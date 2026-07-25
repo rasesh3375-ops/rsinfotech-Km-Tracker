@@ -1,0 +1,1403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>R.S. Infotech — KM Tracker</title>
+<style>
+  :root{
+    --navy:#16213E;
+    --navy2:#1F2F52;
+    --amber:#F0A020;
+    --amber-dark:#B96E0A;
+    --cream:#F7F6F2;
+    --paper:#FFFFFF;
+    --line:#E3E1D8;
+    --muted:#6B6B63;
+    --green:#2E7D4F;
+    --red:#B23A32;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--cream);
+    color:var(--navy);
+    min-height:100vh;
+  }
+  .wrap{max-width:640px;margin:0 auto;padding:20px 16px 60px;}
+  header.top{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:14px 0 18px;border-bottom:1px solid var(--line);margin-bottom:20px;
+  }
+  header.top .brand{display:flex;align-items:center;gap:10px;}
+  header.top .brand img{width:38px;height:38px;object-fit:contain;}
+  header.top .brand .names{display:flex;flex-direction:column;line-height:1.2;}
+  header.top .brand .tagline{font-size:10px;color:var(--red);font-style:italic;font-weight:600;}
+  header.top .brand .dot{width:10px;height:10px;border-radius:50%;background:var(--amber);}
+  header.top h1{font-size:17px;font-weight:700;margin:0;letter-spacing:0.2px;}
+  header.top button.linkbtn{
+    background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;
+    text-decoration:underline;padding:4px;
+  }
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:10px;}
+  .rolecard{
+    background:var(--paper);border:1px solid var(--line);border-radius:14px;
+    padding:26px 18px;text-align:center;cursor:pointer;transition:transform .12s, border-color .12s;
+  }
+  .rolecard:hover{border-color:var(--navy);transform:translateY(-2px);}
+  .rolecard .icon{font-size:28px;margin-bottom:10px;}
+  .rolecard h3{margin:0 0 6px;font-size:15px;}
+  .rolecard p{margin:0;font-size:12.5px;color:var(--muted);}
+  .hidden{display:none !important;}
+  label.field{display:block;font-size:12.5px;color:var(--muted);margin-bottom:6px;font-weight:600;}
+  input[type=text], input[type=number]{
+    width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;
+    font-size:14.5px;background:var(--paper);color:var(--navy);
+  }
+  input:focus{outline:2px solid var(--amber);outline-offset:1px;border-color:var(--amber);}
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    padding:11px 18px;border-radius:8px;border:1px solid var(--navy);
+    background:var(--navy);color:#fff;font-size:14px;font-weight:600;cursor:pointer;
+  }
+  .btn:hover{background:var(--navy2);}
+  .btn.ghost{background:transparent;color:var(--navy);}
+  .btn.ghost:hover{background:#00000008;}
+  .btn.full{width:100%;}
+  .odometer-box{
+    background:var(--navy);color:#fff;border-radius:16px;padding:32px 20px;text-align:center;margin:18px 0;
+  }
+  .odometer-box .label{font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:#C7CCDA;margin-bottom:8px;}
+  .odometer{
+    font-family:"Courier New", monospace;font-size:48px;font-weight:700;letter-spacing:1px;
+    color:var(--amber);
+  }
+  .odometer small{font-size:20px;color:#C7CCDA;font-weight:400;margin-left:6px;}
+  .status-line{font-size:12.5px;color:#C7CCDA;margin-top:10px;}
+  .status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--amber);margin-right:6px;animation:pulse 1.4s infinite;}
+  @keyframes pulse{0%{opacity:1;}50%{opacity:.3;}100%{opacity:1;}}
+  .trackbtn{
+    width:100%;padding:18px;border-radius:12px;border:none;font-size:16px;font-weight:700;cursor:pointer;
+  }
+  .trackbtn.start{background:var(--amber);color:var(--navy);}
+  .trackbtn.stop{background:var(--red);color:#fff;}
+  .msg{font-size:12.5px;color:var(--muted);text-align:center;margin-top:10px;}
+  .msg.error{color:var(--red);}
+  section.block{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px;}
+  section.block h2{font-size:14px;margin:0 0 12px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);}
+  th{color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;}
+  td.num, th.num{text-align:right;}
+  .empty{color:var(--muted);font-size:13px;padding:14px 4px;text-align:center;}
+  .row-inline{display:flex;gap:10px;align-items:flex-end;margin-bottom:14px;flex-wrap:wrap;}
+  .row-inline > div{flex:1;min-width:130px;}
+  .pill{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;font-weight:600;}
+  .pill.live{background:#FDECC8;color:var(--amber-dark);}
+  .pill.idle{background:#EDEDE7;color:var(--muted);}
+  .switch-role{text-align:center;margin-top:26px;}
+  .switch-role button{background:none;border:none;color:var(--muted);font-size:12.5px;text-decoration:underline;cursor:pointer;}
+  .summary-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;}
+  .summary-grid .stat{background:var(--cream);border-radius:10px;padding:12px;text-align:center;}
+  .summary-grid .stat .n{font-family:"Courier New",monospace;font-size:20px;font-weight:700;color:var(--navy);}
+  .summary-grid .stat .l{font-size:10.5px;color:var(--muted);text-transform:uppercase;margin-top:3px;letter-spacing:.3px;}
+  .selfie-thumb{width:52px;height:52px;border-radius:50%;object-fit:cover;border:2px solid var(--amber);vertical-align:middle;}
+  .selfie-thumb.sm{width:32px;height:32px;margin-right:4px;}
+  .checkin-row{display:flex;align-items:center;gap:12px;justify-content:center;margin:12px 0 4px;}
+  select.company-period{
+    padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--navy);font-size:13.5px;
+  }
+  .pill.warn{background:#FBE0DC;color:var(--red);}
+  .pill.disabled{background:#EDEDE7;color:var(--muted);}
+  .userrow{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line);gap:10px;}
+  .userrow:last-child{border-bottom:none;}
+  .userrow .who{font-size:13.5px;}
+  .userrow .who .u{color:var(--muted);font-size:12px;display:block;}
+  .userrow .actions{display:flex;gap:8px;}
+  .userrow .actions button{font-size:11.5px;padding:6px 10px;}
+  .status-card{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;}
+  .status-card.warn{border-color:var(--red);background:#FDF3F2;}
+  .status-card .head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+  .status-card .head strong{font-size:14px;}
+  .status-card .detail{font-size:12.5px;color:var(--muted);margin:2px 0;}
+  .status-card .detail.warn{color:var(--red);font-weight:600;}
+  .status-card iframe{width:100%;height:160px;border:1px solid var(--line);border-radius:8px;margin-top:8px;}
+  .status-card a.maplink{font-size:12px;color:var(--navy);text-decoration:underline;}
+  @media print{
+    header.top button, .switch-role, #rateInput, .row-inline button, section.block:has(#rateInput){display:none !important;}
+    body{background:#fff;}
+    section.block{border:none;padding:0;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="brand">
+      <img src="data:image/jpeg;base64,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" alt="R.S. Infotech logo" />
+      <div class="names">
+        <h1>R.S. Infotech</h1>
+        <span class="tagline">Complete Technology Solutions Provider</span>
+      </div>
+    </div>
+    <button class="linkbtn hidden" id="switchTopBtn" onclick="goHome()">switch role</button>
+  </header>
+
+  <div id="roleScreen">
+    <p style="color:var(--muted);font-size:13.5px;margin:0 0 16px;">Choose how you're using this today.</p>
+    <div class="cards">
+      <div class="rolecard" onclick="selectRole('engineer')">
+        <div class="icon">🚐</div>
+        <h3>Field engineer</h3>
+        <p>Start and stop your trip, track km travelled today.</p>
+      </div>
+      <div class="rolecard" onclick="selectRole('hr')">
+        <div class="icon">📋</div>
+        <h3>HR / manager</h3>
+        <p>View everyone's km, set rate, see expense reports.</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="engineerScreen" class="hidden">
+    <div id="loginGate">
+      <section class="block">
+        <h2>Log in</h2>
+        <label class="field">Username</label>
+        <input type="text" id="loginUsername" placeholder="e.g. ramesh.patil" autocapitalize="none" autocorrect="off" />
+        <div style="height:12px"></div>
+        <label class="field">Password</label>
+        <input type="password" id="loginPassword" placeholder="Password" />
+        <div style="height:12px"></div>
+        <button class="btn full" onclick="loginEngineer()">Log in</button>
+        <div class="msg" id="loginMsg"></div>
+        <p style="font-size:12px;color:var(--muted);text-align:center;margin-top:10px;">Don't have a login? Ask HR to create one for you.</p>
+      </section>
+    </div>
+
+    <div id="engineerMain" class="hidden">
+      <h2 style="margin:0 0 10px;font-size:19px;color:var(--navy);font-weight:700;">Employee dashboard</h2>
+      <p style="font-size:13.5px;color:var(--muted);margin:0 0 4px;">Logged in as <strong id="engNameLabel" style="color:var(--navy)"></strong> · <button class="linkbtn" style="padding:0" onclick="logoutEngineer()">log out</button></p>
+
+      <div class="odometer-box">
+        <div class="label">Today's distance</div>
+        <div class="odometer"><span id="liveKm">0.00</span><small>km</small></div>
+        <div class="status-line" id="trackStatus">Not tracking</div>
+      </div>
+
+      <div id="preCheckin">
+        <label class="btn full" for="selfieInput" style="cursor:pointer;">📷 Check in</label>
+        <input type="file" accept="image/*" capture="user" id="selfieInput" style="display:none" onchange="handleSelfieCapture(event)">
+      </div>
+
+      <div id="duringTrip" class="hidden">
+        <div class="checkin-row">
+          <img id="selfieThumb" class="selfie-thumb" />
+          <span style="font-size:13px;color:var(--green);font-weight:600;">✓ Checked in — you're being tracked</span>
+        </div>
+        <button class="trackbtn stop" id="checkoutBtn" onclick="beginCheckout()">Check out</button>
+      </div>
+
+      <div id="companyForm" class="hidden">
+        <section class="block" style="margin-top:16px;">
+          <h2>Finish this trip</h2>
+          <label class="field">Checkout selfie</label>
+          <div class="checkin-row" style="justify-content:flex-start;margin:0 0 10px;">
+            <img id="checkoutSelfieThumb" class="selfie-thumb" style="display:none;" />
+            <label class="btn" for="checkoutSelfieInput" style="cursor:pointer;flex:1;text-align:center;">📷 Take checkout selfie</label>
+            <input type="file" accept="image/*" capture="user" id="checkoutSelfieInput" style="display:none" onchange="handleCheckoutSelfie(event)">
+          </div>
+          <label class="field">Which company was this trip for?</label>
+          <input type="text" id="companyInput" placeholder="e.g. Acme Pvt Ltd" />
+          <div style="height:12px"></div>
+          <button class="btn full" onclick="saveTripWithCompany()">Save trip</button>
+          <div class="msg" id="companyMsg"></div>
+        </section>
+      </div>
+
+      <div class="msg" id="gpsMsg"></div>
+
+      <div style="height:20px"></div>
+
+      <section class="block">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+          <h2 style="margin:0;">Missed a trip?</h2>
+          <button class="linkbtn" style="padding:0" onclick="toggleManualForm()" id="manualToggleBtn">add manually</button>
+        </div>
+        <div id="manualForm" class="hidden" style="margin-top:12px;">
+          <div class="row-inline">
+            <div>
+              <label class="field">Date</label>
+              <input type="text" id="manualDate" placeholder="YYYY-MM-DD" />
+            </div>
+            <div>
+              <label class="field">Distance (km)</label>
+              <input type="number" id="manualKm" min="0" step="0.1" placeholder="e.g. 42" />
+            </div>
+          </div>
+          <label class="field">Company</label>
+          <input type="text" id="manualCompany" placeholder="e.g. Acme Pvt Ltd" />
+          <div style="height:12px"></div>
+          <button class="btn full" onclick="addManualTrip()">Add trip</button>
+          <div class="msg" id="manualMsg"></div>
+        </div>
+      </section>
+
+      <section class="block">
+        <h2>Last 30 days</h2>
+        <div id="daily30Table"></div>
+      </section>
+
+      <section class="block">
+        <h2>Your trip history</h2>
+        <div id="engHistoryTable"></div>
+      </section>
+    </div>
+  </div>
+
+  <div id="hrScreen" class="hidden">
+    <div id="hrGate">
+      <section class="block">
+        <h2 id="hrGateTitle">HR access</h2>
+        <p id="hrGateHint" style="font-size:12.5px;color:var(--muted);margin:0 0 12px;"></p>
+        <label class="field">HR password</label>
+        <input type="password" id="hrPasswordInput" placeholder="Password" />
+        <div id="hrPasswordConfirmWrap" class="hidden">
+          <div style="height:12px"></div>
+          <label class="field">Confirm password</label>
+          <input type="password" id="hrPasswordConfirm" placeholder="Confirm password" />
+        </div>
+        <div style="height:12px"></div>
+        <button class="btn full" id="hrGateBtn" onclick="submitHrGate()">Continue</button>
+        <div class="msg" id="hrGateMsg"></div>
+      </section>
+    </div>
+
+    <div id="hrMain" class="hidden">
+    <h2 style="margin:0 0 14px;font-size:19px;color:var(--navy);font-weight:700;">Employees km dashboard</h2>
+    <section class="block">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <h2 style="margin:0;">Manage team</h2>
+        <button class="linkbtn" style="padding:0" onclick="logoutHr()">log out</button>
+      </div>
+      <div class="row-inline" style="margin-top:12px;">
+        <div>
+          <label class="field">Username</label>
+          <input type="text" id="newUsername" placeholder="e.g. ramesh.patil" autocapitalize="none" autocorrect="off" />
+        </div>
+        <div>
+          <label class="field">Display name</label>
+          <input type="text" id="newDisplayName" placeholder="e.g. Ramesh Patil" />
+        </div>
+      </div>
+      <label class="field">Temporary password</label>
+      <input type="text" id="newPassword" placeholder="e.g. field2026" />
+      <div style="height:12px"></div>
+      <button class="btn full" onclick="createUserAccount()">Create login</button>
+      <div class="msg" id="createUserMsg"></div>
+      <div style="height:16px"></div>
+      <div id="userListTable"></div>
+    </section>
+
+    <section class="block">
+      <h2>Expense rate</h2>
+      <div class="row-inline">
+        <div>
+          <label class="field">Charge per km (₹)</label>
+          <input type="number" id="rateInput" min="0" step="0.5" placeholder="e.g. 10" />
+        </div>
+        <button class="btn" onclick="saveRate()">Save rate</button>
+      </div>
+      <div class="msg" id="rateMsg"></div>
+    </section>
+
+    <section class="block">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <h2 style="margin:0;">Live tracking status</h2>
+        <button class="linkbtn" style="padding:0" onclick="enableAlerts()" id="alertBtn">enable alerts</button>
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Flags an engineer if their GPS goes quiet, location permission is off, or their phone/browser stops responding while checked in.</p>
+      <div id="liveStatusList"></div>
+    </section>
+
+    <section class="block">
+      <h2>Team overview</h2>
+      <div id="hrSummaryGrid"></div>
+      <div id="hrTable"></div>
+      <div class="row-inline" style="margin-top:12px;margin-bottom:0;">
+        <button class="btn ghost" style="flex:1;" onclick="loadHR()">Refresh</button>
+        <button class="btn ghost" style="flex:1;" onclick="exportCSV()">Export CSV (Excel)</button>
+        <button class="btn ghost" style="flex:1;" onclick="window.print()">Print / save PDF</button>
+      </div>
+    </section>
+
+    <section class="block">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <h2 style="margin:0;">By company</h2>
+        <select class="company-period" id="companyPeriod" onchange="loadCompanyReport()">
+          <option value="7">Last 7 days</option>
+          <option value="15">Last 15 days</option>
+        </select>
+      </div>
+      <div id="companyTable"></div>
+      <button class="btn ghost full" style="margin-top:10px;" onclick="exportCompanyCSV()">Export company CSV</button>
+    </section>
+    </div>
+  </div>
+
+  <div class="switch-role hidden" id="switchBottom">
+    <button onclick="goHome()">← switch role</button>
+  </div>
+
+</div>
+
+<script>
+let currentRole = null;
+let engineerName = null;
+let engineerDisplayName = null;
+let tracking = false;
+let watchId = null;
+let accumulatedKm = 0;
+let todayCompletedKm = 0;
+let lastCoord = null;
+let startTime = null;
+let lastSaveTs = 0;
+let hrInterval = null;
+let pendingSelfie = null;
+let pendingCheckoutSelfie = null;
+let pendingTrip = null;
+
+function todayStr(d){
+  const dt = d || new Date();
+  return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
+}
+function daysAgoStr(n){
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return todayStr(d);
+}
+function fmtKm(v){ return (Math.round(v*100)/100).toFixed(2); }
+
+// ============================================================
+// PASTE YOUR APPS SCRIPT WEB APP URL BELOW (ends in /exec)
+// See the setup instructions for how to get this.
+// ============================================================
+const API_URL = 'https://script.google.com/macros/s/AKfycb.../exec';
+
+// Storage bridge: personal (shared=false) data stays on this device via localStorage.
+// Shared (shared=true) data goes to the Apps Script backend, so every engineer and
+// HR see the same data — stored in your own Google Sheet, no Claude account involved.
+// Uses text/plain content-type on purpose: it avoids a CORS preflight request,
+// which Apps Script Web Apps don't handle. This is a standard, well-known workaround.
+async function remoteGet(key){
+  try{
+    const res = await fetch(API_URL + '?action=get&key=' + encodeURIComponent(key));
+    const data = await res.json();
+    return (data && data.value !== undefined) ? data : null;
+  }catch(e){ return null; }
+}
+async function remoteSet(key, value){
+  try{
+    await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'set', key, value })
+    });
+  }catch(e){}
+}
+async function remoteDelete(key){
+  try{
+    await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'delete', key })
+    });
+  }catch(e){}
+}
+
+async function safeGet(key, shared){
+  try{
+    if(!shared){
+      const v = localStorage.getItem('kmt_' + key);
+      return v !== null ? v : null;
+    }
+    const r = await remoteGet(key);
+    return r ? r.value : null;
+  }catch(e){ return null; }
+}
+async function safeSet(key, value, shared){
+  try{
+    if(!shared){
+      localStorage.setItem('kmt_' + key, value);
+      return;
+    }
+    await remoteSet(key, value);
+  }catch(e){}
+}
+
+async function getTrips(name){
+  const v = await safeGet('trips:' + name, true);
+  return v ? JSON.parse(v) : [];
+}
+async function saveTrips(name, arr){
+  await safeSet('trips:' + name, JSON.stringify(arr), true);
+}
+async function getActive(name){
+  const v = await safeGet('active:' + name, true);
+  return v ? JSON.parse(v) : null;
+}
+async function setActive(name, obj){
+  await safeSet('active:' + name, JSON.stringify(obj), true);
+}
+async function clearActive(name){
+  try{ await remoteDelete('active:' + name); }catch(e){}
+}
+async function getRate(){
+  const v = await safeGet('rate_per_km', true);
+  return v ? parseFloat(v) : 0;
+}
+async function saveRateVal(v){
+  await safeSet('rate_per_km', String(v), true);
+}
+
+function randomHex(len){
+  const bytes = new Uint8Array(len);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+async function sha256Hex(str){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+async function hashPassword(password, salt){
+  return sha256Hex(salt + ':' + password);
+}
+
+async function getUsers(){
+  const v = await safeGet('users', true);
+  return v ? JSON.parse(v) : [];
+}
+async function saveUsers(list){
+  await safeSet('users', JSON.stringify(list), true);
+}
+function normUsername(u){ return (u || '').trim().toLowerCase(); }
+
+async function createUser(username, password, displayName){
+  const uname = normUsername(username);
+  const users = await getUsers();
+  if(users.some(u => u.username === uname)){
+    return { ok:false, reason:'exists' };
+  }
+  const salt = randomHex(8);
+  const hash = await hashPassword(password, salt);
+  users.push({ username: uname, salt, hash, displayName: displayName || username, enabled: true, createdAt: new Date().toISOString() });
+  await saveUsers(users);
+  return { ok:true };
+}
+
+async function findUser(username){
+  const users = await getUsers();
+  return users.find(u => u.username === normUsername(username)) || null;
+}
+
+async function authenticateUser(username, password){
+  const user = await findUser(username);
+  if(!user) return { ok:false, reason:'notfound' };
+  const hash = await hashPassword(password, user.salt);
+  if(hash !== user.hash) return { ok:false, reason:'badpass' };
+  if(user.enabled === false) return { ok:false, reason:'disabled' };
+  return { ok:true, user };
+}
+
+async function toggleUserEnabled(username){
+  const users = await getUsers();
+  const user = users.find(u => u.username === normUsername(username));
+  if(!user) return;
+  user.enabled = !user.enabled;
+  await saveUsers(users);
+  await renderUserList();
+  await loadHR();
+}
+
+async function resetPassword(username){
+  const newPass = prompt('Enter a new temporary password for ' + username + ':');
+  if(!newPass) return;
+  const users = await getUsers();
+  const user = users.find(u => u.username === normUsername(username));
+  if(!user) return;
+  const salt = randomHex(8);
+  user.hash = await hashPassword(newPass, salt);
+  user.salt = salt;
+  await saveUsers(users);
+  alert('Password reset for ' + username + '. Share the new password with them directly.');
+}
+
+async function getHrPasswordRecord(){
+  const v = await safeGet('hr_password', true);
+  return v ? JSON.parse(v) : null;
+}
+async function setHrPassword(password){
+  const salt = randomHex(8);
+  const hash = await hashPassword(password, salt);
+  await safeSet('hr_password', JSON.stringify({ salt, hash }), true);
+}
+async function verifyHrPassword(password){
+  const rec = await getHrPasswordRecord();
+  if(!rec) return false;
+  const hash = await hashPassword(password, rec.salt);
+  return hash === rec.hash;
+}
+
+async function createUserAccount(){
+  const username = document.getElementById('newUsername').value.trim();
+  const displayName = document.getElementById('newDisplayName').value.trim();
+  const password = document.getElementById('newPassword').value;
+  const msg = document.getElementById('createUserMsg');
+  if(!username || !password){
+    msg.textContent = 'Enter a username and a temporary password.';
+    msg.classList.add('error');
+    return;
+  }
+  if(password.length < 4){
+    msg.textContent = 'Password should be at least 4 characters.';
+    msg.classList.add('error');
+    return;
+  }
+  const result = await createUser(username, password, displayName);
+  if(!result.ok){
+    msg.textContent = 'That username is already taken.';
+    msg.classList.add('error');
+    return;
+  }
+  msg.textContent = 'Login created. Share the username and password with ' + (displayName || username) + '.';
+  msg.classList.remove('error');
+  document.getElementById('newUsername').value = '';
+  document.getElementById('newDisplayName').value = '';
+  document.getElementById('newPassword').value = '';
+  await renderUserList();
+  await loadHR();
+  await loadCompanyReport();
+}
+
+async function renderUserList(){
+  const users = await getUsers();
+  const box = document.getElementById('userListTable');
+  if(!users.length){
+    box.innerHTML = '<div class="empty">No engineer logins yet. Create one above.</div>';
+    return;
+  }
+  box.innerHTML = users.map(u => `
+    <div class="userrow">
+      <div class="who">
+        ${u.displayName || u.username}
+        <span class="u">@${u.username}</span>
+      </div>
+      <div class="actions">
+        <span class="pill ${u.enabled === false ? 'disabled' : 'live'}">${u.enabled === false ? 'disabled' : 'active'}</span>
+        <button class="btn ghost" onclick="resetPassword('${u.username}')">Reset password</button>
+        <button class="btn ghost" onclick="toggleUserEnabled('${u.username}')">${u.enabled === false ? 'Enable' : 'Disable'}</button>
+      </div>
+    </div>`).join('');
+}
+
+function haversineKm(lat1, lon1, lat2, lon2){
+  const R = 6371;
+  const dLat = (lat2-lat1) * Math.PI/180;
+  const dLon = (lon2-lon1) * Math.PI/180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+async function compressImageFile(file){
+  const size = 240;
+  if(window.createImageBitmap){
+    try{
+      const bitmap = await createImageBitmap(file);
+      const canvas = document.createElement('canvas');
+      canvas.width = size; canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      const scale = Math.max(size / bitmap.width, size / bitmap.height);
+      const w = bitmap.width * scale, h = bitmap.height * scale;
+      ctx.drawImage(bitmap, (size - w) / 2, (size - h) / 2, w, h);
+      return canvas.toDataURL('image/jpeg', 0.55);
+    }catch(e){
+      // fall through to the <img> based approach below (older/quirkier browsers)
+    }
+  }
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = () => {
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = size; canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        const scale = Math.max(size / img.width, size / img.height);
+        const w = img.width * scale, h = img.height * scale;
+        ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.55));
+      };
+      img.onerror = reject;
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function goHome(){
+  document.getElementById('roleScreen').classList.remove('hidden');
+  document.getElementById('engineerScreen').classList.add('hidden');
+  document.getElementById('hrScreen').classList.add('hidden');
+  document.getElementById('switchTopBtn').classList.add('hidden');
+  document.getElementById('switchBottom').classList.add('hidden');
+  if(hrInterval){ clearInterval(hrInterval); hrInterval = null; }
+  currentRole = null;
+}
+
+async function selectRole(role){
+  currentRole = role;
+  document.getElementById('roleScreen').classList.add('hidden');
+  document.getElementById('switchTopBtn').classList.remove('hidden');
+  document.getElementById('switchBottom').classList.remove('hidden');
+  if(role === 'engineer'){
+    document.getElementById('engineerScreen').classList.remove('hidden');
+    const savedUser = await safeGet('my_username', false);
+    if(savedUser){
+      const user = await findUser(savedUser);
+      if(user && user.enabled !== false){
+        engineerName = user.username;
+        engineerDisplayName = user.displayName || user.username;
+        await enterEngineerMain();
+        return;
+      }
+      // saved session is no longer valid (disabled or removed) — clear it and ask them to log in again
+      await safeSet('my_username', '', false);
+    }
+    document.getElementById('loginGate').classList.remove('hidden');
+    document.getElementById('engineerMain').classList.add('hidden');
+    const msg = document.getElementById('loginMsg');
+    if(savedUser){
+      msg.textContent = 'Your account is no longer active. Contact HR.';
+      msg.classList.add('error');
+    }
+  } else {
+    document.getElementById('hrScreen').classList.remove('hidden');
+    const hasHrPassword = !!(await getHrPasswordRecord());
+    const hrSession = await safeGet('hr_session', false);
+    document.getElementById('hrGate').classList.remove('hidden');
+    document.getElementById('hrMain').classList.add('hidden');
+    document.getElementById('hrPasswordConfirmWrap').classList.add('hidden');
+    document.getElementById('hrPasswordInput').value = '';
+    if(hrSession === 'yes' && hasHrPassword){
+      document.getElementById('hrGate').classList.add('hidden');
+      await enterHrMain();
+      return;
+    }
+    if(!hasHrPassword){
+      document.getElementById('hrGateTitle').textContent = 'Set an HR password';
+      document.getElementById('hrGateHint').textContent = 'This protects the dashboard so only HR can manage the team. Choose a password and share it only with people who should have HR access.';
+      document.getElementById('hrPasswordConfirmWrap').classList.remove('hidden');
+      document.getElementById('hrGateBtn').textContent = 'Set password';
+    } else {
+      document.getElementById('hrGateTitle').textContent = 'HR access';
+      document.getElementById('hrGateHint').textContent = 'Enter the HR password to continue.';
+      document.getElementById('hrGateBtn').textContent = 'Continue';
+    }
+  }
+}
+
+async function submitHrGate(){
+  const pw = document.getElementById('hrPasswordInput').value;
+  const msg = document.getElementById('hrGateMsg');
+  const hasHrPassword = !!(await getHrPasswordRecord());
+  if(!hasHrPassword){
+    const confirm = document.getElementById('hrPasswordConfirm').value;
+    if(!pw || pw.length < 4){
+      msg.textContent = 'Choose a password with at least 4 characters.';
+      msg.classList.add('error');
+      return;
+    }
+    if(pw !== confirm){
+      msg.textContent = 'Passwords do not match.';
+      msg.classList.add('error');
+      return;
+    }
+    await setHrPassword(pw);
+    await safeSet('hr_session', 'yes', false);
+    msg.textContent = '';
+    document.getElementById('hrGate').classList.add('hidden');
+    await enterHrMain();
+    return;
+  }
+  const ok = await verifyHrPassword(pw);
+  if(!ok){
+    msg.textContent = 'Incorrect password.';
+    msg.classList.add('error');
+    return;
+  }
+  await safeSet('hr_session', 'yes', false);
+  msg.textContent = '';
+  document.getElementById('hrGate').classList.add('hidden');
+  await enterHrMain();
+}
+
+async function enterHrMain(){
+  document.getElementById('hrMain').classList.remove('hidden');
+  const rate = await getRate();
+  if(rate) document.getElementById('rateInput').value = rate;
+  await renderUserList();
+  await loadHR();
+  await loadCompanyReport();
+  if(hrInterval) clearInterval(hrInterval);
+  hrInterval = setInterval(() => { loadHR(); loadCompanyReport(); }, 20000);
+}
+
+async function logoutHr(){
+  await safeSet('hr_session', '', false);
+  if(hrInterval){ clearInterval(hrInterval); hrInterval = null; }
+  goHome();
+}
+
+async function loginEngineer(){
+  const username = document.getElementById('loginUsername').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  const msg = document.getElementById('loginMsg');
+  if(!username || !password){
+    msg.textContent = 'Enter your username and password.';
+    msg.classList.add('error');
+    return;
+  }
+  const result = await authenticateUser(username, password);
+  if(!result.ok){
+    if(result.reason === 'disabled'){
+      msg.textContent = 'This account has been disabled. Contact HR.';
+    } else {
+      msg.textContent = 'Incorrect username or password.';
+    }
+    msg.classList.add('error');
+    return;
+  }
+  engineerName = result.user.username;
+  engineerDisplayName = result.user.displayName || result.user.username;
+  await safeSet('my_username', engineerName, false);
+  msg.textContent = '';
+  msg.classList.remove('error');
+  document.getElementById('loginPassword').value = '';
+  await enterEngineerMain();
+}
+
+function logoutEngineer(){
+  if(tracking){
+    alert('Check out and finish your current trip before logging out.');
+    return;
+  }
+  safeSet('my_username', '', false);
+  engineerName = null;
+  engineerDisplayName = null;
+  document.getElementById('loginGate').classList.remove('hidden');
+  document.getElementById('engineerMain').classList.add('hidden');
+  document.getElementById('loginUsername').value = '';
+  document.getElementById('loginPassword').value = '';
+  document.getElementById('loginMsg').textContent = '';
+}
+
+async function forceLogoutEngineer(reason){
+  if(watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
+  if(heartbeatTimer){ clearInterval(heartbeatTimer); heartbeatTimer = null; }
+  tracking = false;
+  await clearActive(engineerName);
+  await safeSet('my_username', '', false);
+  accumulatedKm = 0;
+  lastCoord = null;
+  pendingSelfie = null;
+  pendingTrip = null;
+  engineerName = null;
+  engineerDisplayName = null;
+  document.getElementById('loginGate').classList.remove('hidden');
+  document.getElementById('engineerMain').classList.add('hidden');
+  document.getElementById('loginMsg').textContent = reason;
+  document.getElementById('loginMsg').classList.add('error');
+}
+
+async function enterEngineerMain(){
+  document.getElementById('loginGate').classList.add('hidden');
+  document.getElementById('engineerMain').classList.remove('hidden');
+  document.getElementById('engNameLabel').textContent = engineerDisplayName || engineerName;
+  await renderEngHistory();
+  await renderDaily30();
+  await refreshTodayTotal();
+
+  const active = await getActive(engineerName);
+  if(active){
+    accumulatedKm = active.accumulatedKm || 0;
+    startTime = active.startTime;
+    pendingSelfie = active.selfie || null;
+    lastCoord = active.lastCoord || null;
+    lastGpsError = null;
+    updateLiveDisplay();
+    showDuringTrip();
+    startWatch(true);
+  }
+}
+
+function showPreCheckin(){
+  document.getElementById('preCheckin').classList.remove('hidden');
+  document.getElementById('duringTrip').classList.add('hidden');
+  document.getElementById('companyForm').classList.add('hidden');
+}
+function showDuringTrip(){
+  document.getElementById('preCheckin').classList.add('hidden');
+  document.getElementById('duringTrip').classList.remove('hidden');
+  document.getElementById('companyForm').classList.add('hidden');
+  if(pendingSelfie){ document.getElementById('selfieThumb').src = pendingSelfie; }
+}
+function showCompanyForm(){
+  document.getElementById('preCheckin').classList.add('hidden');
+  document.getElementById('duringTrip').classList.add('hidden');
+  document.getElementById('companyForm').classList.remove('hidden');
+  document.getElementById('companyInput').value = '';
+  pendingCheckoutSelfie = null;
+  document.getElementById('checkoutSelfieThumb').style.display = 'none';
+  document.getElementById('checkoutSelfieThumb').src = '';
+}
+
+async function handleCheckoutSelfie(event){
+  const file = event.target.files && event.target.files[0];
+  event.target.value = '';
+  if(!file) return;
+  const msg = document.getElementById('companyMsg');
+  msg.textContent = 'Processing photo...';
+  msg.classList.remove('error');
+  try{
+    pendingCheckoutSelfie = await compressImageFile(file);
+  }catch(e){
+    msg.textContent = 'Could not read the photo, try again.';
+    msg.classList.add('error');
+    return;
+  }
+  msg.textContent = '';
+  const thumb = document.getElementById('checkoutSelfieThumb');
+  thumb.src = pendingCheckoutSelfie;
+  thumb.style.display = 'inline-block';
+}
+
+function updateLiveDisplay(){
+  document.getElementById('liveKm').textContent = fmtKm(todayCompletedKm + accumulatedKm);
+}
+
+async function refreshTodayTotal(){
+  const trips = await getTrips(engineerName);
+  todayCompletedKm = sumKmInRange(trips, todayStr());
+  updateLiveDisplay();
+}
+
+let heartbeatTimer = null;
+let lastGpsError = null;
+
+async function getBatteryInfo(){
+  try{
+    if(navigator.getBattery){
+      const b = await navigator.getBattery();
+      return { level: Math.round(b.level * 100), charging: b.charging };
+    }
+  }catch(e){}
+  return null;
+}
+
+async function pushActiveState(extra){
+  const battery = await getBatteryInfo();
+  await setActive(engineerName, Object.assign({
+    startTime, accumulatedKm, selfie: pendingSelfie,
+    lastCoord, lastFixTime: lastCoord ? Date.now() : null,
+    lastHeartbeat: Date.now(),
+    gpsError: lastGpsError,
+    battery
+  }, extra || {}));
+}
+
+async function handleSelfieCapture(event){
+  const file = event.target.files && event.target.files[0];
+  event.target.value = '';
+  if(!file) return;
+  const msg = document.getElementById('gpsMsg');
+  const user = await findUser(engineerName);
+  if(!user || user.enabled === false){
+    await forceLogoutEngineer('Your account has been disabled by HR. Contact your manager.');
+    return;
+  }
+  msg.textContent = 'Processing photo...';
+  msg.classList.remove('error');
+  try{
+    pendingSelfie = await compressImageFile(file);
+  }catch(e){
+    msg.textContent = 'Could not read the photo, try again.';
+    msg.classList.add('error');
+    return;
+  }
+  msg.textContent = '';
+  accumulatedKm = 0;
+  lastCoord = null;
+  lastGpsError = null;
+  startTime = new Date().toISOString();
+  updateLiveDisplay();
+  showDuringTrip();
+  startWatch(false);
+}
+
+function startWatch(resumed){
+  const msg = document.getElementById('gpsMsg');
+  msg.textContent = '';
+  msg.classList.remove('error');
+  if(!navigator.geolocation){
+    msg.textContent = 'This browser does not support location tracking.';
+    msg.classList.add('error');
+    lastGpsError = 'Location not supported on this device/browser';
+    pushActiveState();
+    return;
+  }
+  tracking = true;
+  document.getElementById('trackStatus').innerHTML = '<span class="status-dot"></span>Tracking since ' + new Date(startTime).toLocaleTimeString();
+
+  watchId = navigator.geolocation.watchPosition(async (pos) => {
+    const { latitude, longitude, accuracy } = pos.coords;
+    lastGpsError = null;
+    if(accuracy && accuracy > 60){
+      return;
+    }
+    if(lastCoord){
+      const d = haversineKm(lastCoord.lat, lastCoord.lon, latitude, longitude);
+      if(d > 0.005 && d < 2){
+        accumulatedKm += d;
+        updateLiveDisplay();
+      }
+    }
+    lastCoord = { lat: latitude, lon: longitude };
+    const now = Date.now();
+    if(now - lastSaveTs > 15000){
+      lastSaveTs = now;
+      await pushActiveState();
+    }
+  }, (err) => {
+    // err.code: 1 = permission denied (GPS/location turned off), 2 = unavailable, 3 = timeout
+    if(err.code === 1){
+      lastGpsError = 'Location permission denied or GPS turned off';
+    } else if(err.code === 2){
+      lastGpsError = 'Location unavailable (GPS off or no signal)';
+    } else {
+      lastGpsError = 'Location timed out';
+    }
+    msg.textContent = lastGpsError + '. Turn on location to keep tracking accurately.';
+    msg.classList.add('error');
+    pushActiveState();
+  }, { enableHighAccuracy: true, maximumAge: 0, timeout: 25000 });
+
+  if(!resumed){
+    pushActiveState();
+  }
+
+  if(heartbeatTimer) clearInterval(heartbeatTimer);
+  heartbeatTimer = setInterval(async () => {
+    if(!tracking) return;
+    const user = await findUser(engineerName);
+    if(!user || user.enabled === false){
+      await forceLogoutEngineer('Your account has been disabled by HR. Tracking has been stopped.');
+      return;
+    }
+    pushActiveState();
+  }, 30000);
+}
+
+function beginCheckout(){
+  if(watchId !== null){
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+  }
+  if(heartbeatTimer){ clearInterval(heartbeatTimer); heartbeatTimer = null; }
+  tracking = false;
+  document.getElementById('trackStatus').textContent = 'Not tracking';
+
+  pendingTrip = {
+    date: todayStr(new Date(startTime)),
+    startTime,
+    endTime: new Date().toISOString(),
+    km: Math.round(accumulatedKm * 100) / 100,
+    selfie: pendingSelfie
+  };
+  showCompanyForm();
+}
+
+async function saveTripWithCompany(){
+  const company = document.getElementById('companyInput').value.trim();
+  const msg = document.getElementById('companyMsg');
+  if(!pendingCheckoutSelfie){
+    msg.textContent = 'Take a checkout selfie to finish this trip.';
+    msg.classList.add('error');
+    return;
+  }
+  if(!company){
+    msg.textContent = 'Enter a company name to save the trip.';
+    msg.classList.add('error');
+    return;
+  }
+  const trip = {
+    date: pendingTrip.date,
+    startTime: pendingTrip.startTime,
+    endTime: pendingTrip.endTime,
+    km: pendingTrip.km,
+    checkinSelfie: pendingTrip.selfie,
+    checkoutSelfie: pendingCheckoutSelfie,
+    company
+  };
+  const trips = await getTrips(engineerName);
+  trips.push(trip);
+  await saveTrips(engineerName, trips);
+  await clearActive(engineerName);
+
+  accumulatedKm = 0;
+  lastCoord = null;
+  pendingSelfie = null;
+  pendingCheckoutSelfie = null;
+  pendingTrip = null;
+  await refreshTodayTotal();
+  updateLiveDisplay();
+  showPreCheckin();
+  msg.textContent = '';
+  msg.classList.remove('error');
+  document.getElementById('trackStatus').textContent = 'Trip saved · today\'s total updated';
+  await renderEngHistory();
+  await renderDaily30();
+}
+
+async function renderEngHistory(){
+  const trips = await getTrips(engineerName);
+  const box = document.getElementById('engHistoryTable');
+  if(!trips.length){
+    box.innerHTML = '<div class="empty">No trips recorded yet.</div>';
+    return;
+  }
+  const sorted = trips.slice().sort((a,b) => (b.startTime||b.date).localeCompare(a.startTime||a.date)).slice(0, 20);
+  let rows = sorted.map(t => {
+    const timeCol = t.manual ? 'Added manually' : (new Date(t.startTime).toLocaleTimeString() + ' – ' + new Date(t.endTime).toLocaleTimeString());
+    const inPhoto = t.checkinSelfie ? `<img src="${t.checkinSelfie}" class="selfie-thumb sm" title="Check-in" />` : '';
+    const outPhoto = t.checkoutSelfie ? `<img src="${t.checkoutSelfie}" class="selfie-thumb sm" title="Check-out" />` : '';
+    return `<tr><td>${inPhoto}${outPhoto} ${t.date}</td><td>${t.company || '—'}</td><td>${timeCol}</td><td class="num">${fmtKm(t.km)} km</td></tr>`;
+  }).join('');
+  box.innerHTML = `<table><tr><th>Date</th><th>Company</th><th>Trip time</th><th class="num">Distance</th></tr>${rows}</table>`;
+}
+
+async function renderDaily30(){
+  const trips = await getTrips(engineerName);
+  const since = daysAgoStr(29);
+  const totals = {};
+  trips.filter(t => t.date >= since).forEach(t => {
+    totals[t.date] = (totals[t.date] || 0) + t.km;
+  });
+  const today = todayStr();
+  if(tracking && accumulatedKm > 0){
+    totals[today] = (totals[today] || 0) + accumulatedKm;
+  }
+  const dates = Object.keys(totals).sort((a,b) => b.localeCompare(a));
+  const box = document.getElementById('daily30Table');
+  if(!dates.length){
+    box.innerHTML = '<div class="empty">No trips in the last 30 days.</div>';
+    return;
+  }
+  const rows = dates.map(d => `<tr><td>${d}${d === today ? ' (today)' : ''}</td><td class="num">${fmtKm(totals[d])} km</td></tr>`).join('');
+  box.innerHTML = `<table><tr><th>Date</th><th class="num">Total distance</th></tr>${rows}</table>`;
+}
+
+function toggleManualForm(){
+  const f = document.getElementById('manualForm');
+  const isHidden = f.classList.contains('hidden');
+  f.classList.toggle('hidden');
+  if(isHidden){
+    document.getElementById('manualDate').value = todayStr();
+  }
+}
+
+async function addManualTrip(){
+  const date = document.getElementById('manualDate').value.trim();
+  const km = parseFloat(document.getElementById('manualKm').value);
+  const company = document.getElementById('manualCompany').value.trim();
+  const msg = document.getElementById('manualMsg');
+  const validDate = /^\d{4}-\d{2}-\d{2}$/.test(date);
+  if(!validDate){
+    msg.textContent = 'Enter date as YYYY-MM-DD.';
+    msg.classList.add('error');
+    return;
+  }
+  if(isNaN(km) || km <= 0){
+    msg.textContent = 'Enter a valid distance.';
+    msg.classList.add('error');
+    return;
+  }
+  if(!company){
+    msg.textContent = 'Enter the company name.';
+    msg.classList.add('error');
+    return;
+  }
+  const trips = await getTrips(engineerName);
+  trips.push({ date, km: Math.round(km*100)/100, company, manual: true, startTime: date + 'T00:00:00', endTime: date + 'T00:00:00' });
+  await saveTrips(engineerName, trips);
+  msg.textContent = 'Trip added.';
+  msg.classList.remove('error');
+  document.getElementById('manualKm').value = '';
+  document.getElementById('manualCompany').value = '';
+  await refreshTodayTotal();
+  await renderEngHistory();
+  await renderDaily30();
+}
+
+async function saveRate(){
+  const v = parseFloat(document.getElementById('rateInput').value);
+  const msg = document.getElementById('rateMsg');
+  if(isNaN(v) || v < 0){
+    msg.textContent = 'Enter a valid rate.';
+    msg.classList.add('error');
+    return;
+  }
+  await saveRateVal(v);
+  msg.textContent = 'Rate saved: ₹' + v + ' per km';
+  msg.classList.remove('error');
+  await loadHR();
+  await loadCompanyReport();
+}
+
+function sumKmInRange(trips, sinceDateStr){
+  return trips.filter(t => t.date >= sinceDateStr).reduce((s,t) => s + t.km, 0);
+}
+
+function computeStatus(active){
+  if(!active) return { level: 'idle', label: 'idle', detail: 'Not checked in right now.' };
+  const now = Date.now();
+  const hbAge = active.lastHeartbeat ? now - active.lastHeartbeat : Infinity;
+  const fixAge = active.lastFixTime ? now - active.lastFixTime : Infinity;
+  if(hbAge > 90000){
+    const mins = isFinite(hbAge) ? Math.round(hbAge/60000) : '?';
+    return { level:'warn', label:'not responding', detail: 'No signal from the app for ' + mins + ' min — tab may be closed or phone switched off.' };
+  }
+  if(active.gpsError){
+    return { level:'warn', label:'GPS issue', detail: active.gpsError };
+  }
+  if(fixAge > 180000){
+    const mins = Math.round(fixAge/60000);
+    return { level:'warn', label:'no GPS fix', detail: 'No location fix for ' + mins + ' min — GPS may be turned off or signal is weak.' };
+  }
+  return { level:'ok', label:'live', detail: 'Tracking normally · updated ' + new Date(active.lastHeartbeat).toLocaleTimeString() };
+}
+
+let previousWarnState = {};
+let alertsEnabled = false;
+
+function enableAlerts(){
+  if(!('Notification' in window)){
+    document.getElementById('alertBtn').textContent = 'alerts not supported here';
+    return;
+  }
+  Notification.requestPermission().then(perm => {
+    alertsEnabled = perm === 'granted';
+    document.getElementById('alertBtn').textContent = alertsEnabled ? 'alerts on' : 'alerts blocked';
+  });
+}
+
+function renderLiveStatus(infos){
+  const box = document.getElementById('liveStatusList');
+  const activeOnes = infos.filter(i => i.active);
+  if(!activeOnes.length){
+    box.innerHTML = '<div class="empty">No one is currently checked in.</div>';
+    return;
+  }
+  box.innerHTML = activeOnes.map(i => {
+    const s = i.status;
+    const battery = i.active.battery;
+    const batteryLine = battery
+      ? `Battery: ${battery.level}%${battery.charging ? ' (charging)' : (battery.level <= 20 ? ' — low' : '')}`
+      : 'Battery: not reported by this device/browser';
+    const coords = i.active.lastCoord;
+    const mapEmbed = coords
+      ? `<iframe loading="lazy" src="https://www.openstreetmap.org/export/embed.html?bbox=${coords.lon-0.01}%2C${coords.lat-0.01}%2C${coords.lon+0.01}%2C${coords.lat+0.01}&marker=${coords.lat}%2C${coords.lon}"></iframe>
+         <a class="maplink" target="_blank" href="https://www.openstreetmap.org/?mlat=${coords.lat}&mlon=${coords.lon}#map=15/${coords.lat}/${coords.lon}">Open full map ↗</a>`
+      : '<div class="detail">No location fix received yet.</div>';
+    return `<div class="status-card ${s.level === 'warn' ? 'warn' : ''}">
+      <div class="head">
+        <strong>${i.name}</strong>
+        <span class="pill ${s.level === 'warn' ? 'warn' : 'live'}">${s.label}</span>
+      </div>
+      <div class="detail ${s.level === 'warn' ? 'warn' : ''}">${s.detail}</div>
+      <div class="detail">${batteryLine}</div>
+      ${mapEmbed}
+    </div>`;
+  }).join('');
+}
+
+let lastHRRows = [];
+
+async function loadHR(){
+  const users = await getUsers();
+  const rate = await getRate();
+  const today = todayStr();
+  const since7 = daysAgoStr(6);
+  const since15 = daysAgoStr(14);
+
+  let totalToday = 0, total7 = 0, total15 = 0;
+  let rowsHtml = '';
+  lastHRRows = [];
+  const infos = [];
+
+  for(const u of users){
+    const name = u.username;
+    const label = u.displayName || u.username;
+    const trips = await getTrips(name);
+    const active = await getActive(name);
+    const status = computeStatus(active);
+    infos.push({ name: label, active, status });
+
+    if(alertsEnabled && status.level === 'warn' && !previousWarnState[name]){
+      try{ new Notification('KM Tracker alert', { body: label + ': ' + status.detail }); }catch(e){}
+    }
+    previousWarnState[name] = status.level === 'warn';
+
+    const kmToday = sumKmInRange(trips, today) + (active ? active.accumulatedKm : 0);
+    const km7 = sumKmInRange(trips, since7) + (active ? active.accumulatedKm : 0);
+    const km15 = sumKmInRange(trips, since15) + (active ? active.accumulatedKm : 0);
+    totalToday += kmToday; total7 += km7; total15 += km15;
+    const exp7 = km7 * rate;
+    const exp15 = km15 * rate;
+    let pillClass, pillLabel;
+    if(u.enabled === false){
+      pillClass = 'disabled'; pillLabel = 'disabled';
+    } else if(!active){
+      pillClass = 'idle'; pillLabel = 'idle';
+    } else {
+      pillClass = status.level === 'warn' ? 'warn' : 'live';
+      pillLabel = status.label;
+    }
+    const pill = `<span class="pill ${pillClass}">${pillLabel}</span>`;
+    rowsHtml += `<tr>
+      <td>${label} ${pill}</td>
+      <td class="num">${fmtKm(kmToday)}</td>
+      <td class="num">${fmtKm(km7)}</td>
+      <td class="num">${fmtKm(km15)}</td>
+      <td class="num">₹${exp7.toFixed(0)}</td>
+      <td class="num">₹${exp15.toFixed(0)}</td>
+    </tr>`;
+    lastHRRows.push({ name: label, status: pillLabel, kmToday, km7, km15, exp7, exp15 });
+  }
+
+  renderLiveStatus(infos);
+
+  document.getElementById('hrSummaryGrid').innerHTML = `
+    <div class="summary-grid">
+      <div class="stat"><div class="n">${fmtKm(totalToday)}</div><div class="l">Today km (all)</div></div>
+      <div class="stat"><div class="n">${fmtKm(total7)}</div><div class="l">7-day km (all)</div></div>
+      <div class="stat"><div class="n">${fmtKm(total15)}</div><div class="l">15-day km (all)</div></div>
+    </div>`;
+
+  const table = document.getElementById('hrTable');
+  if(!users.length){
+    table.innerHTML = '<div class="empty">No field engineer logins created yet.</div>';
+    return;
+  }
+  table.innerHTML = `<table>
+    <tr><th>Engineer</th><th class="num">Today</th><th class="num">7-day</th><th class="num">15-day</th><th class="num">7-day ₹</th><th class="num">15-day ₹</th></tr>
+    ${rowsHtml}
+  </table>`;
+}
+
+function exportCSV(){
+  if(!lastHRRows.length){
+    alert('No data to export yet.');
+    return;
+  }
+  const header = ['Engineer','Status','Today (km)','7-day (km)','15-day (km)','7-day expense (₹)','15-day expense (₹)'];
+  const lines = [header.join(',')];
+  lastHRRows.forEach(r => {
+    lines.push([
+      '"' + r.name.replace(/"/g,'""') + '"',
+      r.status,
+      fmtKm(r.kmToday),
+      fmtKm(r.km7),
+      fmtKm(r.km15),
+      r.exp7.toFixed(2),
+      r.exp15.toFixed(2)
+    ].join(','));
+  });
+  const csv = lines.join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'km-report-' + todayStr() + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+let lastCompanyRows = [];
+
+async function loadCompanyReport(){
+  const days = parseInt(document.getElementById('companyPeriod').value, 10);
+  const since = daysAgoStr(days - 1);
+  const users = await getUsers();
+  const rate = await getRate();
+  const totals = {};
+
+  for(const u of users){
+    const name = u.username;
+    const trips = await getTrips(name);
+    trips.filter(t => t.date >= since).forEach(t => {
+      const c = t.company || 'Unspecified';
+      if(!totals[c]) totals[c] = 0;
+      totals[c] += t.km;
+    });
+    const active = await getActive(name);
+    if(active){
+      totals['In progress (not yet assigned)'] = (totals['In progress (not yet assigned)'] || 0) + active.accumulatedKm;
+    }
+  }
+
+  const companies = Object.keys(totals).sort((a,b) => totals[b] - totals[a]);
+  lastCompanyRows = companies.map(c => ({ company: c, km: totals[c], expense: totals[c] * rate }));
+
+  const box = document.getElementById('companyTable');
+  if(!companies.length){
+    box.innerHTML = '<div class="empty">No trips with a company recorded yet.</div>';
+    return;
+  }
+  let rows = lastCompanyRows.map(r => `<tr><td>${r.company}</td><td class="num">${fmtKm(r.km)} km</td><td class="num">₹${r.expense.toFixed(0)}</td></tr>`).join('');
+  box.innerHTML = `<table><tr><th>Company</th><th class="num">Distance</th><th class="num">Expense</th></tr>${rows}</table>`;
+}
+
+function exportCompanyCSV(){
+  if(!lastCompanyRows.length){
+    alert('No company data to export yet.');
+    return;
+  }
+  const lines = [['Company','Distance (km)','Expense (₹)'].join(',')];
+  lastCompanyRows.forEach(r => {
+    lines.push(['"' + r.company.replace(/"/g,'""') + '"', fmtKm(r.km), r.expense.toFixed(2)].join(','));
+  });
+  const csv = lines.join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'company-report-' + todayStr() + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+window.addEventListener('beforeunload', () => {
+  if(tracking && engineerName){
+    setActive(engineerName, { startTime, accumulatedKm, selfie: pendingSelfie, lastCoord, lastFixTime: lastCoord ? Date.now() : null, lastHeartbeat: Date.now(), gpsError: 'Tab closed or app exited while tracking' });
+  }
+});
+</script>
+</body>
+</html>
