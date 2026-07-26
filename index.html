@@ -561,20 +561,6 @@
     </section>
 
     <section class="block">
-      <h2 style="margin:0 0 4px;">Attendance Sheet</h2>
-      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Auto-marks Present when an engineer checks in with their selfie. Everything else — leave, holidays, half-days — is entered or corrected by HR. Resident Engineers are excluded from the leave/late-coming rules; their days just track Present/Absent/Holiday.</p>
-      <div class="row-inline">
-        <div>
-          <label class="field">Month</label>
-          <input type="month" id="attSheetMonth" />
-        </div>
-      </div>
-      <button class="btn full" onclick="renderAttendanceSheet()">Load attendance sheet</button>
-      <div style="height:14px"></div>
-      <div id="attendanceSheetBox"></div>
-    </section>
-
-    <section class="block">
       <h2>Team overview</h2>
       <div id="hrSummaryGrid"></div>
       <div id="hrTable"></div>
@@ -623,12 +609,29 @@
       <!-- ===== Dashboard ===== -->
       <div id="hrSubDash">
         <div class="inner-tabs">
-          <button class="active" onclick="switchDashSub('reminders')" id="dashSubBtnReminders">Increment Reminders</button>
+          <button class="active" onclick="switchDashSub('attendance')" id="dashSubBtnAttendance">Attendance Sheet</button>
+          <button onclick="switchDashSub('reminders')" id="dashSubBtnReminders">Increment Reminders</button>
           <button onclick="switchDashSub('expiry')" id="dashSubBtnExpiry">Document Expiry</button>
           <button onclick="switchDashSub('activity')" id="dashSubBtnActivity">Activity Log</button>
         </div>
 
-        <div id="dashSubReminders">
+        <div id="dashSubAttendance">
+          <section class="block">
+            <h2 style="margin:0 0 4px;">Attendance Sheet</h2>
+            <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Auto-marks Present when an engineer checks in with their selfie. Everything else — leave, holidays, half-days — is entered or corrected by HR. Resident Engineers are excluded from the leave/late-coming rules; their days just track Present/Absent/Holiday.</p>
+            <div class="row-inline">
+              <div>
+                <label class="field">Month</label>
+                <input type="month" id="attSheetMonth" />
+              </div>
+            </div>
+            <button class="btn full" onclick="renderAttendanceSheet()">Load attendance sheet</button>
+            <div style="height:14px"></div>
+            <div id="attendanceSheetBox"></div>
+          </section>
+        </div>
+
+        <div id="dashSubReminders" class="hidden">
           <section class="block">
             <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">One month before an employee's increment date, they'll show up here so HR can send a reminder — review and send it yourself by email or WhatsApp.</p>
             <label class="field">Send reminder drafts to</label>
@@ -1441,7 +1444,6 @@ async function enterHrMain(){
   if(rate) document.getElementById('rateInput').value = rate;
   await renderUserList();
   await renderGeofenceZones();
-  await renderAttendanceSheet();
   await loadHR();
   await loadCompanyReport();
   if(hrInterval) clearInterval(hrInterval);
@@ -2583,10 +2585,11 @@ function switchHrSub(sub){
   if(sub === 'generator') renderGeneratorTab();
 }
 function switchDashSub(sub){
-  ['reminders','expiry','activity'].forEach(s => {
+  ['attendance','reminders','expiry','activity'].forEach(s => {
     document.getElementById('dashSub' + s.charAt(0).toUpperCase() + s.slice(1)).classList.toggle('hidden', s !== sub);
     document.getElementById('dashSubBtn' + s.charAt(0).toUpperCase() + s.slice(1)).classList.toggle('active', s === sub);
   });
+  if(sub === 'attendance') renderAttendanceSheet();
   if(sub === 'reminders') renderIncrementReminders();
   if(sub === 'expiry') renderDocExpiryList();
   if(sub === 'activity') renderActivityLogList();
@@ -2594,6 +2597,7 @@ function switchDashSub(sub){
 
 // ---- dashboard ----
 async function refreshDashboard(){
+  await renderAttendanceSheet();
   const savedEmail = await getReminderEmail();
   document.getElementById('reminderEmailInput').value = savedEmail;
   await renderIncrementReminders();
