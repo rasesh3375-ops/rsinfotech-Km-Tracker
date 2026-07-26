@@ -327,6 +327,9 @@
           <img id="selfieThumb" class="selfie-thumb" />
           <span style="font-size:13px;color:var(--green);font-weight:600;">✓ Checked in — you're being tracked</span>
         </div>
+        <div class="status-card warn" style="margin-top:12px;">
+          <div class="detail warn" style="margin:0;">⚠️ Keep this app open while tracking. Closing it, force-quitting it, or turning off location will stop your km from being recorded, and HR will see you flagged as "not responding."</div>
+        </div>
         <button class="trackbtn stop" id="checkoutBtn" onclick="beginCheckout()">Check out</button>
       </div>
 
@@ -1251,7 +1254,7 @@ async function enterHrMain(){
   await loadHR();
   await loadCompanyReport();
   if(hrInterval) clearInterval(hrInterval);
-  hrInterval = setInterval(() => { loadHR(); loadCompanyReport(); }, 20000);
+  hrInterval = setInterval(() => { loadHR(); loadCompanyReport(); }, 12000);
   switchHrTab('tracking');
 }
 
@@ -1307,6 +1310,7 @@ function logoutEngineer(){
 async function forceLogoutEngineer(reason){
   if(watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
   if(heartbeatTimer){ clearInterval(heartbeatTimer); heartbeatTimer = null; }
+  await releaseWakeLock();
   tracking = false;
   await clearActive(engineerName);
   await safeSet('my_username', '', false);
@@ -1466,6 +1470,26 @@ async function handleSelfieCapture(event){
   startWatch(false);
 }
 
+let wakeLock = null;
+async function acquireWakeLock(){
+  try{
+    if('wakeLock' in navigator){
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    }
+  }catch(e){
+    // not supported or permission denied — tracking still works, just more exposed to screen-lock pauses
+  }
+}
+async function releaseWakeLock(){
+  try{ if(wakeLock){ await wakeLock.release(); wakeLock = null; } }catch(e){}
+}
+document.addEventListener('visibilitychange', async () => {
+  if(tracking && document.visibilityState === 'visible' && !wakeLock){
+    await acquireWakeLock();
+  }
+});
+
 function startWatch(resumed){
   const msg = document.getElementById('gpsMsg');
   msg.textContent = '';
@@ -1478,6 +1502,7 @@ function startWatch(resumed){
     return;
   }
   tracking = true;
+  acquireWakeLock();
   document.getElementById('trackStatus').innerHTML = '<span class="status-dot"></span>Tracking since ' + new Date(startTime).toLocaleTimeString();
 
   watchId = navigator.geolocation.watchPosition(async (pos) => {
@@ -1538,6 +1563,7 @@ function beginCheckout(){
     watchId = null;
   }
   if(heartbeatTimer){ clearInterval(heartbeatTimer); heartbeatTimer = null; }
+  releaseWakeLock();
   tracking = false;
   document.getElementById('trackStatus').textContent = 'Not tracking';
 
@@ -1698,9 +1724,9 @@ function computeStatus(active){
   const now = Date.now();
   const hbAge = active.lastHeartbeat ? now - active.lastHeartbeat : Infinity;
   const fixAge = active.lastFixTime ? now - active.lastFixTime : Infinity;
-  if(hbAge > 90000){
-    const mins = isFinite(hbAge) ? Math.round(hbAge/60000) : '?';
-    return { level:'warn', label:'not responding', detail: 'No signal from the app for ' + mins + ' min — tab may be closed or phone switched off.' };
+  if(hbAge > 65000){
+    const secs = isFinite(hbAge) ? Math.round(hbAge/1000) : '?';
+    return { level:'warn', label:'not responding', detail: 'No signal from the app for ' + secs + ' sec — tab may be closed or phone switched off.' };
   }
   if(active.gpsError){
     return { level:'warn', label:'GPS issue', detail: active.gpsError };
@@ -1723,10 +1749,33 @@ function enableAlerts(){
     document.getElementById('alertBtn').textContent = 'alerts not supported here';
     return;
   }
+  try{
+    if(!alertAudioCtx) alertAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if(alertAudioCtx.state === 'suspended') alertAudioCtx.resume();
+  }catch(e){}
   Notification.requestPermission().then(perm => {
     alertsEnabled = perm === 'granted';
     document.getElementById('alertBtn').textContent = alertsEnabled ? 'alerts on' : 'alerts blocked';
   });
+}
+
+let alertAudioCtx = null;
+function playAlertBeep(){
+  try{
+    if(!alertAudioCtx) alertAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = alertAudioCtx;
+    [0, 0.22].forEach(delay => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = 880;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.15, ctx.currentTime + delay);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.18);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(ctx.currentTime + delay);
+      osc.stop(ctx.currentTime + delay + 0.2);
+    });
+  }catch(e){}
 }
 
 let liveMap = null;
@@ -1943,7 +1992,15 @@ async function loadHR(){
     infos.push({ name: label, active, status });
 
     if(alertsEnabled && status.level === 'warn' && !previousWarnState[name]){
-      try{ new Notification('KM Tracker alert', { body: label + ': ' + status.detail }); }catch(e){}
+      try{
+        new Notification('⚠️ ' + label + ' — ' + status.label, {
+          body: status.detail,
+          requireInteraction: true,
+          tag: 'km-alert-' + name
+        });
+      }catch(e){}
+      if(navigator.vibrate) { try{ navigator.vibrate([200, 100, 200]); }catch(e){} }
+      playAlertBeep();
     }
     previousWarnState[name] = status.level === 'warn';
 
@@ -3133,9 +3190,13 @@ function whatsappLetter(){
   window.open('https://wa.me/?text=' + encodeURIComponent(lastGeneratedLetter.text), '_blank');
 }
 
-window.addEventListener('beforeunload', () => {
+window.addEventListener('beforeunload', (e) => {
   if(tracking && engineerName){
     setActive(engineerName, { startTime, accumulatedKm, selfie: pendingSelfie, lastCoord, lastFixTime: lastCoord ? Date.now() : null, lastHeartbeat: Date.now(), gpsError: 'Tab closed or app exited while tracking', trail: tripTrail });
+    // Browsers show their own generic wording here, not this text — but setting
+    // returnValue is what triggers the "leave site?" confirmation at all.
+    e.preventDefault();
+    e.returnValue = 'You are still checked in and being tracked. Leaving will stop your km from being recorded.';
   }
 });
 </script>
