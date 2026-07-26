@@ -129,6 +129,74 @@
     body{background:#fff;}
     section.block{border:none;padding:0;}
   }
+
+  /* ===== HR top-level tabs (Tracking / HR Management) ===== */
+  .hr-tabs{display:flex;gap:6px;background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:5px;margin-bottom:18px;overflow-x:auto;}
+  .hr-tabs button{flex:1;white-space:nowrap;border:none;background:transparent;color:var(--navy);font-size:13.5px;font-weight:700;padding:11px 14px;border-radius:9px;cursor:pointer;}
+  .hr-tabs button.active{background:var(--navy);color:#fff;}
+
+  /* ===== HR Management sub-tabs (Dashboard / Employee Master / Reports / Generator) ===== */
+  .hr-subtabs{display:flex;gap:0;border-bottom:1px solid var(--line);margin-bottom:18px;overflow-x:auto;}
+  .hr-subtabs button{white-space:nowrap;border:none;background:transparent;color:var(--muted);font-size:13.5px;font-weight:600;padding:12px 16px;cursor:pointer;border-bottom:2px solid transparent;}
+  .hr-subtabs button.active{color:var(--navy);border-bottom-color:var(--amber);}
+
+  .stat-grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px;}
+  .stat-card2{background:var(--paper);border:1px solid var(--line);border-left:4px solid var(--amber-dark);border-radius:10px;padding:16px;}
+  .stat-card2 .n{font-family:"Courier New",monospace;font-size:26px;font-weight:700;color:var(--navy);}
+  .stat-card2 .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-top:4px;}
+
+  .inner-tabs{display:flex;gap:22px;border-bottom:1px solid var(--line);margin-bottom:16px;}
+  .inner-tabs button{background:none;border:none;color:var(--muted);font-size:13.5px;font-weight:600;padding:0 0 10px;cursor:pointer;border-bottom:2px solid transparent;}
+  .inner-tabs button.active{color:var(--navy);border-bottom-color:var(--amber-dark);}
+
+  .doc-card{background:var(--cream);border-radius:10px;padding:14px;margin-top:10px;}
+
+  .emp-search-row{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
+  .emp-search-row input{flex:2;min-width:160px;}
+  .emp-search-row .btn{flex:1;min-width:110px;font-size:13px;padding:11px 10px;}
+
+  .emp-row{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;}
+  .emp-row .head{display:flex;justify-content:space-between;align-items:center;}
+  .emp-row .head strong{font-size:14.5px;}
+  .emp-row .head .id{font-size:11.5px;color:var(--muted);}
+  .emp-row .sub{font-size:12.5px;color:var(--muted);margin-top:3px;}
+  .emp-row .actions{margin-top:10px;display:flex;gap:8px;}
+  .emp-row .actions button{font-size:12px;padding:7px 10px;}
+
+  .modal-overlay{position:fixed;inset:0;background:rgba(22,33,62,0.55);display:flex;align-items:flex-start;justify-content:center;padding:20px 12px;overflow-y:auto;z-index:50;}
+  .modal-box{background:var(--paper);border-radius:14px;max-width:520px;width:100%;padding:22px;margin:20px 0 40px;}
+  .modal-box h2{margin:0 0 6px;font-size:19px;}
+  .modal-box .hint{font-size:12.5px;color:var(--muted);margin:0 0 18px;}
+  .field-group{margin-bottom:16px;}
+  .field-group .sec-title{font-size:11.5px;font-weight:700;color:var(--amber-dark);text-transform:uppercase;letter-spacing:.5px;margin:18px 0 12px;padding-top:14px;border-top:1px dashed var(--line);}
+  .field-group .sec-title:first-child{border-top:none;padding-top:0;margin-top:0;}
+  select.field-input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;font-size:14.5px;background:var(--paper);color:var(--navy);}
+  input[type=date]{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;background:var(--paper);color:var(--navy);}
+  input[type=file]{width:100%;font-size:12.5px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--paper);}
+  .bonus-callout{background:#FDECC8;border:1px solid var(--amber);border-radius:8px;padding:12px 14px;font-size:13.5px;font-weight:700;color:var(--amber-dark);margin-bottom:8px;}
+  .modal-actions{display:flex;gap:10px;margin-top:18px;}
+  .modal-actions .btn{flex:1;}
+
+  .report-card{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px;}
+  .report-card .head{display:flex;align-items:center;gap:12px;margin-bottom:12px;}
+  .report-card .avatar{width:38px;height:38px;border-radius:50%;background:var(--amber-dark);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0;}
+  .report-card .titlewrap strong{display:block;font-size:14.5px;}
+  .report-card .titlewrap span{font-size:12px;color:var(--muted);}
+
+  .letter-choice{border:1px solid var(--line);border-left:4px solid transparent;border-radius:10px;padding:13px 14px;margin-bottom:8px;cursor:pointer;font-size:14px;display:flex;gap:12px;align-items:center;}
+  .letter-choice .num{font-size:11px;color:var(--muted);font-weight:700;}
+  .letter-choice.active{border-left-color:var(--amber-dark);background:var(--cream);font-weight:700;}
+
+  .letter-paper{display:none;}
+  #letterOutput.show .letter-paper{display:block;background:#fff;border:1px solid var(--line);border-radius:10px;padding:26px 22px;margin:18px 0;font-size:13.5px;line-height:1.7;white-space:pre-wrap;}
+  @media print{
+    body *{visibility:hidden;}
+    .letter-paper, .letter-paper *{visibility:visible;}
+    .letter-paper{position:absolute;left:0;top:0;width:100%;border:none;padding:0;}
+  }
+  .checklist-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13.5px;}
+  .checklist-row:last-child{border-bottom:none;}
+  .checklist-row input{width:auto;}
 </style>
 </head>
 <body>
@@ -276,11 +344,20 @@
     </div>
 
     <div id="hrMain" class="hidden">
-    <h2 style="margin:0 0 14px;font-size:19px;color:var(--navy);font-weight:700;">Employees km dashboard</h2>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+      <h2 style="margin:0;font-size:19px;color:var(--navy);font-weight:700;">R.S. Infotech HR</h2>
+      <button class="linkbtn" style="padding:0" onclick="logoutHr()">log out</button>
+    </div>
+
+    <div class="hr-tabs">
+      <button class="active" id="hrTabBtnTracking" onclick="switchHrTab('tracking')">📍 Tracking</button>
+      <button id="hrTabBtnMgmt" onclick="switchHrTab('mgmt')">📋 HR Management</button>
+    </div>
+
+    <div id="hrTabTracking">
     <section class="block">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
         <h2 style="margin:0;">Manage team</h2>
-        <button class="linkbtn" style="padding:0" onclick="logoutHr()">log out</button>
       </div>
       <div class="row-inline" style="margin-top:12px;">
         <div>
@@ -344,8 +421,138 @@
       <div id="companyTable"></div>
       <button class="btn ghost full" style="margin-top:10px;" onclick="exportCompanyCSV()">Export company CSV</button>
     </section>
+    </div><!-- /hrTabTracking -->
+
+    <div id="hrTabMgmt" class="hidden">
+      <div class="hr-subtabs">
+        <button class="active" onclick="switchHrSub('dash')" id="hrSubBtnDash">Dashboard</button>
+        <button onclick="switchHrSub('master')" id="hrSubBtnMaster">Employee Master</button>
+        <button onclick="switchHrSub('reports')" id="hrSubBtnReports">Reports</button>
+        <button onclick="switchHrSub('generator')" id="hrSubBtnGenerator">Generator</button>
+      </div>
+
+      <!-- ===== Dashboard ===== -->
+      <div id="hrSubDash">
+        <div class="stat-grid2">
+          <div class="stat-card2"><div class="n" id="statLettersTotal">0</div><div class="l">Letters generated</div></div>
+          <div class="stat-card2"><div class="n" id="statLettersMonth">0</div><div class="l">This month</div></div>
+          <div class="stat-card2"><div class="n" id="statMostUsed">—</div><div class="l">Most used type</div></div>
+          <div class="stat-card2"><div class="n" id="statEmpCount">0</div><div class="l">Employees on file</div></div>
+        </div>
+
+        <div class="inner-tabs">
+          <button class="active" onclick="switchDashSub('reminders')" id="dashSubBtnReminders">Increment Reminders</button>
+          <button onclick="switchDashSub('activity')" id="dashSubBtnActivity">Activity Log</button>
+          <button onclick="switchDashSub('sync')" id="dashSubBtnSync">Cloud Sync</button>
+        </div>
+
+        <div id="dashSubReminders">
+          <section class="block">
+            <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">One month before an employee's increment date, they'll show up here so HR can send a reminder — review and send it yourself by email or WhatsApp.</p>
+            <label class="field">Send reminder drafts to</label>
+            <input type="text" id="reminderEmailInput" placeholder="hr@yourcompany.com" />
+            <div style="height:10px"></div>
+            <button class="btn" onclick="saveReminderEmail()">Save</button>
+            <div class="msg" id="reminderSaveMsg"></div>
+            <div style="height:14px"></div>
+            <div id="incrementReminderList"></div>
+          </section>
+        </div>
+        <div id="dashSubActivity" class="hidden">
+          <section class="block">
+            <div id="activityLogList"></div>
+          </section>
+        </div>
+        <div id="dashSubSync" class="hidden">
+          <section class="block">
+            <p style="font-size:13px;color:var(--muted);margin:0;">Employee records, letters and reports are stored the same way as your km-tracking data — shared across every device signed in as HR, through the storage backend configured in this app. No separate setup needed.</p>
+          </section>
+        </div>
+      </div>
+
+      <!-- ===== Employee Master ===== -->
+      <div id="hrSubMaster" class="hidden">
+        <h2 style="margin:0 0 14px;font-size:17px;">Employee master</h2>
+        <section class="block">
+          <div class="emp-search-row">
+            <input type="text" id="empSearchInput" placeholder="Search by name or employee ID..." oninput="renderEmployeeList()" />
+            <button class="btn ghost" onclick="exportEmployeeBackup()">Export backup</button>
+            <label class="btn ghost" style="cursor:pointer;">Import backup<input type="file" accept="application/json" style="display:none" onchange="importEmployeeBackup(event)"></label>
+          </div>
+          <button class="btn" onclick="openAddEmployeeModal()">+ Add employee</button>
+        </section>
+        <section class="block">
+          <div id="employeeListBox"></div>
+        </section>
+      </div>
+
+      <!-- ===== Reports ===== -->
+      <div id="hrSubReports" class="hidden">
+        <h2 style="margin:0 0 4px;font-size:17px;">Document types</h2>
+        <div id="letterTypeCards"></div>
+
+        <div class="report-card">
+          <div class="head"><div class="avatar">J</div><div class="titlewrap"><strong>Joining Checklist</strong><span id="joiningChecklistCount">0 employees</span></div></div>
+          <button class="btn ghost" onclick="openChecklistPicker('joining')">Open checklist</button>
+        </div>
+        <div class="report-card">
+          <div class="head"><div class="avatar">E</div><div class="titlewrap"><strong>Exit Checklist</strong><span id="exitChecklistCount">0 employees</span></div></div>
+          <button class="btn ghost" onclick="openChecklistPicker('exit')">Open checklist</button>
+        </div>
+
+        <h2 style="margin:22px 0 4px;font-size:17px;">Reports</h2>
+        <div id="reportCardsBox"></div>
+      </div>
+
+      <!-- ===== Generator ===== -->
+      <div id="hrSubGenerator" class="hidden">
+        <section class="block">
+          <div class="field-group">
+            <div class="sec-title">Choose a letter</div>
+            <div id="letterChoiceList"></div>
+          </div>
+          <label class="field">Company name</label>
+          <input type="text" id="genCompanyName" value="R.S.Infotech" />
+          <div style="height:12px"></div>
+          <label class="field">Employee name</label>
+          <input type="text" id="genEmpName" />
+          <div style="height:12px"></div>
+          <label class="field">Designation</label>
+          <input type="text" id="genDesignation" />
+          <div style="height:12px"></div>
+          <label class="field">Department</label>
+          <input type="text" id="genDepartment" />
+          <div style="height:12px"></div>
+          <label class="field">Date of joining</label>
+          <input type="date" id="genDoj" />
+          <div style="height:12px"></div>
+          <label class="field">Last working date</label>
+          <input type="date" id="genLwd" />
+          <div style="height:12px"></div>
+          <label class="field">Date of issue</label>
+          <input type="date" id="genIssueDate" />
+          <div style="height:16px"></div>
+          <button class="btn full" onclick="generateLetter()">Generate letter</button>
+          <div class="msg" id="genMsg"></div>
+        </section>
+
+        <div id="letterOutput">
+          <div class="letter-paper" id="letterPaper"></div>
+        </div>
+
+        <div id="letterActionsBox" class="hidden">
+          <button class="btn ghost full" style="margin-bottom:10px;" onclick="switchHrSub('reports')">← Back to dashboard</button>
+          <button class="btn ghost full" style="margin-bottom:10px;" onclick="emailLetter()">Email</button>
+          <button class="btn ghost full" style="margin-bottom:10px;" onclick="whatsappLetter()">WhatsApp</button>
+          <button class="btn full" onclick="window.print()">Print / Save as PDF</button>
+        </div>
+      </div>
+    </div><!-- /hrTabMgmt -->
     </div>
   </div>
+
+  <div id="checklistModalRoot"></div>
+  <div id="employeeModalRoot"></div>
 
   <div class="switch-role hidden" id="switchBottom">
     <button onclick="goHome()">← switch role</button>
@@ -753,6 +960,7 @@ async function enterHrMain(){
   await loadCompanyReport();
   if(hrInterval) clearInterval(hrInterval);
   hrInterval = setInterval(() => { loadHR(); loadCompanyReport(); }, 20000);
+  switchHrTab('tracking');
 }
 
 async function logoutHr(){
@@ -1391,6 +1599,763 @@ function exportCompanyCSV(){
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+// ============================================================
+// HR MANAGEMENT MODULE
+// (Employee Master, letter Generator, Reports, checklists,
+// increment reminders, activity log — separate from km tracking)
+// ============================================================
+
+let selectedLetterIdx = 0;
+let lastGeneratedLetter = null;
+let editingEmployeeId = null;
+let currentChecklistType = null;
+
+const LETTER_TYPES = [
+  'Experience Letter',
+  'Relieving Letter',
+  'Exit Letter',
+  'No Dues Letter',
+  'Full & Final Settlement Letter',
+  'Loan/Advance Request Form',
+  'Salary Slip'
+];
+const CHECKLIST_ITEMS = {
+  joining: ['ID proof collected', 'Offer letter signed', 'Bank details captured', 'Induction completed', 'Assets issued'],
+  exit: ['Resignation accepted', 'Exit interview done', 'Assets returned', 'Full & final settlement initiated', 'System access revoked']
+};
+
+// ---- storage ----
+async function getEmployees(){
+  const v = await safeGet('employees', true);
+  return v ? JSON.parse(v) : [];
+}
+async function saveEmployees(list){
+  await safeSet('employees', JSON.stringify(list), true);
+}
+async function getLettersLog(){
+  const v = await safeGet('letters_log', true);
+  return v ? JSON.parse(v) : [];
+}
+async function saveLettersLog(list){
+  await safeSet('letters_log', JSON.stringify(list), true);
+}
+async function getActivityLog(){
+  const v = await safeGet('activity_log', true);
+  return v ? JSON.parse(v) : [];
+}
+async function addActivityLog(text){
+  const log = await getActivityLog();
+  log.unshift({ ts: new Date().toISOString(), text });
+  await safeSet('activity_log', JSON.stringify(log.slice(0, 200)), true);
+}
+async function getReminderEmail(){
+  return (await safeGet('reminder_email', true)) || '';
+}
+
+// ---- tab switching ----
+function switchHrTab(tab){
+  document.getElementById('hrTabTracking').classList.toggle('hidden', tab !== 'tracking');
+  document.getElementById('hrTabMgmt').classList.toggle('hidden', tab !== 'mgmt');
+  document.getElementById('hrTabBtnTracking').classList.toggle('active', tab === 'tracking');
+  document.getElementById('hrTabBtnMgmt').classList.toggle('active', tab === 'mgmt');
+  if(tab === 'mgmt'){
+    switchHrSub('dash');
+  }
+}
+function switchHrSub(sub){
+  ['dash','master','reports','generator'].forEach(s => {
+    document.getElementById('hrSub' + s.charAt(0).toUpperCase() + s.slice(1)).classList.toggle('hidden', s !== sub);
+    document.getElementById('hrSubBtn' + s.charAt(0).toUpperCase() + s.slice(1)).classList.toggle('active', s === sub);
+  });
+  if(sub === 'dash') refreshDashboard();
+  if(sub === 'master') renderEmployeeList();
+  if(sub === 'reports') renderReportsTab();
+  if(sub === 'generator') renderGeneratorTab();
+}
+function switchDashSub(sub){
+  ['reminders','activity','sync'].forEach(s => {
+    document.getElementById('dashSub' + s.charAt(0).toUpperCase() + s.slice(1)).classList.toggle('hidden', s !== sub);
+    document.getElementById('dashSubBtn' + s.charAt(0).toUpperCase() + s.slice(1)).classList.toggle('active', s === sub);
+  });
+  if(sub === 'reminders') renderIncrementReminders();
+  if(sub === 'activity') renderActivityLogList();
+}
+
+// ---- dashboard ----
+async function refreshDashboard(){
+  const log = await getLettersLog();
+  const employees = await getEmployees();
+  document.getElementById('statEmpCount').textContent = employees.length;
+  document.getElementById('statLettersTotal').textContent = log.length;
+  const now = new Date();
+  const thisMonthCount = log.filter(l => {
+    const d = new Date(l.date);
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  }).length;
+  document.getElementById('statLettersMonth').textContent = thisMonthCount;
+  if(log.length){
+    const counts = {};
+    log.forEach(l => { counts[l.type] = (counts[l.type] || 0) + 1; });
+    const top = Object.keys(counts).sort((a,b) => counts[b]-counts[a])[0];
+    document.getElementById('statMostUsed').textContent = top;
+  } else {
+    document.getElementById('statMostUsed').textContent = '—';
+  }
+  const savedEmail = await getReminderEmail();
+  document.getElementById('reminderEmailInput').value = savedEmail;
+  await renderIncrementReminders();
+}
+
+async function saveReminderEmail(){
+  const val = document.getElementById('reminderEmailInput').value.trim();
+  await safeSet('reminder_email', val, true);
+  const msg = document.getElementById('reminderSaveMsg');
+  msg.textContent = 'Saved.';
+  msg.classList.remove('error');
+  setTimeout(() => { msg.textContent = ''; }, 2500);
+}
+
+async function renderIncrementReminders(){
+  const employees = await getEmployees();
+  const box = document.getElementById('incrementReminderList');
+  if(!box) return;
+  const now = new Date();
+  const in30 = new Date(); in30.setDate(now.getDate() + 30);
+  const upcoming = employees.filter(e => {
+    if(!e.nextIncrement) return false;
+    const d = new Date(e.nextIncrement);
+    return d >= now && d <= in30;
+  }).sort((a,b) => new Date(a.nextIncrement) - new Date(b.nextIncrement));
+  if(!upcoming.length){
+    box.innerHTML = '<div class="empty">No upcoming increment dates on file yet.</div>';
+    return;
+  }
+  const email = await getReminderEmail();
+  box.innerHTML = upcoming.map(e => {
+    const days = Math.ceil((new Date(e.nextIncrement) - now) / 86400000);
+    const subject = encodeURIComponent('Increment reminder: ' + e.name);
+    const body = encodeURIComponent('Reminder: ' + e.name + ' (' + (e.designation||'') + ') has an increment due on ' + e.nextIncrement + '.');
+    const mailLink = email ? `mailto:${email}?subject=${subject}&body=${body}` : `mailto:?subject=${subject}&body=${body}`;
+    return `<div class="emp-row">
+      <div class="head"><strong>${e.name}</strong><span class="id">in ${days} day${days===1?'':'s'}</span></div>
+      <div class="sub">${e.designation || ''} · increment due ${e.nextIncrement}</div>
+      <div class="actions"><a class="btn ghost" href="${mailLink}">Send reminder email</a></div>
+    </div>`;
+  }).join('');
+}
+
+async function renderActivityLogList(){
+  const log = await getActivityLog();
+  const box = document.getElementById('activityLogList');
+  if(!log.length){
+    box.innerHTML = '<div class="empty">No activity recorded yet.</div>';
+    return;
+  }
+  box.innerHTML = log.map(l => `<div class="emp-row"><div class="sub" style="margin-top:0;">${new Date(l.ts).toLocaleString()}</div><div style="font-size:13.5px;margin-top:2px;">${l.text}</div></div>`).join('');
+}
+
+// ---- employee master ----
+async function compressDocumentFile(file){
+  const maxDim = 900;
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = () => {
+      img.onload = () => {
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      };
+      img.onerror = reject;
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function emptyEmployee(){
+  return {
+    id:'', name:'', designation:'', department:'', doj:'', nextIncrement:'', dob:'',
+    pan:'', aadhaar:'', uan:'', esiNumber:'', bankName:'', ifsc:'', accountNumber:'',
+    phone:'', email:'', address:'',
+    basic:0, hra:0, otherAllowances:0, stdDeductions:0, pf:0, esiDeduction:0, pt:0,
+    loanAmount:0, emiPerMonth:0, loanStatus:'active',
+    diwaliEligible:'yes',
+    emergencyName:'', emergencyNumber:'',
+    aadhaarCardImg:'', panCardImg:'', otherDocs:[],
+    checklists:{ joining:{}, exit:{} }
+  };
+}
+
+function diwaliBonusFor(emp){
+  if(emp.diwaliEligible !== 'yes') return 0;
+  return (Number(emp.basic)||0) + (Number(emp.hra)||0) + (Number(emp.otherAllowances)||0);
+}
+
+function employeeModalHtml(emp){
+  return `
+  <div class="modal-overlay" id="employeeModalOverlay">
+    <div class="modal-box">
+      <h2>${editingEmployeeId ? 'Edit employee' : 'Add employee'}</h2>
+      <p class="hint">This information is stored once and auto-fills letters and payslips for this employee — no need to retype it each time.</p>
+
+      <div class="field-group">
+        <div class="sec-title">Basic details</div>
+        <label class="field">Employee ID</label>
+        <input type="text" id="f_id" placeholder="EMP-1001" value="${emp.id}">
+        <div style="height:12px"></div>
+        <label class="field">Full name</label>
+        <input type="text" id="f_name" placeholder="Employee full name" value="${emp.name}">
+        <div style="height:12px"></div>
+        <label class="field">Designation</label>
+        <input type="text" id="f_designation" placeholder="e.g. Senior Executive" value="${emp.designation}">
+        <div style="height:12px"></div>
+        <label class="field">Department</label>
+        <input type="text" id="f_department" placeholder="e.g. Operations" value="${emp.department}">
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Employment dates</div>
+        <label class="field">Date of joining</label>
+        <input type="date" id="f_doj" value="${emp.doj}">
+        <div style="height:12px"></div>
+        <label class="field">Next increment date</label>
+        <input type="date" id="f_nextIncrement" value="${emp.nextIncrement}">
+        <div style="height:12px"></div>
+        <label class="field">Date of birth</label>
+        <input type="date" id="f_dob" value="${emp.dob}">
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Statutory &amp; bank details</div>
+        <label class="field">PAN number</label>
+        <input type="text" id="f_pan" placeholder="ABCDE1234F" value="${emp.pan}">
+        <div style="height:12px"></div>
+        <label class="field">Aadhaar number</label>
+        <input type="text" id="f_aadhaar" placeholder="XXXX XXXX XXXX" value="${emp.aadhaar}">
+        <div style="height:12px"></div>
+        <label class="field">UAN (PF number)</label>
+        <input type="text" id="f_uan" placeholder="10-digit UAN" value="${emp.uan}">
+        <div style="height:12px"></div>
+        <label class="field">ESI number</label>
+        <input type="text" id="f_esiNumber" placeholder="ESI number" value="${emp.esiNumber}">
+        <div style="height:12px"></div>
+        <label class="field">Bank name</label>
+        <input type="text" id="f_bankName" placeholder="e.g. HDFC Bank" value="${emp.bankName}">
+        <div style="height:12px"></div>
+        <label class="field">IFSC code</label>
+        <input type="text" id="f_ifsc" placeholder="e.g. HDFC0001234" value="${emp.ifsc}">
+        <div style="height:12px"></div>
+        <label class="field">Bank account number</label>
+        <input type="text" id="f_accountNumber" placeholder="Account number" value="${emp.accountNumber}">
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Contact</div>
+        <label class="field">Phone</label>
+        <input type="text" id="f_phone" placeholder="10-digit mobile number" value="${emp.phone}">
+        <div style="height:12px"></div>
+        <label class="field">Email</label>
+        <input type="text" id="f_email" placeholder="name@company.com" value="${emp.email}">
+        <div style="height:12px"></div>
+        <label class="field">Address</label>
+        <input type="text" id="f_address" placeholder="Residential address" value="${emp.address}">
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Salary structure (for salary slip)</div>
+        <label class="field">Basic salary</label>
+        <input type="number" id="f_basic" placeholder="0" value="${emp.basic||''}" oninput="updateBonusPreview()">
+        <div style="height:12px"></div>
+        <label class="field">HRA</label>
+        <input type="number" id="f_hra" placeholder="0" value="${emp.hra||''}" oninput="updateBonusPreview()">
+        <div style="height:12px"></div>
+        <label class="field">Other allowances</label>
+        <input type="number" id="f_otherAllowances" placeholder="0" value="${emp.otherAllowances||''}" oninput="updateBonusPreview()">
+        <div style="height:12px"></div>
+        <label class="field">Standard deductions</label>
+        <input type="number" id="f_stdDeductions" placeholder="0" value="${emp.stdDeductions||''}">
+        <div style="height:12px"></div>
+        <label class="field">PF (provident fund)</label>
+        <input type="number" id="f_pf" placeholder="0" value="${emp.pf||''}">
+        <div style="height:12px"></div>
+        <label class="field">ESI</label>
+        <input type="number" id="f_esiDeduction" placeholder="0" value="${emp.esiDeduction||''}">
+        <div style="height:12px"></div>
+        <label class="field">PT (professional tax)</label>
+        <input type="number" id="f_pt" placeholder="0" value="${emp.pt||''}">
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Loan &amp; advance</div>
+        <label class="field">Loan / advance amount</label>
+        <input type="number" id="f_loanAmount" placeholder="0" value="${emp.loanAmount||''}">
+        <div style="height:12px"></div>
+        <label class="field">EMI per month</label>
+        <input type="number" id="f_emiPerMonth" placeholder="0" value="${emp.emiPerMonth||''}">
+        <div style="height:12px"></div>
+        <label class="field">Loan status</label>
+        <select class="field-input" id="f_loanStatus">
+          <option value="active" ${emp.loanStatus==='active'?'selected':''}>Active - deduct EMI from salary</option>
+          <option value="closed" ${emp.loanStatus==='closed'?'selected':''}>Closed</option>
+        </select>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">While active, the EMI is automatically deducted on this employee's Salary Slip. Set to "Closed" once the loan is fully repaid.</p>
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Diwali bonus eligibility</div>
+        <label class="field">Eligible this year?</label>
+        <select class="field-input" id="f_diwaliEligible" onchange="updateBonusPreview()">
+          <option value="yes" ${emp.diwaliEligible==='yes'?'selected':''}>Yes</option>
+          <option value="no" ${emp.diwaliEligible==='no'?'selected':''}>No</option>
+        </select>
+        <div class="bonus-callout" id="bonusPreview" style="margin-top:12px;">Calculated Diwali bonus: Rs. ${diwaliBonusFor(emp)}</div>
+        <p style="font-size:12px;color:var(--muted);margin:0;">Bonus amount is calculated automatically as Basic + HRA + Other allowances (PF, ESI, and PT are not included) - no need to enter it manually.</p>
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Emergency contact</div>
+        <label class="field">Contact name</label>
+        <input type="text" id="f_emergencyName" placeholder="Full name" value="${emp.emergencyName}">
+        <div style="height:12px"></div>
+        <label class="field">Contact number</label>
+        <input type="text" id="f_emergencyNumber" placeholder="10-digit mobile number" value="${emp.emergencyNumber}">
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Identity documents</div>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Tap to scan with your camera or choose a file from your gallery. Documents are saved as soon as you upload them.</p>
+        <label class="field">Aadhaar card</label>
+        <input type="file" accept="image/*" id="f_aadhaarFile" onchange="handleDocUpload(event,'aadhaarCardImg')">
+        ${emp.aadhaarCardImg ? '<div class="doc-card">✓ Saved</div>' : ''}
+        <div style="height:12px"></div>
+        <label class="field">PAN card</label>
+        <input type="file" accept="image/*" id="f_panFile" onchange="handleDocUpload(event,'panCardImg')">
+        ${emp.panCardImg ? '<div class="doc-card">✓ Saved</div>' : ''}
+        <div style="height:12px"></div>
+        <label class="field">Other documents</label>
+        <a href="#" onclick="addOtherDocSlot();return false;" style="font-size:13px;color:var(--amber-dark);font-weight:600;">+ Add another document</a>
+        <div id="otherDocsBox"></div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn ghost" onclick="closeEmployeeModal()">Cancel</button>
+        <button class="btn" onclick="saveEmployeeForm()">Save employee</button>
+      </div>
+      <div class="msg" id="empSaveMsg"></div>
+    </div>
+  </div>`;
+}
+
+let editingEmployeeDraft = null;
+
+function updateBonusPreview(){
+  const basic = Number(document.getElementById('f_basic').value)||0;
+  const hra = Number(document.getElementById('f_hra').value)||0;
+  const other = Number(document.getElementById('f_otherAllowances').value)||0;
+  const eligible = document.getElementById('f_diwaliEligible').value;
+  const bonus = eligible === 'yes' ? (basic+hra+other) : 0;
+  document.getElementById('bonusPreview').textContent = 'Calculated Diwali bonus: Rs. ' + bonus;
+}
+
+async function handleDocUpload(event, field){
+  const file = event.target.files[0];
+  if(!file) return;
+  const dataUrl = await compressDocumentFile(file);
+  editingEmployeeDraft[field] = dataUrl;
+  event.target.parentElement.querySelector('.doc-card')?.remove();
+  const card = document.createElement('div');
+  card.className = 'doc-card';
+  card.textContent = '✓ Saved';
+  event.target.insertAdjacentElement('afterend', card);
+}
+
+function addOtherDocSlot(){
+  const box = document.getElementById('otherDocsBox');
+  const idx = box.children.length;
+  const wrap = document.createElement('div');
+  wrap.style.marginTop = '10px';
+  wrap.innerHTML = `<label class="field">Document name</label>
+    <input type="text" placeholder="e.g. 10th marksheet" onchange="editingEmployeeDraft.otherDocs[${idx}]=editingEmployeeDraft.otherDocs[${idx}]||{};editingEmployeeDraft.otherDocs[${idx}].name=this.value;">
+    <div style="height:8px"></div>
+    <input type="file" accept="image/*" onchange="handleOtherDocUpload(event, ${idx})">`;
+  editingEmployeeDraft.otherDocs.push({ name:'', dataUrl:'' });
+  box.appendChild(wrap);
+}
+async function handleOtherDocUpload(event, idx){
+  const file = event.target.files[0];
+  if(!file) return;
+  const dataUrl = await compressDocumentFile(file);
+  editingEmployeeDraft.otherDocs[idx].dataUrl = dataUrl;
+}
+
+async function openAddEmployeeModal(id){
+  editingEmployeeId = id || null;
+  if(id){
+    const employees = await getEmployees();
+    editingEmployeeDraft = JSON.parse(JSON.stringify(employees.find(e => e.id === id) || emptyEmployee()));
+  } else {
+    editingEmployeeDraft = emptyEmployee();
+  }
+  document.getElementById('employeeModalRoot').innerHTML = employeeModalHtml(editingEmployeeDraft);
+}
+function closeEmployeeModal(){
+  document.getElementById('employeeModalRoot').innerHTML = '';
+  editingEmployeeDraft = null;
+  editingEmployeeId = null;
+}
+
+async function saveEmployeeForm(){
+  const msg = document.getElementById('empSaveMsg');
+  const id = document.getElementById('f_id').value.trim();
+  const name = document.getElementById('f_name').value.trim();
+  if(!id || !name){
+    msg.textContent = 'Employee ID and full name are required.';
+    msg.classList.add('error');
+    return;
+  }
+  const employees = await getEmployees();
+  if(!editingEmployeeId && employees.some(e => e.id === id)){
+    msg.textContent = 'That Employee ID is already in use.';
+    msg.classList.add('error');
+    return;
+  }
+  const draft = editingEmployeeDraft;
+  Object.assign(draft, {
+    id, name,
+    designation: document.getElementById('f_designation').value.trim(),
+    department: document.getElementById('f_department').value.trim(),
+    doj: document.getElementById('f_doj').value,
+    nextIncrement: document.getElementById('f_nextIncrement').value,
+    dob: document.getElementById('f_dob').value,
+    pan: document.getElementById('f_pan').value.trim(),
+    aadhaar: document.getElementById('f_aadhaar').value.trim(),
+    uan: document.getElementById('f_uan').value.trim(),
+    esiNumber: document.getElementById('f_esiNumber').value.trim(),
+    bankName: document.getElementById('f_bankName').value.trim(),
+    ifsc: document.getElementById('f_ifsc').value.trim(),
+    accountNumber: document.getElementById('f_accountNumber').value.trim(),
+    phone: document.getElementById('f_phone').value.trim(),
+    email: document.getElementById('f_email').value.trim(),
+    address: document.getElementById('f_address').value.trim(),
+    basic: Number(document.getElementById('f_basic').value)||0,
+    hra: Number(document.getElementById('f_hra').value)||0,
+    otherAllowances: Number(document.getElementById('f_otherAllowances').value)||0,
+    stdDeductions: Number(document.getElementById('f_stdDeductions').value)||0,
+    pf: Number(document.getElementById('f_pf').value)||0,
+    esiDeduction: Number(document.getElementById('f_esiDeduction').value)||0,
+    pt: Number(document.getElementById('f_pt').value)||0,
+    loanAmount: Number(document.getElementById('f_loanAmount').value)||0,
+    emiPerMonth: Number(document.getElementById('f_emiPerMonth').value)||0,
+    loanStatus: document.getElementById('f_loanStatus').value,
+    diwaliEligible: document.getElementById('f_diwaliEligible').value,
+    emergencyName: document.getElementById('f_emergencyName').value.trim(),
+    emergencyNumber: document.getElementById('f_emergencyNumber').value.trim()
+  });
+  if(editingEmployeeId){
+    const idx = employees.findIndex(e => e.id === editingEmployeeId);
+    employees[idx] = draft;
+    await addActivityLog('Updated employee record for ' + name);
+  } else {
+    employees.push(draft);
+    await addActivityLog('Added employee ' + name + ' (' + id + ')');
+  }
+  await saveEmployees(employees);
+  closeEmployeeModal();
+  await renderEmployeeList();
+  await refreshDashboard();
+}
+
+async function deleteEmployee(id){
+  if(!confirm('Remove this employee from the master list? This cannot be undone.')) return;
+  let employees = await getEmployees();
+  const emp = employees.find(e => e.id === id);
+  employees = employees.filter(e => e.id !== id);
+  await saveEmployees(employees);
+  if(emp) await addActivityLog('Removed employee ' + emp.name + ' (' + id + ')');
+  await renderEmployeeList();
+  await refreshDashboard();
+}
+
+async function renderEmployeeList(){
+  const box = document.getElementById('employeeListBox');
+  if(!box) return;
+  const q = (document.getElementById('empSearchInput')?.value || '').trim().toLowerCase();
+  let employees = await getEmployees();
+  if(q){
+    employees = employees.filter(e => e.name.toLowerCase().includes(q) || e.id.toLowerCase().includes(q));
+  }
+  if(!employees.length){
+    box.innerHTML = '<div class="empty">No employees added yet. Click "+ Add employee" to build your master list.</div>';
+    return;
+  }
+  box.innerHTML = employees.map(e => `
+    <div class="emp-row">
+      <div class="head"><strong>${e.name}</strong><span class="id">${e.id}</span></div>
+      <div class="sub">${e.designation || '—'} · ${e.department || '—'}</div>
+      <div class="actions">
+        <button class="btn ghost" onclick="openAddEmployeeModal('${e.id}')">Edit</button>
+        <button class="btn ghost" onclick="deleteEmployee('${e.id}')">Delete</button>
+      </div>
+    </div>`).join('');
+}
+
+async function exportEmployeeBackup(){
+  const employees = await getEmployees();
+  const blob = new Blob([JSON.stringify(employees, null, 2)], { type:'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'employee-master-backup-' + todayStr() + '.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+function importEmployeeBackup(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try{
+      const incoming = JSON.parse(reader.result);
+      if(!Array.isArray(incoming)) throw new Error('bad format');
+      const existing = await getEmployees();
+      const byId = {};
+      existing.forEach(e => byId[e.id] = e);
+      incoming.forEach(e => byId[e.id] = e);
+      await saveEmployees(Object.values(byId));
+      await addActivityLog('Imported employee backup (' + incoming.length + ' records)');
+      await renderEmployeeList();
+      await refreshDashboard();
+      alert('Backup imported.');
+    }catch(e){
+      alert('Could not read that backup file.');
+    }
+  };
+  reader.readAsText(file);
+}
+
+// ---- reports tab ----
+async function renderReportsTab(){
+  const letters = [
+    {label:'Experience Letter', avatar:'E'}, {label:'Relieving Letter', avatar:'R'},
+    {label:'Exit Letter', avatar:'E'}, {label:'No Dues Letter', avatar:'N'},
+    {label:'Full & Final Settlement Letter', avatar:'F'}, {label:'Loan/Advance Request Form', avatar:'L'},
+    {label:'Salary Slip', avatar:'S'}
+  ];
+  const log = await getLettersLog();
+  document.getElementById('letterTypeCards').innerHTML = letters.map(l => {
+    const count = log.filter(x => x.type === l.label).length;
+    return `<div class="report-card">
+      <div class="head"><div class="avatar">${l.avatar}</div><div class="titlewrap"><strong>${l.label}</strong><span>${count} generated</span></div></div>
+      <button class="btn" onclick="jumpToGenerator('${l.label}')">Create</button>
+    </div>`;
+  }).join('');
+
+  const employees = await getEmployees();
+  const joiningDone = employees.filter(e => Object.values(e.checklists?.joining||{}).filter(Boolean).length === CHECKLIST_ITEMS.joining.length).length;
+  const exitDone = employees.filter(e => Object.values(e.checklists?.exit||{}).filter(Boolean).length === CHECKLIST_ITEMS.exit.length).length;
+  document.getElementById('joiningChecklistCount').textContent = employees.length + ' employees' + (joiningDone ? (', ' + joiningDone + ' complete') : '');
+  document.getElementById('exitChecklistCount').textContent = employees.length + ' employees' + (exitDone ? (', ' + exitDone + ' complete') : '');
+
+  const reports = [
+    {key:'contact', label:'Employee Contact Report', avatar:'E'},
+    {key:'birthday', label:'Birthday Report', avatar:'B'},
+    {key:'diwali', label:'Diwali Bonus Report', avatar:'D'},
+    {key:'salary', label:'Salary Report', avatar:'S'},
+    {key:'loan', label:'Loan & Advance Report', avatar:'L'}
+  ];
+  document.getElementById('reportCardsBox').innerHTML = reports.map(r => {
+    const withData = employees.filter(e => reportHasData(r.key, e)).length;
+    return `<div class="report-card">
+      <div class="head"><div class="avatar">${r.avatar}</div><div class="titlewrap"><strong>${r.label}</strong><span>${withData} employees with data</span></div></div>
+      <button class="btn ghost" onclick="viewReport('${r.key}','${r.label}')">View report</button>
+      <div id="reportBox_${r.key}"></div>
+    </div>`;
+  }).join('');
+}
+
+function reportHasData(key, e){
+  if(key==='contact') return !!(e.phone || e.email);
+  if(key==='birthday') return !!e.dob;
+  if(key==='diwali') return diwaliBonusFor(e) > 0;
+  if(key==='salary') return (Number(e.basic)||0) > 0;
+  if(key==='loan') return (Number(e.loanAmount)||0) > 0;
+  return false;
+}
+
+async function viewReport(key, label){
+  const employees = await getEmployees();
+  const box = document.getElementById('reportBox_' + key);
+  let rows = '';
+  if(key === 'contact'){
+    rows = employees.map(e => `<tr><td>${e.name}</td><td>${e.designation||''}</td><td>${e.phone||''}</td><td>${e.email||''}</td></tr>`).join('');
+    box.innerHTML = `<div style="margin-top:12px;"><table><tr><th>Name</th><th>Designation</th><th>Phone</th><th>Email</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table></div>`;
+  } else if(key === 'birthday'){
+    rows = employees.filter(e=>e.dob).map(e => `<tr><td>${e.name}</td><td>${e.dob}</td></tr>`).join('');
+    box.innerHTML = `<div style="margin-top:12px;"><table><tr><th>Name</th><th>Date of birth</th></tr>${rows || '<tr><td colspan="2" class="empty">No data yet</td></tr>'}</table></div>`;
+  } else if(key === 'diwali'){
+    rows = employees.map(e => `<tr><td>${e.name}</td><td>${e.diwaliEligible==='yes'?'Yes':'No'}</td><td class="num">₹${diwaliBonusFor(e)}</td></tr>`).join('');
+    box.innerHTML = `<div style="margin-top:12px;"><table><tr><th>Name</th><th>Eligible</th><th class="num">Bonus</th></tr>${rows || '<tr><td colspan="3" class="empty">No data yet</td></tr>'}</table></div>`;
+  } else if(key === 'salary'){
+    rows = employees.map(e => {
+      const gross = (Number(e.basic)||0)+(Number(e.hra)||0)+(Number(e.otherAllowances)||0);
+      const emi = e.loanStatus === 'active' ? (Number(e.emiPerMonth)||0) : 0;
+      const deductions = (Number(e.stdDeductions)||0)+(Number(e.pf)||0)+(Number(e.esiDeduction)||0)+(Number(e.pt)||0)+emi;
+      const net = gross - deductions;
+      return `<tr><td>${e.name}</td><td class="num">₹${gross.toFixed(0)}</td><td class="num">₹${deductions.toFixed(0)}</td><td class="num">₹${net.toFixed(0)}</td></tr>`;
+    }).join('');
+    box.innerHTML = `<div style="margin-top:12px;"><table><tr><th>Name</th><th class="num">Gross</th><th class="num">Deductions</th><th class="num">Net</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table></div>`;
+  } else if(key === 'loan'){
+    rows = employees.filter(e=>(Number(e.loanAmount)||0)>0).map(e => `<tr><td>${e.name}</td><td class="num">₹${e.loanAmount}</td><td class="num">₹${e.emiPerMonth}</td><td>${e.loanStatus}</td></tr>`).join('');
+    box.innerHTML = `<div style="margin-top:12px;"><table><tr><th>Name</th><th class="num">Loan amount</th><th class="num">EMI</th><th>Status</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table></div>`;
+  }
+}
+
+// ---- checklists ----
+function openChecklistPicker(type){
+  currentChecklistType = type;
+  getEmployees().then(employees => {
+    if(!employees.length){
+      document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeChecklistModal()"><div class="modal-box"><h2>${type==='joining'?'Joining':'Exit'} checklist</h2><p class="hint">Add employees first in Employee Master.</p><div class="modal-actions"><button class="btn full" onclick="closeChecklistModal()">Close</button></div></div></div>`;
+      return;
+    }
+    document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeChecklistModal()">
+      <div class="modal-box">
+        <h2>${type==='joining'?'Joining':'Exit'} checklist</h2>
+        <p class="hint">Choose an employee to view or update their checklist.</p>
+        ${employees.map(e => `<div class="emp-row" style="cursor:pointer;" onclick="openChecklistFor('${e.id}')"><div class="head"><strong>${e.name}</strong><span class="id">${e.id}</span></div></div>`).join('')}
+        <div class="modal-actions"><button class="btn ghost full" onclick="closeChecklistModal()">Close</button></div>
+      </div>
+    </div>`;
+  });
+}
+async function openChecklistFor(empId){
+  const employees = await getEmployees();
+  const emp = employees.find(e => e.id === empId);
+  const items = CHECKLIST_ITEMS[currentChecklistType];
+  const state = (emp.checklists && emp.checklists[currentChecklistType]) || {};
+  document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeChecklistModal()">
+    <div class="modal-box">
+      <h2>${emp.name} — ${currentChecklistType === 'joining' ? 'Joining' : 'Exit'} checklist</h2>
+      ${items.map((label,i) => `<div class="checklist-row"><input type="checkbox" id="chk_${i}" ${state[label] ? 'checked' : ''} onchange="toggleChecklistItem('${empId}','${label.replace(/'/g,"\\'")}',this.checked)"><label for="chk_${i}">${label}</label></div>`).join('')}
+      <div class="modal-actions"><button class="btn full" onclick="closeChecklistModal()">Done</button></div>
+    </div>
+  </div>`;
+}
+async function toggleChecklistItem(empId, label, checked){
+  const employees = await getEmployees();
+  const emp = employees.find(e => e.id === empId);
+  if(!emp.checklists) emp.checklists = { joining:{}, exit:{} };
+  if(!emp.checklists[currentChecklistType]) emp.checklists[currentChecklistType] = {};
+  emp.checklists[currentChecklistType][label] = checked;
+  await saveEmployees(employees);
+  await renderReportsTab();
+}
+function closeChecklistModal(){
+  document.getElementById('checklistModalRoot').innerHTML = '';
+}
+
+// ---- generator ----
+function jumpToGenerator(letterLabel){
+  switchHrSub('generator');
+  const idx = LETTER_TYPES.indexOf(letterLabel);
+  if(idx >= 0) selectLetterType(idx);
+}
+async function renderGeneratorTab(){
+  document.getElementById('letterChoiceList').innerHTML = LETTER_TYPES.map((t,i) => `
+    <div class="letter-choice ${i===selectedLetterIdx?'active':''}" onclick="selectLetterType(${i})">
+      <span class="num">${String(i+1).padStart(2,'0')}</span> ${t}
+    </div>`).join('');
+  document.getElementById('genIssueDate').value = document.getElementById('genIssueDate').value || todayStr();
+  document.getElementById('letterOutput').classList.remove('show');
+  document.getElementById('letterActionsBox').classList.add('hidden');
+}
+function selectLetterType(idx){
+  selectedLetterIdx = idx;
+  document.querySelectorAll('.letter-choice').forEach((el,i) => el.classList.toggle('active', i===idx));
+}
+
+function letterTemplate(type, f){
+  const company = f.company, name = f.name || '[Employee name]', designation = f.designation || '[Designation]',
+        department = f.department || '[Department]', doj = f.doj || '[Date of joining]', lwd = f.lwd || '[Last working date]',
+        issueDate = f.issueDate;
+  switch(type){
+    case 'Experience Letter':
+      return `${company}\n\nDate: ${issueDate}\n\nTO WHOMSOEVER IT MAY CONCERN\n\nThis is to certify that ${name} was employed with ${company} as ${designation} in the ${department} department from ${doj} to ${lwd || 'present'}.\n\nDuring this period, we found ${name} to be sincere, hardworking and professional in conduct. We wish them the very best in their future endeavours.\n\nFor ${company}\n\nAuthorised Signatory`;
+    case 'Relieving Letter':
+      return `${company}\n\nDate: ${issueDate}\n\nDear ${name},\n\nThis is to confirm that your resignation from the position of ${designation} in the ${department} department has been accepted, and you are relieved from services of ${company} with effect from ${lwd}.\n\nWe thank you for your contribution and wish you success in your future endeavours.\n\nFor ${company}\n\nAuthorised Signatory`;
+    case 'Exit Letter':
+      return `${company}\n\nDate: ${issueDate}\n\nDear ${name},\n\nThis letter confirms the completion of your exit formalities with ${company}. Your last working day was ${lwd}.\n\nAll company property and access must be returned/disabled as part of this process. We wish you well in your future career.\n\nFor ${company}\n\nAuthorised Signatory`;
+    case 'No Dues Letter':
+      return `${company}\n\nDate: ${issueDate}\n\nTO WHOMSOEVER IT MAY CONCERN\n\nThis is to certify that ${name}, who worked as ${designation} in the ${department} department, has cleared all dues, returned all company assets and has no outstanding financial obligation towards ${company} as of ${lwd || issueDate}.\n\nFor ${company}\n\nAuthorised Signatory`;
+    case 'Full & Final Settlement Letter':
+      return `${company}\n\nDate: ${issueDate}\n\nDear ${name},\n\nThis letter is to inform you that your full and final settlement with respect to your employment as ${designation} (last working day ${lwd}) has been processed. Any dues payable will be credited to your registered bank account.\n\nFor ${company}\n\nAuthorised Signatory`;
+    case 'Loan/Advance Request Form':
+      return `${company}\n\nDate: ${issueDate}\n\nLOAN / ADVANCE REQUEST FORM\n\nEmployee name: ${name}\nDesignation: ${designation}\nDepartment: ${department}\nDate of joining: ${doj}\n\nRequested amount: ____________________\nReason: ____________________________________________\n\nEmployee signature: ____________________\nHR approval: ____________________`;
+    case 'Salary Slip':
+      return `${company}\n\nSALARY SLIP — ${issueDate}\n\nEmployee name: ${name}\nDesignation: ${designation}\nDepartment: ${department}\n\nEARNINGS\nBasic: ${f.basic||0}\nHRA: ${f.hra||0}\nOther allowances: ${f.other||0}\n\nDEDUCTIONS\nStandard deductions: ${f.stdDeductions||0}\nPF: ${f.pf||0}\nESI: ${f.esiDeduction||0}\nPT: ${f.pt||0}\nEMI (if applicable): ${f.emi||0}\n\nNET PAY: ${f.net||0}`;
+    default:
+      return `${company}\n\nDate: ${issueDate}\n\n${name}`;
+  }
+}
+
+async function generateLetter(){
+  const msg = document.getElementById('genMsg');
+  const name = document.getElementById('genEmpName').value.trim();
+  if(!name){
+    msg.textContent = 'Enter the employee name.';
+    msg.classList.add('error');
+    return;
+  }
+  msg.textContent = '';
+  const type = LETTER_TYPES[selectedLetterIdx];
+  const employees = await getEmployees();
+  const matched = employees.find(e => e.name.toLowerCase() === name.toLowerCase());
+  const f = {
+    company: document.getElementById('genCompanyName').value.trim() || 'R.S.Infotech',
+    name,
+    designation: document.getElementById('genDesignation').value.trim(),
+    department: document.getElementById('genDepartment').value.trim(),
+    doj: document.getElementById('genDoj').value,
+    lwd: document.getElementById('genLwd').value,
+    issueDate: document.getElementById('genIssueDate').value || todayStr()
+  };
+  if(matched && type === 'Salary Slip'){
+    const gross = (Number(matched.basic)||0)+(Number(matched.hra)||0)+(Number(matched.otherAllowances)||0);
+    const emi = matched.loanStatus === 'active' ? (Number(matched.emiPerMonth)||0) : 0;
+    f.basic = matched.basic; f.hra = matched.hra; f.other = matched.otherAllowances;
+    f.stdDeductions = matched.stdDeductions; f.pf = matched.pf; f.esiDeduction = matched.esiDeduction; f.pt = matched.pt; f.emi = emi;
+    f.net = gross - ((Number(matched.stdDeductions)||0)+(Number(matched.pf)||0)+(Number(matched.esiDeduction)||0)+(Number(matched.pt)||0)+emi);
+  }
+  const text = letterTemplate(type, f);
+  lastGeneratedLetter = { type, text, employeeName: name };
+  document.getElementById('letterPaper').textContent = text;
+  document.getElementById('letterOutput').classList.add('show');
+  document.getElementById('letterActionsBox').classList.remove('hidden');
+
+  const log = await getLettersLog();
+  log.push({ type, employeeName: name, date: new Date().toISOString() });
+  await saveLettersLog(log);
+  await addActivityLog('Generated ' + type + ' for ' + name);
+}
+
+function emailLetter(){
+  if(!lastGeneratedLetter) return;
+  const subject = encodeURIComponent(lastGeneratedLetter.type + ' — ' + lastGeneratedLetter.employeeName);
+  const body = encodeURIComponent(lastGeneratedLetter.text);
+  window.location.href = `mailto:?subject=${subject}&body=${body}`;
+}
+function whatsappLetter(){
+  if(!lastGeneratedLetter) return;
+  window.open('https://wa.me/?text=' + encodeURIComponent(lastGeneratedLetter.text), '_blank');
 }
 
 window.addEventListener('beforeunload', () => {
