@@ -263,6 +263,8 @@
     .letter-paper{position:absolute;left:0;top:0;width:100%;border:none;padding:0;}
     .holiday-list-paper, .holiday-list-paper *{visibility:visible;}
     .holiday-list-paper{position:absolute;left:0;top:0;width:100%;border:none;padding:0;}
+    .print-isolate, .print-isolate *{visibility:visible;}
+    .print-isolate{position:absolute;left:0;top:0;width:100%;}
   }
   .checklist-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13.5px;}
   .checklist-row:last-child{border-bottom:none;}
@@ -284,6 +286,16 @@
   table.att-table select.att-code.code-SHORT{background:#FBE0DC;}
   table.att-table td.att-late{color:var(--red);font-size:9.5px;}
   .att-legend{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:10px;}
+
+  /* ===== Salary sheet ===== */
+  .sal-sheet-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  table.sal-table{border-collapse:collapse;font-size:12px;white-space:nowrap;width:100%;}
+  table.sal-table th, table.sal-table td{border:1px solid var(--line);padding:5px 7px;text-align:right;}
+  table.sal-table th{background:var(--navy);color:#fff;font-size:10.5px;text-transform:uppercase;text-align:center;}
+  table.sal-table td.sal-name{text-align:left;font-weight:600;}
+  table.sal-table tr.sal-heading td{background:#92D050;color:#16213E;font-weight:800;text-align:left;font-size:13px;text-transform:uppercase;letter-spacing:.3px;}
+  table.sal-table tr.sal-subtotal td{background:var(--cream);font-weight:700;}
+  table.sal-table tr.sal-grandtotal td{background:var(--navy);color:#fff;font-weight:800;}
 
   /* ===== Professional polish pass ===== */
   body{background:linear-gradient(180deg, #FBFAF7 0%, var(--cream) 220px);}
@@ -610,6 +622,7 @@
       <div id="hrSubDash">
         <div class="inner-tabs">
           <button class="active" onclick="switchDashSub('attendance')" id="dashSubBtnAttendance">Attendance Sheet</button>
+          <button onclick="switchDashSub('salary')" id="dashSubBtnSalary">Salary Sheet</button>
           <button onclick="switchDashSub('reminders')" id="dashSubBtnReminders">Increment Reminders</button>
           <button onclick="switchDashSub('expiry')" id="dashSubBtnExpiry">Document Expiry</button>
           <button onclick="switchDashSub('activity')" id="dashSubBtnActivity">Activity Log</button>
@@ -628,6 +641,22 @@
             <button class="btn full" onclick="renderAttendanceSheet()">Load attendance sheet</button>
             <div style="height:14px"></div>
             <div id="attendanceSheetBox"></div>
+          </section>
+        </div>
+
+        <div id="dashSubSalary" class="hidden">
+          <section class="block">
+            <h2 style="margin:0 0 4px;">Salary Sheet</h2>
+            <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by heading — set once per employee in Employee Master, and the Basic/HRA/LTA formula for that heading applies automatically every month. Leave days are pulled from the Attendance Sheet (Absent + LP days) for the month selected.</p>
+            <div class="row-inline">
+              <div>
+                <label class="field">Month</label>
+                <input type="month" id="salSheetMonth" />
+              </div>
+            </div>
+            <button class="btn full" onclick="renderSalarySheet()">Load salary sheet</button>
+            <div style="height:14px"></div>
+            <div id="salarySheetBox"></div>
           </section>
         </div>
 
@@ -2146,6 +2175,20 @@ function renderLiveStatus(infos){
 const ATT_CODES = ['P','A','H','EL','SL','LP','HEL','HSL','HLP','SHORT'];
 const ATT_CODE_LABELS = { P:'Present', A:'Absent', H:'Holiday', EL:'EL', SL:'SL', LP:'LP (unpaid)', HEL:'Half EL', HSL:'Half SL', HLP:'Half LP', SHORT:'Short leave' };
 
+// ---- salary sheet headings ----
+// Each heading defines how Rate of Pay splits into Basic/HRA/LTA. 'flat' means
+// the whole rate (minus leave deduction) is just Basic, with no HRA/LTA split —
+// that's how Junior Engineers are set up in the source sheet.
+const SALARY_HEADINGS = {
+  managerial:  { label: 'Managerial Staff',  basicPct: 0.65, hraPct: 0.35, ltaPct: 0,    flat: false },
+  senior:      { label: 'Seniors Staff',     basicPct: 0.50, hraPct: 0.40, ltaPct: 0.10, flat: false },
+  junior:      { label: 'Junior Engineers',  basicPct: 1.00, hraPct: 0,    ltaPct: 0,    flat: true  },
+  apprentice:  { label: 'Apprentices',       basicPct: 0.50, hraPct: 0.40, ltaPct: 0.10, flat: false },
+  rsit:        { label: 'R.S.IT Solution',   basicPct: 0.50, hraPct: 0.40, ltaPct: 0.10, flat: false },
+  contractor:  { label: 'Contractors',       basicPct: 0.50, hraPct: 0.40, ltaPct: 0.10, flat: false }
+};
+const SALARY_HEADING_ORDER = ['managerial','senior','junior','apprentice','rsit','contractor'];
+
 function computeAttendanceSummary(att, employee, dateList, holidayMap){
   let present=0, absent=0, elUsed=0, slUsed=0, lpDays=0, halfDays=0, shortCount=0, lateCount=0, holidays=0;
   dateList.forEach(dateStr => {
@@ -2231,6 +2274,93 @@ async function handleAttendanceCellChange(employeeId, dateStr, selectEl){
   selectEl.className = 'att-code code-' + code;
   // Refresh just to keep summary columns accurate without losing scroll position too badly
   await renderAttendanceSheet();
+}
+
+// ---- salary sheet ----
+function fmtMoney(n){ return (Math.round(n*100)/100).toLocaleString('en-IN'); }
+
+async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
+  const att = await getAttendance(emp.id);
+  const summary = computeAttendanceSummary(att, emp, dateList, holidayMap);
+  const leaveDays = summary.absent + summary.lpDays; // EL/SL are paid (present); only Absent/LP reduce pay
+  const heading = SALARY_HEADINGS[emp.salaryHeading] || SALARY_HEADINGS.managerial;
+  const rate = Number(emp.ratePay) || 0;
+  const leaveAmount = monthDays ? (rate / monthDays * leaveDays) : 0;
+  let basic, hra, lta;
+  if(heading.flat){
+    basic = rate - leaveAmount;
+    hra = 0; lta = 0;
+  } else {
+    basic = (rate*heading.basicPct) - (rate*heading.basicPct)/monthDays*leaveDays;
+    hra   = (rate*heading.hraPct)   - (rate*heading.hraPct)/monthDays*leaveDays;
+    lta   = (rate*heading.ltaPct)   - (rate*heading.ltaPct)/monthDays*leaveDays;
+  }
+  const gross = basic + hra + lta;
+  const pf = Number(emp.pf) || 0;
+  const esi = Number(emp.esiDeduction) || 0;
+  const pt = gross > 12000 ? 200 : 0;
+  const advanceTemp = Number(emp.advanceTemp) || 0;
+  const advance = Number(emp.advance) || 0;
+  const totalDeduction = pf + esi + pt + advanceTemp + advance;
+  const netSalary = gross - totalDeduction;
+  return { rate, leaveDays, leaveAmount, basic, hra, lta, gross, pf, esi, pt, advanceTemp, advance, totalDeduction, netSalary };
+}
+
+async function renderSalarySheet(){
+  const box = document.getElementById('salarySheetBox');
+  const monthInput = document.getElementById('salSheetMonth');
+  if(!monthInput.value){
+    const d = new Date();
+    monthInput.value = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+  }
+  const [year, month] = monthInput.value.split('-').map(Number);
+  const monthDays = new Date(year, month, 0).getDate();
+  const dateList = [];
+  for(let d=1; d<=monthDays; d++) dateList.push(year + '-' + String(month).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
+
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
+  if(!employees.length){
+    box.innerHTML = '<div class="empty">Add employees in Employee Master first.</div>';
+    return;
+  }
+  const holidays = await getHolidays();
+  const holidayMap = {};
+  holidays.forEach(h => { holidayMap[h.date] = h.name; });
+
+  const cols = ['SR NO','Name','Rate of Pay','Leave Days','Leave Amount','Basic','HRA','LTA','Gross','PF','ESI','PT','Advance Temp','Advance','Total Deduction','Net Salary'];
+  let bodyRows = '';
+  let srNo = 1;
+  const grand = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, totalDeduction:0, netSalary:0 };
+
+  for(const headingKey of SALARY_HEADING_ORDER){
+    const group = employees.filter(e => (e.salaryHeading||'managerial') === headingKey);
+    if(!group.length) continue;
+    bodyRows += `<tr class="sal-heading"><td colspan="16">${SALARY_HEADINGS[headingKey].label}</td></tr>`;
+    const sub = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, totalDeduction:0, netSalary:0 };
+    for(const emp of group){
+      const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
+      bodyRows += `<tr><td>${srNo++}</td><td class="sal-name">${emp.name}</td><td>${fmtMoney(s.rate)}</td><td>${s.leaveDays}</td><td>${fmtMoney(s.leaveAmount)}</td>` +
+        `<td>${fmtMoney(s.basic)}</td><td>${fmtMoney(s.hra)}</td><td>${fmtMoney(s.lta)}</td><td>${fmtMoney(s.gross)}</td>` +
+        `<td>${fmtMoney(s.pf)}</td><td>${fmtMoney(s.esi)}</td><td>${fmtMoney(s.pt)}</td><td>${fmtMoney(s.advanceTemp)}</td><td>${fmtMoney(s.advance)}</td>` +
+        `<td>${fmtMoney(s.totalDeduction)}</td><td>${fmtMoney(s.netSalary)}</td></tr>`;
+      ['rate','leaveAmount','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','totalDeduction','netSalary'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; });
+    }
+    bodyRows += `<tr class="sal-subtotal"><td></td><td>Subtotal</td><td>${fmtMoney(sub.rate)}</td><td></td><td>${fmtMoney(sub.leaveAmount)}</td>` +
+      `<td>${fmtMoney(sub.basic)}</td><td>${fmtMoney(sub.hra)}</td><td>${fmtMoney(sub.lta)}</td><td>${fmtMoney(sub.gross)}</td>` +
+      `<td>${fmtMoney(sub.pf)}</td><td>${fmtMoney(sub.esi)}</td><td>${fmtMoney(sub.pt)}</td><td>${fmtMoney(sub.advanceTemp)}</td><td>${fmtMoney(sub.advance)}</td>` +
+      `<td>${fmtMoney(sub.totalDeduction)}</td><td>${fmtMoney(sub.netSalary)}</td></tr>`;
+  }
+
+  bodyRows += `<tr class="sal-grandtotal"><td></td><td>Grand Total</td><td>${fmtMoney(grand.rate)}</td><td></td><td>${fmtMoney(grand.leaveAmount)}</td>` +
+    `<td>${fmtMoney(grand.basic)}</td><td>${fmtMoney(grand.hra)}</td><td>${fmtMoney(grand.lta)}</td><td>${fmtMoney(grand.gross)}</td>` +
+    `<td>${fmtMoney(grand.pf)}</td><td>${fmtMoney(grand.esi)}</td><td>${fmtMoney(grand.pt)}</td><td>${fmtMoney(grand.advanceTemp)}</td><td>${fmtMoney(grand.advance)}</td>` +
+    `<td>${fmtMoney(grand.totalDeduction)}</td><td>${fmtMoney(grand.netSalary)}</td></tr>`;
+
+  box.innerHTML = `<div class="sal-sheet-wrap print-isolate" id="salaryPrintArea">
+      <table class="sal-table"><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr>${bodyRows}</table>
+    </div>
+    <p style="font-size:11px;color:var(--muted);margin:10px 0;">PT = ₹200 if Gross &gt; ₹12,000, else ₹0. Leave Days = Absent + LP days for the month (EL/SL count as present, no deduction). PF, ESI, Advance are entered per employee in Employee Master.</p>
+    <button class="btn ghost full" onclick="window.print()">Print / Save PDF</button>`;
 }
 
 // ---- geofence zones ----
@@ -2585,11 +2715,12 @@ function switchHrSub(sub){
   if(sub === 'generator') renderGeneratorTab();
 }
 function switchDashSub(sub){
-  ['attendance','reminders','expiry','activity'].forEach(s => {
+  ['attendance','salary','reminders','expiry','activity'].forEach(s => {
     document.getElementById('dashSub' + s.charAt(0).toUpperCase() + s.slice(1)).classList.toggle('hidden', s !== sub);
     document.getElementById('dashSubBtn' + s.charAt(0).toUpperCase() + s.slice(1)).classList.toggle('active', s === sub);
   });
   if(sub === 'attendance') renderAttendanceSheet();
+  if(sub === 'salary') renderSalarySheet();
   if(sub === 'reminders') renderIncrementReminders();
   if(sub === 'expiry') renderDocExpiryList();
   if(sub === 'activity') renderActivityLogList();
@@ -2739,6 +2870,7 @@ function emptyEmployee(){
     trackingEnabled:'no', trackingUsername:'',
     employmentStatus:'active', leftDate:'',
     employeeType:'field', slOpening:0, elOpening:0,
+    salaryHeading:'managerial', ratePay:0, advanceTemp:0, advance:0,
     licenseExpiry:'', insuranceExpiry:'',
     aadhaarCardImg:'', panCardImg:'', otherDocs:[],
     checklists:{ joining:{}, exit:{} }
@@ -2903,6 +3035,24 @@ function employeeModalHtml(emp){
           <input type="number" id="f_elOpening" placeholder="0" value="${emp.elOpening??''}">
           <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Enter manually for this year only. From next year onward, the EL Calculation Sheet report carries the closing balance forward automatically.</p>
         </div>
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Salary sheet heading</div>
+        <label class="field">Heading</label>
+        <select class="field-input" id="f_salaryHeading">
+          ${Object.keys(SALARY_HEADINGS).map(k => `<option value="${k}" ${(emp.salaryHeading===k || (!emp.salaryHeading && k==='managerial'))?'selected':''}>${SALARY_HEADINGS[k].label}</option>`).join('')}
+        </select>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Picks which Basic/HRA/LTA split formula applies to this employee on the Salary Sheet — set once here, applied automatically every month.</p>
+        <div style="height:14px"></div>
+        <label class="field">Rate of pay (monthly)</label>
+        <input type="number" id="f_ratePay" placeholder="0" value="${emp.ratePay||''}">
+        <div style="height:12px"></div>
+        <label class="field">Advance for temporary</label>
+        <input type="number" id="f_advanceTemp" placeholder="0" value="${emp.advanceTemp||''}">
+        <div style="height:12px"></div>
+        <label class="field">Advance</label>
+        <input type="number" id="f_advance" placeholder="0" value="${emp.advance||''}">
       </div>
 
       <div class="field-group">
@@ -3107,7 +3257,11 @@ async function saveEmployeeForm(){
     insuranceExpiry: document.getElementById('f_insuranceExpiry').value,
     employeeType: document.getElementById('f_employeeType').value,
     slOpening: Number(document.getElementById('f_slOpening').value)||0,
-    elOpening: Number(document.getElementById('f_elOpening').value)||0
+    elOpening: Number(document.getElementById('f_elOpening').value)||0,
+    salaryHeading: document.getElementById('f_salaryHeading').value,
+    ratePay: Number(document.getElementById('f_ratePay').value)||0,
+    advanceTemp: Number(document.getElementById('f_advanceTemp').value)||0,
+    advance: Number(document.getElementById('f_advance').value)||0
   });
   if(editingEmployeeId){
     const idx = employees.findIndex(e => e.id === editingEmployeeId);
