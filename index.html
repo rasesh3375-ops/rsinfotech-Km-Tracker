@@ -210,24 +210,9 @@
         <span class="tagline">Complete Technology Solutions Provider</span>
       </div>
     </div>
-    <button class="linkbtn hidden" id="switchTopBtn" onclick="goHome()">switch role</button>
   </header>
 
-  <div id="roleScreen">
-    <p style="color:var(--muted);font-size:13.5px;margin:0 0 16px;">Choose how you're using this today.</p>
-    <div class="cards">
-      <div class="rolecard" onclick="selectRole('engineer')">
-        <div class="icon">🚐</div>
-        <h3>Field engineer</h3>
-        <p>Start and stop your trip, track km travelled today.</p>
-      </div>
-      <div class="rolecard" onclick="selectRole('hr')">
-        <div class="icon">📋</div>
-        <h3>HR / manager</h3>
-        <p>View everyone's km, set rate, see expense reports.</p>
-      </div>
-    </div>
-  </div>
+  <div id="roleScreen" class="hidden"></div>
 
   <div id="engineerScreen" class="hidden">
     <div id="loginGate">
@@ -554,9 +539,7 @@
   <div id="checklistModalRoot"></div>
   <div id="employeeModalRoot"></div>
 
-  <div class="switch-role hidden" id="switchBottom">
-    <button onclick="goHome()">← switch role</button>
-  </div>
+  <div class="switch-role hidden" id="switchBottom"></div>
 
 </div>
 
@@ -854,21 +837,23 @@ async function compressImageFile(file){
   });
 }
 
+// This app is locked to one role per URL: "/" is the field-engineer entry,
+// "/hr" is the HR entry (see vercel.json rewrite). Engineers are never shown
+// any HR option, and there is no in-app way to switch between the two.
+const FIXED_ROLE = (window.location.pathname.replace(/\/+$/, '') === '/hr') ? 'hr' : 'engineer';
+
 function goHome(){
-  document.getElementById('roleScreen').classList.remove('hidden');
+  // Kept only for internal state resets — always returns to this deployment's
+  // fixed role's login, never to a role picker (there isn't one anymore).
   document.getElementById('engineerScreen').classList.add('hidden');
   document.getElementById('hrScreen').classList.add('hidden');
-  document.getElementById('switchTopBtn').classList.add('hidden');
-  document.getElementById('switchBottom').classList.add('hidden');
   if(hrInterval){ clearInterval(hrInterval); hrInterval = null; }
   currentRole = null;
+  selectRole(FIXED_ROLE);
 }
 
 async function selectRole(role){
   currentRole = role;
-  document.getElementById('roleScreen').classList.add('hidden');
-  document.getElementById('switchTopBtn').classList.remove('hidden');
-  document.getElementById('switchBottom').classList.remove('hidden');
   if(role === 'engineer'){
     document.getElementById('engineerScreen').classList.remove('hidden');
     const savedUser = await safeGet('my_username', false);
@@ -915,6 +900,9 @@ async function selectRole(role){
     }
   }
 }
+
+// Enter the fixed role for this URL as soon as the page loads.
+selectRole(FIXED_ROLE);
 
 async function submitHrGate(){
   const pw = document.getElementById('hrPasswordInput').value;
