@@ -2438,7 +2438,7 @@ function emptyEmployee(){
     id:'', name:'', designation:'', department:'', doj:'', nextIncrement:'', dob:'',
     pan:'', aadhaar:'', uan:'', esiNumber:'', bankName:'', ifsc:'', accountNumber:'',
     phone:'', email:'', address:'',
-    basic:0, hra:0, otherAllowances:0, stdDeductions:0, pf:0, esiDeduction:0, pt:0,
+    basic:0, hra:0, otherAllowances:0, dressAllowance:0, mobileExpense:0, stdDeductions:0, pf:0, esiDeduction:0, pt:0,
     loanAmount:0, emiPerMonth:0, loanStatus:'active',
     diwaliEligible:'yes',
     emergencyName:'', emergencyNumber:'',
@@ -2535,6 +2535,12 @@ function employeeModalHtml(emp){
         <div style="height:12px"></div>
         <label class="field">Other allowances</label>
         <input type="number" id="f_otherAllowances" placeholder="0" value="${emp.otherAllowances||''}" oninput="updateBonusPreview()">
+        <div style="height:12px"></div>
+        <label class="field">Dress / uniform allowance (monthly)</label>
+        <input type="number" id="f_dressAllowance" placeholder="0" value="${emp.dressAllowance||''}">
+        <div style="height:12px"></div>
+        <label class="field">Mobile / communication expense (monthly)</label>
+        <input type="number" id="f_mobileExpense" placeholder="0" value="${emp.mobileExpense||''}">
         <div style="height:12px"></div>
         <label class="field">Standard deductions</label>
         <input type="number" id="f_stdDeductions" placeholder="0" value="${emp.stdDeductions||''}">
@@ -2766,6 +2772,8 @@ async function saveEmployeeForm(){
     basic: Number(document.getElementById('f_basic').value)||0,
     hra: Number(document.getElementById('f_hra').value)||0,
     otherAllowances: Number(document.getElementById('f_otherAllowances').value)||0,
+    dressAllowance: Number(document.getElementById('f_dressAllowance').value)||0,
+    mobileExpense: Number(document.getElementById('f_mobileExpense').value)||0,
     stdDeductions: Number(document.getElementById('f_stdDeductions').value)||0,
     pf: Number(document.getElementById('f_pf').value)||0,
     esiDeduction: Number(document.getElementById('f_esiDeduction').value)||0,
@@ -2914,8 +2922,10 @@ async function renderReportsTab(){
   const reports = [
     {key:'contact', label:'Employee Contact Report', avatar:'E'},
     {key:'birthday', label:'Birthday Report', avatar:'B'},
+    {key:'increment', label:'Increment Report', avatar:'I'},
     {key:'diwali', label:'Diwali Bonus Report', avatar:'D'},
     {key:'salary', label:'Salary Report', avatar:'S'},
+    {key:'ctc', label:'Cost to Company Report', avatar:'C'},
     {key:'loan', label:'Loan & Advance Report', avatar:'L'}
   ];
   document.getElementById('reportCardsBox').innerHTML = reports.map(r => {
@@ -2933,8 +2943,10 @@ async function renderReportsTab(){
 function reportHasData(key, e){
   if(key==='contact') return !!(e.phone || e.email);
   if(key==='birthday') return !!e.dob;
+  if(key==='increment') return !!e.nextIncrement;
   if(key==='diwali') return diwaliBonusFor(e) > 0;
   if(key==='salary') return (Number(e.basic)||0) > 0;
+  if(key==='ctc') return (Number(e.basic)||0) > 0;
   if(key==='loan') return (Number(e.loanAmount)||0) > 0;
   return false;
 }
@@ -3125,6 +3137,14 @@ async function viewReport(key, label){
   } else if(key === 'birthday'){
     rows = employees.filter(e=>e.dob).map(e => `<tr><td>${e.name}</td><td>${e.dob}</td></tr>`).join('');
     box.innerHTML = `<div style="margin-top:12px;"><table><tr><th>Name</th><th>Date of birth</th></tr>${rows || '<tr><td colspan="2" class="empty">No data yet</td></tr>'}</table></div>`;
+  } else if(key === 'increment'){
+    rows = employees.filter(e=>e.nextIncrement).map(e => {
+      const d = new Date(e.nextIncrement);
+      const monthName = d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+      const lastSalary = (Number(e.basic)||0)+(Number(e.hra)||0)+(Number(e.otherAllowances)||0);
+      return `<tr><td>${e.name}</td><td>${monthName}</td><td>${e.nextIncrement}</td><td class="num">₹${lastSalary.toFixed(0)}</td></tr>`;
+    }).join('');
+    box.innerHTML = `<div style="margin-top:12px;"><table><tr><th>Name</th><th>Increment month</th><th>Increment date</th><th class="num">Last salary (gross)</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table></div>`;
   } else if(key === 'diwali'){
     rows = employees.map(e => `<tr><td>${e.name}</td><td>${e.diwaliEligible==='yes'?'Yes':'No'}</td><td class="num">₹${diwaliBonusFor(e)}</td></tr>`).join('');
     box.innerHTML = `<div style="margin-top:12px;"><table><tr><th>Name</th><th>Eligible</th><th class="num">Bonus</th></tr>${rows || '<tr><td colspan="3" class="empty">No data yet</td></tr>'}</table></div>`;
@@ -3137,6 +3157,15 @@ async function viewReport(key, label){
       return `<tr><td>${e.name}</td><td class="num">₹${gross.toFixed(0)}</td><td class="num">₹${deductions.toFixed(0)}</td><td class="num">₹${net.toFixed(0)}</td></tr>`;
     }).join('');
     box.innerHTML = `<div style="margin-top:12px;"><table><tr><th>Name</th><th class="num">Gross</th><th class="num">Deductions</th><th class="num">Net</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table></div>`;
+  } else if(key === 'ctc'){
+    rows = employees.map(e => {
+      const monthlyGross = (Number(e.basic)||0)+(Number(e.hra)||0)+(Number(e.otherAllowances)||0)+(Number(e.dressAllowance)||0)+(Number(e.mobileExpense)||0);
+      const annualGross = monthlyGross * 12;
+      const bonus = diwaliBonusFor(e);
+      const annualCtc = annualGross + bonus;
+      return `<tr><td>${e.name}</td><td class="num">₹${monthlyGross.toFixed(0)}</td><td class="num">₹${annualGross.toFixed(0)}</td><td class="num">₹${bonus.toFixed(0)}</td><td class="num">₹${annualCtc.toFixed(0)}</td></tr>`;
+    }).join('');
+    box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;"><table><tr><th>Name</th><th class="num">Monthly gross</th><th class="num">Annual gross</th><th class="num">Diwali bonus</th><th class="num">Annual CTC</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table><p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Annual CTC = (Basic + HRA + Other allowances + Dress allowance + Mobile expense) × 12 + Diwali bonus. PF, ESI and PT are employee-side deductions, not added here.</p></div>`;
   } else if(key === 'loan'){
     rows = employees.filter(e=>(Number(e.loanAmount)||0)>0).map(e => `<tr><td>${e.name}</td><td class="num">₹${e.loanAmount}</td><td class="num">₹${e.emiPerMonth}</td><td>${e.loanStatus}</td></tr>`).join('');
     box.innerHTML = `<div style="margin-top:12px;"><table><tr><th>Name</th><th class="num">Loan amount</th><th class="num">EMI</th><th>Status</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table></div>`;
