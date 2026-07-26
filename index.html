@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>R.S. Infotech — KM Tracker</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   :root{
     --navy:#16213E;
@@ -122,8 +124,28 @@
   .status-card .head strong{font-size:14px;}
   .status-card .detail{font-size:12.5px;color:var(--muted);margin:2px 0;}
   .status-card .detail.warn{color:var(--red);font-weight:600;}
-  .status-card iframe{width:100%;height:160px;border:1px solid var(--line);border-radius:8px;margin-top:8px;}
   .status-card a.maplink{font-size:12px;color:var(--navy);text-decoration:underline;}
+
+  /* ===== Shared live map (all engineers in one window, flight-tracker style) ===== */
+  #liveMapWrap{position:relative;margin-bottom:14px;}
+  #liveMap{width:100%;height:340px;border-radius:14px;border:1px solid var(--line);overflow:hidden;background:#EAEAE2;}
+  .live-map-legend{display:flex;gap:16px;font-size:11.5px;color:var(--muted);margin-top:8px;flex-wrap:wrap;}
+  .live-map-legend span{display:inline-flex;align-items:center;gap:5px;}
+  .live-map-legend .dot{width:9px;height:9px;border-radius:50%;display:inline-block;}
+  .live-map-legend .dot.moving{background:var(--green);}
+  .live-map-legend .dot.stopped{background:var(--red);}
+  .live-marker-wrap{display:flex;align-items:center;justify-content:center;width:30px;height:30px;}
+  .live-marker{
+    width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    color:#fff;font-size:13px;box-shadow:0 2px 6px rgba(0,0,0,.25), 0 0 0 3px #fff;
+    transition:transform .3s ease;
+  }
+  .live-marker.moving{background:var(--green);}
+  .live-marker.stopped{background:var(--red);animation:pulse 1.6s infinite;}
+  .leaflet-popup-content{font-size:12.5px;line-height:1.5;margin:10px 12px;}
+  .leaflet-popup-content strong{font-size:13.5px;}
+  .map-empty-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;background:rgba(247,246,242,0.85);border-radius:14px;pointer-events:none;}
+
   @media print{
     header.top button, .switch-role, #rateInput, .row-inline button, section.block:has(#rateInput){display:none !important;}
     body{background:#fff;}
@@ -197,6 +219,28 @@
   .checklist-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13.5px;}
   .checklist-row:last-child{border-bottom:none;}
   .checklist-row input{width:auto;}
+
+  /* ===== Professional polish pass ===== */
+  body{background:linear-gradient(180deg, #FBFAF7 0%, var(--cream) 220px);}
+  header.top{padding-bottom:16px;}
+  header.top .brand img{border-radius:8px;box-shadow:0 1px 3px rgba(22,33,62,.15);}
+  section.block, .rolecard, .report-card, .emp-row, .letter-choice{
+    box-shadow:0 1px 2px rgba(22,33,62,.04), 0 1px 8px rgba(22,33,62,.05);
+  }
+  section.block{transition:box-shadow .15s ease;}
+  .btn{box-shadow:0 1px 2px rgba(22,33,62,.15);transition:background .15s ease, transform .05s ease, box-shadow .15s ease;}
+  .btn:active{transform:translateY(1px);box-shadow:0 1px 1px rgba(22,33,62,.15);}
+  .btn.ghost{box-shadow:none;}
+  .odometer-box{box-shadow:0 4px 18px rgba(22,33,62,.28);background:linear-gradient(160deg, var(--navy) 0%, var(--navy2) 100%);}
+  .stat-card2, .summary-grid .stat{transition:box-shadow .15s ease;box-shadow:0 1px 2px rgba(22,33,62,.04), 0 1px 6px rgba(22,33,62,.05);}
+  .pill{font-weight:700;letter-spacing:.2px;}
+  .hr-tabs{box-shadow:inset 0 1px 2px rgba(22,33,62,.06);}
+  h1, h2{letter-spacing:.1px;}
+  section.block h2{color:var(--navy);}
+  .rolecard{position:relative;overflow:hidden;}
+  .rolecard::after{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--amber);transform:scaleX(0);transition:transform .2s ease;}
+  .rolecard:hover::after{transform:scaleX(1);}
+  ::selection{background:var(--amber);color:var(--navy);}
 </style>
 </head>
 <body>
@@ -365,7 +409,16 @@
         <h2 style="margin:0;">Live tracking status</h2>
         <button class="linkbtn" style="padding:0" onclick="enableAlerts()" id="alertBtn">enable alerts</button>
       </div>
-      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Flags an engineer if their GPS goes quiet, location permission is off, or their phone/browser stops responding while checked in.</p>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">All checked-in engineers on one map — green means moving, red means stopped or unresponsive. Flags an engineer if their GPS goes quiet, location permission is off, or their phone/browser stops responding while checked in.</p>
+      <div id="liveMapWrap">
+        <div id="liveMap"></div>
+        <div class="map-empty-overlay hidden" id="liveMapEmpty">No one is currently checked in.</div>
+      </div>
+      <div class="live-map-legend">
+        <span><span class="dot moving"></span>Moving</span>
+        <span><span class="dot stopped"></span>Stopped / not responding</span>
+      </div>
+      <div style="height:14px"></div>
       <div id="liveStatusList"></div>
     </section>
 
@@ -529,6 +582,7 @@ let hrInterval = null;
 let pendingSelfie = null;
 let pendingCheckoutSelfie = null;
 let pendingTrip = null;
+let tripTrail = [];
 
 function todayStr(d){
   const dt = d || new Date();
@@ -979,6 +1033,7 @@ async function forceLogoutEngineer(reason){
   await safeSet('my_username', '', false);
   accumulatedKm = 0;
   lastCoord = null;
+  tripTrail = [];
   pendingSelfie = null;
   pendingTrip = null;
   engineerName = null;
@@ -1003,6 +1058,7 @@ async function enterEngineerMain(){
     startTime = active.startTime;
     pendingSelfie = active.selfie || null;
     lastCoord = active.lastCoord || null;
+    tripTrail = active.trail || (lastCoord ? [lastCoord] : []);
     lastGpsError = null;
     updateLiveDisplay();
     showDuringTrip();
@@ -1081,6 +1137,7 @@ async function pushActiveState(extra){
     lastCoord, lastFixTime: lastCoord ? Date.now() : null,
     lastHeartbeat: Date.now(),
     gpsError: lastGpsError,
+    trail: tripTrail,
     battery
   }, extra || {}));
 }
@@ -1107,6 +1164,7 @@ async function handleSelfieCapture(event){
   msg.textContent = '';
   accumulatedKm = 0;
   lastCoord = null;
+  tripTrail = [];
   lastGpsError = null;
   startTime = new Date().toISOString();
   updateLiveDisplay();
@@ -1142,6 +1200,8 @@ function startWatch(resumed){
       }
     }
     lastCoord = { lat: latitude, lon: longitude };
+    tripTrail.push(lastCoord);
+    if(tripTrail.length > 40) tripTrail.shift();
     const now = Date.now();
     if(now - lastSaveTs > 15000){
       lastSaveTs = now;
@@ -1225,6 +1285,7 @@ async function saveTripWithCompany(){
 
   accumulatedKm = 0;
   lastCoord = null;
+  tripTrail = [];
   pendingSelfie = null;
   pendingCheckoutSelfie = null;
   pendingTrip = null;
@@ -1370,9 +1431,101 @@ function enableAlerts(){
   });
 }
 
+let liveMap = null;
+let liveMapMarkers = {};
+let liveMapLines = {};
+
+function ensureLiveMap(){
+  if(liveMap || typeof L === 'undefined') return;
+  const el = document.getElementById('liveMap');
+  if(!el) return;
+  liveMap = L.map(el, { zoomControl: true }).setView([20.5937, 78.9629], 5);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(liveMap);
+}
+
+function bearingBetween(a, b){
+  const toRad = d => d * Math.PI / 180;
+  const toDeg = r => r * 180 / Math.PI;
+  const y = Math.sin(toRad(b.lon - a.lon)) * Math.cos(toRad(b.lat));
+  const x = Math.cos(toRad(a.lat)) * Math.sin(toRad(b.lat)) - Math.sin(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.cos(toRad(b.lon - a.lon));
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+function updateLiveMap(activeOnes){
+  const el = document.getElementById('liveMap');
+  const emptyOverlay = document.getElementById('liveMapEmpty');
+  if(!el) return;
+  const withCoords = activeOnes.filter(i => i.active && i.active.lastCoord);
+  emptyOverlay?.classList.toggle('hidden', withCoords.length > 0);
+  if(!withCoords.length) return;
+  ensureLiveMap();
+  if(!liveMap) return;
+
+  const seenNames = new Set();
+  const bounds = [];
+
+  withCoords.forEach(i => {
+    seenNames.add(i.name);
+    const coords = i.active.lastCoord;
+    const trail = i.active.trail || [coords];
+    const isMoving = i.status.level !== 'warn';
+    let bearing = 0;
+    if(trail.length >= 2){
+      bearing = bearingBetween(trail[trail.length - 2], trail[trail.length - 1]);
+    }
+    const latlng = [coords.lat, coords.lon];
+    bounds.push(latlng);
+
+    const icon = L.divIcon({
+      className: '',
+      html: `<div class="live-marker-wrap"><div class="live-marker ${isMoving ? 'moving' : 'stopped'}" style="transform:rotate(${bearing}deg)">${isMoving ? '➤' : '■'}</div></div>`,
+      iconSize: [30, 30],
+      iconAnchor: [15, 15]
+    });
+
+    const popupHtml = `<strong>${i.name}</strong><br>${i.status.label}${isMoving ? ' · driving' : ' · stopped'}<br>${i.status.detail}`;
+
+    if(liveMapMarkers[i.name]){
+      liveMapMarkers[i.name].setLatLng(latlng);
+      liveMapMarkers[i.name].setIcon(icon);
+      liveMapMarkers[i.name].setPopupContent(popupHtml);
+    } else {
+      liveMapMarkers[i.name] = L.marker(latlng, { icon }).addTo(liveMap).bindPopup(popupHtml);
+    }
+
+    const trailLatLngs = trail.map(p => [p.lat, p.lon]);
+    if(liveMapLines[i.name]){
+      liveMapLines[i.name].setLatLngs(trailLatLngs);
+      liveMapLines[i.name].setStyle({ color: isMoving ? '#2E7D4F' : '#B23A32' });
+    } else {
+      liveMapLines[i.name] = L.polyline(trailLatLngs, { color: isMoving ? '#2E7D4F' : '#B23A32', weight: 3, opacity: 0.7 }).addTo(liveMap);
+    }
+  });
+
+  // Remove markers/lines for engineers no longer active
+  Object.keys(liveMapMarkers).forEach(name => {
+    if(!seenNames.has(name)){
+      liveMap.removeLayer(liveMapMarkers[name]);
+      delete liveMapMarkers[name];
+      if(liveMapLines[name]){ liveMap.removeLayer(liveMapLines[name]); delete liveMapLines[name]; }
+    }
+  });
+
+  if(bounds.length === 1){
+    liveMap.setView(bounds[0], 15);
+  } else if(bounds.length > 1){
+    liveMap.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 });
+  }
+  setTimeout(() => liveMap.invalidateSize(), 50);
+}
+
 function renderLiveStatus(infos){
   const box = document.getElementById('liveStatusList');
   const activeOnes = infos.filter(i => i.active);
+  updateLiveMap(activeOnes);
   if(!activeOnes.length){
     box.innerHTML = '<div class="empty">No one is currently checked in.</div>';
     return;
@@ -1384,18 +1537,17 @@ function renderLiveStatus(infos){
       ? `Battery: ${battery.level}%${battery.charging ? ' (charging)' : (battery.level <= 20 ? ' — low' : '')}`
       : 'Battery: not reported by this device/browser';
     const coords = i.active.lastCoord;
-    const mapEmbed = coords
-      ? `<iframe loading="lazy" src="https://www.openstreetmap.org/export/embed.html?bbox=${coords.lon-0.01}%2C${coords.lat-0.01}%2C${coords.lon+0.01}%2C${coords.lat+0.01}&marker=${coords.lat}%2C${coords.lon}"></iframe>
-         <a class="maplink" target="_blank" href="https://www.openstreetmap.org/?mlat=${coords.lat}&mlon=${coords.lon}#map=15/${coords.lat}/${coords.lon}">Open full map ↗</a>`
-      : '<div class="detail">No location fix received yet.</div>';
+    const mapLink = coords
+      ? `<a class="maplink" target="_blank" href="https://www.openstreetmap.org/?mlat=${coords.lat}&mlon=${coords.lon}#map=15/${coords.lat}/${coords.lon}">Open in full map ↗</a>`
+      : '';
     return `<div class="status-card ${s.level === 'warn' ? 'warn' : ''}">
       <div class="head">
         <strong>${i.name}</strong>
-        <span class="pill ${s.level === 'warn' ? 'warn' : 'live'}">${s.label}</span>
+        <span class="pill ${s.level === 'warn' ? 'warn' : 'live'}">${s.level === 'warn' ? s.label : '🚗 ' + s.label}</span>
       </div>
       <div class="detail ${s.level === 'warn' ? 'warn' : ''}">${s.detail}</div>
       <div class="detail">${batteryLine}</div>
-      ${mapEmbed}
+      ${mapLink}
     </div>`;
   }).join('');
 }
@@ -1621,6 +1773,9 @@ function switchHrTab(tab){
   document.getElementById('hrTabBtnMgmt').classList.toggle('active', tab === 'mgmt');
   if(tab === 'mgmt'){
     switchHrSub('dash');
+  }
+  if(tab === 'tracking' && liveMap){
+    setTimeout(() => liveMap.invalidateSize(), 60);
   }
 }
 function switchHrSub(sub){
@@ -2407,7 +2562,7 @@ function whatsappLetter(){
 
 window.addEventListener('beforeunload', () => {
   if(tracking && engineerName){
-    setActive(engineerName, { startTime, accumulatedKm, selfie: pendingSelfie, lastCoord, lastFixTime: lastCoord ? Date.now() : null, lastHeartbeat: Date.now(), gpsError: 'Tab closed or app exited while tracking' });
+    setActive(engineerName, { startTime, accumulatedKm, selfie: pendingSelfie, lastCoord, lastFixTime: lastCoord ? Date.now() : null, lastHeartbeat: Date.now(), gpsError: 'Tab closed or app exited while tracking', trail: tripTrail });
   }
 });
 </script>
