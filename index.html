@@ -768,9 +768,9 @@
 
         <section class="block">
           <h2 style="margin:0 0 4px;font-size:17px;">Holiday List (to share with engineers)</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A printable holiday list with the company logo, for a chosen year — built from the Holidays list above.</p>
-          <label class="field">Year</label>
-          <input type="number" id="holidayListYear" placeholder="e.g. 2026" />
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A printable holiday list with the company logo, for a chosen financial year (April–March) — built from the Holidays list above.</p>
+          <label class="field">Financial year starting April of</label>
+          <input type="number" id="holidayListYear" placeholder="e.g. 2026 for FY 2026-27" />
           <div style="height:14px"></div>
           <button class="btn full" onclick="generateHolidayListDoc()">Generate holiday list</button>
           <div id="holidayListOutput" class="hidden" style="margin-top:16px;">
@@ -3743,7 +3743,7 @@ async function renderHolidayList(){
       <div class="actions"><button class="btn ghost" onclick="deleteHoliday('${h.date}')">Delete</button></div>
     </div>`).join('');
   const yearInput = document.getElementById('holidayListYear');
-  if(yearInput && !yearInput.value) yearInput.value = new Date().getFullYear();
+  if(yearInput && !yearInput.value) yearInput.value = getCurrentFYStartYear();
 }
 
 // ---- EL calculation sheet ----
@@ -3942,9 +3942,13 @@ async function renderOvertimeReport(){
 let lastHolidayListText = '';
 
 async function generateHolidayListDoc(){
-  const year = parseInt(document.getElementById('holidayListYear').value, 10) || new Date().getFullYear();
+  const startYear = parseInt(document.getElementById('holidayListYear').value, 10) || getCurrentFYStartYear();
+  document.getElementById('holidayListYear').value = startYear;
+  const fyStart = startYear + '-04-01';
+  const fyEnd = (startYear + 1) + '-03-31';
+  const fyLabel = 'FY ' + startYear + '-' + String(startYear + 1).slice(2);
   const holidays = (await getHolidays())
-    .filter(h => new Date(h.date).getFullYear() === year)
+    .filter(h => h.date >= fyStart && h.date <= fyEnd)
     .sort((a,b) => a.date.localeCompare(b.date));
 
   const rows = holidays.length
@@ -3954,7 +3958,7 @@ async function generateHolidayListDoc(){
         const niceDate = d.toLocaleDateString(undefined, { day: '2-digit', month: 'long', year: 'numeric' });
         return `<tr><td>${niceDate}</td><td>${dayName}</td><td>${h.name}</td></tr>`;
       }).join('')
-    : `<tr><td colspan="3" class="empty">No holidays added for ${year} yet — add them in the Holidays section above.</td></tr>`;
+    : `<tr><td colspan="3" class="empty">No holidays added for ${fyLabel} yet — add them in the Holidays section above.</td></tr>`;
 
   const logoSrc = (document.querySelector('header.top .brand img') || {}).src || '';
 
@@ -3966,22 +3970,22 @@ async function generateHolidayListDoc(){
         <div class="hl-tagline">Complete Technology Solutions Provider</div>
       </div>
     </div>
-    <h3>Holiday List — ${year}</h3>
+    <h3>Holiday List — ${fyLabel}</h3>
     <table><tr><th>Date</th><th>Day</th><th>Festival / Occasion</th></tr>${rows}</table>
     <div class="hl-footer">Issued by HR · R.S. Infotech · ${todayStr()}</div>`;
 
   document.getElementById('holidayListPaper').innerHTML = paperHtml;
   document.getElementById('holidayListOutput').classList.remove('hidden');
 
-  lastHolidayListText = `R.S. Infotech — Holiday List (${year})\n\n` +
+  lastHolidayListText = `R.S. Infotech — Holiday List (${fyLabel})\n\n` +
     (holidays.length
       ? holidays.map(h => {
           const d = new Date(h.date);
           return d.toLocaleDateString(undefined, { day: '2-digit', month: 'long', year: 'numeric' }) + ' (' + d.toLocaleDateString(undefined, { weekday: 'long' }) + ') — ' + h.name;
         }).join('\n')
-      : 'No holidays added for ' + year + ' yet.');
+      : 'No holidays added for ' + fyLabel + ' yet.');
 
-  saveFileToDrive(['HR Management','Reports','Holiday List'], `Holiday List - ${year}.txt`, lastHolidayListText, 'text/plain');
+  saveFileToDrive(['HR Management','Reports','Holiday List'], `Holiday List - ${fyLabel}.txt`, lastHolidayListText, 'text/plain');
 }
 
 function emailHolidayList(){
