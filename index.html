@@ -356,19 +356,57 @@
 
   <div id="hrScreen" class="hidden">
     <div id="hrGate">
-      <section class="block">
-        <h2 id="hrGateTitle">HR access</h2>
-        <p id="hrGateHint" style="font-size:12.5px;color:var(--muted);margin:0 0 12px;"></p>
-        <label class="field">HR password</label>
-        <input type="password" id="hrPasswordInput" placeholder="Password" />
-        <div id="hrPasswordConfirmWrap" class="hidden">
-          <div style="height:12px"></div>
-          <label class="field">Confirm password</label>
-          <input type="password" id="hrPasswordConfirm" placeholder="Confirm password" />
-        </div>
+      <section class="block" id="hrGateLogin">
+        <h2 style="margin:0 0 4px;">HR login</h2>
+        <p style="font-size:12.5px;color:var(--muted);margin:0 0 12px;">Enter your HR username and password.</p>
+        <label class="field">Username</label>
+        <input type="text" id="hrLoginUsername" placeholder="e.g. hr.admin" autocapitalize="none" autocorrect="off" />
         <div style="height:12px"></div>
-        <button class="btn full" id="hrGateBtn" onclick="submitHrGate()">Continue</button>
+        <label class="field">Password</label>
+        <input type="password" id="hrLoginPassword" placeholder="Password" />
+        <div style="height:14px"></div>
+        <button class="btn full" onclick="submitHrLogin()">Log in</button>
         <div class="msg" id="hrGateMsg"></div>
+        <p style="text-align:center;margin:14px 0 0;"><button class="linkbtn" style="padding:0" onclick="showHrForgot()">Forgot password?</button></p>
+      </section>
+
+      <section class="block hidden" id="hrGateSetup">
+        <h2 style="margin:0 0 4px;">Set up HR login</h2>
+        <p style="font-size:12.5px;color:var(--muted);margin:0 0 12px;">No HR login exists yet on this device. Create one — share it only with people who should have HR access.</p>
+        <label class="field">Username</label>
+        <input type="text" id="hrSetupUsername" placeholder="e.g. hr.admin" autocapitalize="none" autocorrect="off" />
+        <div style="height:12px"></div>
+        <label class="field">Password</label>
+        <input type="password" id="hrSetupPassword" placeholder="Choose a password" />
+        <div style="height:12px"></div>
+        <label class="field">Recovery question</label>
+        <input type="text" id="hrSetupQuestion" placeholder="e.g. What city were you born in?" />
+        <div style="height:12px"></div>
+        <label class="field">Recovery answer</label>
+        <input type="text" id="hrSetupAnswer" placeholder="Answer" />
+        <div style="height:14px"></div>
+        <button class="btn full" onclick="submitHrSetup()">Create HR login</button>
+        <div class="msg" id="hrSetupMsg"></div>
+      </section>
+
+      <section class="block hidden" id="hrGateForgot">
+        <h2 style="margin:0 0 4px;">Forgot password</h2>
+        <p style="font-size:12.5px;color:var(--muted);margin:0 0 12px;" id="hrForgotQuestionText"></p>
+        <label class="field">Your answer</label>
+        <input type="text" id="hrForgotAnswer" placeholder="Answer" />
+        <div style="height:14px"></div>
+        <button class="btn full" onclick="verifyHrRecoveryAnswer()">Verify answer</button>
+        <div class="msg" id="hrForgotMsg"></div>
+        <p style="text-align:center;margin:14px 0 0;"><button class="linkbtn" style="padding:0" onclick="showHrLogin()">Back to login</button></p>
+      </section>
+
+      <section class="block hidden" id="hrGateReset">
+        <h2 style="margin:0 0 4px;">Set a new password</h2>
+        <label class="field">New password</label>
+        <input type="password" id="hrResetPassword" placeholder="New password" />
+        <div style="height:14px"></div>
+        <button class="btn full" onclick="submitHrPasswordReset()">Set new password</button>
+        <div class="msg" id="hrResetMsg"></div>
       </section>
     </div>
 
@@ -867,19 +905,46 @@ async function resetPassword(username){
 }
 
 async function getHrPasswordRecord(){
-  const v = await safeGet('hr_password', true);
-  return v ? JSON.parse(v) : null;
+  const remote = await safeGet('hr_password', true);
+  if(remote) return JSON.parse(remote);
+  const local = await safeGet('hr_password_local', false);
+  return local ? JSON.parse(local) : null;
 }
-async function setHrPassword(password){
+async function saveHrPasswordRecord(rec){
+  const json = JSON.stringify(rec);
+  // Shared storage keeps every device in sync once the backend is configured;
+  // the local copy is a reliable fallback on this device even before that.
+  await safeSet('hr_password', json, true);
+  await safeSet('hr_password_local', json, false);
+}
+async function setHrCredentials(username, password, question, answer){
   const salt = randomHex(8);
   const hash = await hashPassword(password, salt);
-  await safeSet('hr_password', JSON.stringify({ salt, hash }), true);
+  const recoverySalt = randomHex(8);
+  const recoveryHash = await hashPassword(answer.trim().toLowerCase(), recoverySalt);
+  await saveHrPasswordRecord({ username: normUsername(username), salt, hash, question, recoverySalt, recoveryHash });
 }
-async function verifyHrPassword(password){
+async function verifyHrLogin(username, password){
   const rec = await getHrPasswordRecord();
   if(!rec) return false;
+  if(rec.username && normUsername(username) !== rec.username) return false;
   const hash = await hashPassword(password, rec.salt);
   return hash === rec.hash;
+}
+async function verifyHrRecoveryAnswerValue(answer){
+  const rec = await getHrPasswordRecord();
+  if(!rec || !rec.recoveryHash) return false;
+  const hash = await hashPassword(answer.trim().toLowerCase(), rec.recoverySalt);
+  return hash === rec.recoveryHash;
+}
+async function setHrNewPassword(password){
+  const rec = await getHrPasswordRecord();
+  if(!rec) return;
+  const salt = randomHex(8);
+  const hash = await hashPassword(password, salt);
+  rec.salt = salt;
+  rec.hash = hash;
+  await saveHrPasswordRecord(rec);
 }
 
 async function createUserAccount(){
@@ -1023,22 +1088,15 @@ async function selectRole(role){
     const hrSession = await safeGet('hr_session', false);
     document.getElementById('hrGate').classList.remove('hidden');
     document.getElementById('hrMain').classList.add('hidden');
-    document.getElementById('hrPasswordConfirmWrap').classList.add('hidden');
-    document.getElementById('hrPasswordInput').value = '';
     if(hrSession === 'yes' && hasHrPassword){
       document.getElementById('hrGate').classList.add('hidden');
       await enterHrMain();
       return;
     }
     if(!hasHrPassword){
-      document.getElementById('hrGateTitle').textContent = 'Set an HR password';
-      document.getElementById('hrGateHint').textContent = 'This protects the dashboard so only HR can manage the team. Choose a password and share it only with people who should have HR access.';
-      document.getElementById('hrPasswordConfirmWrap').classList.remove('hidden');
-      document.getElementById('hrGateBtn').textContent = 'Set password';
+      showHrSetup();
     } else {
-      document.getElementById('hrGateTitle').textContent = 'HR access';
-      document.getElementById('hrGateHint').textContent = 'Enter the HR password to continue.';
-      document.getElementById('hrGateBtn').textContent = 'Continue';
+      showHrLogin();
     }
   }
 }
@@ -1046,39 +1104,109 @@ async function selectRole(role){
 // Enter the fixed role for this URL as soon as the page loads.
 selectRole(FIXED_ROLE);
 
-async function submitHrGate(){
-  const pw = document.getElementById('hrPasswordInput').value;
+function hideAllHrGateSections(){
+  ['hrGateLogin','hrGateSetup','hrGateForgot','hrGateReset'].forEach(id => {
+    document.getElementById(id).classList.add('hidden');
+  });
+}
+function showHrLogin(){
+  hideAllHrGateSections();
+  document.getElementById('hrGateLogin').classList.remove('hidden');
+  document.getElementById('hrLoginPassword').value = '';
+  document.getElementById('hrGateMsg').textContent = '';
+}
+function showHrSetup(){
+  hideAllHrGateSections();
+  document.getElementById('hrGateSetup').classList.remove('hidden');
+}
+async function showHrForgot(){
+  hideAllHrGateSections();
+  const rec = await getHrPasswordRecord();
+  document.getElementById('hrForgotQuestionText').textContent = rec && rec.question ? rec.question : 'No recovery question is on file for this device.';
+  document.getElementById('hrForgotAnswer').value = '';
+  document.getElementById('hrForgotMsg').textContent = '';
+  document.getElementById('hrGateForgot').classList.remove('hidden');
+}
+
+async function submitHrLogin(){
+  const username = document.getElementById('hrLoginUsername').value.trim();
+  const pw = document.getElementById('hrLoginPassword').value;
   const msg = document.getElementById('hrGateMsg');
-  const hasHrPassword = !!(await getHrPasswordRecord());
-  if(!hasHrPassword){
-    const confirm = document.getElementById('hrPasswordConfirm').value;
-    if(!pw || pw.length < 4){
-      msg.textContent = 'Choose a password with at least 4 characters.';
-      msg.classList.add('error');
-      return;
-    }
-    if(pw !== confirm){
-      msg.textContent = 'Passwords do not match.';
-      msg.classList.add('error');
-      return;
-    }
-    await setHrPassword(pw);
-    await safeSet('hr_session', 'yes', false);
-    msg.textContent = '';
-    document.getElementById('hrGate').classList.add('hidden');
-    await enterHrMain();
+  if(!username || !pw){
+    msg.textContent = 'Enter your username and password.';
+    msg.classList.add('error');
     return;
   }
-  const ok = await verifyHrPassword(pw);
+  const ok = await verifyHrLogin(username, pw);
   if(!ok){
-    msg.textContent = 'Incorrect password.';
+    msg.textContent = 'Incorrect username or password.';
     msg.classList.add('error');
     return;
   }
   await safeSet('hr_session', 'yes', false);
   msg.textContent = '';
+  msg.classList.remove('error');
   document.getElementById('hrGate').classList.add('hidden');
   await enterHrMain();
+}
+
+async function submitHrSetup(){
+  const username = document.getElementById('hrSetupUsername').value.trim();
+  const pw = document.getElementById('hrSetupPassword').value;
+  const question = document.getElementById('hrSetupQuestion').value.trim();
+  const answer = document.getElementById('hrSetupAnswer').value.trim();
+  const msg = document.getElementById('hrSetupMsg');
+  if(!username || !pw || !question || !answer){
+    msg.textContent = 'Fill in a username, password, and a recovery question with its answer.';
+    msg.classList.add('error');
+    return;
+  }
+  if(pw.length < 4){
+    msg.textContent = 'Choose a password with at least 4 characters.';
+    msg.classList.add('error');
+    return;
+  }
+  await setHrCredentials(username, pw, question, answer);
+  await safeSet('hr_session', 'yes', false);
+  msg.textContent = '';
+  msg.classList.remove('error');
+  document.getElementById('hrGate').classList.add('hidden');
+  await enterHrMain();
+}
+
+async function verifyHrRecoveryAnswer(){
+  const answer = document.getElementById('hrForgotAnswer').value;
+  const msg = document.getElementById('hrForgotMsg');
+  if(!answer){
+    msg.textContent = 'Enter your answer.';
+    msg.classList.add('error');
+    return;
+  }
+  const ok = await verifyHrRecoveryAnswerValue(answer);
+  if(!ok){
+    msg.textContent = 'That answer doesn\'t match. Try again, or contact whoever set up this device.';
+    msg.classList.add('error');
+    return;
+  }
+  msg.textContent = '';
+  hideAllHrGateSections();
+  document.getElementById('hrResetPassword').value = '';
+  document.getElementById('hrResetMsg').textContent = '';
+  document.getElementById('hrGateReset').classList.remove('hidden');
+}
+
+async function submitHrPasswordReset(){
+  const pw = document.getElementById('hrResetPassword').value;
+  const msg = document.getElementById('hrResetMsg');
+  if(!pw || pw.length < 4){
+    msg.textContent = 'Choose a password with at least 4 characters.';
+    msg.classList.add('error');
+    return;
+  }
+  await setHrNewPassword(pw);
+  msg.textContent = '';
+  alert('Password updated. Log in with your new password.');
+  showHrLogin();
 }
 
 async function enterHrMain(){
