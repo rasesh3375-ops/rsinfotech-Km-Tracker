@@ -244,10 +244,25 @@
 
   .letter-paper{display:none;}
   #letterOutput.show .letter-paper{display:block;background:#fff;border:1px solid var(--line);border-radius:10px;padding:26px 22px;margin:18px 0;font-size:13.5px;line-height:1.7;white-space:pre-wrap;}
+  .holiday-list-paper{display:none;}
+  #holidayListOutput.show .holiday-list-paper, #holidayListOutput:not(.hidden) .holiday-list-paper{display:block;}
+  .holiday-list-paper{background:#fff;border:1px solid var(--line);border-radius:10px;padding:28px 24px;margin:0;}
+  .holiday-list-paper .hl-head{display:flex;align-items:center;gap:14px;border-bottom:2px solid var(--navy);padding-bottom:16px;margin-bottom:20px;}
+  .holiday-list-paper .hl-head img{width:56px;height:56px;object-fit:contain;border-radius:6px;}
+  .holiday-list-paper .hl-head .hl-company{font-family:Georgia, serif;font-size:19px;font-weight:700;color:var(--navy);}
+  .holiday-list-paper .hl-head .hl-tagline{font-size:11px;color:var(--muted);}
+  .holiday-list-paper h3{text-align:center;font-size:16px;letter-spacing:.5px;text-transform:uppercase;color:var(--navy);margin:0 0 20px;}
+  .holiday-list-paper table{width:100%;border-collapse:collapse;font-size:13.5px;}
+  .holiday-list-paper th{background:var(--navy);color:#fff;padding:9px 10px;text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.3px;}
+  .holiday-list-paper td{padding:9px 10px;border-bottom:1px solid var(--line);}
+  .holiday-list-paper tr:nth-child(even) td{background:var(--cream);}
+  .holiday-list-paper .hl-footer{margin-top:20px;font-size:11px;color:var(--muted);text-align:center;}
   @media print{
     body *{visibility:hidden;}
     .letter-paper, .letter-paper *{visibility:visible;}
     .letter-paper{position:absolute;left:0;top:0;width:100%;border:none;padding:0;}
+    .holiday-list-paper, .holiday-list-paper *{visibility:visible;}
+    .holiday-list-paper{position:absolute;left:0;top:0;width:100%;border:none;padding:0;}
   }
   .checklist-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13.5px;}
   .checklist-row:last-child{border-bottom:none;}
@@ -664,6 +679,23 @@
           <div class="msg" id="holidayMsg"></div>
           <div style="height:14px"></div>
           <div id="holidayListBox"></div>
+        </section>
+
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">Holiday List (to share with engineers)</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A printable holiday list with the company logo, for a chosen year — built from the Holidays list above.</p>
+          <label class="field">Year</label>
+          <input type="number" id="holidayListYear" placeholder="e.g. 2026" />
+          <div style="height:14px"></div>
+          <button class="btn full" onclick="generateHolidayListDoc()">Generate holiday list</button>
+          <div id="holidayListOutput" class="hidden" style="margin-top:16px;">
+            <div class="holiday-list-paper" id="holidayListPaper"></div>
+            <div class="row-inline" style="margin-top:10px;margin-bottom:0;">
+              <button class="btn ghost" style="flex:1;" onclick="emailHolidayList()">Email</button>
+              <button class="btn ghost" style="flex:1;" onclick="whatsappHolidayList()">WhatsApp</button>
+              <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
+            </div>
+          </div>
         </section>
       </div>
 
@@ -3015,6 +3047,62 @@ async function renderHolidayList(){
       <div class="head"><strong>${h.name}</strong><span class="id">${h.date}</span></div>
       <div class="actions"><button class="btn ghost" onclick="deleteHoliday('${h.date}')">Delete</button></div>
     </div>`).join('');
+  const yearInput = document.getElementById('holidayListYear');
+  if(yearInput && !yearInput.value) yearInput.value = new Date().getFullYear();
+}
+
+let lastHolidayListText = '';
+
+async function generateHolidayListDoc(){
+  const year = parseInt(document.getElementById('holidayListYear').value, 10) || new Date().getFullYear();
+  const holidays = (await getHolidays())
+    .filter(h => new Date(h.date).getFullYear() === year)
+    .sort((a,b) => a.date.localeCompare(b.date));
+
+  const rows = holidays.length
+    ? holidays.map(h => {
+        const d = new Date(h.date);
+        const dayName = d.toLocaleDateString(undefined, { weekday: 'long' });
+        const niceDate = d.toLocaleDateString(undefined, { day: '2-digit', month: 'long', year: 'numeric' });
+        return `<tr><td>${niceDate}</td><td>${dayName}</td><td>${h.name}</td></tr>`;
+      }).join('')
+    : `<tr><td colspan="3" class="empty">No holidays added for ${year} yet — add them in the Holidays section above.</td></tr>`;
+
+  const logoSrc = (document.querySelector('header.top .brand img') || {}).src || '';
+
+  const paperHtml = `
+    <div class="hl-head">
+      ${logoSrc ? `<img src="${logoSrc}" alt="R.S. Infotech logo">` : ''}
+      <div>
+        <div class="hl-company">R.S. Infotech</div>
+        <div class="hl-tagline">Complete Technology Solutions Provider</div>
+      </div>
+    </div>
+    <h3>Holiday List — ${year}</h3>
+    <table><tr><th>Date</th><th>Day</th><th>Festival / Occasion</th></tr>${rows}</table>
+    <div class="hl-footer">Issued by HR · R.S. Infotech · ${todayStr()}</div>`;
+
+  document.getElementById('holidayListPaper').innerHTML = paperHtml;
+  document.getElementById('holidayListOutput').classList.remove('hidden');
+
+  lastHolidayListText = `R.S. Infotech — Holiday List (${year})\n\n` +
+    (holidays.length
+      ? holidays.map(h => {
+          const d = new Date(h.date);
+          return d.toLocaleDateString(undefined, { day: '2-digit', month: 'long', year: 'numeric' }) + ' (' + d.toLocaleDateString(undefined, { weekday: 'long' }) + ') — ' + h.name;
+        }).join('\n')
+      : 'No holidays added for ' + year + ' yet.');
+}
+
+function emailHolidayList(){
+  if(!lastHolidayListText) return;
+  const subject = encodeURIComponent('R.S. Infotech — Holiday List');
+  const body = encodeURIComponent(lastHolidayListText);
+  window.location.href = `mailto:?subject=${subject}&body=${body}`;
+}
+function whatsappHolidayList(){
+  if(!lastHolidayListText) return;
+  window.open('https://wa.me/?text=' + encodeURIComponent(lastHolidayListText), '_blank');
 }
 
 async function viewReport(key, label){
