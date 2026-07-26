@@ -434,14 +434,16 @@
         <section class="block">
           <div class="emp-search-row">
             <input type="text" id="empSearchInput" placeholder="Search by name or employee ID..." oninput="renderEmployeeList()" />
-            <button class="btn ghost" onclick="exportEmployeeBackup()">Export backup</button>
-            <label class="btn ghost" style="cursor:pointer;">Import backup<input type="file" accept="application/json" style="display:none" onchange="importEmployeeBackup(event)"></label>
           </div>
           <button class="btn" onclick="openAddEmployeeModal()">+ Add employee</button>
         </section>
         <section class="block">
           <div id="employeeListBox"></div>
         </section>
+        <div class="report-card">
+          <div class="head"><div class="avatar">L</div><div class="titlewrap"><strong>Left Employees</strong><span id="leftEmployeeCount">0 on file</span></div></div>
+          <button class="btn ghost" onclick="openLeftEmployeesModal()">View left employees</button>
+        </div>
       </div>
 
       <!-- ===== Reports ===== -->
@@ -1746,6 +1748,7 @@ function emptyEmployee(){
     diwaliEligible:'yes',
     emergencyName:'', emergencyNumber:'',
     trackingEnabled:'no', trackingUsername:'',
+    employmentStatus:'active', leftDate:'',
     aadhaarCardImg:'', panCardImg:'', otherDocs:[],
     checklists:{ joining:{}, exit:{} }
   };
@@ -2088,73 +2091,116 @@ async function saveEmployeeForm(){
 }
 
 async function deleteEmployee(id){
-  if(!confirm('Remove this employee from the master list? This cannot be undone.')) return;
+  if(!confirm('Permanently delete this employee record? This cannot be undone — if they simply left the job, use "Mark as left" instead so their record and history are kept.')) return;
   let employees = await getEmployees();
   const emp = employees.find(e => e.id === id);
   employees = employees.filter(e => e.id !== id);
   await saveEmployees(employees);
-  if(emp) await addActivityLog('Removed employee ' + emp.name + ' (' + id + ')');
+  if(emp) await addActivityLog('Permanently deleted employee record for ' + emp.name + ' (' + id + ')');
   await renderEmployeeList();
   await refreshDashboard();
+}
+
+async function markEmployeeLeft(id){
+  const employees = await getEmployees();
+  const emp = employees.find(e => e.id === id);
+  if(!emp) return;
+  const leftDate = prompt('Last working date for ' + emp.name + ' (YYYY-MM-DD):', todayStr());
+  if(!leftDate) return;
+  emp.employmentStatus = 'left';
+  emp.leftDate = leftDate;
+  // Disable their km-tracking login, if they had one — their full record stays on file.
+  if(emp.trackingUsername){
+    const users = await getUsers();
+    const user = users.find(u => u.username === emp.trackingUsername);
+    if(user){
+      user.enabled = false;
+      await saveUsers(users);
+    }
+  }
+  await saveEmployees(employees);
+  await addActivityLog(emp.name + ' marked as left (' + leftDate + ')' + (emp.trackingUsername ? ' — km tracking disabled' : ''));
+  await renderEmployeeList();
+  await refreshDashboard();
+  await renderUserList();
+}
+
+async function reactivateEmployee(id){
+  const employees = await getEmployees();
+  const emp = employees.find(e => e.id === id);
+  if(!emp) return;
+  if(!confirm('Reactivate ' + emp.name + ' as a current employee? Their km-tracking login (if any) will be re-enabled.')) return;
+  emp.employmentStatus = 'active';
+  emp.leftDate = '';
+  if(emp.trackingUsername){
+    const users = await getUsers();
+    const user = users.find(u => u.username === emp.trackingUsername);
+    if(user){
+      user.enabled = true;
+      await saveUsers(users);
+    }
+  }
+  await saveEmployees(employees);
+  await addActivityLog(emp.name + ' reactivated as a current employee');
+  await renderEmployeeList();
+  await refreshDashboard();
+  await renderUserList();
+  closeLeftEmployeesModal();
 }
 
 async function renderEmployeeList(){
   const box = document.getElementById('employeeListBox');
   if(!box) return;
   const q = (document.getElementById('empSearchInput')?.value || '').trim().toLowerCase();
-  let employees = await getEmployees();
+  let employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
   if(q){
     employees = employees.filter(e => e.name.toLowerCase().includes(q) || e.id.toLowerCase().includes(q));
   }
   if(!employees.length){
     box.innerHTML = '<div class="empty">No employees added yet. Click "+ Add employee" to build your master list.</div>';
-    return;
+  } else {
+    box.innerHTML = employees.map(e => `
+      <div class="emp-row">
+        <div class="head"><strong>${e.name}</strong><span class="id">${e.id}</span></div>
+        <div class="sub">${e.designation || '—'} · ${e.department || '—'}</div>
+        <div class="actions">
+          <button class="btn ghost" onclick="openAddEmployeeModal('${e.id}')">Edit</button>
+          <button class="btn ghost" onclick="markEmployeeLeft('${e.id}')">Mark as left</button>
+          <button class="btn ghost" onclick="deleteEmployee('${e.id}')">Delete</button>
+        </div>
+      </div>`).join('');
   }
-  box.innerHTML = employees.map(e => `
-    <div class="emp-row">
-      <div class="head"><strong>${e.name}</strong><span class="id">${e.id}</span></div>
-      <div class="sub">${e.designation || '—'} · ${e.department || '—'}</div>
-      <div class="actions">
-        <button class="btn ghost" onclick="openAddEmployeeModal('${e.id}')">Edit</button>
-        <button class="btn ghost" onclick="deleteEmployee('${e.id}')">Delete</button>
-      </div>
-    </div>`).join('');
+  const leftCount = (await getEmployees()).filter(e => e.employmentStatus === 'left').length;
+  const leftCountEl = document.getElementById('leftEmployeeCount');
+  if(leftCountEl) leftCountEl.textContent = leftCount + ' on file';
 }
 
-async function exportEmployeeBackup(){
-  const employees = await getEmployees();
-  const blob = new Blob([JSON.stringify(employees, null, 2)], { type:'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'employee-master-backup-' + todayStr() + '.json';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-function importEmployeeBackup(event){
-  const file = event.target.files[0];
-  if(!file) return;
-  const reader = new FileReader();
-  reader.onload = async () => {
-    try{
-      const incoming = JSON.parse(reader.result);
-      if(!Array.isArray(incoming)) throw new Error('bad format');
-      const existing = await getEmployees();
-      const byId = {};
-      existing.forEach(e => byId[e.id] = e);
-      incoming.forEach(e => byId[e.id] = e);
-      await saveEmployees(Object.values(byId));
-      await addActivityLog('Imported employee backup (' + incoming.length + ' records)');
-      await renderEmployeeList();
-      await refreshDashboard();
-      alert('Backup imported.');
-    }catch(e){
-      alert('Could not read that backup file.');
+function openLeftEmployeesModal(){
+  getEmployees().then(employees => {
+    const left = employees.filter(e => e.employmentStatus === 'left');
+    if(!left.length){
+      document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeLeftEmployeesModal()"><div class="modal-box"><h2>Left employees</h2><p class="hint">No employees marked as left yet.</p><div class="modal-actions"><button class="btn full" onclick="closeLeftEmployeesModal()">Close</button></div></div></div>`;
+      return;
     }
-  };
-  reader.readAsText(file);
+    document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeLeftEmployeesModal()">
+      <div class="modal-box">
+        <h2>Left employees</h2>
+        <p class="hint">Their full record is kept on file — view details, or reactivate if they rejoin.</p>
+        ${left.map(e => `<div class="emp-row">
+          <div class="head"><strong>${e.name}</strong><span class="id">${e.id}</span></div>
+          <div class="sub">${e.designation || '—'} · left ${e.leftDate || 'date not recorded'}</div>
+          <div class="actions">
+            <button class="btn ghost" onclick="closeLeftEmployeesModal();openAddEmployeeModal('${e.id}')">View details</button>
+            <button class="btn ghost" onclick="reactivateEmployee('${e.id}')">Reactivate</button>
+          </div>
+        </div>`).join('')}
+        <div class="modal-actions"><button class="btn ghost full" onclick="closeLeftEmployeesModal()">Close</button></div>
+      </div>
+    </div>`;
+  });
+}
+function closeLeftEmployeesModal(){
+  document.getElementById('checklistModalRoot').innerHTML = '';
 }
 
 // ---- reports tab ----
