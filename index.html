@@ -1199,6 +1199,7 @@ async function toggleUserEnabled(username){
   await saveUsers(users);
   await renderUserList();
   await loadHR();
+  await addActivityLog((user.enabled ? 'Enabled' : 'Disabled') + ' tracking login @' + user.username);
 }
 
 async function resetPassword(username){
@@ -1212,6 +1213,7 @@ async function resetPassword(username){
   user.salt = salt;
   await saveUsers(users);
   alert('Password reset for ' + username + '. Share the new password with them directly.');
+  await addActivityLog('Reset tracking password for @' + user.username);
 }
 
 async function getHrPasswordRecord(){
@@ -1458,6 +1460,7 @@ async function submitHrLogin(){
   msg.classList.remove('error');
   document.getElementById('hrGate').classList.add('hidden');
   await enterHrMain();
+  await addActivityLog('HR login: @' + normUsername(username));
 }
 
 async function submitHrSetup(){
@@ -1482,6 +1485,7 @@ async function submitHrSetup(){
   msg.classList.remove('error');
   document.getElementById('hrGate').classList.add('hidden');
   await enterHrMain();
+  await addActivityLog('HR login created: @' + normUsername(username));
 }
 
 async function verifyHrRecoveryAnswer(){
@@ -1517,6 +1521,7 @@ async function submitHrPasswordReset(){
   msg.textContent = '';
   alert('Password updated. Log in with your new password.');
   showHrLogin();
+  await addActivityLog('HR password reset via recovery question');
 }
 
 async function enterHrMain(){
@@ -1533,6 +1538,7 @@ async function enterHrMain(){
 }
 
 async function logoutHr(){
+  await addActivityLog('HR logout');
   await safeSet('hr_session', '', false);
   if(hrInterval){ clearInterval(hrInterval); hrInterval = null; }
   goHome();
@@ -2037,6 +2043,7 @@ async function saveRate(){
   msg.classList.remove('error');
   await loadHR();
   await loadCompanyReport();
+  await addActivityLog('Expense rate changed to ₹' + v + ' per km');
 }
 
 function sumKmInRange(trips, sinceDateStr){
@@ -2336,6 +2343,9 @@ async function handleAttendanceCellChange(employeeId, dateStr, selectEl){
   selectEl.className = 'att-code code-' + code;
   // Refresh just to keep summary columns accurate without losing scroll position too badly
   await renderAttendanceSheet();
+  const employees = await getEmployees();
+  const emp = employees.find(e => e.id === employeeId);
+  await addActivityLog('Attendance edited: ' + (emp ? emp.name : employeeId) + ' on ' + dateStr + ' set to ' + (code || '(blank)'));
 }
 
 // ---- salary sheet ----
@@ -2894,6 +2904,7 @@ async function saveReminderEmail(){
   msg.textContent = 'Saved.';
   msg.classList.remove('error');
   setTimeout(() => { msg.textContent = ''; }, 2500);
+  await addActivityLog('Reminder email set to ' + val);
 }
 
 async function renderIncrementReminders(){
@@ -3820,9 +3831,11 @@ async function addOvertimeEntry(){
 async function deleteOvertimeEntry(id){
   if(!confirm('Remove this overtime entry?')) return;
   let log = await getOvertimeLog();
+  const entry = log.find(o => o.id === id);
   log = log.filter(o => o.id !== id);
   await saveOvertimeLog(log);
   await renderOvertimeReport();
+  if(entry) await addActivityLog('Deleted overtime entry for ' + entry.name + ' on ' + entry.date);
 }
 
 async function renderOvertimeReport(){
@@ -4024,6 +4037,7 @@ async function toggleChecklistItem(empId, label, checked){
   emp.checklists[currentChecklistType][label] = checked;
   await saveEmployees(employees);
   await renderReportsTab();
+  await addActivityLog((checked ? 'Checked' : 'Unchecked') + ' "' + label + '" on ' + emp.name + '\'s ' + currentChecklistType + ' checklist');
 }
 function closeChecklistModal(){
   document.getElementById('checklistModalRoot').innerHTML = '';
