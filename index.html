@@ -848,9 +848,12 @@
           <label class="field">Company name</label>
           <input type="text" id="genCompanyName" value="R.S.Infotech" />
           <div style="height:12px"></div>
-          <label class="field">Employee name</label>
-          <input type="text" id="genEmpName" />
-          <div style="height:12px"></div>
+          <label class="field">Employee</label>
+          <select class="field-input" id="genEmpSelect" onchange="autoFillGeneratorFromEmployee()">
+            <option value="">— Select employee —</option>
+          </select>
+          <p style="font-size:11.5px;color:var(--muted);margin:8px 0 0;">Designation, department and date of joining below are pulled from Employee Master automatically — edit them here only if this document needs something different.</p>
+          <div style="height:14px"></div>
           <label class="field">Designation</label>
           <input type="text" id="genDesignation" />
           <div style="height:12px"></div>
@@ -4043,9 +4046,28 @@ async function renderGeneratorTab(){
     <div class="letter-choice ${i===selectedLetterIdx?'active':''}" onclick="selectLetterType(${i})">
       <span class="num">${String(i+1).padStart(2,'0')}</span> ${t}
     </div>`).join('');
+
+  const activeEmployees = employees.filter(e => e.employmentStatus !== 'left');
+  const sel = document.getElementById('genEmpSelect');
+  const prevSelected = sel.value;
+  sel.innerHTML = '<option value="">— Select employee —</option>' +
+    activeEmployees.map(e => `<option value="${e.id}">${e.name} (${e.id})</option>`).join('');
+  if(prevSelected && activeEmployees.some(e => e.id === prevSelected)) sel.value = prevSelected;
+
   document.getElementById('genIssueDate').value = document.getElementById('genIssueDate').value || todayStr();
   document.getElementById('letterOutput').classList.remove('show');
   document.getElementById('letterActionsBox').classList.add('hidden');
+}
+
+async function autoFillGeneratorFromEmployee(){
+  const empId = document.getElementById('genEmpSelect').value;
+  if(!empId) return;
+  const employees = await getEmployees();
+  const emp = employees.find(e => e.id === empId);
+  if(!emp) return;
+  document.getElementById('genDesignation').value = emp.designation || '';
+  document.getElementById('genDepartment').value = emp.department || '';
+  document.getElementById('genDoj').value = emp.doj || '';
 }
 function selectLetterType(idx){
   selectedLetterIdx = idx;
@@ -4078,16 +4100,17 @@ function letterTemplate(type, f){
 
 async function generateLetter(){
   const msg = document.getElementById('genMsg');
-  const name = document.getElementById('genEmpName').value.trim();
-  if(!name){
-    msg.textContent = 'Enter the employee name.';
+  const empId = document.getElementById('genEmpSelect').value;
+  if(!empId){
+    msg.textContent = 'Select an employee.';
     msg.classList.add('error');
     return;
   }
   msg.textContent = '';
   const type = LETTER_TYPES[selectedLetterIdx];
   const employees = await getEmployees();
-  const matched = employees.find(e => e.name.toLowerCase() === name.toLowerCase());
+  const matched = employees.find(e => e.id === empId);
+  const name = matched ? matched.name : '';
   const f = {
     company: document.getElementById('genCompanyName').value.trim() || 'R.S.Infotech',
     name,
