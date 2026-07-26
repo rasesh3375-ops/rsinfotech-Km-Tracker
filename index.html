@@ -558,7 +558,7 @@
 
         <section class="block">
           <h2 style="margin:0 0 4px;font-size:17px;">Attendance</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Sundays are excluded automatically. Add festivals or declared holidays below so they don't count as absent either.</p>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Marked Present as soon as the engineer takes a check-in selfie that day — whether or not they end up recording a trip. Sundays are excluded automatically; add festivals or declared holidays below so they don't count as absent either.</p>
           <div class="row-inline">
             <div>
               <label class="field">Engineer (tracking login)</label>
@@ -749,6 +749,18 @@ async function getTrips(name){
 }
 async function saveTrips(name, arr){
   await safeSet('trips:' + name, JSON.stringify(arr), true);
+}
+async function getCheckins(name){
+  const v = await safeGet('checkins:' + name, true);
+  return v ? JSON.parse(v) : [];
+}
+async function recordCheckin(name){
+  const dates = await getCheckins(name);
+  const today = todayStr();
+  if(!dates.includes(today)){
+    dates.push(today);
+    await safeSet('checkins:' + name, JSON.stringify(dates), true);
+  }
 }
 async function getActive(name){
   const v = await safeGet('active:' + name, true);
@@ -1287,6 +1299,7 @@ async function handleSelfieCapture(event){
   currentGeofenceStatus = 'none';
   cachedGeofences = await getGeofences();
   startTime = new Date().toISOString();
+  await recordCheckin(engineerName);
   updateLiveDisplay();
   showDuringTrip();
   startWatch(false);
@@ -2701,6 +2714,7 @@ async function loadAttendanceCalendar(){
   const daysInMonth = new Date(year, month, 0).getDate();
   const trips = await getTrips(username);
   const tripDates = new Set(trips.map(t => t.date));
+  const checkinDates = new Set(await getCheckins(username));
   const holidays = await getHolidays();
   const holidayMap = {};
   holidays.forEach(h => { holidayMap[h.date] = h.name; });
@@ -2718,7 +2732,7 @@ async function loadAttendanceCalendar(){
       status = 'Weekly off (Sunday)'; cls = ''; offDays++;
     } else if(holidayMap[dateStr]){
       status = 'Holiday — ' + holidayMap[dateStr]; cls = ''; offDays++;
-    } else if(tripDates.has(dateStr)){
+    } else if(tripDates.has(dateStr) || checkinDates.has(dateStr)){
       status = 'Present'; cls = 'live'; present++;
     } else {
       status = 'Absent'; cls = 'warn'; absent++;
