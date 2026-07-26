@@ -344,22 +344,7 @@
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
         <h2 style="margin:0;">Manage team</h2>
       </div>
-      <div class="row-inline" style="margin-top:12px;">
-        <div>
-          <label class="field">Username</label>
-          <input type="text" id="newUsername" placeholder="e.g. ramesh.patil" autocapitalize="none" autocorrect="off" />
-        </div>
-        <div>
-          <label class="field">Display name</label>
-          <input type="text" id="newDisplayName" placeholder="e.g. Ramesh Patil" />
-        </div>
-      </div>
-      <label class="field">Temporary password</label>
-      <input type="text" id="newPassword" placeholder="e.g. field2026" />
-      <div style="height:12px"></div>
-      <button class="btn full" onclick="createUserAccount()">Create login</button>
-      <div class="msg" id="createUserMsg"></div>
-      <div style="height:16px"></div>
+      <p style="font-size:12.5px;color:var(--muted);margin:8px 0 14px;">Logins are created automatically from Employee Master when you mark an employee as needing km tracking. Manage existing logins below.</p>
       <div id="userListTable"></div>
     </section>
 
@@ -473,9 +458,6 @@
 
       <!-- ===== Reports ===== -->
       <div id="hrSubReports" class="hidden">
-        <h2 style="margin:0 0 4px;font-size:17px;">Document types</h2>
-        <div id="letterTypeCards"></div>
-
         <div class="report-card">
           <div class="head"><div class="avatar">J</div><div class="titlewrap"><strong>Joining Checklist</strong><span id="joiningChecklistCount">0 employees</span></div></div>
           <button class="btn ghost" onclick="openChecklistPicker('joining')">Open checklist</button>
@@ -1776,6 +1758,7 @@ function emptyEmployee(){
     loanAmount:0, emiPerMonth:0, loanStatus:'active',
     diwaliEligible:'yes',
     emergencyName:'', emergencyNumber:'',
+    trackingEnabled:'no', trackingUsername:'',
     aadhaarCardImg:'', panCardImg:'', otherDocs:[],
     checklists:{ joining:{}, exit:{} }
   };
@@ -1917,6 +1900,27 @@ function employeeModalHtml(emp){
       </div>
 
       <div class="field-group">
+        <div class="sec-title">Field tracking</div>
+        <label class="field">Does this employee need km tracking (field engineer)?</label>
+        <select class="field-input" id="f_needsTracking" onchange="toggleTrackingFields()">
+          <option value="no" ${emp.trackingEnabled!=='yes'?'selected':''}>No</option>
+          <option value="yes" ${emp.trackingEnabled==='yes'?'selected':''}>Yes</option>
+        </select>
+        <div id="trackingLoginFields" class="${emp.trackingEnabled==='yes'?'':'hidden'}" style="margin-top:12px;">
+          ${emp.trackingUsername ? `
+            <p style="font-size:12.5px;color:var(--muted);margin:0;">Tracking login already created: <strong style="color:var(--navy);">@${emp.trackingUsername}</strong>. Use "Reset password" in the Tracking tab if they need a new one.</p>
+          ` : `
+            <label class="field">Username for their tracking login</label>
+            <input type="text" id="f_trackingUsername" placeholder="e.g. ramesh.patil" autocapitalize="none" autocorrect="off" value="${emp.trackingUsername||''}">
+            <div style="height:12px"></div>
+            <label class="field">Temporary password</label>
+            <input type="text" id="f_trackingPassword" placeholder="e.g. field2026">
+            <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Saving this employee will create their km-tracking login automatically — share the username and password with them directly.</p>
+          `}
+        </div>
+      </div>
+
+      <div class="field-group">
         <div class="sec-title">Identity documents</div>
         <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Tap to scan with your camera or choose a file from your gallery. Documents are saved as soon as you upload them.</p>
         <label class="field">Aadhaar card</label>
@@ -1939,6 +1943,11 @@ function employeeModalHtml(emp){
       <div class="msg" id="empSaveMsg"></div>
     </div>
   </div>`;
+}
+
+function toggleTrackingFields(){
+  const needsTracking = document.getElementById('f_needsTracking').value === 'yes';
+  document.getElementById('trackingLoginFields').classList.toggle('hidden', !needsTracking);
 }
 
 let editingEmployeeDraft = null;
@@ -2014,7 +2023,36 @@ async function saveEmployeeForm(){
     msg.classList.add('error');
     return;
   }
+  const needsTracking = document.getElementById('f_needsTracking').value;
   const draft = editingEmployeeDraft;
+
+  // If this employee needs km tracking and doesn't have a login yet, create one now.
+  if(needsTracking === 'yes' && !draft.trackingUsername){
+    const trackingUsername = document.getElementById('f_trackingUsername')?.value.trim();
+    const trackingPassword = document.getElementById('f_trackingPassword')?.value;
+    if(!trackingUsername || !trackingPassword){
+      msg.textContent = 'Enter a username and temporary password to create their tracking login.';
+      msg.classList.add('error');
+      return;
+    }
+    if(trackingPassword.length < 4){
+      msg.textContent = 'Tracking password should be at least 4 characters.';
+      msg.classList.add('error');
+      return;
+    }
+    const result = await createUser(trackingUsername, trackingPassword, name);
+    if(!result.ok){
+      msg.textContent = 'That tracking username is already taken — choose another.';
+      msg.classList.add('error');
+      return;
+    }
+    draft.trackingUsername = normUsername(trackingUsername);
+    await addActivityLog('Created km-tracking login @' + draft.trackingUsername + ' for ' + name);
+  }
+  if(needsTracking === 'no'){
+    draft.trackingUsername = draft.trackingUsername || '';
+  }
+
   Object.assign(draft, {
     id, name,
     designation: document.getElementById('f_designation').value.trim(),
@@ -2044,7 +2082,8 @@ async function saveEmployeeForm(){
     loanStatus: document.getElementById('f_loanStatus').value,
     diwaliEligible: document.getElementById('f_diwaliEligible').value,
     emergencyName: document.getElementById('f_emergencyName').value.trim(),
-    emergencyNumber: document.getElementById('f_emergencyNumber').value.trim()
+    emergencyNumber: document.getElementById('f_emergencyNumber').value.trim(),
+    trackingEnabled: needsTracking
   });
   if(editingEmployeeId){
     const idx = employees.findIndex(e => e.id === editingEmployeeId);
@@ -2058,6 +2097,7 @@ async function saveEmployeeForm(){
   closeEmployeeModal();
   await renderEmployeeList();
   await refreshDashboard();
+  await renderUserList();
 }
 
 async function deleteEmployee(id){
@@ -2132,21 +2172,6 @@ function importEmployeeBackup(event){
 
 // ---- reports tab ----
 async function renderReportsTab(){
-  const letters = [
-    {label:'Experience Letter', avatar:'E'}, {label:'Relieving Letter', avatar:'R'},
-    {label:'Exit Letter', avatar:'E'}, {label:'No Dues Letter', avatar:'N'},
-    {label:'Full & Final Settlement Letter', avatar:'F'}, {label:'Loan/Advance Request Form', avatar:'L'},
-    {label:'Salary Slip', avatar:'S'}
-  ];
-  const log = await getLettersLog();
-  document.getElementById('letterTypeCards').innerHTML = letters.map(l => {
-    const count = log.filter(x => x.type === l.label).length;
-    return `<div class="report-card">
-      <div class="head"><div class="avatar">${l.avatar}</div><div class="titlewrap"><strong>${l.label}</strong><span>${count} generated</span></div></div>
-      <button class="btn" onclick="jumpToGenerator('${l.label}')">Create</button>
-    </div>`;
-  }).join('');
-
   const employees = await getEmployees();
   const joiningDone = employees.filter(e => Object.values(e.checklists?.joining||{}).filter(Boolean).length === CHECKLIST_ITEMS.joining.length).length;
   const exitDone = employees.filter(e => Object.values(e.checklists?.exit||{}).filter(Boolean).length === CHECKLIST_ITEMS.exit.length).length;
