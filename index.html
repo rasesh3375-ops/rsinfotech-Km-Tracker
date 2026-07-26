@@ -423,6 +423,38 @@
     </section>
 
     <section class="block">
+      <h2 style="margin:0 0 4px;">Geofence zones</h2>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Define office or client zones — an engineer checked in outside all of these will be flagged as "outside zone" on the map and status list above.</p>
+      <div class="row-inline">
+        <div>
+          <label class="field">Zone name</label>
+          <input type="text" id="zoneNameInput" placeholder="e.g. Head Office" />
+        </div>
+      </div>
+      <div class="row-inline">
+        <div>
+          <label class="field">Latitude</label>
+          <input type="text" id="zoneLatInput" placeholder="e.g. 19.0760" />
+        </div>
+        <div>
+          <label class="field">Longitude</label>
+          <input type="text" id="zoneLonInput" placeholder="e.g. 72.8777" />
+        </div>
+        <div>
+          <label class="field">Radius (km)</label>
+          <input type="number" id="zoneRadiusInput" min="0.1" step="0.1" placeholder="e.g. 2" />
+        </div>
+      </div>
+      <div class="row-inline" style="margin-bottom:0;">
+        <button class="btn ghost" style="flex:1;" onclick="useCurrentLocationForZone()">Use my current location</button>
+        <button class="btn" style="flex:1;" onclick="addGeofenceZone()">Add zone</button>
+      </div>
+      <div class="msg" id="zoneMsg"></div>
+      <div style="height:14px"></div>
+      <div id="geofenceZoneList"></div>
+    </section>
+
+    <section class="block">
       <h2>Team overview</h2>
       <div id="hrSummaryGrid"></div>
       <div id="hrTable"></div>
@@ -431,6 +463,20 @@
         <button class="btn ghost" style="flex:1;" onclick="exportCSV()">Export CSV (Excel)</button>
         <button class="btn ghost" style="flex:1;" onclick="window.print()">Print / save PDF</button>
       </div>
+    </section>
+
+    <section class="block">
+      <h2 style="margin:0 0 4px;">Daily Summary</h2>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A one-tap digest of today's km, expenses and any flagged engineers — generate it and send by email or WhatsApp.</p>
+      <button class="btn full" onclick="generateDailySummary()">Generate today's summary</button>
+      <div id="dailySummaryOutput" class="hidden" style="margin-top:14px;">
+        <div class="letter-paper show" id="dailySummaryText" style="display:block;"></div>
+        <div class="row-inline" style="margin-top:10px;margin-bottom:0;">
+          <button class="btn ghost" style="flex:1;" onclick="emailDailySummary()">Email</button>
+          <button class="btn ghost" style="flex:1;" onclick="whatsappDailySummary()">WhatsApp</button>
+        </div>
+      </div>
+      <p style="font-size:11.5px;color:var(--muted);margin:12px 0 0;">This is one-tap, not automatic. True unattended daily sending needs a scheduled job on your storage backend (the Google Apps Script project this app already uses) — ask if you'd like the script for that.</p>
     </section>
 
     <section class="block">
@@ -458,6 +504,7 @@
       <div id="hrSubDash">
         <div class="inner-tabs">
           <button class="active" onclick="switchDashSub('reminders')" id="dashSubBtnReminders">Increment Reminders</button>
+          <button onclick="switchDashSub('expiry')" id="dashSubBtnExpiry">Document Expiry</button>
           <button onclick="switchDashSub('activity')" id="dashSubBtnActivity">Activity Log</button>
         </div>
 
@@ -471,6 +518,12 @@
             <div class="msg" id="reminderSaveMsg"></div>
             <div style="height:14px"></div>
             <div id="incrementReminderList"></div>
+          </section>
+        </div>
+        <div id="dashSubExpiry" class="hidden">
+          <section class="block">
+            <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Driving license and vehicle insurance expiries coming up in the next 30 days, from Employee Master.</p>
+            <div id="docExpiryList"></div>
           </section>
         </div>
         <div id="dashSubActivity" class="hidden">
@@ -502,6 +555,42 @@
       <!-- ===== Reports ===== -->
       <div id="hrSubReports" class="hidden">
         <div id="reportCardsBox"></div>
+
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">Attendance</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Sundays are excluded automatically. Add festivals or declared holidays below so they don't count as absent either.</p>
+          <div class="row-inline">
+            <div>
+              <label class="field">Engineer (tracking login)</label>
+              <select class="field-input" id="attendanceUserSelect"></select>
+            </div>
+            <div>
+              <label class="field">Month</label>
+              <input type="month" id="attendanceMonthInput" />
+            </div>
+          </div>
+          <button class="btn full" onclick="loadAttendanceCalendar()">Load attendance</button>
+          <div style="height:14px"></div>
+          <div id="attendanceCalendarBox"></div>
+        </section>
+
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">Holidays</h2>
+          <div class="row-inline">
+            <div>
+              <label class="field">Date</label>
+              <input type="date" id="holidayDateInput" />
+            </div>
+            <div>
+              <label class="field">Occasion</label>
+              <input type="text" id="holidayNameInput" placeholder="e.g. Diwali" />
+            </div>
+          </div>
+          <button class="btn full" onclick="addHoliday()">Add</button>
+          <div class="msg" id="holidayMsg"></div>
+          <div style="height:14px"></div>
+          <div id="holidayListBox"></div>
+        </section>
       </div>
 
       <!-- ===== Generator ===== -->
@@ -583,6 +672,8 @@ let pendingSelfie = null;
 let pendingCheckoutSelfie = null;
 let pendingTrip = null;
 let tripTrail = [];
+let cachedGeofences = [];
+let currentGeofenceStatus = 'none';
 
 function todayStr(d){
   const dt = d || new Date();
@@ -675,6 +766,20 @@ async function getRate(){
 }
 async function saveRateVal(v){
   await safeSet('rate_per_km', String(v), true);
+}
+async function getGeofences(){
+  const v = await safeGet('geofences', true);
+  return v ? JSON.parse(v) : [];
+}
+async function saveGeofences(list){
+  await safeSet('geofences', JSON.stringify(list), true);
+}
+async function getHolidays(){
+  const v = await safeGet('holidays', true);
+  return v ? JSON.parse(v) : [];
+}
+async function saveHolidays(list){
+  await safeSet('holidays', JSON.stringify(list), true);
 }
 
 function randomHex(len){
@@ -969,6 +1074,7 @@ async function enterHrMain(){
   const rate = await getRate();
   if(rate) document.getElementById('rateInput').value = rate;
   await renderUserList();
+  await renderGeofenceZones();
   await loadHR();
   await loadCompanyReport();
   if(hrInterval) clearInterval(hrInterval);
@@ -1059,6 +1165,8 @@ async function enterEngineerMain(){
     pendingSelfie = active.selfie || null;
     lastCoord = active.lastCoord || null;
     tripTrail = active.trail || (lastCoord ? [lastCoord] : []);
+    currentGeofenceStatus = active.geofenceStatus || 'none';
+    cachedGeofences = await getGeofences();
     lastGpsError = null;
     updateLiveDisplay();
     showDuringTrip();
@@ -1138,8 +1246,18 @@ async function pushActiveState(extra){
     lastHeartbeat: Date.now(),
     gpsError: lastGpsError,
     trail: tripTrail,
+    geofenceStatus: currentGeofenceStatus,
     battery
   }, extra || {}));
+}
+
+function updateGeofenceStatus(coord){
+  if(!cachedGeofences.length){
+    currentGeofenceStatus = 'none';
+    return;
+  }
+  const inside = cachedGeofences.some(z => haversineKm(coord.lat, coord.lon, z.lat, z.lon) <= z.radiusKm);
+  currentGeofenceStatus = inside ? 'inside' : 'outside';
 }
 
 async function handleSelfieCapture(event){
@@ -1166,6 +1284,8 @@ async function handleSelfieCapture(event){
   lastCoord = null;
   tripTrail = [];
   lastGpsError = null;
+  currentGeofenceStatus = 'none';
+  cachedGeofences = await getGeofences();
   startTime = new Date().toISOString();
   updateLiveDisplay();
   showDuringTrip();
@@ -1202,6 +1322,7 @@ function startWatch(resumed){
     lastCoord = { lat: latitude, lon: longitude };
     tripTrail.push(lastCoord);
     if(tripTrail.length > 40) tripTrail.shift();
+    updateGeofenceStatus(lastCoord);
     const now = Date.now();
     if(now - lastSaveTs > 15000){
       lastSaveTs = now;
@@ -1414,6 +1535,9 @@ function computeStatus(active){
     const mins = Math.round(fixAge/60000);
     return { level:'warn', label:'no GPS fix', detail: 'No location fix for ' + mins + ' min — GPS may be turned off or signal is weak.' };
   }
+  if(active.geofenceStatus === 'outside'){
+    return { level:'warn', label:'outside zone', detail: 'Currently outside all defined geofence zones.' };
+  }
   return { level:'ok', label:'live', detail: 'Tracking normally · updated ' + new Date(active.lastHeartbeat).toLocaleTimeString() };
 }
 
@@ -1552,6 +1676,76 @@ function renderLiveStatus(infos){
   }).join('');
 }
 
+// ---- geofence zones ----
+async function renderGeofenceZones(){
+  const zones = await getGeofences();
+  const box = document.getElementById('geofenceZoneList');
+  if(!box) return;
+  if(!zones.length){
+    box.innerHTML = '<div class="empty">No zones defined yet — engineers won\'t be flagged for location until you add one.</div>';
+    return;
+  }
+  box.innerHTML = zones.map(z => `
+    <div class="emp-row">
+      <div class="head"><strong>${z.name}</strong><span class="id">${z.radiusKm} km radius</span></div>
+      <div class="sub">${z.lat.toFixed(5)}, ${z.lon.toFixed(5)}</div>
+      <div class="actions"><button class="btn ghost" onclick="deleteGeofenceZone('${z.id}')">Delete</button></div>
+    </div>`).join('');
+}
+
+function useCurrentLocationForZone(){
+  const msg = document.getElementById('zoneMsg');
+  if(!navigator.geolocation){
+    msg.textContent = 'This browser does not support location.';
+    msg.classList.add('error');
+    return;
+  }
+  msg.textContent = 'Getting your current location…';
+  msg.classList.remove('error');
+  navigator.geolocation.getCurrentPosition(pos => {
+    document.getElementById('zoneLatInput').value = pos.coords.latitude.toFixed(6);
+    document.getElementById('zoneLonInput').value = pos.coords.longitude.toFixed(6);
+    msg.textContent = 'Location filled in — add a name and radius, then Add zone.';
+  }, () => {
+    msg.textContent = 'Could not get your location. Enter latitude/longitude manually.';
+    msg.classList.add('error');
+  });
+}
+
+async function addGeofenceZone(){
+  const msg = document.getElementById('zoneMsg');
+  const name = document.getElementById('zoneNameInput').value.trim();
+  const lat = parseFloat(document.getElementById('zoneLatInput').value);
+  const lon = parseFloat(document.getElementById('zoneLonInput').value);
+  const radiusKm = parseFloat(document.getElementById('zoneRadiusInput').value);
+  if(!name || isNaN(lat) || isNaN(lon) || isNaN(radiusKm) || radiusKm <= 0){
+    msg.textContent = 'Enter a zone name, valid latitude/longitude and a radius greater than 0.';
+    msg.classList.add('error');
+    return;
+  }
+  const zones = await getGeofences();
+  zones.push({ id: randomHex(6), name, lat, lon, radiusKm });
+  await saveGeofences(zones);
+  await addActivityLog('Added geofence zone "' + name + '" (' + radiusKm + ' km radius)');
+  document.getElementById('zoneNameInput').value = '';
+  document.getElementById('zoneLatInput').value = '';
+  document.getElementById('zoneLonInput').value = '';
+  document.getElementById('zoneRadiusInput').value = '';
+  msg.textContent = 'Zone added.';
+  msg.classList.remove('error');
+  await renderGeofenceZones();
+}
+
+async function deleteGeofenceZone(id){
+  if(!confirm('Remove this geofence zone?')) return;
+  let zones = await getGeofences();
+  const zone = zones.find(z => z.id === id);
+  zones = zones.filter(z => z.id !== id);
+  await saveGeofences(zones);
+  if(zone) await addActivityLog('Removed geofence zone "' + zone.name + '"');
+  await renderGeofenceZones();
+}
+
 let lastHRRows = [];
 
 async function loadHR(){
@@ -1654,6 +1848,43 @@ function exportCSV(){
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+let lastDailySummaryText = '';
+
+async function generateDailySummary(){
+  if(!lastHRRows.length){
+    alert('No team data yet — add engineer logins first.');
+    return;
+  }
+  const rate = await getRate();
+  const today = todayStr();
+  let totalKm = 0, totalExpense = 0;
+  const flagged = [];
+  const lines = lastHRRows.map(r => {
+    totalKm += r.kmToday;
+    const todayExpense = r.kmToday * rate;
+    totalExpense += todayExpense;
+    if(r.status !== 'live' && r.status !== 'idle'){
+      flagged.push(r.name + ' (' + r.status + ')');
+    }
+    return `${r.name}: ${fmtKm(r.kmToday)} km · ₹${todayExpense.toFixed(0)} · ${r.status}`;
+  });
+  const text = `R.S. Infotech — Daily Summary (${today})\n\n${lines.join('\n')}\n\nTotal distance: ${fmtKm(totalKm)} km\nTotal expense: ₹${totalExpense.toFixed(0)}${flagged.length ? ('\n\nFlagged: ' + flagged.join(', ')) : ''}`;
+  lastDailySummaryText = text;
+  document.getElementById('dailySummaryText').textContent = text;
+  document.getElementById('dailySummaryOutput').classList.remove('hidden');
+}
+
+function emailDailySummary(){
+  if(!lastDailySummaryText) return;
+  const subject = encodeURIComponent('Daily Summary — ' + todayStr());
+  const body = encodeURIComponent(lastDailySummaryText);
+  window.location.href = `mailto:?subject=${subject}&body=${body}`;
+}
+function whatsappDailySummary(){
+  if(!lastDailySummaryText) return;
+  window.open('https://wa.me/?text=' + encodeURIComponent(lastDailySummaryText), '_blank');
 }
 
 let lastCompanyRows = [];
@@ -1789,11 +2020,12 @@ function switchHrSub(sub){
   if(sub === 'generator') renderGeneratorTab();
 }
 function switchDashSub(sub){
-  ['reminders','activity'].forEach(s => {
+  ['reminders','expiry','activity'].forEach(s => {
     document.getElementById('dashSub' + s.charAt(0).toUpperCase() + s.slice(1)).classList.toggle('hidden', s !== sub);
     document.getElementById('dashSubBtn' + s.charAt(0).toUpperCase() + s.slice(1)).classList.toggle('active', s === sub);
   });
   if(sub === 'reminders') renderIncrementReminders();
+  if(sub === 'expiry') renderDocExpiryList();
   if(sub === 'activity') renderActivityLogList();
 }
 
@@ -1859,6 +2091,41 @@ async function renderIncrementReminders(){
   }).join('');
 }
 
+async function renderDocExpiryList(){
+  const employees = await getEmployees();
+  const box = document.getElementById('docExpiryList');
+  if(!box) return;
+  const now = new Date();
+  const in30 = new Date(); in30.setDate(now.getDate() + 30);
+  const items = [];
+  employees.forEach(e => {
+    if(e.employmentStatus === 'left') return;
+    [['licenseExpiry','Driving license'], ['insuranceExpiry','Vehicle insurance']].forEach(([field, label]) => {
+      if(!e[field]) return;
+      const d = new Date(e[field]);
+      if(d >= now && d <= in30){
+        items.push({ name: e.name, designation: e.designation, docLabel: label, date: e[field], days: Math.ceil((d - now) / 86400000) });
+      }
+    });
+  });
+  items.sort((a,b) => new Date(a.date) - new Date(b.date));
+  if(!items.length){
+    box.innerHTML = '<div class="empty">No license or insurance expiries in the next 30 days.</div>';
+    return;
+  }
+  const email = await getReminderEmail();
+  box.innerHTML = items.map(it => {
+    const subject = encodeURIComponent(it.docLabel + ' expiry: ' + it.name);
+    const body = encodeURIComponent('Reminder: ' + it.name + '\'s ' + it.docLabel.toLowerCase() + ' expires on ' + it.date + '.');
+    const mailLink = email ? `mailto:${email}?subject=${subject}&body=${body}` : `mailto:?subject=${subject}&body=${body}`;
+    return `<div class="emp-row">
+      <div class="head"><strong>${it.name}</strong><span class="id">in ${it.days} day${it.days===1?'':'s'}</span></div>
+      <div class="sub">${it.docLabel} expires ${it.date}${it.designation ? (' · ' + it.designation) : ''}</div>
+      <div class="actions"><a class="btn ghost" href="${mailLink}">Send reminder email</a></div>
+    </div>`;
+  }).join('');
+}
+
 async function renderActivityLogList(){
   document.getElementById('activitySummaryLine').textContent = await buildActivitySummaryLine();
   const log = await getActivityLog();
@@ -1904,6 +2171,7 @@ function emptyEmployee(){
     emergencyName:'', emergencyNumber:'',
     trackingEnabled:'no', trackingUsername:'',
     employmentStatus:'active', leftDate:'',
+    licenseExpiry:'', insuranceExpiry:'',
     aadhaarCardImg:'', panCardImg:'', otherDocs:[],
     checklists:{ joining:{}, exit:{} }
   };
@@ -2063,6 +2331,13 @@ function employeeModalHtml(emp){
             <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Saving this employee will create their km-tracking login automatically — share the username and password with them directly.</p>
           `}
         </div>
+        <div style="height:14px"></div>
+        <label class="field">Driving license expiry date</label>
+        <input type="date" id="f_licenseExpiry" value="${emp.licenseExpiry||''}">
+        <div style="height:12px"></div>
+        <label class="field">Vehicle insurance expiry date</label>
+        <input type="date" id="f_insuranceExpiry" value="${emp.insuranceExpiry||''}">
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">You'll get a reminder in Dashboard → Document Expiry a month before either of these run out.</p>
       </div>
 
       <div class="field-group">
@@ -2228,7 +2503,9 @@ async function saveEmployeeForm(){
     diwaliEligible: document.getElementById('f_diwaliEligible').value,
     emergencyName: document.getElementById('f_emergencyName').value.trim(),
     emergencyNumber: document.getElementById('f_emergencyNumber').value.trim(),
-    trackingEnabled: needsTracking
+    trackingEnabled: needsTracking,
+    licenseExpiry: document.getElementById('f_licenseExpiry').value,
+    insuranceExpiry: document.getElementById('f_insuranceExpiry').value
   });
   if(editingEmployeeId){
     const idx = employees.findIndex(e => e.id === editingEmployeeId);
@@ -2376,6 +2653,8 @@ async function renderReportsTab(){
       <div id="reportBox_${r.key}"></div>
     </div>`;
   }).join('');
+  await populateAttendanceUserSelect();
+  await renderHolidayList();
 }
 
 function reportHasData(key, e){
@@ -2385,6 +2664,125 @@ function reportHasData(key, e){
   if(key==='salary') return (Number(e.basic)||0) > 0;
   if(key==='loan') return (Number(e.loanAmount)||0) > 0;
   return false;
+}
+
+// ---- attendance & holidays ----
+async function populateAttendanceUserSelect(){
+  const sel = document.getElementById('attendanceUserSelect');
+  if(!sel) return;
+  const users = await getUsers();
+  const prev = sel.value;
+  if(!users.length){
+    sel.innerHTML = '<option value="">No engineer logins yet</option>';
+    return;
+  }
+  sel.innerHTML = users.map(u => `<option value="${u.username}">${u.displayName || u.username}</option>`).join('');
+  if(prev && users.some(u => u.username === prev)) sel.value = prev;
+  const monthInput = document.getElementById('attendanceMonthInput');
+  if(monthInput && !monthInput.value){
+    const d = new Date();
+    monthInput.value = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+  }
+}
+
+async function loadAttendanceCalendar(){
+  const box = document.getElementById('attendanceCalendarBox');
+  const username = document.getElementById('attendanceUserSelect').value;
+  const monthStr = document.getElementById('attendanceMonthInput').value;
+  if(!username){
+    box.innerHTML = '<div class="empty">Add an engineer login first.</div>';
+    return;
+  }
+  if(!monthStr){
+    box.innerHTML = '<div class="empty">Choose a month.</div>';
+    return;
+  }
+  const [year, month] = monthStr.split('-').map(Number);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const trips = await getTrips(username);
+  const tripDates = new Set(trips.map(t => t.date));
+  const holidays = await getHolidays();
+  const holidayMap = {};
+  holidays.forEach(h => { holidayMap[h.date] = h.name; });
+  const todayD = todayStr();
+
+  let present = 0, absent = 0, offDays = 0;
+  const rows = [];
+  for(let day = 1; day <= daysInMonth; day++){
+    const dateStr = year + '-' + String(month).padStart(2,'0') + '-' + String(day).padStart(2,'0');
+    const dow = new Date(year, month - 1, day).getDay();
+    let status, cls;
+    if(dateStr > todayD){
+      status = '—'; cls = '';
+    } else if(dow === 0){
+      status = 'Weekly off (Sunday)'; cls = ''; offDays++;
+    } else if(holidayMap[dateStr]){
+      status = 'Holiday — ' + holidayMap[dateStr]; cls = ''; offDays++;
+    } else if(tripDates.has(dateStr)){
+      status = 'Present'; cls = 'live'; present++;
+    } else {
+      status = 'Absent'; cls = 'warn'; absent++;
+    }
+    const dayName = new Date(year, month - 1, day).toLocaleDateString(undefined, { weekday: 'short' });
+    rows.push(`<tr><td>${dateStr} (${dayName})</td><td><span class="pill ${cls}">${status}</span></td></tr>`);
+  }
+  box.innerHTML = `
+    <div class="summary-grid" style="grid-template-columns:repeat(3,1fr);">
+      <div class="stat"><div class="n">${present}</div><div class="l">Present</div></div>
+      <div class="stat"><div class="n">${absent}</div><div class="l">Absent</div></div>
+      <div class="stat"><div class="n">${offDays}</div><div class="l">Off / holiday</div></div>
+    </div>
+    <table><tr><th>Date</th><th>Status</th></tr>${rows.join('')}</table>`;
+}
+
+async function addHoliday(){
+  const msg = document.getElementById('holidayMsg');
+  const date = document.getElementById('holidayDateInput').value;
+  const name = document.getElementById('holidayNameInput').value.trim();
+  if(!date || !name){
+    msg.textContent = 'Enter both a date and an occasion name.';
+    msg.classList.add('error');
+    return;
+  }
+  const holidays = await getHolidays();
+  if(holidays.some(h => h.date === date)){
+    msg.textContent = 'A holiday is already recorded for that date.';
+    msg.classList.add('error');
+    return;
+  }
+  holidays.push({ date, name });
+  holidays.sort((a,b) => a.date.localeCompare(b.date));
+  await saveHolidays(holidays);
+  await addActivityLog('Added holiday "' + name + '" (' + date + ')');
+  document.getElementById('holidayDateInput').value = '';
+  document.getElementById('holidayNameInput').value = '';
+  msg.textContent = 'Holiday added.';
+  msg.classList.remove('error');
+  await renderHolidayList();
+}
+
+async function deleteHoliday(date){
+  let holidays = await getHolidays();
+  const h = holidays.find(x => x.date === date);
+  holidays = holidays.filter(x => x.date !== date);
+  await saveHolidays(holidays);
+  if(h) await addActivityLog('Removed holiday "' + h.name + '" (' + date + ')');
+  await renderHolidayList();
+}
+
+async function renderHolidayList(){
+  const box = document.getElementById('holidayListBox');
+  if(!box) return;
+  const holidays = await getHolidays();
+  if(!holidays.length){
+    box.innerHTML = '<div class="empty">No holidays added yet.</div>';
+    return;
+  }
+  box.innerHTML = holidays.map(h => `
+    <div class="emp-row">
+      <div class="head"><strong>${h.name}</strong><span class="id">${h.date}</span></div>
+      <div class="actions"><button class="btn ghost" onclick="deleteHoliday('${h.date}')">Delete</button></div>
+    </div>`).join('');
 }
 
 async function viewReport(key, label){
