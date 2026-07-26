@@ -981,6 +981,31 @@ async function remoteDelete(key){
     });
   }catch(e){}
 }
+
+// Saves a file into the matching tab/report folder in Google Drive, under
+// "R.S. Infotech HR Dashboard". Folder path mirrors the app's own tab names.
+// Non-blocking: if it fails, the report/letter itself still works normally.
+async function saveFileToDrive(folderPath, fileName, content, mimeType){
+  try{
+    await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'saveFile', folderPath, fileName, content, mimeType: mimeType || 'text/plain' })
+    });
+  }catch(e){
+    // Drive save is a bonus, not a requirement — the report already rendered fine either way
+  }
+}
+function csvEscape(v){
+  const s = (v===undefined || v===null) ? '' : String(v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+}
+function toCsv(headerArr, rowsArr){
+  const lines = [headerArr.map(csvEscape).join(',')];
+  rowsArr.forEach(r => lines.push(r.map(csvEscape).join(',')));
+  return lines.join('\n');
+}
+
 let lastBackendError = '';
 async function testBackendConnection(){
   const box = document.getElementById('backendTestResult');
@@ -2263,6 +2288,8 @@ async function renderAttendanceSheet(){
   let headerRow = '<tr><th>S.No</th><th style="text-align:left;">Name</th>' +
     dateList.map(d => `<th>${parseInt(d.slice(8),10)}</th>`).join('') +
     '<th>Present</th><th>Absent</th><th>EL</th><th>SL</th><th>LP</th><th>Half</th><th>Short</th><th>Late</th></tr>';
+  const csvHeader = ['S.No','Name', ...dateList.map(d => parseInt(d.slice(8),10)), 'Present','Absent','EL','SL','LP','Half','Short','Late'];
+  const csvRows = [];
 
   let bodyRows = '';
   for(let i=0; i<employees.length; i++){
@@ -2270,10 +2297,12 @@ async function renderAttendanceSheet(){
     const att = await getAttendance(emp.id);
     const isResident = emp.employeeType === 'resident';
     const summary = computeAttendanceSummary(att, emp, dateList, holidayMap);
+    const dayCodes = [];
     const dayCells = dateList.map(dateStr => {
       const dow = new Date(dateStr).getDay();
       const entry = att[dateStr];
       const defaultCode = entry ? entry.code : (holidayMap[dateStr] ? 'H' : (dow === 0 ? 'H' : (dateStr <= todayStr() ? 'A' : '')));
+      dayCodes.push(defaultCode || '');
       const options = ATT_CODES.filter(c => !(isResident && c === 'SHORT'))
         .map(c => `<option value="${c}" ${c===defaultCode?'selected':''}>${c}</option>`).join('');
       const blankOpt = defaultCode ? '' : `<option value="" selected></option>`;
@@ -2282,7 +2311,10 @@ async function renderAttendanceSheet(){
     }).join('');
     bodyRows += `<tr><td>${i+1}</td><td class="att-name">${emp.name}${isResident?' <span style="color:var(--muted);font-size:10px;">(Resident)</span>':''}</td>${dayCells}` +
       `<td>${summary.present}</td><td>${summary.absent}</td><td>${summary.elUsed}</td><td>${summary.slUsed}</td><td>${summary.lpDays}</td><td>${summary.halfDays}</td><td>${summary.shortCount}</td><td>${summary.lateCount}</td></tr>`;
+    csvRows.push([i+1, emp.name, ...dayCodes, summary.present, summary.absent, summary.elUsed, summary.slUsed, summary.lpDays, summary.halfDays, summary.shortCount, summary.lateCount]);
   }
+
+  saveFileToDrive(['HR Management','Dashboard','Attendance Sheet'], `Attendance Sheet - ${monthInput.value}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
 
   box.innerHTML = `${reportLogoHeader('Attendance Sheet — ' + monthInput.value)}
     <div class="att-sheet-wrap"><table class="att-table">${headerRow}${bodyRows}</table></div>
@@ -2421,11 +2453,13 @@ async function renderSalarySheet(){
   let bodyRows = '';
   let srNo = 1;
   const grand = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netSalary:0 };
+  const csvRows = [];
 
   for(const headingKey of SALARY_HEADING_ORDER){
     const group = employees.filter(e => (e.salaryHeading||'managerial') === headingKey);
     if(!group.length) continue;
     bodyRows += `<tr class="sal-heading"><td colspan="17">${SALARY_HEADINGS[headingKey].label}</td></tr>`;
+    csvRows.push([SALARY_HEADINGS[headingKey].label]);
     const sub = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netSalary:0 };
     for(const emp of group){
       const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
@@ -2433,18 +2467,23 @@ async function renderSalarySheet(){
         `<td>${fmtMoney(s.basic)}</td><td>${fmtMoney(s.hra)}</td><td>${fmtMoney(s.lta)}</td><td>${fmtMoney(s.gross)}</td>` +
         `<td>${fmtMoney(s.pf)}</td><td>${fmtMoney(s.esi)}</td><td>${fmtMoney(s.pt)}</td><td>${fmtMoney(s.advanceTemp)}</td><td>${fmtMoney(s.advance)}</td><td>${fmtMoney(s.retention)}</td>` +
         `<td>${fmtMoney(s.totalDeduction)}</td><td>${fmtMoney(s.netSalary)}</td></tr>`;
+      csvRows.push([srNo-1, emp.name, s.rate, s.leaveDays, s.leaveAmount, s.basic, s.hra, s.lta, s.gross, s.pf, s.esi, s.pt, s.advanceTemp, s.advance, s.retention, s.totalDeduction, s.netSalary]);
       ['rate','leaveAmount','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','retention','totalDeduction','netSalary'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; });
     }
     bodyRows += `<tr class="sal-subtotal"><td></td><td>Subtotal</td><td>${fmtMoney(sub.rate)}</td><td></td><td>${fmtMoney(sub.leaveAmount)}</td>` +
       `<td>${fmtMoney(sub.basic)}</td><td>${fmtMoney(sub.hra)}</td><td>${fmtMoney(sub.lta)}</td><td>${fmtMoney(sub.gross)}</td>` +
       `<td>${fmtMoney(sub.pf)}</td><td>${fmtMoney(sub.esi)}</td><td>${fmtMoney(sub.pt)}</td><td>${fmtMoney(sub.advanceTemp)}</td><td>${fmtMoney(sub.advance)}</td><td>${fmtMoney(sub.retention)}</td>` +
       `<td>${fmtMoney(sub.totalDeduction)}</td><td>${fmtMoney(sub.netSalary)}</td></tr>`;
+    csvRows.push(['', 'Subtotal', sub.rate, '', sub.leaveAmount, sub.basic, sub.hra, sub.lta, sub.gross, sub.pf, sub.esi, sub.pt, sub.advanceTemp, sub.advance, sub.retention, sub.totalDeduction, sub.netSalary]);
   }
 
   bodyRows += `<tr class="sal-grandtotal"><td></td><td>Grand Total</td><td>${fmtMoney(grand.rate)}</td><td></td><td>${fmtMoney(grand.leaveAmount)}</td>` +
     `<td>${fmtMoney(grand.basic)}</td><td>${fmtMoney(grand.hra)}</td><td>${fmtMoney(grand.lta)}</td><td>${fmtMoney(grand.gross)}</td>` +
     `<td>${fmtMoney(grand.pf)}</td><td>${fmtMoney(grand.esi)}</td><td>${fmtMoney(grand.pt)}</td><td>${fmtMoney(grand.advanceTemp)}</td><td>${fmtMoney(grand.advance)}</td><td>${fmtMoney(grand.retention)}</td>` +
     `<td>${fmtMoney(grand.totalDeduction)}</td><td>${fmtMoney(grand.netSalary)}</td></tr>`;
+  csvRows.push(['', 'Grand Total', grand.rate, '', grand.leaveAmount, grand.basic, grand.hra, grand.lta, grand.gross, grand.pf, grand.esi, grand.pt, grand.advanceTemp, grand.advance, grand.retention, grand.totalDeduction, grand.netSalary]);
+
+  saveFileToDrive(['HR Management','Dashboard','Salary Sheet'], `Salary Sheet - ${monthInput.value}.csv`, toCsv(cols, csvRows), 'text/csv');
 
   box.innerHTML = `<div class="sal-sheet-wrap print-isolate" id="salaryPrintArea">
       ${reportLogoHeader('Salary Sheet — ' + monthInput.value)}
@@ -2870,6 +2909,8 @@ async function renderIncrementReminders(){
     return;
   }
   const email = await getReminderEmail();
+  saveFileToDrive(['HR Management','Dashboard','Increment Reminders'], `Increment Reminders - ${todayStr()}.csv`,
+    toCsv(['Name','Designation','Increment due','Days away'], upcoming.map(e => [e.name, e.designation||'', e.nextIncrement, Math.ceil((new Date(e.nextIncrement) - now) / 86400000)])), 'text/csv');
   box.innerHTML = reportLogoHeader('Increment Reminders') + upcoming.map(e => {
     const days = Math.ceil((new Date(e.nextIncrement) - now) / 86400000);
     const subject = encodeURIComponent('Increment reminder: ' + e.name);
@@ -3706,6 +3747,9 @@ async function renderElCalculationSheet(){
     rows.push({ id: emp.id, name: emp.name, opening, presentDays, earned, elUsed, closing });
   }
 
+  saveFileToDrive(['HR Management','Reports','EL Calculation Sheet'], `EL Calculation Sheet - FY ${startYear}-${String(startYear+1).slice(2)}.csv`,
+    toCsv(['Name','Opening EL','Present days (FY)','EL earned','EL used','Closing EL'], rows.map(r => [r.name, r.opening, r.presentDays, r.earned, r.elUsed, r.closing])), 'text/csv');
+
   box.innerHTML = `
     <div style="overflow-x:auto;"><table>
       <tr><th>Name</th><th class="num">Opening EL</th><th class="num">Present days (FY)</th><th class="num">EL earned</th><th class="num">EL used</th><th class="num">Closing EL</th></tr>
@@ -3792,6 +3836,8 @@ async function renderOvertimeReport(){
     return;
   }
   const totalHours = log.reduce((sum,o) => sum + Number(o.hours), 0);
+  saveFileToDrive(['HR Management','Reports','Overtime Report'], `Overtime Report - ${monthStr}.csv`,
+    toCsv(['Name','Date','Hours','Note'], log.map(o => [o.name, o.date, o.hours, o.note||''])), 'text/csv');
   box.innerHTML = `<div style="overflow-x:auto;"><table>
       <tr><th>Name</th><th>Date</th><th class="num">Hours</th><th>Note</th><th></th></tr>
       ${log.map(o => `<tr><td>${o.name}</td><td>${o.date}</td><td class="num">${o.hours}</td><td>${o.note||''}</td><td><button class="btn ghost" style="font-size:11px;padding:5px 8px;" onclick="deleteOvertimeEntry('${o.id}')">Delete</button></td></tr>`).join('')}
@@ -3840,6 +3886,8 @@ async function generateHolidayListDoc(){
           return d.toLocaleDateString(undefined, { day: '2-digit', month: 'long', year: 'numeric' }) + ' (' + d.toLocaleDateString(undefined, { weekday: 'long' }) + ') — ' + h.name;
         }).join('\n')
       : 'No holidays added for ' + year + ' yet.');
+
+  saveFileToDrive(['HR Management','Reports','Holiday List'], `Holiday List - ${year}.txt`, lastHolidayListText, 'text/plain');
 }
 
 function emailHolidayList(){
@@ -3858,46 +3906,62 @@ async function viewReport(key, label){
   const box = document.getElementById('reportBox_' + key);
   const fsBtn = `<button class="btn ghost full" style="margin-top:8px;" onclick="openFullscreenView('${label.replace(/'/g,"\\'")}','reportBox_${key}')">⛶ Full screen</button>`;
   let rows = '';
+  let csvHeader = [], csvRows = [];
   if(key === 'contact'){
+    csvHeader = ['Name','Designation','Phone','Email'];
+    csvRows = employees.map(e => [e.name, e.designation||'', e.phone||'', e.email||'']);
     rows = employees.map(e => `<tr><td>${e.name}</td><td>${e.designation||''}</td><td>${e.phone||''}</td><td>${e.email||''}</td></tr>`).join('');
     box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Designation</th><th>Phone</th><th>Email</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'birthday'){
+    csvHeader = ['Name','Date of birth'];
+    csvRows = employees.filter(e=>e.dob).map(e => [e.name, e.dob]);
     rows = employees.filter(e=>e.dob).map(e => `<tr><td>${e.name}</td><td>${e.dob}</td></tr>`).join('');
     box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Date of birth</th></tr>${rows || '<tr><td colspan="2" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'increment'){
+    csvHeader = ['Name','Increment month','Increment date','Last salary (gross)'];
     rows = employees.filter(e=>e.nextIncrement).map(e => {
       const d = new Date(e.nextIncrement);
       const monthName = d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
       const lastSalary = (Number(e.basic)||0)+(Number(e.hra)||0)+(Number(e.otherAllowances)||0);
+      csvRows.push([e.name, monthName, e.nextIncrement, lastSalary]);
       return `<tr><td>${e.name}</td><td>${monthName}</td><td>${e.nextIncrement}</td><td class="num">₹${lastSalary.toFixed(0)}</td></tr>`;
     }).join('');
     box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Increment month</th><th>Increment date</th><th class="num">Last salary (gross)</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'diwali'){
+    csvHeader = ['Name','Eligible','Bonus'];
+    csvRows = employees.map(e => [e.name, e.diwaliEligible==='yes'?'Yes':'No', diwaliBonusFor(e)]);
     rows = employees.map(e => `<tr><td>${e.name}</td><td>${e.diwaliEligible==='yes'?'Yes':'No'}</td><td class="num">₹${diwaliBonusFor(e)}</td></tr>`).join('');
     box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Eligible</th><th class="num">Bonus</th></tr>${rows || '<tr><td colspan="3" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'salary'){
+    csvHeader = ['Name','Gross','Deductions','Net'];
     rows = employees.map(e => {
       const gross = (Number(e.basic)||0)+(Number(e.hra)||0)+(Number(e.otherAllowances)||0);
       const emi = e.loanStatus === 'active' ? (Number(e.emiPerMonth)||0) : 0;
       const deductions = (Number(e.stdDeductions)||0)+(Number(e.pf)||0)+(Number(e.esiDeduction)||0)+(Number(e.pt)||0)+emi;
       const net = gross - deductions;
+      csvRows.push([e.name, gross, deductions, net]);
       return `<tr><td>${e.name}</td><td class="num">₹${gross.toFixed(0)}</td><td class="num">₹${deductions.toFixed(0)}</td><td class="num">₹${net.toFixed(0)}</td></tr>`;
     }).join('');
     box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th class="num">Gross</th><th class="num">Deductions</th><th class="num">Net</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'ctc'){
+    csvHeader = ['Name','Monthly gross','Annual gross','Diwali bonus','Annual CTC'];
     rows = employees.map(e => {
       const monthlyGross = (Number(e.basic)||0)+(Number(e.hra)||0)+(Number(e.otherAllowances)||0)+(Number(e.dressAllowance)||0)+(Number(e.mobileExpense)||0);
       const annualGross = monthlyGross * 12;
       const bonus = diwaliBonusFor(e);
       const annualCtc = annualGross + bonus;
+      csvRows.push([e.name, monthlyGross, annualGross, bonus, annualCtc]);
       return `<tr><td>${e.name}</td><td class="num">₹${monthlyGross.toFixed(0)}</td><td class="num">₹${annualGross.toFixed(0)}</td><td class="num">₹${bonus.toFixed(0)}</td><td class="num">₹${annualCtc.toFixed(0)}</td></tr>`;
     }).join('');
     box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}<table><tr><th>Name</th><th class="num">Monthly gross</th><th class="num">Annual gross</th><th class="num">Diwali bonus</th><th class="num">Annual CTC</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table><p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Annual CTC = (Basic + HRA + Other allowances + Dress allowance + Mobile expense) × 12 + Diwali bonus. PF, ESI and PT are employee-side deductions, not added here.</p>${fsBtn}</div>`;
   } else if(key === 'loan'){
+    csvHeader = ['Name','Loan amount','EMI','Status'];
+    csvRows = employees.filter(e=>(Number(e.loanAmount)||0)>0).map(e => [e.name, e.loanAmount, e.emiPerMonth, e.loanStatus]);
     rows = employees.filter(e=>(Number(e.loanAmount)||0)>0).map(e => `<tr><td>${e.name}</td><td class="num">₹${e.loanAmount}</td><td class="num">₹${e.emiPerMonth}</td><td>${e.loanStatus}</td></tr>`).join('');
     box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th class="num">Loan amount</th><th class="num">EMI</th><th>Status</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'retention'){
     const now = new Date();
+    csvHeader = ['Name','Bond start','Bond end','Retention money','Months','Monthly deduction','Months elapsed','Deducted so far','Balance'];
     rows = employees.filter(e => (Number(e.retentionMoney)||0) > 0 && (Number(e.retentionMonths)||0) > 0 && e.bondStart).map(e => {
       const money = Number(e.retentionMoney)||0;
       const months = Number(e.retentionMonths)||0;
@@ -3908,9 +3972,13 @@ async function viewReport(key, label){
       const monthsElapsed = Math.min(Math.max(nowIndex - startIndex, 0), months);
       const deductedSoFar = Math.round(monthly * monthsElapsed * 100)/100;
       const balance = Math.round((money - deductedSoFar)*100)/100;
+      csvRows.push([e.name, e.bondStart||'', e.bondEnd||'', money, months, monthly, monthsElapsed, deductedSoFar, balance]);
       return `<tr><td>${e.name}</td><td>${e.bondStart||''}</td><td>${e.bondEnd||''}</td><td class="num">₹${fmtMoney(money)}</td><td class="num">${months}</td><td class="num">₹${fmtMoney(monthly)}</td><td class="num">${monthsElapsed}</td><td class="num">₹${fmtMoney(deductedSoFar)}</td><td class="num">₹${fmtMoney(balance)}</td></tr>`;
     }).join('');
     box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Bond start</th><th>Bond end</th><th class="num">Retention money</th><th class="num">Months</th><th class="num">Monthly deduction</th><th class="num">Months elapsed</th><th class="num">Deducted so far</th><th class="num">Balance</th></tr>${rows || '<tr><td colspan="9" class="empty">No employees with retention money configured</td></tr>'}</table>${fsBtn}</div>`;
+  }
+  if(csvHeader.length){
+    saveFileToDrive(['HR Management','Reports',label], `${label} - ${todayStr()}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
   }
 }
 
@@ -4046,6 +4114,9 @@ async function generateLetter(){
   log.push({ type, employeeName: name, date: new Date().toISOString() });
   await saveLettersLog(log);
   await addActivityLog('Generated ' + type + ' for ' + name);
+
+  const safeType = type.replace(/\//g, '-'); // matches the Drive folder name (no slashes in folder names)
+  saveFileToDrive(['HR Management','Generator',safeType], `${name} - ${f.issueDate}.txt`, text, 'text/plain');
 }
 
 function escapeHtml(str){
