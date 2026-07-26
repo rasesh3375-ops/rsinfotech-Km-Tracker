@@ -829,6 +829,12 @@ async function remoteDelete(key){
   }catch(e){}
 }
 
+// Every "shared" key also gets a local mirror. This is what makes the app
+// actually work today: the API_URL above is still a placeholder, so every
+// remote call fails, and without this fallback nothing shared (employees,
+// trips, engineer logins, holidays, etc.) would ever save at all. Once a
+// real Apps Script URL is configured, remote reads/writes start succeeding
+// and take priority automatically — the local copy just stops being needed.
 async function safeGet(key, shared){
   try{
     if(!shared){
@@ -836,7 +842,9 @@ async function safeGet(key, shared){
       return v !== null ? v : null;
     }
     const r = await remoteGet(key);
-    return r ? r.value : null;
+    if(r && r.value !== undefined && r.value !== null) return r.value;
+    const local = localStorage.getItem('kmt_shared_' + key);
+    return local !== null ? local : null;
   }catch(e){ return null; }
 }
 async function safeSet(key, value, shared){
@@ -845,6 +853,7 @@ async function safeSet(key, value, shared){
       localStorage.setItem('kmt_' + key, value);
       return;
     }
+    localStorage.setItem('kmt_shared_' + key, value);
     await remoteSet(key, value);
   }catch(e){}
 }
@@ -876,6 +885,7 @@ async function setActive(name, obj){
   await safeSet('active:' + name, JSON.stringify(obj), true);
 }
 async function clearActive(name){
+  try{ localStorage.removeItem('kmt_shared_active:' + name); }catch(e){}
   try{ await remoteDelete('active:' + name); }catch(e){}
 }
 async function getRate(){
