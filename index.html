@@ -4,6 +4,39 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>R.S. Infotech — KM Tracker</title>
+
+<!-- Favicons (Mac / Windows / Linux desktop browsers) -->
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png">
+
+<!-- Android / Chrome / desktop PWA install -->
+<link rel="manifest" id="appManifest" href="/manifest.json">
+<meta name="theme-color" content="#16213E">
+
+<!-- iOS Add to Home Screen -->
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" id="appleTitle" content="RS KM Tracker">
+
+<!-- Windows / Microsoft tiles -->
+<meta name="msapplication-config" content="/browserconfig.xml">
+<meta name="msapplication-TileColor" content="#16213E">
+<meta name="msapplication-TileImage" content="/icons/mstile-150x150.png">
+
+<script>
+  // This deployment serves two fixed entry points ("/" = engineer, "/hr" = HR),
+  // so point the manifest/icon metadata at the right one before anything else runs.
+  (function(){
+    if(location.pathname.replace(/\/+$/, '') === '/hr'){
+      document.getElementById('appManifest').setAttribute('href', '/manifest-hr.json');
+      document.getElementById('appleTitle').setAttribute('content', 'RS HR');
+      document.title = 'R.S. Infotech — HR';
+    }
+  })();
+</script>
+
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
