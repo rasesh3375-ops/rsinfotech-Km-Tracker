@@ -403,17 +403,9 @@
 
       <!-- ===== Dashboard ===== -->
       <div id="hrSubDash">
-        <div class="stat-grid2">
-          <div class="stat-card2"><div class="n" id="statLettersTotal">0</div><div class="l">Letters generated</div></div>
-          <div class="stat-card2"><div class="n" id="statLettersMonth">0</div><div class="l">This month</div></div>
-          <div class="stat-card2"><div class="n" id="statMostUsed">—</div><div class="l">Most used type</div></div>
-          <div class="stat-card2"><div class="n" id="statEmpCount">0</div><div class="l">Employees on file</div></div>
-        </div>
-
         <div class="inner-tabs">
           <button class="active" onclick="switchDashSub('reminders')" id="dashSubBtnReminders">Increment Reminders</button>
           <button onclick="switchDashSub('activity')" id="dashSubBtnActivity">Activity Log</button>
-          <button onclick="switchDashSub('sync')" id="dashSubBtnSync">Cloud Sync</button>
         </div>
 
         <div id="dashSubReminders">
@@ -430,12 +422,8 @@
         </div>
         <div id="dashSubActivity" class="hidden">
           <section class="block">
+            <p style="font-size:12.5px;color:var(--muted);margin:0 0 14px;" id="activitySummaryLine"></p>
             <div id="activityLogList"></div>
-          </section>
-        </div>
-        <div id="dashSubSync" class="hidden">
-          <section class="block">
-            <p style="font-size:13px;color:var(--muted);margin:0;">Employee records, letters and reports are stored the same way as your km-tracking data — shared across every device signed in as HR, through the storage backend configured in this app. No separate setup needed.</p>
           </section>
         </div>
       </div>
@@ -458,6 +446,11 @@
 
       <!-- ===== Reports ===== -->
       <div id="hrSubReports" class="hidden">
+        <div id="reportCardsBox"></div>
+      </div>
+
+      <!-- ===== Generator ===== -->
+      <div id="hrSubGenerator" class="hidden">
         <div class="report-card">
           <div class="head"><div class="avatar">J</div><div class="titlewrap"><strong>Joining Checklist</strong><span id="joiningChecklistCount">0 employees</span></div></div>
           <button class="btn ghost" onclick="openChecklistPicker('joining')">Open checklist</button>
@@ -467,12 +460,6 @@
           <button class="btn ghost" onclick="openChecklistPicker('exit')">Open checklist</button>
         </div>
 
-        <h2 style="margin:22px 0 4px;font-size:17px;">Reports</h2>
-        <div id="reportCardsBox"></div>
-      </div>
-
-      <!-- ===== Generator ===== -->
-      <div id="hrSubGenerator" class="hidden">
         <section class="block">
           <div class="field-group">
             <div class="sec-title">Choose a letter</div>
@@ -1645,7 +1632,7 @@ function switchHrSub(sub){
   if(sub === 'generator') renderGeneratorTab();
 }
 function switchDashSub(sub){
-  ['reminders','activity','sync'].forEach(s => {
+  ['reminders','activity'].forEach(s => {
     document.getElementById('dashSub' + s.charAt(0).toUpperCase() + s.slice(1)).classList.toggle('hidden', s !== sub);
     document.getElementById('dashSubBtn' + s.charAt(0).toUpperCase() + s.slice(1)).classList.toggle('active', s === sub);
   });
@@ -1655,27 +1642,26 @@ function switchDashSub(sub){
 
 // ---- dashboard ----
 async function refreshDashboard(){
+  const savedEmail = await getReminderEmail();
+  document.getElementById('reminderEmailInput').value = savedEmail;
+  await renderIncrementReminders();
+}
+
+async function buildActivitySummaryLine(){
   const log = await getLettersLog();
   const employees = await getEmployees();
-  document.getElementById('statEmpCount').textContent = employees.length;
-  document.getElementById('statLettersTotal').textContent = log.length;
   const now = new Date();
   const thisMonthCount = log.filter(l => {
     const d = new Date(l.date);
     return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
   }).length;
-  document.getElementById('statLettersMonth').textContent = thisMonthCount;
+  let mostUsed = '—';
   if(log.length){
     const counts = {};
     log.forEach(l => { counts[l.type] = (counts[l.type] || 0) + 1; });
-    const top = Object.keys(counts).sort((a,b) => counts[b]-counts[a])[0];
-    document.getElementById('statMostUsed').textContent = top;
-  } else {
-    document.getElementById('statMostUsed').textContent = '—';
+    mostUsed = Object.keys(counts).sort((a,b) => counts[b]-counts[a])[0];
   }
-  const savedEmail = await getReminderEmail();
-  document.getElementById('reminderEmailInput').value = savedEmail;
-  await renderIncrementReminders();
+  return `${log.length} letters generated (${thisMonthCount} this month, most used: ${mostUsed}) · ${employees.length} employees on file`;
 }
 
 async function saveReminderEmail(){
@@ -1717,6 +1703,7 @@ async function renderIncrementReminders(){
 }
 
 async function renderActivityLogList(){
+  document.getElementById('activitySummaryLine').textContent = await buildActivitySummaryLine();
   const log = await getActivityLog();
   const box = document.getElementById('activityLogList');
   if(!log.length){
@@ -2173,11 +2160,6 @@ function importEmployeeBackup(event){
 // ---- reports tab ----
 async function renderReportsTab(){
   const employees = await getEmployees();
-  const joiningDone = employees.filter(e => Object.values(e.checklists?.joining||{}).filter(Boolean).length === CHECKLIST_ITEMS.joining.length).length;
-  const exitDone = employees.filter(e => Object.values(e.checklists?.exit||{}).filter(Boolean).length === CHECKLIST_ITEMS.exit.length).length;
-  document.getElementById('joiningChecklistCount').textContent = employees.length + ' employees' + (joiningDone ? (', ' + joiningDone + ' complete') : '');
-  document.getElementById('exitChecklistCount').textContent = employees.length + ' employees' + (exitDone ? (', ' + exitDone + ' complete') : '');
-
   const reports = [
     {key:'contact', label:'Employee Contact Report', avatar:'E'},
     {key:'birthday', label:'Birthday Report', avatar:'B'},
@@ -2283,6 +2265,12 @@ function jumpToGenerator(letterLabel){
   if(idx >= 0) selectLetterType(idx);
 }
 async function renderGeneratorTab(){
+  const employees = await getEmployees();
+  const joiningDone = employees.filter(e => Object.values(e.checklists?.joining||{}).filter(Boolean).length === CHECKLIST_ITEMS.joining.length).length;
+  const exitDone = employees.filter(e => Object.values(e.checklists?.exit||{}).filter(Boolean).length === CHECKLIST_ITEMS.exit.length).length;
+  document.getElementById('joiningChecklistCount').textContent = employees.length + ' employees' + (joiningDone ? (', ' + joiningDone + ' complete') : '');
+  document.getElementById('exitChecklistCount').textContent = employees.length + ' employees' + (exitDone ? (', ' + exitDone + ' complete') : '');
+
   document.getElementById('letterChoiceList').innerHTML = LETTER_TYPES.map((t,i) => `
     <div class="letter-choice ${i===selectedLetterIdx?'active':''}" onclick="selectLetterType(${i})">
       <span class="num">${String(i+1).padStart(2,'0')}</span> ${t}
