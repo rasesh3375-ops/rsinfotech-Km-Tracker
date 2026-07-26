@@ -650,7 +650,11 @@
             <div class="row-inline">
               <div>
                 <label class="field">Month</label>
-                <input type="month" id="attSheetMonth" />
+                <select class="field-input" id="attSheetMonthSel"></select>
+              </div>
+              <div>
+                <label class="field">Year</label>
+                <select class="field-input" id="attSheetYearSel"></select>
               </div>
             </div>
             <button class="btn full" onclick="renderAttendanceSheet()">Load attendance sheet</button>
@@ -666,7 +670,11 @@
             <div class="row-inline">
               <div>
                 <label class="field">Month</label>
-                <input type="month" id="salSheetMonth" />
+                <select class="field-input" id="salSheetMonthSel"></select>
+              </div>
+              <div>
+                <label class="field">Year</label>
+                <select class="field-input" id="salSheetYearSel"></select>
               </div>
             </div>
             <button class="btn full" onclick="renderSalarySheet()">Load salary sheet</button>
@@ -738,9 +746,15 @@
               <label class="field">Engineer (tracking login)</label>
               <select class="field-input" id="attendanceUserSelect"></select>
             </div>
+          </div>
+          <div class="row-inline">
             <div>
               <label class="field">Month</label>
-              <input type="month" id="attendanceMonthInput" />
+              <select class="field-input" id="attendanceMonthSel"></select>
+            </div>
+            <div>
+              <label class="field">Year</label>
+              <select class="field-input" id="attendanceYearSel"></select>
             </div>
           </div>
           <button class="btn full" onclick="loadAttendanceCalendar()">Load attendance</button>
@@ -831,9 +845,16 @@
           <button class="btn full" onclick="addOvertimeEntry()">Add overtime entry</button>
           <div class="msg" id="otMsg"></div>
           <div style="height:14px"></div>
-          <label class="field">View month</label>
-          <input type="month" id="otViewMonth" />
-          <div style="height:10px"></div>
+          <div class="row-inline">
+            <div>
+              <label class="field">View month</label>
+              <select class="field-input" id="otViewMonthSel"></select>
+            </div>
+            <div>
+              <label class="field">Year</label>
+              <select class="field-input" id="otViewYearSel"></select>
+            </div>
+          </div>
           <button class="btn ghost full" onclick="renderOvertimeReport()">Show month</button>
           <div style="height:14px"></div>
           <div id="overtimeReportBox"></div>
@@ -943,6 +964,32 @@ function todayStr(d){
 function getCurrentFYStartYear(){
   const d = new Date();
   return d.getMonth() < 3 ? d.getFullYear() - 1 : d.getFullYear();
+}
+// input type="month" degrades to a plain text field on some browsers
+// (notably iOS Safari), silently failing to let people pick a different
+// month. These two helpers replace it with a plain Month + Year select
+// pair, which works reliably everywhere.
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+function populateMonthYearSelects(monthSelId, yearSelId){
+  const monthSel = document.getElementById(monthSelId);
+  const yearSel = document.getElementById(yearSelId);
+  if(!monthSel || !yearSel) return;
+  if(!monthSel.options.length){
+    monthSel.innerHTML = MONTH_NAMES.map((m,i) => `<option value="${i+1}">${m}</option>`).join('');
+  }
+  if(!yearSel.options.length){
+    const current = new Date().getFullYear();
+    const years = [];
+    for(let y = current - 2; y <= current + 1; y++) years.push(y);
+    yearSel.innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join('');
+  }
+  if(!monthSel.value) monthSel.value = String(new Date().getMonth() + 1);
+  if(!yearSel.value) yearSel.value = String(new Date().getFullYear());
+}
+function getMonthYearValue(monthSelId, yearSelId){
+  const month = document.getElementById(monthSelId).value;
+  const year = document.getElementById(yearSelId).value;
+  return year + '-' + String(month).padStart(2,'0');
 }
 function daysAgoStr(n){
   const d = new Date();
@@ -2294,12 +2341,9 @@ function computeAttendanceSummary(att, employee, dateList, holidayMap){
 
 async function renderAttendanceSheet(){
   const box = document.getElementById('attendanceSheetBox');
-  const monthInput = document.getElementById('attSheetMonth');
-  if(!monthInput.value){
-    const d = new Date();
-    monthInput.value = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
-  }
-  const [year, month] = monthInput.value.split('-').map(Number);
+  populateMonthYearSelects('attSheetMonthSel', 'attSheetYearSel');
+  const monthVal = getMonthYearValue('attSheetMonthSel', 'attSheetYearSel');
+  const [year, month] = monthVal.split('-').map(Number);
   const daysInMonth = new Date(year, month, 0).getDate();
   const dateList = [];
   for(let d=1; d<=daysInMonth; d++) dateList.push(year + '-' + String(month).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
@@ -2342,9 +2386,9 @@ async function renderAttendanceSheet(){
     csvRows.push([i+1, emp.name, ...dayCodes, summary.present, summary.absent, summary.elUsed, summary.slUsed, summary.lpDays, summary.halfDays, summary.shortCount, summary.lateCount]);
   }
 
-  saveFileToDrive(['HR Management','Dashboard','Attendance Sheet'], `Attendance Sheet - ${monthInput.value}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
+  saveFileToDrive(['HR Management','Dashboard','Attendance Sheet'], `Attendance Sheet - ${monthVal}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
 
-  box.innerHTML = `${reportLogoHeader('Attendance Sheet — ' + monthInput.value)}
+  box.innerHTML = `${reportLogoHeader('Attendance Sheet — ' + monthVal)}
     <div class="att-sheet-wrap"><table class="att-table">${headerRow}${bodyRows}</table></div>
     <div class="att-legend">
       <span><strong>P</strong> Present</span><span><strong>A</strong> Absent</span><span><strong>H</strong> Holiday</span>
@@ -2461,12 +2505,9 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
 
 async function renderSalarySheet(){
   const box = document.getElementById('salarySheetBox');
-  const monthInput = document.getElementById('salSheetMonth');
-  if(!monthInput.value){
-    const d = new Date();
-    monthInput.value = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
-  }
-  const [year, month] = monthInput.value.split('-').map(Number);
+  populateMonthYearSelects('salSheetMonthSel', 'salSheetYearSel');
+  const monthVal = getMonthYearValue('salSheetMonthSel', 'salSheetYearSel');
+  const [year, month] = monthVal.split('-').map(Number);
   const monthDays = new Date(year, month, 0).getDate();
   const dateList = [];
   for(let d=1; d<=monthDays; d++) dateList.push(year + '-' + String(month).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
@@ -2514,10 +2555,10 @@ async function renderSalarySheet(){
     `<td>${fmtMoney(grand.totalDeduction)}</td><td>${fmtMoney(grand.netSalary)}</td></tr>`;
   csvRows.push(['', 'Grand Total', grand.rate, '', grand.leaveAmount, grand.basic, grand.hra, grand.lta, grand.gross, grand.pf, grand.esi, grand.pt, grand.advanceTemp, grand.advance, grand.retention, grand.totalDeduction, grand.netSalary]);
 
-  saveFileToDrive(['HR Management','Dashboard','Salary Sheet'], `Salary Sheet - ${monthInput.value}.csv`, toCsv(cols, csvRows), 'text/csv');
+  saveFileToDrive(['HR Management','Dashboard','Salary Sheet'], `Salary Sheet - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
 
   box.innerHTML = `<div class="sal-sheet-wrap print-isolate" id="salaryPrintArea">
-      ${reportLogoHeader('Salary Sheet — ' + monthInput.value)}
+      ${reportLogoHeader('Salary Sheet — ' + monthVal)}
       <table class="sal-table"><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr>${bodyRows}</table>
     </div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0;">PT = ₹200 if Gross &gt; ₹12,000, else ₹0. Leave Days = Absent + LP days for the month (EL/SL count as present, no deduction). PF, ESI, Advance are entered per employee in Employee Master. Apprentices and Contractors have no PF, ESI, or PT. R.S.IT Solution has no PF or ESI, but PT still applies. Retention is the monthly bond retention deduction, if configured.</p>
@@ -3636,17 +3677,14 @@ async function populateAttendanceUserSelect(){
   }
   sel.innerHTML = users.map(u => `<option value="${u.username}">${u.displayName || u.username}</option>`).join('');
   if(prev && users.some(u => u.username === prev)) sel.value = prev;
-  const monthInput = document.getElementById('attendanceMonthInput');
-  if(monthInput && !monthInput.value){
-    const d = new Date();
-    monthInput.value = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
-  }
+  populateMonthYearSelects('attendanceMonthSel', 'attendanceYearSel');
 }
 
 async function loadAttendanceCalendar(){
   const box = document.getElementById('attendanceCalendarBox');
   const username = document.getElementById('attendanceUserSelect').value;
-  const monthStr = document.getElementById('attendanceMonthInput').value;
+  populateMonthYearSelects('attendanceMonthSel', 'attendanceYearSel');
+  const monthStr = getMonthYearValue('attendanceMonthSel', 'attendanceYearSel');
   if(!username){
     box.innerHTML = '<div class="empty">Add an engineer login first.</div>';
     return;
@@ -3874,11 +3912,7 @@ async function populateOvertimeEmployeeSelect(){
     return;
   }
   sel.innerHTML = employees.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
-  const monthInput = document.getElementById('otViewMonth');
-  if(monthInput && !monthInput.value){
-    const d = new Date();
-    monthInput.value = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
-  }
+  populateMonthYearSelects('otViewMonthSel', 'otViewYearSel');
 }
 
 async function addOvertimeEntry(){
@@ -3918,12 +3952,8 @@ async function deleteOvertimeEntry(id){
 
 async function renderOvertimeReport(){
   const box = document.getElementById('overtimeReportBox');
-  const monthInput = document.getElementById('otViewMonth');
-  if(!monthInput.value){
-    const d = new Date();
-    monthInput.value = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
-  }
-  const monthStr = monthInput.value;
+  populateMonthYearSelects('otViewMonthSel', 'otViewYearSel');
+  const monthStr = getMonthYearValue('otViewMonthSel', 'otViewYearSel');
   const log = (await getOvertimeLog()).filter(o => o.date.startsWith(monthStr)).sort((a,b) => a.date.localeCompare(b.date));
   if(!log.length){
     box.innerHTML = '<div class="empty">No overtime logged for this month yet.</div>';
