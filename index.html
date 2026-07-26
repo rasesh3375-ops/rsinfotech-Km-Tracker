@@ -268,6 +268,23 @@
   .checklist-row:last-child{border-bottom:none;}
   .checklist-row input{width:auto;}
 
+  /* ===== Attendance sheet grid ===== */
+  .att-sheet-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  table.att-table{border-collapse:collapse;font-size:12px;white-space:nowrap;}
+  table.att-table th, table.att-table td{border:1px solid var(--line);padding:4px 3px;text-align:center;}
+  table.att-table th{background:var(--navy);color:#fff;font-size:10.5px;text-transform:uppercase;}
+  table.att-table td.att-name{text-align:left;font-weight:600;min-width:120px;position:sticky;left:0;background:var(--paper);}
+  table.att-table select.att-code{width:52px;font-size:11px;padding:3px 2px;border:1px solid var(--line);border-radius:4px;background:var(--paper);}
+  table.att-table select.att-code.code-P{background:#E7F4EC;}
+  table.att-table select.att-code.code-A{background:#FDECEA;}
+  table.att-table select.att-code.code-H{background:#EDEDE7;}
+  table.att-table select.att-code.code-EL,table.att-table select.att-code.code-HEL{background:#FDECC8;}
+  table.att-table select.att-code.code-SL,table.att-table select.att-code.code-HSL{background:#E3ECFB;}
+  table.att-table select.att-code.code-LP,table.att-table select.att-code.code-HLP{background:#F3E3F7;}
+  table.att-table select.att-code.code-SHORT{background:#FBE0DC;}
+  table.att-table td.att-late{color:var(--red);font-size:9.5px;}
+  .att-legend{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:10px;}
+
   /* ===== Professional polish pass ===== */
   body{background:linear-gradient(180deg, #FBFAF7 0%, var(--cream) 220px);}
   header.top{padding-bottom:16px;}
@@ -544,6 +561,20 @@
     </section>
 
     <section class="block">
+      <h2 style="margin:0 0 4px;">Attendance Sheet</h2>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Auto-marks Present when an engineer checks in with their selfie. Everything else — leave, holidays, half-days — is entered or corrected by HR. Resident Engineers are excluded from the leave/late-coming rules; their days just track Present/Absent/Holiday.</p>
+      <div class="row-inline">
+        <div>
+          <label class="field">Month</label>
+          <input type="month" id="attSheetMonth" />
+        </div>
+      </div>
+      <button class="btn full" onclick="renderAttendanceSheet()">Load attendance sheet</button>
+      <div style="height:14px"></div>
+      <div id="attendanceSheetBox"></div>
+    </section>
+
+    <section class="block">
       <h2>Team overview</h2>
       <div id="hrSummaryGrid"></div>
       <div id="hrTable"></div>
@@ -702,6 +733,51 @@
               <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
             </div>
           </div>
+        </section>
+
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">EL Calculation Sheet</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Earned Leave = 1 day per 25 days present, per the leave policy. Resident Engineers are excluded. This computes each employee's EL for the financial year you pick from the Attendance Sheet, and can carry the closing balance forward as next year's opening balance automatically.</p>
+          <label class="field">Financial year starting April of</label>
+          <input type="number" id="elCalcStartYear" placeholder="e.g. 2026 for FY 2026-27" />
+          <div style="height:14px"></div>
+          <button class="btn full" onclick="renderElCalculationSheet()">Generate EL calculation sheet</button>
+          <div style="height:14px"></div>
+          <div id="elCalcBox"></div>
+        </section>
+
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">Overtime Report</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Applies to Field Engineers per the overtime policy. Log hours HR has been informed of (by the following day, per policy) — this is manual since overtime is reported over WhatsApp, not through this app.</p>
+          <div class="row-inline">
+            <div>
+              <label class="field">Field engineer</label>
+              <select class="field-input" id="otEmployeeSelect"></select>
+            </div>
+            <div>
+              <label class="field">Date</label>
+              <input type="date" id="otDateInput" />
+            </div>
+          </div>
+          <div class="row-inline">
+            <div>
+              <label class="field">Hours</label>
+              <input type="number" step="0.5" id="otHoursInput" placeholder="e.g. 2.5" />
+            </div>
+            <div>
+              <label class="field">Note (optional)</label>
+              <input type="text" id="otNoteInput" placeholder="e.g. urgent site visit" />
+            </div>
+          </div>
+          <button class="btn full" onclick="addOvertimeEntry()">Add overtime entry</button>
+          <div class="msg" id="otMsg"></div>
+          <div style="height:14px"></div>
+          <label class="field">View month</label>
+          <input type="month" id="otViewMonth" />
+          <div style="height:10px"></div>
+          <button class="btn ghost full" onclick="renderOvertimeReport()">Show month</button>
+          <div style="height:14px"></div>
+          <div id="overtimeReportBox"></div>
         </section>
       </div>
 
@@ -921,6 +997,34 @@ async function recordCheckin(name){
     await safeSet('checkins:' + name, JSON.stringify(dates), true);
   }
 }
+
+// ---- attendance sheet (day-by-day leave codes, per employee) ----
+// Codes: P (present), A (absent), H (holiday), EL (earned/privilege leave),
+// SL (sick leave), LP (leave without pay), HEL/HSL/HLP (half-day variants),
+// SHORT (short leave, non-resident only).
+async function getAttendance(employeeId){
+  const v = await safeGet('attendance:' + employeeId, true);
+  return v ? JSON.parse(v) : {};
+}
+async function setAttendanceDay(employeeId, dateStr, code, extra){
+  const att = await getAttendance(employeeId);
+  att[dateStr] = Object.assign({ code }, extra || {});
+  await safeSet('attendance:' + employeeId, JSON.stringify(att), true);
+}
+async function findEmployeeByTrackingUsername(username){
+  const employees = await getEmployees();
+  return employees.find(e => e.trackingUsername === username) || null;
+}
+
+// ---- overtime log (field engineers) ----
+async function getOvertimeLog(){
+  const v = await safeGet('overtime_log', true);
+  return v ? JSON.parse(v) : [];
+}
+async function saveOvertimeLog(list){
+  await safeSet('overtime_log', JSON.stringify(list), true);
+}
+
 async function getActive(name){
   const v = await safeGet('active:' + name, true);
   return v ? JSON.parse(v) : null;
@@ -1337,6 +1441,7 @@ async function enterHrMain(){
   if(rate) document.getElementById('rateInput').value = rate;
   await renderUserList();
   await renderGeofenceZones();
+  await renderAttendanceSheet();
   await loadHR();
   await loadCompanyReport();
   if(hrInterval) clearInterval(hrInterval);
@@ -1551,9 +1656,59 @@ async function handleSelfieCapture(event){
   cachedGeofences = await getGeofences();
   startTime = new Date().toISOString();
   await recordCheckin(engineerName);
+  await applyAttendanceOnCheckin(engineerName);
   updateLiveDisplay();
   showDuringTrip();
   startWatch(false);
+}
+
+// Marks today's attendance for the linked employee record and, for anyone
+// except Resident Engineers, checks the check-in time against the Late
+// Coming / Short Leave policy and notifies them on their own device.
+async function applyAttendanceOnCheckin(username){
+  try{
+    const emp = await findEmployeeByTrackingUsername(username);
+    if(!emp) return;
+    const today = todayStr();
+    const now = new Date();
+
+    if(emp.employeeType === 'resident'){
+      await setAttendanceDay(emp.id, today, 'P', {});
+      return;
+    }
+
+    const minutes = now.getHours() * 60 + now.getMinutes();
+    const graceEnd = 9 * 60 + 45;   // 9:45 AM — up to this is on-time
+    const shortLeaveCutoff = 10 * 60; // 30+ min late (past 10:00 AM) = short leave
+
+    if(minutes > shortLeaveCutoff){
+      await setAttendanceDay(emp.id, today, 'SHORT', { lateFlag: true, checkinTime: now.toTimeString().slice(0,5) });
+      notifyEngineerOnDevice('Marked as short leave', 'You checked in after 10:00 AM, which the leave policy counts as a short leave today.');
+    } else if(minutes > graceEnd){
+      await setAttendanceDay(emp.id, today, 'P', { lateFlag: true, checkinTime: now.toTimeString().slice(0,5) });
+      notifyEngineerOnDevice('Late arrival recorded', 'You checked in after 9:45 AM. More than 3 late arrivals in a month leads to a half-day deduction for every 2 further late instances, per policy.');
+    } else {
+      await setAttendanceDay(emp.id, today, 'P', { checkinTime: now.toTimeString().slice(0,5) });
+    }
+  }catch(e){
+    // never block check-in over attendance bookkeeping
+  }
+}
+function notifyEngineerOnDevice(title, body){
+  const msg = document.getElementById('gpsMsg');
+  if(msg){
+    msg.textContent = '⚠️ ' + title + ' — ' + body;
+    msg.classList.add('error');
+  }
+  try{
+    if('Notification' in window && Notification.permission === 'granted'){
+      new Notification(title, { body, requireInteraction: true });
+    } else if('Notification' in window && Notification.permission !== 'denied'){
+      Notification.requestPermission().then(p => {
+        if(p === 'granted') new Notification(title, { body, requireInteraction: true });
+      });
+    }
+  }catch(e){}
 }
 
 let wakeLock = null;
@@ -1983,6 +2138,97 @@ function renderLiveStatus(infos){
       ${mapLink}
     </div>`;
   }).join('');
+}
+
+// ---- attendance sheet ----
+const ATT_CODES = ['P','A','H','EL','SL','LP','HEL','HSL','HLP','SHORT'];
+const ATT_CODE_LABELS = { P:'Present', A:'Absent', H:'Holiday', EL:'EL', SL:'SL', LP:'LP (unpaid)', HEL:'Half EL', HSL:'Half SL', HLP:'Half LP', SHORT:'Short leave' };
+
+function computeAttendanceSummary(att, employee, dateList, holidayMap){
+  let present=0, absent=0, elUsed=0, slUsed=0, lpDays=0, halfDays=0, shortCount=0, lateCount=0, holidays=0;
+  dateList.forEach(dateStr => {
+    const dow = new Date(dateStr).getDay();
+    const entry = att[dateStr];
+    const code = entry ? entry.code : (holidayMap[dateStr] ? 'H' : (dow === 0 ? 'H' : null));
+    if(entry && entry.lateFlag) lateCount++;
+    switch(code){
+      case 'P': present += 1; break;
+      case 'A': absent += 1; break;
+      case 'H': holidays += 1; break;
+      case 'EL': present += 1; elUsed += 1; break;
+      case 'SL': present += 1; slUsed += 1; break;
+      case 'LP': lpDays += 1; break;
+      case 'HEL': present += 0.5; elUsed += 0.5; halfDays += 1; break;
+      case 'HSL': present += 0.5; slUsed += 0.5; halfDays += 1; break;
+      case 'HLP': lpDays += 0.5; present += 0.5; halfDays += 1; break;
+      case 'SHORT': present += 1; shortCount += 1; break;
+      default: if(dateStr <= todayStr()) absent += 1; // unmarked past day defaults to absent
+    }
+  });
+  const paidDays = present; // EL/SL/P/half-days all paid; A and LP are not
+  return { present, absent, elUsed, slUsed, lpDays, halfDays, shortCount, lateCount, holidays, paidDays };
+}
+
+async function renderAttendanceSheet(){
+  const box = document.getElementById('attendanceSheetBox');
+  const monthInput = document.getElementById('attSheetMonth');
+  if(!monthInput.value){
+    const d = new Date();
+    monthInput.value = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+  }
+  const [year, month] = monthInput.value.split('-').map(Number);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const dateList = [];
+  for(let d=1; d<=daysInMonth; d++) dateList.push(year + '-' + String(month).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
+
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
+  if(!employees.length){
+    box.innerHTML = '<div class="empty">Add employees in Employee Master first.</div>';
+    return;
+  }
+  const holidays = await getHolidays();
+  const holidayMap = {};
+  holidays.forEach(h => { holidayMap[h.date] = h.name; });
+
+  let headerRow = '<tr><th>S.No</th><th style="text-align:left;">Name</th>' +
+    dateList.map(d => `<th>${parseInt(d.slice(8),10)}</th>`).join('') +
+    '<th>Present</th><th>Absent</th><th>EL</th><th>SL</th><th>LP</th><th>Half</th><th>Short</th><th>Late</th></tr>';
+
+  let bodyRows = '';
+  for(let i=0; i<employees.length; i++){
+    const emp = employees[i];
+    const att = await getAttendance(emp.id);
+    const isResident = emp.employeeType === 'resident';
+    const summary = computeAttendanceSummary(att, emp, dateList, holidayMap);
+    const dayCells = dateList.map(dateStr => {
+      const dow = new Date(dateStr).getDay();
+      const entry = att[dateStr];
+      const defaultCode = entry ? entry.code : (holidayMap[dateStr] ? 'H' : (dow === 0 ? 'H' : (dateStr <= todayStr() ? 'A' : '')));
+      const options = ATT_CODES.filter(c => !(isResident && c === 'SHORT'))
+        .map(c => `<option value="${c}" ${c===defaultCode?'selected':''}>${c}</option>`).join('');
+      const blankOpt = defaultCode ? '' : `<option value="" selected></option>`;
+      const lateMark = entry && entry.lateFlag ? '<br><span class="att-late">late</span>' : '';
+      return `<td><select class="att-code code-${defaultCode||''}" onchange="handleAttendanceCellChange('${emp.id}','${dateStr}',this)">${blankOpt}${options}</select>${lateMark}</td>`;
+    }).join('');
+    bodyRows += `<tr><td>${i+1}</td><td class="att-name">${emp.name}${isResident?' <span style="color:var(--muted);font-size:10px;">(Resident)</span>':''}</td>${dayCells}` +
+      `<td>${summary.present}</td><td>${summary.absent}</td><td>${summary.elUsed}</td><td>${summary.slUsed}</td><td>${summary.lpDays}</td><td>${summary.halfDays}</td><td>${summary.shortCount}</td><td>${summary.lateCount}</td></tr>`;
+  }
+
+  box.innerHTML = `<div class="att-sheet-wrap"><table class="att-table">${headerRow}${bodyRows}</table></div>
+    <div class="att-legend">
+      <span><strong>P</strong> Present</span><span><strong>A</strong> Absent</span><span><strong>H</strong> Holiday</span>
+      <span><strong>EL</strong> Earned leave</span><span><strong>SL</strong> Sick leave</span><span><strong>LP</strong> Leave without pay</span>
+      <span><strong>HEL/HSL/HLP</strong> Half-day variants</span><span><strong>SHORT</strong> Short leave</span>
+    </div>`;
+}
+
+async function handleAttendanceCellChange(employeeId, dateStr, selectEl){
+  const code = selectEl.value;
+  const entry = (await getAttendance(employeeId))[dateStr] || {};
+  await setAttendanceDay(employeeId, dateStr, code, { lateFlag: entry.lateFlag, checkinTime: entry.checkinTime });
+  selectEl.className = 'att-code code-' + code;
+  // Refresh just to keep summary columns accurate without losing scroll position too badly
+  await renderAttendanceSheet();
 }
 
 // ---- geofence zones ----
@@ -2488,6 +2734,7 @@ function emptyEmployee(){
     emergencyName:'', emergencyNumber:'',
     trackingEnabled:'no', trackingUsername:'',
     employmentStatus:'active', leftDate:'',
+    employeeType:'field', slOpening:0, elOpening:0,
     licenseExpiry:'', insuranceExpiry:'',
     aadhaarCardImg:'', panCardImg:'', otherDocs:[],
     checklists:{ joining:{}, exit:{} }
@@ -2636,6 +2883,25 @@ function employeeModalHtml(emp){
       </div>
 
       <div class="field-group">
+        <div class="sec-title">Work policy</div>
+        <label class="field">Employee type</label>
+        <select class="field-input" id="f_employeeType" onchange="toggleLeaveFieldsForType()">
+          <option value="field" ${(!emp.employeeType || emp.employeeType==='field')?'selected':''}>Field Engineer</option>
+          <option value="wfh" ${emp.employeeType==='wfh'?'selected':''}>Work From Home</option>
+          <option value="resident" ${emp.employeeType==='resident'?'selected':''}>Resident Engineer</option>
+        </select>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">This decides which leave rules apply. Resident Engineers are excluded entirely from SL/EL balances, overtime, short leave, late-coming and sandwich-leave rules. Field Engineers get the full policy including overtime; Work From Home gets 4 sick leaves/year (instead of 7) and no short leave.</p>
+        <div id="leaveOpeningFields" class="${emp.employeeType==='resident'?'hidden':''}" style="margin-top:14px;">
+          <label class="field">SL opening balance (this year)</label>
+          <input type="number" id="f_slOpening" placeholder="0" value="${emp.slOpening??''}">
+          <div style="height:12px"></div>
+          <label class="field">EL opening balance (this year)</label>
+          <input type="number" id="f_elOpening" placeholder="0" value="${emp.elOpening??''}">
+          <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Enter manually for this year only. From next year onward, the EL Calculation Sheet report carries the closing balance forward automatically.</p>
+        </div>
+      </div>
+
+      <div class="field-group">
         <div class="sec-title">Field tracking</div>
         <label class="field">Does this employee need km tracking (field engineer)?</label>
         <select class="field-input" id="f_needsTracking" onchange="toggleTrackingFields()">
@@ -2691,6 +2957,10 @@ function employeeModalHtml(emp){
 function toggleTrackingFields(){
   const needsTracking = document.getElementById('f_needsTracking').value === 'yes';
   document.getElementById('trackingLoginFields').classList.toggle('hidden', !needsTracking);
+}
+function toggleLeaveFieldsForType(){
+  const isResident = document.getElementById('f_employeeType').value === 'resident';
+  document.getElementById('leaveOpeningFields').classList.toggle('hidden', isResident);
 }
 
 let editingEmployeeDraft = null;
@@ -2830,7 +3100,10 @@ async function saveEmployeeForm(){
     emergencyNumber: document.getElementById('f_emergencyNumber').value.trim(),
     trackingEnabled: needsTracking,
     licenseExpiry: document.getElementById('f_licenseExpiry').value,
-    insuranceExpiry: document.getElementById('f_insuranceExpiry').value
+    insuranceExpiry: document.getElementById('f_insuranceExpiry').value,
+    employeeType: document.getElementById('f_employeeType').value,
+    slOpening: Number(document.getElementById('f_slOpening').value)||0,
+    elOpening: Number(document.getElementById('f_elOpening').value)||0
   });
   if(editingEmployeeId){
     const idx = employees.findIndex(e => e.id === editingEmployeeId);
@@ -2982,6 +3255,7 @@ async function renderReportsTab(){
   }).join('');
   await populateAttendanceUserSelect();
   await renderHolidayList();
+  await populateOvertimeEmployeeSelect();
 }
 
 function reportHasData(key, e){
@@ -3115,6 +3389,132 @@ async function renderHolidayList(){
     </div>`).join('');
   const yearInput = document.getElementById('holidayListYear');
   if(yearInput && !yearInput.value) yearInput.value = new Date().getFullYear();
+}
+
+// ---- EL calculation sheet ----
+async function renderElCalculationSheet(){
+  const box = document.getElementById('elCalcBox');
+  const yearInput = document.getElementById('elCalcStartYear');
+  if(!yearInput.value) yearInput.value = new Date().getFullYear();
+  const startYear = parseInt(yearInput.value, 10);
+  const fyStart = startYear + '-04-01';
+  const fyEnd = (startYear + 1) + '-03-31';
+
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left' && e.employeeType !== 'resident');
+  if(!employees.length){
+    box.innerHTML = '<div class="empty">No non-resident employees on file yet.</div>';
+    return;
+  }
+
+  const rows = [];
+  for(const emp of employees){
+    const att = await getAttendance(emp.id);
+    let presentDays = 0, elUsed = 0;
+    Object.keys(att).forEach(dateStr => {
+      if(dateStr < fyStart || dateStr > fyEnd) return;
+      const code = att[dateStr].code;
+      if(code === 'P' || code === 'EL' || code === 'SL') presentDays += 1;
+      else if(code === 'HEL' || code === 'HSL' || code === 'HLP') presentDays += 0.5;
+      if(code === 'EL') elUsed += 1;
+      else if(code === 'HEL') elUsed += 0.5;
+    });
+    const opening = Number(emp.elOpening) || 0;
+    const earned = Math.floor(presentDays / 25);
+    const closing = opening + earned - elUsed;
+    rows.push({ id: emp.id, name: emp.name, opening, presentDays, earned, elUsed, closing });
+  }
+
+  box.innerHTML = `
+    <div style="overflow-x:auto;"><table>
+      <tr><th>Name</th><th class="num">Opening EL</th><th class="num">Present days (FY)</th><th class="num">EL earned</th><th class="num">EL used</th><th class="num">Closing EL</th></tr>
+      ${rows.map(r => `<tr><td>${r.name}</td><td class="num">${r.opening}</td><td class="num">${r.presentDays}</td><td class="num">${r.earned}</td><td class="num">${r.elUsed}</td><td class="num">${r.closing}</td></tr>`).join('')}
+    </table></div>
+    <p style="font-size:11px;color:var(--muted);margin:10px 0;">FY ${startYear}-${String(startYear+1).slice(2)}: ${fyStart} to ${fyEnd}. EL earned = 1 day per 25 days present (present includes EL/SL days and half-day equivalents), floored. Closing = Opening + Earned − Used.</p>
+    <button class="btn full" onclick='applyElClosingAsNextOpening(${JSON.stringify(rows.map(r=>({id:r.id,closing:r.closing})))})'>Apply closing balances as next year's EL opening balance</button>
+  `;
+}
+
+async function applyElClosingAsNextOpening(closingList){
+  if(!confirm('This will overwrite each employee\'s current EL opening balance with the computed closing balance, so it carries forward as next year\'s opening. Continue?')) return;
+  const employees = await getEmployees();
+  closingList.forEach(c => {
+    const emp = employees.find(e => e.id === c.id);
+    if(emp) emp.elOpening = c.closing;
+  });
+  await saveEmployees(employees);
+  await addActivityLog('Carried forward EL closing balances as next year\'s opening balances (' + closingList.length + ' employees)');
+  alert('EL opening balances updated. These will now feed next year\'s EL calculation and Salary Report.');
+}
+
+// ---- overtime report ----
+async function populateOvertimeEmployeeSelect(){
+  const sel = document.getElementById('otEmployeeSelect');
+  if(!sel) return;
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left' && e.employeeType === 'field');
+  if(!employees.length){
+    sel.innerHTML = '<option value="">No field engineers on file</option>';
+    return;
+  }
+  sel.innerHTML = employees.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+  const monthInput = document.getElementById('otViewMonth');
+  if(monthInput && !monthInput.value){
+    const d = new Date();
+    monthInput.value = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+  }
+}
+
+async function addOvertimeEntry(){
+  const msg = document.getElementById('otMsg');
+  const empId = document.getElementById('otEmployeeSelect').value;
+  const date = document.getElementById('otDateInput').value;
+  const hours = parseFloat(document.getElementById('otHoursInput').value);
+  const note = document.getElementById('otNoteInput').value.trim();
+  if(!empId || !date || !hours || hours <= 0){
+    msg.textContent = 'Choose the employee, date, and a positive number of hours.';
+    msg.classList.add('error');
+    return;
+  }
+  const employees = await getEmployees();
+  const emp = employees.find(e => e.id === empId);
+  const log = await getOvertimeLog();
+  log.push({ id: randomHex(6), employeeId: empId, name: emp ? emp.name : '', date, hours, note });
+  await saveOvertimeLog(log);
+  await addActivityLog('Logged ' + hours + 'h overtime for ' + (emp ? emp.name : empId) + ' on ' + date);
+  document.getElementById('otDateInput').value = '';
+  document.getElementById('otHoursInput').value = '';
+  document.getElementById('otNoteInput').value = '';
+  msg.textContent = 'Overtime entry added.';
+  msg.classList.remove('error');
+  await renderOvertimeReport();
+}
+
+async function deleteOvertimeEntry(id){
+  if(!confirm('Remove this overtime entry?')) return;
+  let log = await getOvertimeLog();
+  log = log.filter(o => o.id !== id);
+  await saveOvertimeLog(log);
+  await renderOvertimeReport();
+}
+
+async function renderOvertimeReport(){
+  const box = document.getElementById('overtimeReportBox');
+  const monthInput = document.getElementById('otViewMonth');
+  if(!monthInput.value){
+    const d = new Date();
+    monthInput.value = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+  }
+  const monthStr = monthInput.value;
+  const log = (await getOvertimeLog()).filter(o => o.date.startsWith(monthStr)).sort((a,b) => a.date.localeCompare(b.date));
+  if(!log.length){
+    box.innerHTML = '<div class="empty">No overtime logged for this month yet.</div>';
+    return;
+  }
+  const totalHours = log.reduce((sum,o) => sum + Number(o.hours), 0);
+  box.innerHTML = `<div style="overflow-x:auto;"><table>
+      <tr><th>Name</th><th>Date</th><th class="num">Hours</th><th>Note</th><th></th></tr>
+      ${log.map(o => `<tr><td>${o.name}</td><td>${o.date}</td><td class="num">${o.hours}</td><td>${o.note||''}</td><td><button class="btn ghost" style="font-size:11px;padding:5px 8px;" onclick="deleteOvertimeEntry('${o.id}')">Delete</button></td></tr>`).join('')}
+    </table></div>
+    <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Total overtime hours for ${monthStr}: <strong>${totalHours}</strong></p>`;
 }
 
 let lastHolidayListText = '';
