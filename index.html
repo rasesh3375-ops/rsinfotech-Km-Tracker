@@ -228,6 +228,21 @@
   select.field-input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;font-size:14.5px;background:var(--paper);color:var(--navy);}
   input[type=date]{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;background:var(--paper);color:var(--navy);}
   input[type=file]{width:100%;font-size:12.5px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--paper);}
+  input:disabled{background:#EDEDE7;color:var(--muted);cursor:not-allowed;}
+
+  /* ===== Full-screen sheet viewer ===== */
+  #fullscreenSheetRoot{position:fixed;inset:0;background:var(--paper);z-index:200;display:flex;flex-direction:column;}
+  .fullscreen-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line);background:var(--navy);color:#fff;flex-shrink:0;}
+  .fullscreen-header strong{font-size:15px;}
+  .fullscreen-header .btn.ghost{color:#fff;border:1px solid rgba(255,255,255,.4);}
+  .fullscreen-body{flex:1;overflow:auto;padding:16px;-webkit-overflow-scrolling:touch;}
+
+  /* ===== Shared logo + date header for reports & documents ===== */
+  .report-logo-header{display:flex;align-items:center;gap:12px;border-bottom:2px solid var(--navy);padding-bottom:12px;margin-bottom:14px;}
+  .report-logo-header img{width:42px;height:42px;object-fit:contain;border-radius:6px;}
+  .report-logo-company{font-family:Georgia, serif;font-size:16px;font-weight:700;color:var(--navy);}
+  .report-logo-title{font-size:12.5px;color:var(--navy);font-weight:600;}
+  .report-logo-date{font-size:11px;color:var(--muted);}
   .bonus-callout{background:#FDECC8;border:1px solid var(--amber);border-radius:8px;padding:12px 14px;font-size:13.5px;font-weight:700;color:var(--amber-dark);margin-bottom:8px;}
   .modal-actions{display:flex;gap:10px;margin-top:18px;}
   .modal-actions .btn{flex:1;}
@@ -670,11 +685,12 @@
             <div class="msg" id="reminderSaveMsg"></div>
             <div style="height:14px"></div>
             <div id="incrementReminderList"></div>
+            <button class="btn ghost full" style="margin-top:12px;" onclick="openFullscreenView('Increment Reminders','incrementReminderList')">⛶ Full screen</button>
           </section>
         </div>
         <div id="dashSubExpiry" class="hidden">
           <section class="block">
-            <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Driving license and vehicle insurance expiries coming up in the next 30 days, from Employee Master.</p>
+            <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Bond end dates coming up in the next 30 days, from Employee Master.</p>
             <div id="docExpiryList"></div>
           </section>
         </div>
@@ -871,6 +887,14 @@
 
   <div id="checklistModalRoot"></div>
   <div id="employeeModalRoot"></div>
+
+  <div id="fullscreenSheetRoot" class="hidden">
+    <div class="fullscreen-header">
+      <strong id="fullscreenTitle"></strong>
+      <button class="btn ghost" onclick="closeFullscreenView()">✕ Close</button>
+    </div>
+    <div class="fullscreen-body" id="fullscreenBody"></div>
+  </div>
 
   <div class="switch-role hidden" id="switchBottom"></div>
 
@@ -2260,12 +2284,14 @@ async function renderAttendanceSheet(){
       `<td>${summary.present}</td><td>${summary.absent}</td><td>${summary.elUsed}</td><td>${summary.slUsed}</td><td>${summary.lpDays}</td><td>${summary.halfDays}</td><td>${summary.shortCount}</td><td>${summary.lateCount}</td></tr>`;
   }
 
-  box.innerHTML = `<div class="att-sheet-wrap"><table class="att-table">${headerRow}${bodyRows}</table></div>
+  box.innerHTML = `${reportLogoHeader('Attendance Sheet — ' + monthInput.value)}
+    <div class="att-sheet-wrap"><table class="att-table">${headerRow}${bodyRows}</table></div>
     <div class="att-legend">
       <span><strong>P</strong> Present</span><span><strong>A</strong> Absent</span><span><strong>H</strong> Holiday</span>
       <span><strong>EL</strong> Earned leave</span><span><strong>SL</strong> Sick leave</span><span><strong>LP</strong> Leave without pay</span>
       <span><strong>HEL/HSL/HLP</strong> Half-day variants</span><span><strong>SHORT</strong> Short leave</span>
-    </div>`;
+    </div>
+    <button class="btn ghost full" style="margin-top:12px;" onclick="openFullscreenView('Attendance Sheet','attendanceSheetBox')">⛶ Full screen</button>`;
 }
 
 async function handleAttendanceCellChange(employeeId, dateStr, selectEl){
@@ -2279,6 +2305,67 @@ async function handleAttendanceCellChange(employeeId, dateStr, selectEl){
 
 // ---- salary sheet ----
 function fmtMoney(n){ return (Math.round(n*100)/100).toLocaleString('en-IN'); }
+
+// Shared logo + current-date header for every report and generated document.
+function reportLogoHeader(title){
+  const logoSrc = (document.querySelector('header.top .brand img') || {}).src || '';
+  const dateStr = new Date().toLocaleDateString(undefined, { day:'2-digit', month:'long', year:'numeric' });
+  return `<div class="report-logo-header">
+    ${logoSrc ? `<img src="${logoSrc}" alt="R.S. Infotech logo">` : ''}
+    <div class="report-logo-header-text">
+      <div class="report-logo-company">R.S. Infotech</div>
+      <div class="report-logo-title">${title}</div>
+      <div class="report-logo-date">${dateStr}</div>
+    </div>
+  </div>`;
+}
+
+// Full-screen viewer: moves the live element (not a copy) into an overlay so
+// edits made while full-screen still hit the real DOM node.
+let fullscreenActiveId = null;
+let fullscreenOriginalParent = null;
+let fullscreenOriginalNextSibling = null;
+function openFullscreenView(title, sourceId){
+  const el = document.getElementById(sourceId);
+  if(!el) return;
+  fullscreenActiveId = sourceId;
+  fullscreenOriginalParent = el.parentElement;
+  fullscreenOriginalNextSibling = el.nextSibling;
+  document.getElementById('fullscreenTitle').textContent = title;
+  document.getElementById('fullscreenBody').appendChild(el);
+  document.getElementById('fullscreenSheetRoot').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  try{
+    const overlayEl = document.getElementById('fullscreenSheetRoot');
+    if(overlayEl.requestFullscreen) overlayEl.requestFullscreen().catch(()=>{});
+  }catch(e){}
+}
+function closeFullscreenView(){
+  if(fullscreenActiveId){
+    const el = document.getElementById(fullscreenActiveId);
+    if(el && fullscreenOriginalParent){
+      if(fullscreenOriginalNextSibling) fullscreenOriginalParent.insertBefore(el, fullscreenOriginalNextSibling);
+      else fullscreenOriginalParent.appendChild(el);
+    }
+  }
+  document.getElementById('fullscreenSheetRoot').classList.add('hidden');
+  document.body.style.overflow = '';
+  fullscreenActiveId = null;
+  try{ if(document.fullscreenElement) document.exitFullscreen().catch(()=>{}); }catch(e){}
+}
+
+
+function computeRetentionForMonth(emp, year, month){
+  const money = Number(emp.retentionMoney) || 0;
+  const months = Number(emp.retentionMonths) || 0;
+  if(!money || !months || !emp.bondStart) return 0;
+  const start = new Date(emp.bondStart);
+  const startIndex = start.getFullYear()*12 + start.getMonth();
+  const thisIndex = year*12 + (month-1);
+  const offset = thisIndex - startIndex;
+  if(offset < 0 || offset >= months) return 0;
+  return Math.round((money / months) * 100) / 100;
+}
 
 async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   const att = await getAttendance(emp.id);
@@ -2302,9 +2389,11 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   const pt = heading.pt ? (gross > 12000 ? 200 : 0) : 0;
   const advanceTemp = Number(emp.advanceTemp) || 0;
   const advance = Number(emp.advance) || 0;
-  const totalDeduction = pf + esi + pt + advanceTemp + advance;
+  const [dYear, dMonth] = dateList[0].split('-').map(Number);
+  const retention = computeRetentionForMonth(emp, dYear, dMonth);
+  const totalDeduction = pf + esi + pt + advanceTemp + advance + retention;
   const netSalary = gross - totalDeduction;
-  return { rate, leaveDays, leaveAmount, basic, hra, lta, gross, pf, esi, pt, advanceTemp, advance, totalDeduction, netSalary };
+  return { rate, leaveDays, leaveAmount, basic, hra, lta, gross, pf, esi, pt, advanceTemp, advance, retention, totalDeduction, netSalary };
 }
 
 async function renderSalarySheet(){
@@ -2328,40 +2417,44 @@ async function renderSalarySheet(){
   const holidayMap = {};
   holidays.forEach(h => { holidayMap[h.date] = h.name; });
 
-  const cols = ['SR NO','Name','Rate of Pay','Leave Days','Leave Amount','Basic','HRA','LTA','Gross','PF','ESI','PT','Advance Temp','Advance','Total Deduction','Net Salary'];
+  const cols = ['SR NO','Name','Rate of Pay','Leave Days','Leave Amount','Basic','HRA','LTA','Gross','PF','ESI','PT','Advance Temp','Advance','Retention','Total Deduction','Net Salary'];
   let bodyRows = '';
   let srNo = 1;
-  const grand = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, totalDeduction:0, netSalary:0 };
+  const grand = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netSalary:0 };
 
   for(const headingKey of SALARY_HEADING_ORDER){
     const group = employees.filter(e => (e.salaryHeading||'managerial') === headingKey);
     if(!group.length) continue;
-    bodyRows += `<tr class="sal-heading"><td colspan="16">${SALARY_HEADINGS[headingKey].label}</td></tr>`;
-    const sub = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, totalDeduction:0, netSalary:0 };
+    bodyRows += `<tr class="sal-heading"><td colspan="17">${SALARY_HEADINGS[headingKey].label}</td></tr>`;
+    const sub = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netSalary:0 };
     for(const emp of group){
       const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
       bodyRows += `<tr><td>${srNo++}</td><td class="sal-name">${emp.name}</td><td>${fmtMoney(s.rate)}</td><td>${s.leaveDays}</td><td>${fmtMoney(s.leaveAmount)}</td>` +
         `<td>${fmtMoney(s.basic)}</td><td>${fmtMoney(s.hra)}</td><td>${fmtMoney(s.lta)}</td><td>${fmtMoney(s.gross)}</td>` +
-        `<td>${fmtMoney(s.pf)}</td><td>${fmtMoney(s.esi)}</td><td>${fmtMoney(s.pt)}</td><td>${fmtMoney(s.advanceTemp)}</td><td>${fmtMoney(s.advance)}</td>` +
+        `<td>${fmtMoney(s.pf)}</td><td>${fmtMoney(s.esi)}</td><td>${fmtMoney(s.pt)}</td><td>${fmtMoney(s.advanceTemp)}</td><td>${fmtMoney(s.advance)}</td><td>${fmtMoney(s.retention)}</td>` +
         `<td>${fmtMoney(s.totalDeduction)}</td><td>${fmtMoney(s.netSalary)}</td></tr>`;
-      ['rate','leaveAmount','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','totalDeduction','netSalary'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; });
+      ['rate','leaveAmount','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','retention','totalDeduction','netSalary'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; });
     }
     bodyRows += `<tr class="sal-subtotal"><td></td><td>Subtotal</td><td>${fmtMoney(sub.rate)}</td><td></td><td>${fmtMoney(sub.leaveAmount)}</td>` +
       `<td>${fmtMoney(sub.basic)}</td><td>${fmtMoney(sub.hra)}</td><td>${fmtMoney(sub.lta)}</td><td>${fmtMoney(sub.gross)}</td>` +
-      `<td>${fmtMoney(sub.pf)}</td><td>${fmtMoney(sub.esi)}</td><td>${fmtMoney(sub.pt)}</td><td>${fmtMoney(sub.advanceTemp)}</td><td>${fmtMoney(sub.advance)}</td>` +
+      `<td>${fmtMoney(sub.pf)}</td><td>${fmtMoney(sub.esi)}</td><td>${fmtMoney(sub.pt)}</td><td>${fmtMoney(sub.advanceTemp)}</td><td>${fmtMoney(sub.advance)}</td><td>${fmtMoney(sub.retention)}</td>` +
       `<td>${fmtMoney(sub.totalDeduction)}</td><td>${fmtMoney(sub.netSalary)}</td></tr>`;
   }
 
   bodyRows += `<tr class="sal-grandtotal"><td></td><td>Grand Total</td><td>${fmtMoney(grand.rate)}</td><td></td><td>${fmtMoney(grand.leaveAmount)}</td>` +
     `<td>${fmtMoney(grand.basic)}</td><td>${fmtMoney(grand.hra)}</td><td>${fmtMoney(grand.lta)}</td><td>${fmtMoney(grand.gross)}</td>` +
-    `<td>${fmtMoney(grand.pf)}</td><td>${fmtMoney(grand.esi)}</td><td>${fmtMoney(grand.pt)}</td><td>${fmtMoney(grand.advanceTemp)}</td><td>${fmtMoney(grand.advance)}</td>` +
+    `<td>${fmtMoney(grand.pf)}</td><td>${fmtMoney(grand.esi)}</td><td>${fmtMoney(grand.pt)}</td><td>${fmtMoney(grand.advanceTemp)}</td><td>${fmtMoney(grand.advance)}</td><td>${fmtMoney(grand.retention)}</td>` +
     `<td>${fmtMoney(grand.totalDeduction)}</td><td>${fmtMoney(grand.netSalary)}</td></tr>`;
 
   box.innerHTML = `<div class="sal-sheet-wrap print-isolate" id="salaryPrintArea">
+      ${reportLogoHeader('Salary Sheet — ' + monthInput.value)}
       <table class="sal-table"><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr>${bodyRows}</table>
     </div>
-    <p style="font-size:11px;color:var(--muted);margin:10px 0;">PT = ₹200 if Gross &gt; ₹12,000, else ₹0. Leave Days = Absent + LP days for the month (EL/SL count as present, no deduction). PF, ESI, Advance are entered per employee in Employee Master. Apprentices and Contractors have no PF, ESI, or PT. R.S.IT Solution has no PF or ESI, but PT still applies.</p>
-    <button class="btn ghost full" onclick="window.print()">Print / Save PDF</button>`;
+    <p style="font-size:11px;color:var(--muted);margin:10px 0;">PT = ₹200 if Gross &gt; ₹12,000, else ₹0. Leave Days = Absent + LP days for the month (EL/SL count as present, no deduction). PF, ESI, Advance are entered per employee in Employee Master. Apprentices and Contractors have no PF, ESI, or PT. R.S.IT Solution has no PF or ESI, but PT still applies. Retention is the monthly bond retention deduction, if configured.</p>
+    <div class="row-inline" style="margin-bottom:0;">
+      <button class="btn ghost" style="flex:1;" onclick="openFullscreenView('Salary Sheet','salarySheetBox')">⛶ Full screen</button>
+      <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
+    </div>`;
 }
 
 // ---- geofence zones ----
@@ -2777,7 +2870,7 @@ async function renderIncrementReminders(){
     return;
   }
   const email = await getReminderEmail();
-  box.innerHTML = upcoming.map(e => {
+  box.innerHTML = reportLogoHeader('Increment Reminders') + upcoming.map(e => {
     const days = Math.ceil((new Date(e.nextIncrement) - now) / 86400000);
     const subject = encodeURIComponent('Increment reminder: ' + e.name);
     const body = encodeURIComponent('Reminder: ' + e.name + ' (' + (e.designation||'') + ') has an increment due on ' + e.nextIncrement + '.');
@@ -2799,7 +2892,7 @@ async function renderDocExpiryList(){
   const items = [];
   employees.forEach(e => {
     if(e.employmentStatus === 'left') return;
-    [['licenseExpiry','Driving license'], ['insuranceExpiry','Vehicle insurance']].forEach(([field, label]) => {
+    [['bondEnd','Bond end date']].forEach(([field, label]) => {
       if(!e[field]) return;
       const d = new Date(e[field]);
       if(d >= now && d <= in30){
@@ -2809,13 +2902,13 @@ async function renderDocExpiryList(){
   });
   items.sort((a,b) => new Date(a.date) - new Date(b.date));
   if(!items.length){
-    box.innerHTML = '<div class="empty">No license or insurance expiries in the next 30 days.</div>';
+    box.innerHTML = '<div class="empty">No bond end dates in the next 30 days.</div>';
     return;
   }
   const email = await getReminderEmail();
   box.innerHTML = items.map(it => {
-    const subject = encodeURIComponent(it.docLabel + ' expiry: ' + it.name);
-    const body = encodeURIComponent('Reminder: ' + it.name + '\'s ' + it.docLabel.toLowerCase() + ' expires on ' + it.date + '.');
+    const subject = encodeURIComponent(it.docLabel + ': ' + it.name);
+    const body = encodeURIComponent('Reminder: ' + it.name + '\'s ' + it.docLabel.toLowerCase() + ' is on ' + it.date + '.');
     const mailLink = email ? `mailto:${email}?subject=${subject}&body=${body}` : `mailto:?subject=${subject}&body=${body}`;
     return `<div class="emp-row">
       <div class="head"><strong>${it.name}</strong><span class="id">in ${it.days} day${it.days===1?'':'s'}</span></div>
@@ -2872,7 +2965,7 @@ function emptyEmployee(){
     employmentStatus:'active', leftDate:'',
     employeeType:'field', slOpening:0, elOpening:0,
     salaryHeading:'managerial', ratePay:0, advanceTemp:0, advance:0,
-    licenseExpiry:'', insuranceExpiry:'',
+    bondStart:'', bondEnd:'', retentionMoney:0, retentionMonths:0,
     aadhaarCardImg:'', panCardImg:'', otherDocs:[],
     checklists:{ joining:{}, exit:{} }
   };
@@ -2889,6 +2982,59 @@ function employeeModalHtml(emp){
     <div class="modal-box">
       <h2>${editingEmployeeId ? 'Edit employee' : 'Add employee'}</h2>
       <p class="hint">This information is stored once and auto-fills letters and payslips for this employee — no need to retype it each time.</p>
+
+      <div class="field-group">
+        <div class="sec-title">Salary sheet heading</div>
+        <label class="field">Heading</label>
+        <select class="field-input" id="f_salaryHeading" onchange="toggleStatutoryFieldsForHeading()">
+          ${Object.keys(SALARY_HEADINGS).map(k => `<option value="${k}" ${(emp.salaryHeading===k || (!emp.salaryHeading && k==='managerial'))?'selected':''}>${SALARY_HEADINGS[k].label}</option>`).join('')}
+        </select>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Picks which Basic/HRA/LTA split formula applies to this employee on the Salary Sheet, and which of PF/ESI/PT apply at all — set once here, applied automatically every month.</p>
+        <div style="height:14px"></div>
+        <label class="field">Rate of pay (monthly)</label>
+        <input type="number" id="f_ratePay" placeholder="0" value="${emp.ratePay||''}">
+        <div style="height:12px"></div>
+        <label class="field">Advance for temporary</label>
+        <input type="number" id="f_advanceTemp" placeholder="0" value="${emp.advanceTemp||''}">
+        <div style="height:12px"></div>
+        <label class="field">Advance</label>
+        <input type="number" id="f_advance" placeholder="0" value="${emp.advance||''}">
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Work policy</div>
+        <label class="field">Employee type</label>
+        <select class="field-input" id="f_employeeType" onchange="toggleLeaveFieldsForType()">
+          <option value="field" ${(!emp.employeeType || emp.employeeType==='field')?'selected':''}>Field Engineer</option>
+          <option value="wfh" ${emp.employeeType==='wfh'?'selected':''}>Work From Home</option>
+          <option value="resident" ${emp.employeeType==='resident'?'selected':''}>Resident Engineer</option>
+        </select>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">This decides which leave rules apply. Resident Engineers are excluded entirely from SL/EL balances, overtime, short leave, late-coming and sandwich-leave rules. Field Engineers get the full policy including overtime; Work From Home gets 4 sick leaves/year (instead of 7) and no short leave.</p>
+        <div id="leaveOpeningFields" class="${emp.employeeType==='resident'?'hidden':''}" style="margin-top:14px;">
+          <label class="field">SL opening balance (this year)</label>
+          <input type="number" id="f_slOpening" placeholder="0" value="${emp.slOpening??''}">
+          <div style="height:12px"></div>
+          <label class="field">EL opening balance (this year)</label>
+          <input type="number" id="f_elOpening" placeholder="0" value="${emp.elOpening??''}">
+          <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Enter manually for this year only. From next year onward, the EL Calculation Sheet report carries the closing balance forward automatically.</p>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Bond &amp; retention money</div>
+        <label class="field">Bond start date</label>
+        <input type="date" id="f_bondStart" value="${emp.bondStart||''}">
+        <div style="height:12px"></div>
+        <label class="field">Bond end date</label>
+        <input type="date" id="f_bondEnd" value="${emp.bondEnd||''}">
+        <div style="height:12px"></div>
+        <label class="field">Retention money (total)</label>
+        <input type="number" id="f_retentionMoney" placeholder="0" value="${emp.retentionMoney||''}">
+        <div style="height:12px"></div>
+        <label class="field">Number of months to deduct over</label>
+        <input type="number" id="f_retentionMonths" placeholder="e.g. 12" value="${emp.retentionMonths||''}">
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">If retention money is set, it's split evenly across these months starting from the bond start date, and deducted from the Salary Sheet automatically each month — shown as its own line item, and tracked in the Retention Money Detail report.</p>
+      </div>
 
       <div class="field-group">
         <div class="sec-title">Basic details</div>
@@ -2973,14 +3119,15 @@ function employeeModalHtml(emp){
         <label class="field">Standard deductions</label>
         <input type="number" id="f_stdDeductions" placeholder="0" value="${emp.stdDeductions||''}">
         <div style="height:12px"></div>
-        <label class="field">PF (provident fund)</label>
+        <label class="field" id="f_pf_label">PF (provident fund)</label>
         <input type="number" id="f_pf" placeholder="0" value="${emp.pf||''}">
         <div style="height:12px"></div>
-        <label class="field">ESI</label>
+        <label class="field" id="f_esiDeduction_label">ESI</label>
         <input type="number" id="f_esiDeduction" placeholder="0" value="${emp.esiDeduction||''}">
         <div style="height:12px"></div>
-        <label class="field">PT (professional tax)</label>
+        <label class="field" id="f_pt_label">PT (professional tax)</label>
         <input type="number" id="f_pt" placeholder="0" value="${emp.pt||''}">
+        <p style="font-size:11.5px;color:var(--muted);margin:8px 0 0;" id="statutoryHint"></p>
       </div>
 
       <div class="field-group">
@@ -3020,43 +3167,6 @@ function employeeModalHtml(emp){
       </div>
 
       <div class="field-group">
-        <div class="sec-title">Work policy</div>
-        <label class="field">Employee type</label>
-        <select class="field-input" id="f_employeeType" onchange="toggleLeaveFieldsForType()">
-          <option value="field" ${(!emp.employeeType || emp.employeeType==='field')?'selected':''}>Field Engineer</option>
-          <option value="wfh" ${emp.employeeType==='wfh'?'selected':''}>Work From Home</option>
-          <option value="resident" ${emp.employeeType==='resident'?'selected':''}>Resident Engineer</option>
-        </select>
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">This decides which leave rules apply. Resident Engineers are excluded entirely from SL/EL balances, overtime, short leave, late-coming and sandwich-leave rules. Field Engineers get the full policy including overtime; Work From Home gets 4 sick leaves/year (instead of 7) and no short leave.</p>
-        <div id="leaveOpeningFields" class="${emp.employeeType==='resident'?'hidden':''}" style="margin-top:14px;">
-          <label class="field">SL opening balance (this year)</label>
-          <input type="number" id="f_slOpening" placeholder="0" value="${emp.slOpening??''}">
-          <div style="height:12px"></div>
-          <label class="field">EL opening balance (this year)</label>
-          <input type="number" id="f_elOpening" placeholder="0" value="${emp.elOpening??''}">
-          <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Enter manually for this year only. From next year onward, the EL Calculation Sheet report carries the closing balance forward automatically.</p>
-        </div>
-      </div>
-
-      <div class="field-group">
-        <div class="sec-title">Salary sheet heading</div>
-        <label class="field">Heading</label>
-        <select class="field-input" id="f_salaryHeading">
-          ${Object.keys(SALARY_HEADINGS).map(k => `<option value="${k}" ${(emp.salaryHeading===k || (!emp.salaryHeading && k==='managerial'))?'selected':''}>${SALARY_HEADINGS[k].label}</option>`).join('')}
-        </select>
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Picks which Basic/HRA/LTA split formula applies to this employee on the Salary Sheet — set once here, applied automatically every month.</p>
-        <div style="height:14px"></div>
-        <label class="field">Rate of pay (monthly)</label>
-        <input type="number" id="f_ratePay" placeholder="0" value="${emp.ratePay||''}">
-        <div style="height:12px"></div>
-        <label class="field">Advance for temporary</label>
-        <input type="number" id="f_advanceTemp" placeholder="0" value="${emp.advanceTemp||''}">
-        <div style="height:12px"></div>
-        <label class="field">Advance</label>
-        <input type="number" id="f_advance" placeholder="0" value="${emp.advance||''}">
-      </div>
-
-      <div class="field-group">
         <div class="sec-title">Field tracking</div>
         <label class="field">Does this employee need km tracking (field engineer)?</label>
         <select class="field-input" id="f_needsTracking" onchange="toggleTrackingFields()">
@@ -3075,13 +3185,6 @@ function employeeModalHtml(emp){
             <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Saving this employee will create their km-tracking login automatically — share the username and password with them directly.</p>
           `}
         </div>
-        <div style="height:14px"></div>
-        <label class="field">Driving license expiry date</label>
-        <input type="date" id="f_licenseExpiry" value="${emp.licenseExpiry||''}">
-        <div style="height:12px"></div>
-        <label class="field">Vehicle insurance expiry date</label>
-        <input type="date" id="f_insuranceExpiry" value="${emp.insuranceExpiry||''}">
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">You'll get a reminder in Dashboard → Document Expiry a month before either of these run out.</p>
       </div>
 
       <div class="field-group">
@@ -3116,6 +3219,21 @@ function toggleTrackingFields(){
 function toggleLeaveFieldsForType(){
   const isResident = document.getElementById('f_employeeType').value === 'resident';
   document.getElementById('leaveOpeningFields').classList.toggle('hidden', isResident);
+}
+
+function toggleStatutoryFieldsForHeading(){
+  const heading = SALARY_HEADINGS[document.getElementById('f_salaryHeading').value] || SALARY_HEADINGS.managerial;
+  const notes = [];
+  [['f_pf','pf','PF'], ['f_esiDeduction','esi','ESI'], ['f_pt','pt','PT']].forEach(([id, flag, label]) => {
+    const input = document.getElementById(id);
+    const applies = heading[flag];
+    input.disabled = !applies;
+    if(!applies){ input.value = ''; input.placeholder = 'Not applicable'; }
+    else { input.placeholder = '0'; }
+    if(!applies) notes.push(label);
+  });
+  const hint = document.getElementById('statutoryHint');
+  if(hint) hint.textContent = notes.length ? (notes.join(', ') + ' not applicable for ' + SALARY_HEADINGS[document.getElementById('f_salaryHeading').value].label + ' — greyed out and excluded from the Salary Sheet automatically.') : '';
 }
 
 let editingEmployeeDraft = null;
@@ -3169,6 +3287,7 @@ async function openAddEmployeeModal(id){
     editingEmployeeDraft = emptyEmployee();
   }
   document.getElementById('employeeModalRoot').innerHTML = employeeModalHtml(editingEmployeeDraft);
+  toggleStatutoryFieldsForHeading();
 }
 function closeEmployeeModal(){
   document.getElementById('employeeModalRoot').innerHTML = '';
@@ -3254,8 +3373,10 @@ async function saveEmployeeForm(){
     emergencyName: document.getElementById('f_emergencyName').value.trim(),
     emergencyNumber: document.getElementById('f_emergencyNumber').value.trim(),
     trackingEnabled: needsTracking,
-    licenseExpiry: document.getElementById('f_licenseExpiry').value,
-    insuranceExpiry: document.getElementById('f_insuranceExpiry').value,
+    bondStart: document.getElementById('f_bondStart').value,
+    bondEnd: document.getElementById('f_bondEnd').value,
+    retentionMoney: Number(document.getElementById('f_retentionMoney').value)||0,
+    retentionMonths: Number(document.getElementById('f_retentionMonths').value)||0,
     employeeType: document.getElementById('f_employeeType').value,
     slOpening: Number(document.getElementById('f_slOpening').value)||0,
     elOpening: Number(document.getElementById('f_elOpening').value)||0,
@@ -3402,7 +3523,8 @@ async function renderReportsTab(){
     {key:'diwali', label:'Diwali Bonus Report', avatar:'D'},
     {key:'salary', label:'Salary Report', avatar:'S'},
     {key:'ctc', label:'Cost to Company Report', avatar:'C'},
-    {key:'loan', label:'Loan & Advance Report', avatar:'L'}
+    {key:'loan', label:'Loan & Advance Report', avatar:'L'},
+    {key:'retention', label:'Retention Money Detail', avatar:'R'}
   ];
   document.getElementById('reportCardsBox').innerHTML = reports.map(r => {
     const withData = employees.filter(e => reportHasData(r.key, e)).length;
@@ -3425,6 +3547,7 @@ function reportHasData(key, e){
   if(key==='salary') return (Number(e.basic)||0) > 0;
   if(key==='ctc') return (Number(e.basic)||0) > 0;
   if(key==='loan') return (Number(e.loanAmount)||0) > 0;
+  if(key==='retention') return (Number(e.retentionMoney)||0) > 0 && (Number(e.retentionMonths)||0) > 0 && !!e.bondStart;
   return false;
 }
 
@@ -3733,13 +3856,14 @@ function whatsappHolidayList(){
 async function viewReport(key, label){
   const employees = await getEmployees();
   const box = document.getElementById('reportBox_' + key);
+  const fsBtn = `<button class="btn ghost full" style="margin-top:8px;" onclick="openFullscreenView('${label.replace(/'/g,"\\'")}','reportBox_${key}')">⛶ Full screen</button>`;
   let rows = '';
   if(key === 'contact'){
     rows = employees.map(e => `<tr><td>${e.name}</td><td>${e.designation||''}</td><td>${e.phone||''}</td><td>${e.email||''}</td></tr>`).join('');
-    box.innerHTML = `<div style="margin-top:12px;"><table><tr><th>Name</th><th>Designation</th><th>Phone</th><th>Email</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table></div>`;
+    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Designation</th><th>Phone</th><th>Email</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'birthday'){
     rows = employees.filter(e=>e.dob).map(e => `<tr><td>${e.name}</td><td>${e.dob}</td></tr>`).join('');
-    box.innerHTML = `<div style="margin-top:12px;"><table><tr><th>Name</th><th>Date of birth</th></tr>${rows || '<tr><td colspan="2" class="empty">No data yet</td></tr>'}</table></div>`;
+    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Date of birth</th></tr>${rows || '<tr><td colspan="2" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'increment'){
     rows = employees.filter(e=>e.nextIncrement).map(e => {
       const d = new Date(e.nextIncrement);
@@ -3747,10 +3871,10 @@ async function viewReport(key, label){
       const lastSalary = (Number(e.basic)||0)+(Number(e.hra)||0)+(Number(e.otherAllowances)||0);
       return `<tr><td>${e.name}</td><td>${monthName}</td><td>${e.nextIncrement}</td><td class="num">₹${lastSalary.toFixed(0)}</td></tr>`;
     }).join('');
-    box.innerHTML = `<div style="margin-top:12px;"><table><tr><th>Name</th><th>Increment month</th><th>Increment date</th><th class="num">Last salary (gross)</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table></div>`;
+    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Increment month</th><th>Increment date</th><th class="num">Last salary (gross)</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'diwali'){
     rows = employees.map(e => `<tr><td>${e.name}</td><td>${e.diwaliEligible==='yes'?'Yes':'No'}</td><td class="num">₹${diwaliBonusFor(e)}</td></tr>`).join('');
-    box.innerHTML = `<div style="margin-top:12px;"><table><tr><th>Name</th><th>Eligible</th><th class="num">Bonus</th></tr>${rows || '<tr><td colspan="3" class="empty">No data yet</td></tr>'}</table></div>`;
+    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Eligible</th><th class="num">Bonus</th></tr>${rows || '<tr><td colspan="3" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'salary'){
     rows = employees.map(e => {
       const gross = (Number(e.basic)||0)+(Number(e.hra)||0)+(Number(e.otherAllowances)||0);
@@ -3759,7 +3883,7 @@ async function viewReport(key, label){
       const net = gross - deductions;
       return `<tr><td>${e.name}</td><td class="num">₹${gross.toFixed(0)}</td><td class="num">₹${deductions.toFixed(0)}</td><td class="num">₹${net.toFixed(0)}</td></tr>`;
     }).join('');
-    box.innerHTML = `<div style="margin-top:12px;"><table><tr><th>Name</th><th class="num">Gross</th><th class="num">Deductions</th><th class="num">Net</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table></div>`;
+    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th class="num">Gross</th><th class="num">Deductions</th><th class="num">Net</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'ctc'){
     rows = employees.map(e => {
       const monthlyGross = (Number(e.basic)||0)+(Number(e.hra)||0)+(Number(e.otherAllowances)||0)+(Number(e.dressAllowance)||0)+(Number(e.mobileExpense)||0);
@@ -3768,10 +3892,25 @@ async function viewReport(key, label){
       const annualCtc = annualGross + bonus;
       return `<tr><td>${e.name}</td><td class="num">₹${monthlyGross.toFixed(0)}</td><td class="num">₹${annualGross.toFixed(0)}</td><td class="num">₹${bonus.toFixed(0)}</td><td class="num">₹${annualCtc.toFixed(0)}</td></tr>`;
     }).join('');
-    box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;"><table><tr><th>Name</th><th class="num">Monthly gross</th><th class="num">Annual gross</th><th class="num">Diwali bonus</th><th class="num">Annual CTC</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table><p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Annual CTC = (Basic + HRA + Other allowances + Dress allowance + Mobile expense) × 12 + Diwali bonus. PF, ESI and PT are employee-side deductions, not added here.</p></div>`;
+    box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}<table><tr><th>Name</th><th class="num">Monthly gross</th><th class="num">Annual gross</th><th class="num">Diwali bonus</th><th class="num">Annual CTC</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table><p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Annual CTC = (Basic + HRA + Other allowances + Dress allowance + Mobile expense) × 12 + Diwali bonus. PF, ESI and PT are employee-side deductions, not added here.</p>${fsBtn}</div>`;
   } else if(key === 'loan'){
     rows = employees.filter(e=>(Number(e.loanAmount)||0)>0).map(e => `<tr><td>${e.name}</td><td class="num">₹${e.loanAmount}</td><td class="num">₹${e.emiPerMonth}</td><td>${e.loanStatus}</td></tr>`).join('');
-    box.innerHTML = `<div style="margin-top:12px;"><table><tr><th>Name</th><th class="num">Loan amount</th><th class="num">EMI</th><th>Status</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table></div>`;
+    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th class="num">Loan amount</th><th class="num">EMI</th><th>Status</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
+  } else if(key === 'retention'){
+    const now = new Date();
+    rows = employees.filter(e => (Number(e.retentionMoney)||0) > 0 && (Number(e.retentionMonths)||0) > 0 && e.bondStart).map(e => {
+      const money = Number(e.retentionMoney)||0;
+      const months = Number(e.retentionMonths)||0;
+      const monthly = Math.round((money/months)*100)/100;
+      const start = new Date(e.bondStart);
+      const startIndex = start.getFullYear()*12 + start.getMonth();
+      const nowIndex = now.getFullYear()*12 + now.getMonth();
+      const monthsElapsed = Math.min(Math.max(nowIndex - startIndex, 0), months);
+      const deductedSoFar = Math.round(monthly * monthsElapsed * 100)/100;
+      const balance = Math.round((money - deductedSoFar)*100)/100;
+      return `<tr><td>${e.name}</td><td>${e.bondStart||''}</td><td>${e.bondEnd||''}</td><td class="num">₹${fmtMoney(money)}</td><td class="num">${months}</td><td class="num">₹${fmtMoney(monthly)}</td><td class="num">${monthsElapsed}</td><td class="num">₹${fmtMoney(deductedSoFar)}</td><td class="num">₹${fmtMoney(balance)}</td></tr>`;
+    }).join('');
+    box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Bond start</th><th>Bond end</th><th class="num">Retention money</th><th class="num">Months</th><th class="num">Monthly deduction</th><th class="num">Months elapsed</th><th class="num">Deducted so far</th><th class="num">Balance</th></tr>${rows || '<tr><td colspan="9" class="empty">No employees with retention money configured</td></tr>'}</table>${fsBtn}</div>`;
   }
 }
 
@@ -3899,7 +4038,7 @@ async function generateLetter(){
   }
   const text = letterTemplate(type, f);
   lastGeneratedLetter = { type, text, employeeName: name };
-  document.getElementById('letterPaper').textContent = text;
+  document.getElementById('letterPaper').innerHTML = reportLogoHeader(type) + '<div style="white-space:pre-wrap;">' + escapeHtml(text) + '</div>';
   document.getElementById('letterOutput').classList.add('show');
   document.getElementById('letterActionsBox').classList.remove('hidden');
 
@@ -3907,6 +4046,12 @@ async function generateLetter(){
   log.push({ type, employeeName: name, date: new Date().toISOString() });
   await saveLettersLog(log);
   await addActivityLog('Generated ' + type + ' for ' + name);
+}
+
+function escapeHtml(str){
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
 }
 
 function emailLetter(){
