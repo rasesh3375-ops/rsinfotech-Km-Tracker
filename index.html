@@ -2178,14 +2178,15 @@ const ATT_CODE_LABELS = { P:'Present', A:'Absent', H:'Holiday', EL:'EL', SL:'SL'
 // ---- salary sheet headings ----
 // Each heading defines how Rate of Pay splits into Basic/HRA/LTA. 'flat' means
 // the whole rate (minus leave deduction) is just Basic, with no HRA/LTA split —
-// that's how Junior Engineers are set up in the source sheet.
+// that's how Junior Engineers are set up in the source sheet. pf/esi/pt flags
+// control which statutory deductions apply to that heading at all.
 const SALARY_HEADINGS = {
-  managerial:  { label: 'Managerial Staff',  basicPct: 0.65, hraPct: 0.35, ltaPct: 0,    flat: false },
-  senior:      { label: 'Seniors Staff',     basicPct: 0.50, hraPct: 0.40, ltaPct: 0.10, flat: false },
-  junior:      { label: 'Junior Engineers',  basicPct: 1.00, hraPct: 0,    ltaPct: 0,    flat: true  },
-  apprentice:  { label: 'Apprentices',       basicPct: 0.50, hraPct: 0.40, ltaPct: 0.10, flat: false },
-  rsit:        { label: 'R.S.IT Solution',   basicPct: 0.50, hraPct: 0.40, ltaPct: 0.10, flat: false },
-  contractor:  { label: 'Contractors',       basicPct: 0.50, hraPct: 0.40, ltaPct: 0.10, flat: false }
+  managerial:  { label: 'Managerial Staff',  basicPct: 0.65, hraPct: 0.35, ltaPct: 0,    flat: false, pf: true,  esi: true,  pt: true  },
+  senior:      { label: 'Seniors Staff',     basicPct: 0.50, hraPct: 0.40, ltaPct: 0.10, flat: false, pf: true,  esi: true,  pt: true  },
+  junior:      { label: 'Junior Engineers',  basicPct: 1.00, hraPct: 0,    ltaPct: 0,    flat: true,  pf: true,  esi: true,  pt: true  },
+  apprentice:  { label: 'Apprentices',       basicPct: 0.50, hraPct: 0.40, ltaPct: 0.10, flat: false, pf: false, esi: false, pt: false },
+  rsit:        { label: 'R.S.IT Solution',   basicPct: 0.50, hraPct: 0.40, ltaPct: 0.10, flat: false, pf: false, esi: false, pt: true  },
+  contractor:  { label: 'Contractors',       basicPct: 0.50, hraPct: 0.40, ltaPct: 0.10, flat: false, pf: false, esi: false, pt: false }
 };
 const SALARY_HEADING_ORDER = ['managerial','senior','junior','apprentice','rsit','contractor'];
 
@@ -2296,9 +2297,9 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
     lta   = (rate*heading.ltaPct)   - (rate*heading.ltaPct)/monthDays*leaveDays;
   }
   const gross = basic + hra + lta;
-  const pf = Number(emp.pf) || 0;
-  const esi = Number(emp.esiDeduction) || 0;
-  const pt = gross > 12000 ? 200 : 0;
+  const pf = heading.pf ? (Number(emp.pf) || 0) : 0;
+  const esi = heading.esi ? (Number(emp.esiDeduction) || 0) : 0;
+  const pt = heading.pt ? (gross > 12000 ? 200 : 0) : 0;
   const advanceTemp = Number(emp.advanceTemp) || 0;
   const advance = Number(emp.advance) || 0;
   const totalDeduction = pf + esi + pt + advanceTemp + advance;
@@ -2359,7 +2360,7 @@ async function renderSalarySheet(){
   box.innerHTML = `<div class="sal-sheet-wrap print-isolate" id="salaryPrintArea">
       <table class="sal-table"><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr>${bodyRows}</table>
     </div>
-    <p style="font-size:11px;color:var(--muted);margin:10px 0;">PT = ₹200 if Gross &gt; ₹12,000, else ₹0. Leave Days = Absent + LP days for the month (EL/SL count as present, no deduction). PF, ESI, Advance are entered per employee in Employee Master.</p>
+    <p style="font-size:11px;color:var(--muted);margin:10px 0;">PT = ₹200 if Gross &gt; ₹12,000, else ₹0. Leave Days = Absent + LP days for the month (EL/SL count as present, no deduction). PF, ESI, Advance are entered per employee in Employee Master. Apprentices and Contractors have no PF, ESI, or PT. R.S.IT Solution has no PF or ESI, but PT still applies.</p>
     <button class="btn ghost full" onclick="window.print()">Print / Save PDF</button>`;
 }
 
