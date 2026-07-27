@@ -863,15 +863,6 @@
 
       <!-- ===== Generator ===== -->
       <div id="hrSubGenerator" class="hidden">
-        <div class="report-card">
-          <div class="head"><div class="avatar">J</div><div class="titlewrap"><strong>Joining Checklist</strong><span id="joiningChecklistCount">0 employees</span></div></div>
-          <button class="btn ghost" onclick="openChecklistPicker('joining')">Open checklist</button>
-        </div>
-        <div class="report-card">
-          <div class="head"><div class="avatar">E</div><div class="titlewrap"><strong>Exit Checklist</strong><span id="exitChecklistCount">0 employees</span></div></div>
-          <button class="btn ghost" onclick="openChecklistPicker('exit')">Open checklist</button>
-        </div>
-
         <section class="block">
           <div class="field-group">
             <div class="sec-title">Choose a letter</div>
@@ -2863,6 +2854,7 @@ let editingEmployeeId = null;
 let currentChecklistType = null;
 
 const LETTER_TYPES = [
+  'Appointment Letter',
   'Experience Letter',
   'Relieving Letter',
   'Exit Letter',
@@ -3511,15 +3503,31 @@ async function saveEmployeeForm(){
     const idx = employees.findIndex(e => e.id === editingEmployeeId);
     employees[idx] = draft;
     await addActivityLog('Updated employee record for ' + name);
+    await saveEmployees(employees);
+    closeEmployeeModal();
+    await renderEmployeeList();
+    await refreshDashboard();
+    await renderUserList();
   } else {
     employees.push(draft);
     await addActivityLog('Added employee ' + name + ' (' + id + ')');
+    await saveEmployees(employees);
+    closeEmployeeModal();
+    await renderEmployeeList();
+    await refreshDashboard();
+    await renderUserList();
+    await jumpToGeneratorForNewEmployee(id);
   }
-  await saveEmployees(employees);
-  closeEmployeeModal();
-  await renderEmployeeList();
-  await refreshDashboard();
-  await renderUserList();
+}
+
+async function jumpToGeneratorForNewEmployee(employeeId){
+  switchHrSub('generator');
+  await renderGeneratorTab();
+  const idx = LETTER_TYPES.indexOf('Appointment Letter');
+  if(idx >= 0) selectLetterType(idx);
+  const sel = document.getElementById('genEmpSelect');
+  if(sel) sel.value = employeeId;
+  await autoFillGeneratorFromEmployee();
 }
 
 async function deleteEmployee(id){
@@ -4173,13 +4181,19 @@ async function renderGeneratorTab(){
   const employees = await getEmployees();
   const joiningDone = employees.filter(e => Object.values(e.checklists?.joining||{}).filter(Boolean).length === CHECKLIST_ITEMS.joining.length).length;
   const exitDone = employees.filter(e => Object.values(e.checklists?.exit||{}).filter(Boolean).length === CHECKLIST_ITEMS.exit.length).length;
-  document.getElementById('joiningChecklistCount').textContent = employees.length + ' employees' + (joiningDone ? (', ' + joiningDone + ' complete') : '');
-  document.getElementById('exitChecklistCount').textContent = employees.length + ' employees' + (exitDone ? (', ' + exitDone + ' complete') : '');
 
-  document.getElementById('letterChoiceList').innerHTML = LETTER_TYPES.map((t,i) => `
+  const letterItems = LETTER_TYPES.map((t,i) => `
     <div class="letter-choice ${i===selectedLetterIdx?'active':''}" onclick="selectLetterType(${i})">
       <span class="num">${String(i+1).padStart(2,'0')}</span> ${t}
     </div>`).join('');
+  const checklistItems = `
+    <div class="letter-choice" onclick="openChecklistPicker('joining')">
+      <span class="num">${String(LETTER_TYPES.length+1).padStart(2,'0')}</span> Joining Checklist <span style="margin-left:auto;color:var(--muted);font-weight:400;font-size:12px;">${employees.length} employees${joiningDone ? ', ' + joiningDone + ' complete' : ''}</span>
+    </div>
+    <div class="letter-choice" onclick="openChecklistPicker('exit')">
+      <span class="num">${String(LETTER_TYPES.length+2).padStart(2,'0')}</span> Exit Checklist <span style="margin-left:auto;color:var(--muted);font-weight:400;font-size:12px;">${employees.length} employees${exitDone ? ', ' + exitDone + ' complete' : ''}</span>
+    </div>`;
+  document.getElementById('letterChoiceList').innerHTML = letterItems + checklistItems;
 
   const activeEmployees = employees.filter(e => e.employmentStatus !== 'left');
   const sel = document.getElementById('genEmpSelect');
@@ -4213,6 +4227,8 @@ function letterTemplate(type, f){
         department = f.department || '[Department]', doj = f.doj || '[Date of joining]', lwd = f.lwd || '[Last working date]',
         issueDate = f.issueDate;
   switch(type){
+    case 'Appointment Letter':
+      return `${company}\n\nDate: ${issueDate}\n\nDear ${name},\n\nWe are pleased to appoint you as ${designation} in the ${department} department at ${company}, effective from ${doj}.\n\nYour employment will be governed by the terms discussed with you and the company's HR policies, including working hours, leave entitlements, and code of conduct. Please treat this letter as confirmation of your appointment and report to work on your date of joining with the required documents.\n\nWe welcome you to the team and look forward to a long and successful association.\n\nFor ${company}\n\nAuthorised Signatory`;
     case 'Experience Letter':
       return `${company}\n\nDate: ${issueDate}\n\nTO WHOMSOEVER IT MAY CONCERN\n\nThis is to certify that ${name} was employed with ${company} as ${designation} in the ${department} department from ${doj} to ${lwd || 'present'}.\n\nDuring this period, we found ${name} to be sincere, hardworking and professional in conduct. We wish them the very best in their future endeavours.\n\nFor ${company}\n\nAuthorised Signatory`;
     case 'Relieving Letter':
