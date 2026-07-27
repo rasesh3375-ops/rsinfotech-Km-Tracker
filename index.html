@@ -871,12 +871,26 @@
           <label class="field">Company name</label>
           <input type="text" id="genCompanyName" value="R.S.Infotech" />
           <div style="height:12px"></div>
-          <label class="field">Employee</label>
-          <select class="field-input" id="genEmpSelect" onchange="autoFillGeneratorFromEmployee()">
-            <option value="">— Select employee —</option>
-          </select>
-          <p style="font-size:11.5px;color:var(--muted);margin:8px 0 0;">Designation, department and date of joining below are pulled from Employee Master automatically — edit them here only if this document needs something different.</p>
-          <div style="height:14px"></div>
+          <div id="genOfferFieldsWrap" class="hidden">
+            <p style="font-size:11.5px;color:var(--muted);margin:0 0 8px;">An offer letter goes to someone who hasn't joined yet, so it's filled in manually here rather than pulled from Employee Master.</p>
+            <label class="field">Candidate name</label>
+            <input type="text" id="genCandidateName" placeholder="Candidate's full name" />
+            <div style="height:12px"></div>
+            <label class="field">Offered salary (CTC, per month or annual — your call)</label>
+            <input type="text" id="genOfferedSalary" placeholder="e.g. ₹35,000 per month" />
+            <div style="height:12px"></div>
+            <label class="field">Reply / acceptance by</label>
+            <input type="date" id="genOfferReplyBy" />
+            <div style="height:14px"></div>
+          </div>
+          <div id="genEmpSelectWrap">
+            <label class="field">Employee</label>
+            <select class="field-input" id="genEmpSelect" onchange="autoFillGeneratorFromEmployee()">
+              <option value="">— Select employee —</option>
+            </select>
+            <p style="font-size:11.5px;color:var(--muted);margin:8px 0 0;">Designation, department and date of joining below are pulled from Employee Master automatically — edit them here only if this document needs something different.</p>
+            <div style="height:14px"></div>
+          </div>
           <label class="field">Designation</label>
           <input type="text" id="genDesignation" />
           <div style="height:12px"></div>
@@ -2854,6 +2868,7 @@ let editingEmployeeId = null;
 let currentChecklistType = null;
 
 const LETTER_TYPES = [
+  'Offer Letter',
   'Appointment Letter',
   'Experience Letter',
   'Relieving Letter',
@@ -4205,6 +4220,7 @@ async function renderGeneratorTab(){
   document.getElementById('genIssueDate').value = document.getElementById('genIssueDate').value || todayStr();
   document.getElementById('letterOutput').classList.remove('show');
   document.getElementById('letterActionsBox').classList.add('hidden');
+  toggleGeneratorFieldsForType();
 }
 
 async function autoFillGeneratorFromEmployee(){
@@ -4220,6 +4236,12 @@ async function autoFillGeneratorFromEmployee(){
 function selectLetterType(idx){
   selectedLetterIdx = idx;
   document.querySelectorAll('.letter-choice').forEach((el,i) => el.classList.toggle('active', i===idx));
+  toggleGeneratorFieldsForType();
+}
+function toggleGeneratorFieldsForType(){
+  const isOffer = LETTER_TYPES[selectedLetterIdx] === 'Offer Letter';
+  document.getElementById('genOfferFieldsWrap').classList.toggle('hidden', !isOffer);
+  document.getElementById('genEmpSelectWrap').classList.toggle('hidden', isOffer);
 }
 
 function letterTemplate(type, f){
@@ -4227,6 +4249,8 @@ function letterTemplate(type, f){
         department = f.department || '[Department]', doj = f.doj || '[Date of joining]', lwd = f.lwd || '[Last working date]',
         issueDate = f.issueDate;
   switch(type){
+    case 'Offer Letter':
+      return `${company}\n\nDate: ${issueDate}\n\nDear ${name},\n\nFurther to your interview and discussions with us, we are pleased to offer you the position of ${designation}${department ? ' in the ' + department + ' department' : ''} at ${company}, with a proposed joining date of ${doj || '[to be confirmed]'}.\n\n${f.offeredSalary ? 'Offered compensation: ' + f.offeredSalary + '\n\n' : ''}This offer is subject to satisfactory verification of your documents and references, and does not constitute a confirmed appointment until you accept it and formally join the organisation. Detailed terms of employment will be shared in your appointment letter upon joining.\n\n${f.replyBy ? 'Please confirm your acceptance of this offer by ' + f.replyBy + '.\n\n' : ''}We look forward to welcoming you to ${company}.\n\nFor ${company}\n\nAuthorised Signatory`;
     case 'Appointment Letter':
       return `${company}\n\nDate: ${issueDate}\n\nDear ${name},\n\nWe are pleased to appoint you as ${designation} in the ${department} department at ${company}, effective from ${doj}.\n\nYour employment will be governed by the terms discussed with you and the company's HR policies, including working hours, leave entitlements, and code of conduct. Please treat this letter as confirmation of your appointment and report to work on your date of joining with the required documents.\n\nWe welcome you to the team and look forward to a long and successful association.\n\nFor ${company}\n\nAuthorised Signatory`;
     case 'Experience Letter':
@@ -4250,17 +4274,30 @@ function letterTemplate(type, f){
 
 async function generateLetter(){
   const msg = document.getElementById('genMsg');
-  const empId = document.getElementById('genEmpSelect').value;
-  if(!empId){
-    msg.textContent = 'Select an employee.';
-    msg.classList.add('error');
-    return;
+  const type = LETTER_TYPES[selectedLetterIdx];
+  const isOffer = type === 'Offer Letter';
+
+  let name, matched = null;
+  if(isOffer){
+    name = document.getElementById('genCandidateName').value.trim();
+    if(!name){
+      msg.textContent = 'Enter the candidate\'s name.';
+      msg.classList.add('error');
+      return;
+    }
+  } else {
+    const empId = document.getElementById('genEmpSelect').value;
+    if(!empId){
+      msg.textContent = 'Select an employee.';
+      msg.classList.add('error');
+      return;
+    }
+    const employees = await getEmployees();
+    matched = employees.find(e => e.id === empId);
+    name = matched ? matched.name : '';
   }
   msg.textContent = '';
-  const type = LETTER_TYPES[selectedLetterIdx];
-  const employees = await getEmployees();
-  const matched = employees.find(e => e.id === empId);
-  const name = matched ? matched.name : '';
+
   const f = {
     company: document.getElementById('genCompanyName').value.trim() || 'R.S.Infotech',
     name,
@@ -4270,6 +4307,10 @@ async function generateLetter(){
     lwd: document.getElementById('genLwd').value,
     issueDate: document.getElementById('genIssueDate').value || todayStr()
   };
+  if(isOffer){
+    f.offeredSalary = document.getElementById('genOfferedSalary').value.trim();
+    f.replyBy = document.getElementById('genOfferReplyBy').value;
+  }
   if(matched && type === 'Salary Slip'){
     const gross = (Number(matched.basic)||0)+(Number(matched.hra)||0)+(Number(matched.otherAllowances)||0);
     const emi = matched.loanStatus === 'active' ? (Number(matched.emiPerMonth)||0) : 0;
