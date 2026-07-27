@@ -974,7 +974,8 @@ function populateMonthYearSelects(monthSelId, yearSelId){
   const monthSel = document.getElementById(monthSelId);
   const yearSel = document.getElementById(yearSelId);
   if(!monthSel || !yearSel) return;
-  if(!monthSel.options.length){
+  const firstTime = !monthSel.options.length;
+  if(firstTime){
     monthSel.innerHTML = MONTH_NAMES.map((m,i) => `<option value="${i+1}">${m}</option>`).join('');
   }
   if(!yearSel.options.length){
@@ -983,8 +984,15 @@ function populateMonthYearSelects(monthSelId, yearSelId){
     for(let y = current - 2; y <= current + 1; y++) years.push(y);
     yearSel.innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join('');
   }
-  if(!monthSel.value) monthSel.value = String(new Date().getMonth() + 1);
-  if(!yearSel.value) yearSel.value = String(new Date().getFullYear());
+  // Only force today's month/year the first time these are populated — a
+  // <select> always reports some value once it has options, so checking
+  // "is it empty" here would never trigger on later calls anyway. This way
+  // every report defaults to the current month automatically, but still
+  // remembers whatever month the person picked afterward.
+  if(firstTime){
+    monthSel.value = String(new Date().getMonth() + 1);
+    yearSel.value = String(new Date().getFullYear());
+  }
 }
 function getMonthYearValue(monthSelId, yearSelId){
   const month = document.getElementById(monthSelId).value;
