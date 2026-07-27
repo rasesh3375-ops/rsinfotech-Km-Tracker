@@ -4595,7 +4595,7 @@ async function uploadPayrollDoc(){
   msg.classList.remove('error');
   const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
   const fileName = `${type} - ${monthVal}${ext}`;
-  const url = await uploadDocumentToDrive(['Office Documents','Payroll Documents', type], fileName, file);
+  const url = await uploadDocumentToDrive(['HR Management','Office Documents','Payroll Documents', type], fileName, file);
   if(!url){
     msg.textContent = 'Upload failed — check your connection and try again.';
     msg.classList.add('error');
@@ -4654,7 +4654,7 @@ async function uploadApprenticeDoc(){
   msg.classList.remove('error');
   const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
   const fileName = `${emp ? emp.name + ' - ' : ''}${category}${ext}`;
-  const url = await uploadDocumentToDrive(['Office Documents','Apprentice Documents', category], fileName, file);
+  const url = await uploadDocumentToDrive(['HR Management','Office Documents','Apprentice Documents', category], fileName, file);
   if(!url){
     msg.textContent = 'Upload failed — check your connection and try again.';
     msg.classList.add('error');
@@ -4718,7 +4718,7 @@ async function uploadCompanyDoc(category, folderLabel){
   msg.classList.remove('error');
   const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
   const fileName = `${docName} - ${todayStr()}${ext}`;
-  const url = await uploadDocumentToDrive(['Office Documents', folderLabel], fileName, file);
+  const url = await uploadDocumentToDrive(['HR Management','Office Documents', folderLabel], fileName, file);
   if(!url){
     msg.textContent = 'Upload failed — check your connection and try again.';
     msg.classList.add('error');
@@ -4810,7 +4810,7 @@ async function uploadWorkmanDoc(employeeId, event){
   if(!entry) return;
   const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
   const fileName = `${entry.name} - Insurance Policy${ext}`;
-  const url = await uploadDocumentToDrive(['Office Documents','Workman Compensation', entry.name], fileName, file);
+  const url = await uploadDocumentToDrive(['HR Management','Office Documents','Workman Compensation', entry.name], fileName, file);
   if(!url){ alert('Upload failed — check your connection and try again.'); return; }
   entry.docUrl = url;
   entry.docName = fileName;
@@ -4899,7 +4899,7 @@ async function uploadUniformDoc(employeeId, employeeName, event){
   if(!file) return;
   const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
   const fileName = `${employeeName} - Uniform-ID Document${ext}`;
-  const url = await uploadDocumentToDrive(['Office Documents','Uniform and ID', employeeName], fileName, file);
+  const url = await uploadDocumentToDrive(['HR Management','Office Documents','Uniform and ID', employeeName], fileName, file);
   if(!url){ alert('Upload failed — check your connection and try again.'); return; }
   const list = await getUniformIdList();
   let entry = list.find(u => u.employeeId === employeeId);
