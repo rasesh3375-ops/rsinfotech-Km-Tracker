@@ -820,6 +820,54 @@
         </section>
 
         <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">PF Report</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">PF deducted per employee for the month, pulled from the Salary Sheet. Apprentices, R.S.IT Solution and Contractors don't have PF, so they're excluded here.</p>
+          <div class="row-inline">
+            <div><label class="field">Month</label><select class="field-input" id="pfReportMonthSel"></select></div>
+            <div><label class="field">Year</label><select class="field-input" id="pfReportYearSel"></select></div>
+          </div>
+          <button class="btn full" onclick="renderStatutoryReport('pf','PF Report')">Generate PF report</button>
+          <div style="height:14px"></div>
+          <div id="pfReportBox"></div>
+        </section>
+
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">ESI Report</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">ESI deducted per employee for the month, pulled from the Salary Sheet. Apprentices, R.S.IT Solution and Contractors don't have ESI, so they're excluded here.</p>
+          <div class="row-inline">
+            <div><label class="field">Month</label><select class="field-input" id="esiReportMonthSel"></select></div>
+            <div><label class="field">Year</label><select class="field-input" id="esiReportYearSel"></select></div>
+          </div>
+          <button class="btn full" onclick="renderStatutoryReport('esi','ESI Report')">Generate ESI report</button>
+          <div style="height:14px"></div>
+          <div id="esiReportBox"></div>
+        </section>
+
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">PT Report</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Professional Tax deducted per employee for the month, pulled from the Salary Sheet. Apprentices and Contractors don't have PT — Managerial, Seniors, Junior Engineers, and R.S.IT Solution do, when Gross exceeds ₹12,000.</p>
+          <div class="row-inline">
+            <div><label class="field">Month</label><select class="field-input" id="ptReportMonthSel"></select></div>
+            <div><label class="field">Year</label><select class="field-input" id="ptReportYearSel"></select></div>
+          </div>
+          <button class="btn full" onclick="renderStatutoryReport('pt','PT Report')">Generate PT report</button>
+          <div style="height:14px"></div>
+          <div id="ptReportBox"></div>
+        </section>
+
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">Apprentice Salary Report</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Full salary breakdown for employees under the Apprentices heading only, for the month you pick — pulled from the Salary Sheet.</p>
+          <div class="row-inline">
+            <div><label class="field">Month</label><select class="field-input" id="apprenticeReportMonthSel"></select></div>
+            <div><label class="field">Year</label><select class="field-input" id="apprenticeReportYearSel"></select></div>
+          </div>
+          <button class="btn full" onclick="renderApprenticeSalaryReport()">Generate apprentice salary report</button>
+          <div style="height:14px"></div>
+          <div id="apprenticeReportBox"></div>
+        </section>
+
+        <section class="block">
           <h2 style="margin:0 0 4px;font-size:17px;">Overtime Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Applies to Field Engineers per the overtime policy. Log hours HR has been informed of (by the following day, per policy) — this is manual since overtime is reported over WhatsApp, not through this app.</p>
           <div class="row-inline">
@@ -2579,6 +2627,115 @@ async function renderSalarySheet(){
       <button class="btn ghost" style="flex:1;" onclick="openFullscreenView('Salary Sheet','salarySheetBox')">⛶ Full screen</button>
       <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
     </div>`;
+}
+
+// ---- PF / ESI / PT reports: each is Name + amount + Grand Total, month/year wise, pulled from the Salary Sheet formulas ----
+const STATUTORY_REPORT_CONFIG = {
+  pf: { field: 'pf', selMonth: 'pfReportMonthSel', selYear: 'pfReportYearSel', box: 'pfReportBox', folder: 'PF Report' },
+  esi: { field: 'esi', selMonth: 'esiReportMonthSel', selYear: 'esiReportYearSel', box: 'esiReportBox', folder: 'ESI Report' },
+  pt: { field: 'pt', selMonth: 'ptReportMonthSel', selYear: 'ptReportYearSel', box: 'ptReportBox', folder: 'PT Report' }
+};
+async function renderStatutoryReport(key, label){
+  const cfg = STATUTORY_REPORT_CONFIG[key];
+  const box = document.getElementById(cfg.box);
+  populateMonthYearSelects(cfg.selMonth, cfg.selYear);
+  const monthVal = getMonthYearValue(cfg.selMonth, cfg.selYear);
+  const [year, month] = monthVal.split('-').map(Number);
+  const monthDays = new Date(year, month, 0).getDate();
+  const dateList = [];
+  for(let d=1; d<=monthDays; d++) dateList.push(year + '-' + String(month).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
+
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
+  if(!employees.length){
+    box.innerHTML = '<div class="empty">Add employees in Employee Master first.</div>';
+    return;
+  }
+  const holidayMap = await getHolidayMap_local();
+
+  const rows = [];
+  let grandTotal = 0;
+  for(const emp of employees){
+    const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
+    const amount = s[cfg.field];
+    if(amount > 0){
+      rows.push([emp.name, amount]);
+      grandTotal += amount;
+    }
+  }
+
+  if(!rows.length){
+    box.innerHTML = `${reportLogoHeader(label + ' — ' + monthVal)}<div class="empty">No employees have ${key.toUpperCase()} deductions for this month.</div>`;
+    return;
+  }
+
+  const tableRows = rows.map(r => `<tr><td>${r[0]}</td><td class="num">₹${fmtMoney(r[1])}</td></tr>`).join('');
+  box.innerHTML = `<div class="print-isolate" id="statReportPrintArea_${key}">
+      ${reportLogoHeader(label + ' — ' + monthVal)}
+      <table><tr><th>Name</th><th class="num">${key.toUpperCase()} Amount</th></tr>${tableRows}<tr class="sal-grandtotal"><td><strong>Grand Total</strong></td><td class="num"><strong>₹${fmtMoney(grandTotal)}</strong></td></tr></table>
+    </div>
+    <div class="row-inline" style="margin-top:10px;margin-bottom:0;">
+      <button class="btn ghost" style="flex:1;" onclick="openFullscreenView('${label}','${cfg.box}')">⛶ Full screen</button>
+      <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
+    </div>`;
+
+  const csvRows = rows.map(r => [r[0], r[1]]);
+  csvRows.push(['Grand Total', grandTotal]);
+  saveFileToDrive(['HR Management','Reports',cfg.folder], `${label} - ${monthVal}.csv`, toCsv(['Name', key.toUpperCase() + ' Amount'], csvRows), 'text/csv');
+}
+
+// Small local helper so these reports don't depend on load order of the holiday-map builder elsewhere
+async function getHolidayMap_local(){
+  const holidays = await getHolidays();
+  const map = {};
+  holidays.forEach(h => { map[h.date] = h.name; });
+  return map;
+}
+
+async function renderApprenticeSalaryReport(){
+  const box = document.getElementById('apprenticeReportBox');
+  populateMonthYearSelects('apprenticeReportMonthSel', 'apprenticeReportYearSel');
+  const monthVal = getMonthYearValue('apprenticeReportMonthSel', 'apprenticeReportYearSel');
+  const [year, month] = monthVal.split('-').map(Number);
+  const monthDays = new Date(year, month, 0).getDate();
+  const dateList = [];
+  for(let d=1; d<=monthDays; d++) dateList.push(year + '-' + String(month).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
+
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left' && (e.salaryHeading||'managerial') === 'apprentice');
+  if(!employees.length){
+    box.innerHTML = `${reportLogoHeader('Apprentice Salary Report — ' + monthVal)}<div class="empty">No employees under the Apprentices heading yet.</div>`;
+    return;
+  }
+  const holidayMap = await getHolidayMap_local();
+
+  const cols = ['Name','Rate of Pay','Leave Days','Leave Amount','Basic','HRA','LTA','Gross','Advance Temp','Advance','Retention','Total Deduction','Net Salary'];
+  const csvRows = [];
+  let srNo = 1;
+  const grand = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netSalary:0 };
+  let bodyRows = '';
+  for(const emp of employees){
+    const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
+    bodyRows += `<tr><td>${emp.name}</td><td class="num">${fmtMoney(s.rate)}</td><td class="num">${s.leaveDays}</td><td class="num">${fmtMoney(s.leaveAmount)}</td>` +
+      `<td class="num">${fmtMoney(s.basic)}</td><td class="num">${fmtMoney(s.hra)}</td><td class="num">${fmtMoney(s.lta)}</td><td class="num">${fmtMoney(s.gross)}</td>` +
+      `<td class="num">${fmtMoney(s.advanceTemp)}</td><td class="num">${fmtMoney(s.advance)}</td><td class="num">${fmtMoney(s.retention)}</td><td class="num">${fmtMoney(s.totalDeduction)}</td><td class="num">${fmtMoney(s.netSalary)}</td></tr>`;
+    csvRows.push([emp.name, s.rate, s.leaveDays, s.leaveAmount, s.basic, s.hra, s.lta, s.gross, s.advanceTemp, s.advance, s.retention, s.totalDeduction, s.netSalary]);
+    ['rate','leaveAmount','basic','hra','lta','gross','advanceTemp','advance','retention','totalDeduction','netSalary'].forEach(k => { grand[k]+=s[k]; });
+  }
+  bodyRows += `<tr class="sal-grandtotal"><td><strong>Grand Total</strong></td><td class="num">${fmtMoney(grand.rate)}</td><td></td><td class="num">${fmtMoney(grand.leaveAmount)}</td>` +
+    `<td class="num">${fmtMoney(grand.basic)}</td><td class="num">${fmtMoney(grand.hra)}</td><td class="num">${fmtMoney(grand.lta)}</td><td class="num">${fmtMoney(grand.gross)}</td>` +
+    `<td class="num">${fmtMoney(grand.advanceTemp)}</td><td class="num">${fmtMoney(grand.advance)}</td><td class="num">${fmtMoney(grand.retention)}</td><td class="num">${fmtMoney(grand.totalDeduction)}</td><td class="num">${fmtMoney(grand.netSalary)}</td></tr>`;
+  csvRows.push(['Grand Total', grand.rate, '', grand.leaveAmount, grand.basic, grand.hra, grand.lta, grand.gross, grand.advanceTemp, grand.advance, grand.retention, grand.totalDeduction, grand.netSalary]);
+
+  box.innerHTML = `<div class="sal-sheet-wrap print-isolate" id="apprenticeReportPrintArea">
+      ${reportLogoHeader('Apprentice Salary Report — ' + monthVal)}
+      <table class="sal-table"><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr>${bodyRows}</table>
+    </div>
+    <p style="font-size:11px;color:var(--muted);margin:10px 0;">No PF, ESI, or PT — Apprentices are excluded from all three.</p>
+    <div class="row-inline" style="margin-bottom:0;">
+      <button class="btn ghost" style="flex:1;" onclick="openFullscreenView('Apprentice Salary Report','apprenticeReportBox')">⛶ Full screen</button>
+      <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
+    </div>`;
+
+  saveFileToDrive(['HR Management','Reports','Apprentice Salary Report'], `Apprentice Salary Report - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
 }
 
 // ---- geofence zones ----
