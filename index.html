@@ -631,6 +631,7 @@
         <button onclick="switchHrSub('master')" id="hrSubBtnMaster">Employee Master</button>
         <button onclick="switchHrSub('reports')" id="hrSubBtnReports">Reports</button>
         <button onclick="switchHrSub('generator')" id="hrSubBtnGenerator">Generator</button>
+        <button onclick="switchHrSub('docs')" id="hrSubBtnDocs">Office Documents</button>
       </div>
 
       <!-- ===== Dashboard ===== -->
@@ -969,6 +970,121 @@
           <button class="btn full" onclick="window.print()">Print / Save as PDF</button>
         </div>
       </div>
+
+      <!-- ===== Office Documents ===== -->
+      <div id="hrSubDocs" class="hidden">
+
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">1. Payroll Documents (monthly)</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">PF Challan, ESI Challan, PT Challan, Wages Register, Pay Slip — upload each month's document manually; files are stored in Google Drive, not in the app itself.</p>
+          <label class="field">Document type</label>
+          <select class="field-input" id="payrollDocType">
+            <option value="PF Challan">PF Challan</option>
+            <option value="ESI Challan">ESI Challan</option>
+            <option value="PT Challan">PT Challan</option>
+            <option value="Wages Register">Wages Register</option>
+            <option value="Pay Slip">Pay Slip</option>
+          </select>
+          <div class="row-inline" style="margin-top:12px;">
+            <div><label class="field">Month</label><select class="field-input" id="payrollDocMonthSel"></select></div>
+            <div><label class="field">Year</label><select class="field-input" id="payrollDocYearSel"></select></div>
+          </div>
+          <label class="field">File</label>
+          <input type="file" id="payrollDocFile" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx">
+          <div style="height:12px"></div>
+          <button class="btn full" onclick="uploadPayrollDoc()">Upload document</button>
+          <div class="msg" id="payrollDocMsg"></div>
+          <div style="height:14px"></div>
+          <div id="payrollDocList"></div>
+        </section>
+
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">2. Apprentice Documents</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Apprentice claim documents, contracts, and other important apprentice paperwork.</p>
+          <label class="field">Category</label>
+          <select class="field-input" id="apprenticeDocCategory">
+            <option value="Apprentice Claim Document">Apprentice Claim Document</option>
+            <option value="Apprentice Contract">Apprentice Contract</option>
+            <option value="Other Apprentice Document">Other Apprentice Document</option>
+          </select>
+          <div style="height:12px"></div>
+          <label class="field">Apprentice (optional)</label>
+          <select class="field-input" id="apprenticeDocEmpSelect">
+            <option value="">— Not linked to a specific apprentice —</option>
+          </select>
+          <div style="height:12px"></div>
+          <label class="field">Note (optional)</label>
+          <input type="text" id="apprenticeDocNote" placeholder="e.g. NAPS claim for Q2">
+          <div style="height:12px"></div>
+          <label class="field">File</label>
+          <input type="file" id="apprenticeDocFile" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx">
+          <div style="height:12px"></div>
+          <button class="btn full" onclick="uploadApprenticeDoc()">Upload document</button>
+          <div class="msg" id="apprenticeDocMsg"></div>
+          <div style="height:14px"></div>
+          <div id="apprenticeDocList"></div>
+        </section>
+
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">3. Holiday List — R.S. Infotech, Vadodara</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The generated holiday list already lives in Reports → Holiday List. If you also have an official signed/stamped copy, upload it here for record-keeping.</p>
+          <label class="field">File</label>
+          <input type="file" id="companyDocFile_holidaylist" accept=".pdf,.jpg,.jpeg,.png">
+          <div style="height:12px"></div>
+          <button class="btn full" onclick="uploadCompanyDoc('holidaylist','Holiday List')">Upload document</button>
+          <div class="msg" id="companyDocMsg_holidaylist"></div>
+          <div style="height:14px"></div>
+          <div id="companyDocList_holidaylist"></div>
+        </section>
+
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">4. R.S. Infotech Profile</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Company profile documents — brochures, presentations, credentials.</p>
+          <label class="field">File</label>
+          <input type="file" id="companyDocFile_profile" accept=".pdf,.jpg,.jpeg,.png,.ppt,.pptx,.doc,.docx">
+          <div style="height:12px"></div>
+          <button class="btn full" onclick="uploadCompanyDoc('profile','Company Profile')">Upload document</button>
+          <div class="msg" id="companyDocMsg_profile"></div>
+          <div style="height:14px"></div>
+          <div id="companyDocList_profile"></div>
+        </section>
+
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">5. R.S. Infotech Important Documents</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Registration certificates, licenses, and other important company documents.</p>
+          <label class="field">Document name</label>
+          <input type="text" id="importantDocName" placeholder="e.g. GST Registration Certificate">
+          <div style="height:12px"></div>
+          <label class="field">File</label>
+          <input type="file" id="companyDocFile_important" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx">
+          <div style="height:12px"></div>
+          <button class="btn full" onclick="uploadCompanyDoc('important','Important Documents')">Upload document</button>
+          <div class="msg" id="companyDocMsg_important"></div>
+          <div style="height:14px"></div>
+          <div id="companyDocList_important"></div>
+        </section>
+
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">6. Workman Compensation &amp; Insurance</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Which employees are covered under Workman Compensation, with their insurance details — add or remove manually.</p>
+          <label class="field">Add employee to this list</label>
+          <select class="field-input" id="workmanEmpSelect">
+            <option value="">— Select employee —</option>
+          </select>
+          <div style="height:12px"></div>
+          <button class="btn full" onclick="addToWorkmanCompensation()">Add to list</button>
+          <div class="msg" id="workmanMsg"></div>
+          <div style="height:14px"></div>
+          <div id="workmanList"></div>
+        </section>
+
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">7. Uniform &amp; ID List</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Track uniform and ID card issue status for every employee, with supporting documents.</p>
+          <div id="uniformIdList"></div>
+        </section>
+
+      </div>
     </div><!-- /hrTabMgmt -->
     </div>
   </div>
@@ -1125,6 +1241,28 @@ async function saveFileToDrive(folderPath, fileName, content, mimeType){
     // Drive save is a bonus, not a requirement — the report already rendered fine either way
   }
 }
+// Uploads an actual file (PDF, scanned document, photo) to Drive — unlike
+// saveFileToDrive above, which only handles plain text/CSV report content.
+// Returns the Drive file URL on success, or null on failure.
+async function uploadDocumentToDrive(folderPath, fileName, file){
+  try{
+    const base64Data = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'uploadDocument', folderPath, fileName, base64Data, mimeType: file.type || 'application/octet-stream' })
+    });
+    const data = await res.json();
+    return data && data.fileUrl ? data.fileUrl : null;
+  }catch(e){
+    return null;
+  }
+}
 function csvEscape(v){
   const s = (v===undefined || v===null) ? '' : String(v);
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
@@ -1266,6 +1404,43 @@ async function getHolidays(){
 }
 async function saveHolidays(list){
   await safeSet('holidays', JSON.stringify(list), true);
+}
+
+// ---- office documents: metadata only (small), files themselves live in Drive ----
+async function getPayrollDocs(){
+  const v = await safeGet('office_payroll_docs', true);
+  return v ? JSON.parse(v) : [];
+}
+async function savePayrollDocs(list){
+  await safeSet('office_payroll_docs', JSON.stringify(list), true);
+}
+async function getApprenticeDocs(){
+  const v = await safeGet('office_apprentice_docs', true);
+  return v ? JSON.parse(v) : [];
+}
+async function saveApprenticeDocs(list){
+  await safeSet('office_apprentice_docs', JSON.stringify(list), true);
+}
+async function getCompanyDocs(category){
+  const v = await safeGet('office_company_docs:' + category, true);
+  return v ? JSON.parse(v) : [];
+}
+async function saveCompanyDocs(category, list){
+  await safeSet('office_company_docs:' + category, JSON.stringify(list), true);
+}
+async function getWorkmanCompensation(){
+  const v = await safeGet('workman_compensation', true);
+  return v ? JSON.parse(v) : [];
+}
+async function saveWorkmanCompensation(list){
+  await safeSet('workman_compensation', JSON.stringify(list), true);
+}
+async function getUniformIdList(){
+  const v = await safeGet('uniform_id_list', true);
+  return v ? JSON.parse(v) : [];
+}
+async function saveUniformIdList(list){
+  await safeSet('uniform_id_list', JSON.stringify(list), true);
 }
 
 function randomHex(len){
@@ -3082,7 +3257,7 @@ function switchHrTab(tab){
   }
 }
 function switchHrSub(sub){
-  ['dash','master','reports','generator'].forEach(s => {
+  ['dash','master','reports','generator','docs'].forEach(s => {
     document.getElementById('hrSub' + s.charAt(0).toUpperCase() + s.slice(1)).classList.toggle('hidden', s !== sub);
     document.getElementById('hrSubBtn' + s.charAt(0).toUpperCase() + s.slice(1)).classList.toggle('active', s === sub);
   });
@@ -3090,6 +3265,7 @@ function switchHrSub(sub){
   if(sub === 'master') renderEmployeeList();
   if(sub === 'reports') renderReportsTab();
   if(sub === 'generator') renderGeneratorTab();
+  if(sub === 'docs') renderOfficeDocumentsTab();
 }
 function switchDashSub(sub){
   ['attendance','salary','reminders','expiry','activity'].forEach(s => {
@@ -4378,6 +4554,364 @@ async function renderGeneratorTab(){
   document.getElementById('letterOutput').classList.remove('show');
   document.getElementById('letterActionsBox').classList.add('hidden');
   toggleGeneratorFieldsForType();
+}
+
+// =======================================================================
+// OFFICE DOCUMENTS — files live in Google Drive; only small metadata
+// (names, links, dates) is kept in the app's shared storage.
+// =======================================================================
+async function renderOfficeDocumentsTab(){
+  populateMonthYearSelects('payrollDocMonthSel', 'payrollDocYearSel');
+
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
+  const apprentices = employees.filter(e => (e.salaryHeading||'') === 'apprentice');
+  const apprenticeSel = document.getElementById('apprenticeDocEmpSelect');
+  apprenticeSel.innerHTML = '<option value="">— Not linked to a specific apprentice —</option>' +
+    apprentices.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+
+  await renderPayrollDocList();
+  await renderApprenticeDocList();
+  await renderCompanyDocList('holidaylist');
+  await renderCompanyDocList('profile');
+  await renderCompanyDocList('important');
+  await populateWorkmanEmployeeSelect(employees);
+  await renderWorkmanList();
+  await renderUniformIdList(employees);
+}
+
+// ---- 1. Payroll documents (monthly) ----
+async function uploadPayrollDoc(){
+  const msg = document.getElementById('payrollDocMsg');
+  const fileInput = document.getElementById('payrollDocFile');
+  const file = fileInput.files[0];
+  if(!file){
+    msg.textContent = 'Choose a file to upload.';
+    msg.classList.add('error');
+    return;
+  }
+  const type = document.getElementById('payrollDocType').value;
+  const monthVal = getMonthYearValue('payrollDocMonthSel', 'payrollDocYearSel');
+  msg.textContent = 'Uploading…';
+  msg.classList.remove('error');
+  const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
+  const fileName = `${type} - ${monthVal}${ext}`;
+  const url = await uploadDocumentToDrive(['Office Documents','Payroll Documents', type], fileName, file);
+  if(!url){
+    msg.textContent = 'Upload failed — check your connection and try again.';
+    msg.classList.add('error');
+    return;
+  }
+  const list = await getPayrollDocs();
+  list.unshift({ id: randomHex(6), type, month: monthVal, fileName, url, uploadedAt: new Date().toISOString() });
+  await savePayrollDocs(list);
+  await addActivityLog('Uploaded ' + type + ' for ' + monthVal);
+  fileInput.value = '';
+  msg.textContent = 'Uploaded.';
+  msg.classList.remove('error');
+  await renderPayrollDocList();
+}
+async function renderPayrollDocList(){
+  const box = document.getElementById('payrollDocList');
+  const list = await getPayrollDocs();
+  if(!list.length){
+    box.innerHTML = '<div class="empty">No payroll documents uploaded yet.</div>';
+    return;
+  }
+  box.innerHTML = list.map(d => `
+    <div class="emp-row">
+      <div class="head"><strong>${d.type}</strong><span class="id">${d.month}</span></div>
+      <div class="sub">${d.fileName}</div>
+      <div class="actions">
+        <a class="btn ghost" href="${d.url}" target="_blank">Open</a>
+        <button class="btn ghost" onclick="deletePayrollDoc('${d.id}')">Remove</button>
+      </div>
+    </div>`).join('');
+}
+async function deletePayrollDoc(id){
+  if(!confirm('Remove this from the list? The file will stay in Drive as an archive — this only removes it from this list.')) return;
+  let list = await getPayrollDocs();
+  list = list.filter(d => d.id !== id);
+  await savePayrollDocs(list);
+  await renderPayrollDocList();
+}
+
+// ---- 2. Apprentice documents ----
+async function uploadApprenticeDoc(){
+  const msg = document.getElementById('apprenticeDocMsg');
+  const fileInput = document.getElementById('apprenticeDocFile');
+  const file = fileInput.files[0];
+  if(!file){
+    msg.textContent = 'Choose a file to upload.';
+    msg.classList.add('error');
+    return;
+  }
+  const category = document.getElementById('apprenticeDocCategory').value;
+  const empId = document.getElementById('apprenticeDocEmpSelect').value;
+  const note = document.getElementById('apprenticeDocNote').value.trim();
+  const employees = await getEmployees();
+  const emp = employees.find(e => e.id === empId);
+  msg.textContent = 'Uploading…';
+  msg.classList.remove('error');
+  const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
+  const fileName = `${emp ? emp.name + ' - ' : ''}${category}${ext}`;
+  const url = await uploadDocumentToDrive(['Office Documents','Apprentice Documents', category], fileName, file);
+  if(!url){
+    msg.textContent = 'Upload failed — check your connection and try again.';
+    msg.classList.add('error');
+    return;
+  }
+  const list = await getApprenticeDocs();
+  list.unshift({ id: randomHex(6), category, employeeId: empId, employeeName: emp ? emp.name : '', note, fileName, url, uploadedAt: new Date().toISOString() });
+  await saveApprenticeDocs(list);
+  await addActivityLog('Uploaded ' + category + (emp ? ' for ' + emp.name : ''));
+  fileInput.value = '';
+  document.getElementById('apprenticeDocNote').value = '';
+  msg.textContent = 'Uploaded.';
+  msg.classList.remove('error');
+  await renderApprenticeDocList();
+}
+async function renderApprenticeDocList(){
+  const box = document.getElementById('apprenticeDocList');
+  const list = await getApprenticeDocs();
+  if(!list.length){
+    box.innerHTML = '<div class="empty">No apprentice documents uploaded yet.</div>';
+    return;
+  }
+  box.innerHTML = list.map(d => `
+    <div class="emp-row">
+      <div class="head"><strong>${d.category}</strong>${d.employeeName ? `<span class="id">${d.employeeName}</span>` : ''}</div>
+      <div class="sub">${d.fileName}${d.note ? ' · ' + d.note : ''}</div>
+      <div class="actions">
+        <a class="btn ghost" href="${d.url}" target="_blank">Open</a>
+        <button class="btn ghost" onclick="deleteApprenticeDoc('${d.id}')">Remove</button>
+      </div>
+    </div>`).join('');
+}
+async function deleteApprenticeDoc(id){
+  if(!confirm('Remove this from the list? The file will stay in Drive as an archive — this only removes it from this list.')) return;
+  let list = await getApprenticeDocs();
+  list = list.filter(d => d.id !== id);
+  await saveApprenticeDocs(list);
+  await renderApprenticeDocList();
+}
+
+// ---- 3/4/5. Company-level documents (Holiday List copy, Profile, Important Documents) ----
+async function uploadCompanyDoc(category, folderLabel){
+  const msg = document.getElementById('companyDocMsg_' + category);
+  const fileInput = document.getElementById('companyDocFile_' + category);
+  const file = fileInput.files[0];
+  if(!file){
+    msg.textContent = 'Choose a file to upload.';
+    msg.classList.add('error');
+    return;
+  }
+  let docName = folderLabel;
+  if(category === 'important'){
+    docName = document.getElementById('importantDocName').value.trim();
+    if(!docName){
+      msg.textContent = 'Enter a document name.';
+      msg.classList.add('error');
+      return;
+    }
+  }
+  msg.textContent = 'Uploading…';
+  msg.classList.remove('error');
+  const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
+  const fileName = `${docName} - ${todayStr()}${ext}`;
+  const url = await uploadDocumentToDrive(['Office Documents', folderLabel], fileName, file);
+  if(!url){
+    msg.textContent = 'Upload failed — check your connection and try again.';
+    msg.classList.add('error');
+    return;
+  }
+  const list = await getCompanyDocs(category);
+  list.unshift({ id: randomHex(6), name: docName, fileName, url, uploadedAt: new Date().toISOString() });
+  await saveCompanyDocs(category, list);
+  await addActivityLog('Uploaded ' + folderLabel + ' document: ' + docName);
+  fileInput.value = '';
+  if(category === 'important') document.getElementById('importantDocName').value = '';
+  msg.textContent = 'Uploaded.';
+  msg.classList.remove('error');
+  await renderCompanyDocList(category);
+}
+async function renderCompanyDocList(category){
+  const box = document.getElementById('companyDocList_' + category);
+  const list = await getCompanyDocs(category);
+  if(!list.length){
+    box.innerHTML = '<div class="empty">No documents uploaded yet.</div>';
+    return;
+  }
+  box.innerHTML = list.map(d => `
+    <div class="emp-row">
+      <div class="head"><strong>${d.name}</strong></div>
+      <div class="sub">${d.fileName}</div>
+      <div class="actions">
+        <a class="btn ghost" href="${d.url}" target="_blank">Open</a>
+        <button class="btn ghost" onclick="deleteCompanyDoc('${category}','${d.id}')">Remove</button>
+      </div>
+    </div>`).join('');
+}
+async function deleteCompanyDoc(category, id){
+  if(!confirm('Remove this from the list? The file will stay in Drive as an archive — this only removes it from this list.')) return;
+  let list = await getCompanyDocs(category);
+  list = list.filter(d => d.id !== id);
+  await saveCompanyDocs(category, list);
+  await renderCompanyDocList(category);
+}
+
+// ---- 6. Workman Compensation & Insurance ----
+async function populateWorkmanEmployeeSelect(employees){
+  const sel = document.getElementById('workmanEmpSelect');
+  const covered = await getWorkmanCompensation();
+  const coveredIds = new Set(covered.map(c => c.employeeId));
+  const available = employees.filter(e => !coveredIds.has(e.id));
+  sel.innerHTML = '<option value="">— Select employee —</option>' +
+    available.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+}
+async function addToWorkmanCompensation(){
+  const msg = document.getElementById('workmanMsg');
+  const empId = document.getElementById('workmanEmpSelect').value;
+  if(!empId){
+    msg.textContent = 'Select an employee.';
+    msg.classList.add('error');
+    return;
+  }
+  const employees = await getEmployees();
+  const emp = employees.find(e => e.id === empId);
+  const list = await getWorkmanCompensation();
+  list.push({ employeeId: empId, name: emp.name, policyNumber:'', provider:'', sumInsured:'', expiryDate:'', notes:'', docUrl:'', docName:'' });
+  await saveWorkmanCompensation(list);
+  await addActivityLog('Added ' + emp.name + ' to Workman Compensation list');
+  msg.textContent = 'Added.';
+  msg.classList.remove('error');
+  await renderOfficeDocumentsTab();
+}
+async function removeFromWorkmanCompensation(employeeId){
+  if(!confirm('Remove this employee from the Workman Compensation list?')) return;
+  let list = await getWorkmanCompensation();
+  const entry = list.find(w => w.employeeId === employeeId);
+  list = list.filter(w => w.employeeId !== employeeId);
+  await saveWorkmanCompensation(list);
+  if(entry) await addActivityLog('Removed ' + entry.name + ' from Workman Compensation list');
+  await renderOfficeDocumentsTab();
+}
+async function updateWorkmanField(employeeId, field, value){
+  const list = await getWorkmanCompensation();
+  const entry = list.find(w => w.employeeId === employeeId);
+  if(!entry) return;
+  entry[field] = value;
+  await saveWorkmanCompensation(list);
+}
+async function uploadWorkmanDoc(employeeId, event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const list = await getWorkmanCompensation();
+  const entry = list.find(w => w.employeeId === employeeId);
+  if(!entry) return;
+  const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
+  const fileName = `${entry.name} - Insurance Policy${ext}`;
+  const url = await uploadDocumentToDrive(['Office Documents','Workman Compensation', entry.name], fileName, file);
+  if(!url){ alert('Upload failed — check your connection and try again.'); return; }
+  entry.docUrl = url;
+  entry.docName = fileName;
+  await saveWorkmanCompensation(list);
+  await renderWorkmanList();
+}
+async function renderWorkmanList(){
+  const box = document.getElementById('workmanList');
+  const list = await getWorkmanCompensation();
+  if(!list.length){
+    box.innerHTML = '<div class="empty">No employees added to the Workman Compensation list yet.</div>';
+    return;
+  }
+  box.innerHTML = list.map(w => `
+    <div class="emp-row">
+      <div class="head"><strong>${w.name}</strong><button class="btn ghost" style="font-size:11px;padding:5px 8px;" onclick="removeFromWorkmanCompensation('${w.employeeId}')">Remove</button></div>
+      <div style="height:10px"></div>
+      <label class="field">Policy number</label>
+      <input type="text" value="${w.policyNumber||''}" onchange="updateWorkmanField('${w.employeeId}','policyNumber',this.value)">
+      <div style="height:10px"></div>
+      <label class="field">Insurance provider</label>
+      <input type="text" value="${w.provider||''}" onchange="updateWorkmanField('${w.employeeId}','provider',this.value)">
+      <div style="height:10px"></div>
+      <label class="field">Sum insured</label>
+      <input type="text" value="${w.sumInsured||''}" onchange="updateWorkmanField('${w.employeeId}','sumInsured',this.value)">
+      <div style="height:10px"></div>
+      <label class="field">Policy expiry date</label>
+      <input type="date" value="${w.expiryDate||''}" onchange="updateWorkmanField('${w.employeeId}','expiryDate',this.value)">
+      <div style="height:10px"></div>
+      <label class="field">Notes</label>
+      <input type="text" value="${w.notes||''}" onchange="updateWorkmanField('${w.employeeId}','notes',this.value)">
+      <div style="height:10px"></div>
+      <label class="field">Policy document</label>
+      <input type="file" accept=".pdf,.jpg,.jpeg,.png" onchange="uploadWorkmanDoc('${w.employeeId}', event)">
+      ${w.docUrl ? `<div class="doc-card">✓ <a href="${w.docUrl}" target="_blank">${w.docName}</a></div>` : ''}
+    </div>`).join('');
+}
+
+// ---- 7. Uniform & ID list ----
+async function renderUniformIdList(employees){
+  const box = document.getElementById('uniformIdList');
+  const list = await getUniformIdList();
+  const byId = {};
+  list.forEach(u => { byId[u.employeeId] = u; });
+  if(!employees.length){
+    box.innerHTML = '<div class="empty">Add employees in Employee Master first.</div>';
+    return;
+  }
+  box.innerHTML = employees.map(e => {
+    const u = byId[e.id] || { employeeId: e.id, name: e.name, uniformIssued:false, uniformDate:'', uniformSize:'', idIssued:false, idNumber:'', idDate:'', docUrl:'', docName:'' };
+    return `<div class="emp-row">
+      <div class="head"><strong>${e.name}</strong></div>
+      <div style="height:10px"></div>
+      <label class="checklist-row"><input type="checkbox" ${u.uniformIssued?'checked':''} onchange="updateUniformField('${e.id}','${e.name.replace(/'/g,"\\'")}','uniformIssued',this.checked)"> Uniform issued</label>
+      <label class="field">Uniform size</label>
+      <input type="text" value="${u.uniformSize||''}" placeholder="e.g. L" onchange="updateUniformField('${e.id}','${e.name.replace(/'/g,"\\'")}','uniformSize',this.value)">
+      <div style="height:10px"></div>
+      <label class="field">Uniform issue date</label>
+      <input type="date" value="${u.uniformDate||''}" onchange="updateUniformField('${e.id}','${e.name.replace(/'/g,"\\'")}','uniformDate',this.value)">
+      <div style="height:14px"></div>
+      <label class="checklist-row"><input type="checkbox" ${u.idIssued?'checked':''} onchange="updateUniformField('${e.id}','${e.name.replace(/'/g,"\\'")}','idIssued',this.checked)"> ID card issued</label>
+      <label class="field">ID card number</label>
+      <input type="text" value="${u.idNumber||''}" onchange="updateUniformField('${e.id}','${e.name.replace(/'/g,"\\'")}','idNumber',this.value)">
+      <div style="height:10px"></div>
+      <label class="field">ID issue date</label>
+      <input type="date" value="${u.idDate||''}" onchange="updateUniformField('${e.id}','${e.name.replace(/'/g,"\\'")}','idDate',this.value)">
+      <div style="height:10px"></div>
+      <label class="field">Supporting document (ID photo, receipt, etc.)</label>
+      <input type="file" accept=".pdf,.jpg,.jpeg,.png" onchange="uploadUniformDoc('${e.id}','${e.name.replace(/'/g,"\\'")}', event)">
+      ${u.docUrl ? `<div class="doc-card">✓ <a href="${u.docUrl}" target="_blank">${u.docName}</a></div>` : ''}
+    </div>`;
+  }).join('');
+}
+async function updateUniformField(employeeId, employeeName, field, value){
+  const list = await getUniformIdList();
+  let entry = list.find(u => u.employeeId === employeeId);
+  if(!entry){
+    entry = { employeeId, name: employeeName, uniformIssued:false, uniformDate:'', uniformSize:'', idIssued:false, idNumber:'', idDate:'', docUrl:'', docName:'' };
+    list.push(entry);
+  }
+  entry[field] = value;
+  await saveUniformIdList(list);
+}
+async function uploadUniformDoc(employeeId, employeeName, event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
+  const fileName = `${employeeName} - Uniform-ID Document${ext}`;
+  const url = await uploadDocumentToDrive(['Office Documents','Uniform and ID', employeeName], fileName, file);
+  if(!url){ alert('Upload failed — check your connection and try again.'); return; }
+  const list = await getUniformIdList();
+  let entry = list.find(u => u.employeeId === employeeId);
+  if(!entry){
+    entry = { employeeId, name: employeeName, uniformIssued:false, uniformDate:'', uniformSize:'', idIssued:false, idNumber:'', idDate:'' };
+    list.push(entry);
+  }
+  entry.docUrl = url;
+  entry.docName = fileName;
+  await saveUniformIdList(list);
+  const employees = await getEmployees();
+  await renderUniformIdList(employees.filter(e => e.employmentStatus !== 'left'));
 }
 
 async function autoFillGeneratorFromEmployee(){
