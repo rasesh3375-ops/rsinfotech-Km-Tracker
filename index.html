@@ -370,6 +370,11 @@
       <h2 style="margin:0 0 10px;font-size:19px;color:var(--navy);font-weight:700;">Employee dashboard</h2>
       <p style="font-size:13.5px;color:var(--muted);margin:0 0 4px;">Logged in as <strong id="engNameLabel" style="color:var(--navy)"></strong> · <button class="linkbtn" style="padding:0" onclick="logoutEngineer()">log out</button></p>
 
+      <div id="engHandbookCard" class="hidden" style="border:1px solid var(--line);border-radius:10px;padding:14px;margin:12px 0;background:var(--paper);">
+        <div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:6px;">📘 Employee Handbook</div>
+        <div id="engHandbookBody"></div>
+      </div>
+
       <div class="odometer-box">
         <div class="label">Today's distance</div>
         <div class="odometer"><span id="liveKm">0.00</span><small>km</small></div>
@@ -1084,6 +1089,27 @@
           <div id="uniformIdList"></div>
         </section>
 
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">8. Employee Handbook</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Field and WFH engineers see the whole handbook. Resident Engineers only see the Resident Engineer Policy section below — not the full document. Update either whenever the policy changes, typically once a year.</p>
+          <label class="field">Full handbook document (visible to Field / WFH engineers)</label>
+          <input type="file" id="handbookFile" accept=".pdf,.doc,.docx">
+          <div style="height:10px"></div>
+          <label class="field">Year / version label</label>
+          <input type="text" id="handbookYear" placeholder="e.g. 2026-27">
+          <div style="height:12px"></div>
+          <button class="btn full" onclick="uploadEmployeeHandbook()">Upload / replace full handbook</button>
+          <div class="msg" id="handbookMsg"></div>
+          <div style="height:10px"></div>
+          <div id="handbookCurrentInfo"></div>
+          <div style="height:18px"></div>
+          <label class="field">Resident Engineer Policy text (shown only to Resident Engineers)</label>
+          <textarea id="residentPolicyText" rows="14" style="width:100%;font-family:inherit;font-size:13px;padding:10px;border:1px solid var(--line);border-radius:8px;"></textarea>
+          <div style="height:12px"></div>
+          <button class="btn full" onclick="saveResidentPolicyFromForm()">Save resident policy text</button>
+          <div class="msg" id="residentPolicyMsg"></div>
+        </section>
+
       </div>
     </div><!-- /hrTabMgmt -->
     </div>
@@ -1441,6 +1467,81 @@ async function getUniformIdList(){
 }
 async function saveUniformIdList(list){
   await safeSet('uniform_id_list', JSON.stringify(list), true);
+}
+
+// ---- employee handbook (full doc for Field/WFH; resident policy text for Resident) ----
+async function getEmployeeHandbook(){
+  const v = await safeGet('employee_handbook', true);
+  return v ? JSON.parse(v) : null;
+}
+async function saveEmployeeHandbook(data){
+  await safeSet('employee_handbook', JSON.stringify(data), true);
+}
+const DEFAULT_RESIDENT_POLICY_TEXT = `RESIDENT ENGINEER POLICY
+
+1. Purpose:
+
+This policy defines the roles, responsibilities, and employment conditions of Resident Engineers under R.S. INFOTECH. It ensures fairness, clarity, and compliance with company standards for engineers assigned to specific site locations.
+
+2. Work Responsibility:
+
+• Resident Engineers are responsible for maintaining all systems, services, and equipment at their assigned site location as per company standards. They must maintain regular attendance, perform all assigned tasks efficiently, and stay in communication with the HR Department or Reporting Head.
+
+3. Work-from-Home and Leave Policy:
+
+• If a Resident Engineer manages all assigned work from home and ensures uninterrupted operations, no leave will be deducted.
+
+• If a backup engineer is arranged to handle work during the engineer's absence, the period will be considered as official leave.
+
+• All leave requests must be submitted to the HR Department in advance, clearly mentioning the mode of work (work-from-home or backup required).
+
+• Uninformed absence or failure to communicate will be treated as unauthorized leave.
+
+• Since Resident Engineers have the flexibility to manage work remotely as per site requirements, separate Earned Leave (EL) and Sick Leave (SL) benefits are not applicable under this role.
+
+4. Holiday Policy:
+
+• Resident Engineers will follow the holiday schedule of their assigned site company, not Company's internal holiday list.
+
+• If the site company requires the engineer to work on a declared holiday, the engineer must report for duty as instructed.
+
+• No additional pay or compensatory off will be applicable for work performed on holidays.
+
+5. Bonus Policy:
+
+• The annual or festival bonus is already included within the employee's fixed salary.
+
+• If an employee wishes to receive the bonus separately, their monthly salary will be reduced accordingly.
+
+• The separate bonus will be released during Diwali as per company policy.
+
+• No employee shall receive both — an included bonus and a separate bonus payment.
+
+6. Employment and Payroll Restriction:
+
+• Resident Engineers are full-time employees of Company and shall remain under the company's payroll at all times. The site company, where the engineer is stationed for work, is not permitted to offer employment, job transfer, or any contractual engagement to the engineer. Likewise, the Resident Engineer is strictly prohibited from accepting, discussing, or joining any such offer from the site company or any person associated with it. Any such act, attempt, or acceptance without prior written approval from Company management will be considered a serious violation of company policy and may lead to disciplinary action or termination.
+
+7. Fuel Allowance Policy:
+
+For Resident Engineers, fuel expenses are considered included in their fixed salary, as their work location and travel responsibilities are predetermined based on the assigned client site.
+
+8. Reporting and Compliance:
+
+• Resident Engineers must submit regular work reports or updates to the HR Department or Reporting Head.
+
+• Work-from-home performance and attendance will be monitored by HR.
+
+• Non-compliance, negligence, or misuse of this policy will result in disciplinary action
+
+9. Review and Amendments:
+
+This policy may be reviewed or revised by the HR Department as required. Any amendments or updates will be communicated officially to all concerned employees.`;
+async function getResidentPolicyText(){
+  const v = await safeGet('resident_policy_text', true);
+  return v || DEFAULT_RESIDENT_POLICY_TEXT;
+}
+async function saveResidentPolicyText(text){
+  await safeSet('resident_policy_text', text, true);
 }
 
 function randomHex(len){
@@ -1873,6 +1974,26 @@ async function loginEngineer(){
   await enterEngineerMain();
 }
 
+async function renderEmployeeHandbookForEngineer(){
+  const card = document.getElementById('engHandbookCard');
+  const body = document.getElementById('engHandbookBody');
+  if(!card || !body || !engineerName) return;
+  const emp = await findEmployeeByTrackingUsername(engineerName);
+  const isResident = emp && emp.employeeType === 'resident';
+  card.classList.remove('hidden');
+  if(isResident){
+    const text = await getResidentPolicyText();
+    body.innerHTML = `<details><summary style="font-size:13px;color:var(--amber-dark);cursor:pointer;">View Resident Engineer Policy</summary><div style="white-space:pre-wrap;font-size:12.5px;margin-top:10px;line-height:1.6;">${escapeHtml(text)}</div></details>`;
+  } else {
+    const handbook = await getEmployeeHandbook();
+    if(handbook && handbook.fileUrl){
+      body.innerHTML = `<a class="btn ghost full" href="${handbook.fileUrl}" target="_blank">View Employee Handbook${handbook.year ? ' (' + handbook.year + ')' : ''}</a>`;
+    } else {
+      body.innerHTML = `<div style="font-size:12.5px;color:var(--muted);">Not uploaded yet — check with HR.</div>`;
+    }
+  }
+}
+
 function logoutEngineer(){
   if(tracking){
     alert('Check out and finish your current trip before logging out.');
@@ -1915,6 +2036,7 @@ async function enterEngineerMain(){
   await renderEngHistory();
   await renderDaily30();
   await refreshTodayTotal();
+  await renderEmployeeHandbookForEngineer();
 
   const active = await getActive(engineerName);
   if(active){
@@ -4577,6 +4699,55 @@ async function renderOfficeDocumentsTab(){
   await populateWorkmanEmployeeSelect(employees);
   await renderWorkmanList();
   await renderUniformIdList(employees);
+  await renderHandbookSection();
+}
+
+// ---- 8. Employee Handbook ----
+async function renderHandbookSection(){
+  const handbook = await getEmployeeHandbook();
+  const info = document.getElementById('handbookCurrentInfo');
+  if(handbook && handbook.fileUrl){
+    info.innerHTML = `<div class="doc-card">✓ Current: <a href="${handbook.fileUrl}" target="_blank">${handbook.fileName}</a>${handbook.year ? ' (' + handbook.year + ')' : ''}</div>`;
+  } else {
+    info.innerHTML = '<div class="empty">No handbook uploaded yet.</div>';
+  }
+  document.getElementById('residentPolicyText').value = await getResidentPolicyText();
+}
+async function uploadEmployeeHandbook(){
+  const msg = document.getElementById('handbookMsg');
+  const fileInput = document.getElementById('handbookFile');
+  const file = fileInput.files[0];
+  if(!file){
+    msg.textContent = 'Choose the handbook file.';
+    msg.classList.add('error');
+    return;
+  }
+  const year = document.getElementById('handbookYear').value.trim();
+  msg.textContent = 'Uploading…';
+  msg.classList.remove('error');
+  const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
+  const fileName = `Employee Handbook${year ? ' - ' + year : ''}${ext}`;
+  const url = await uploadDocumentToDrive(['Office Documents','Employee Handbook'], fileName, file);
+  if(!url){
+    msg.textContent = 'Upload failed — check your connection and try again.';
+    msg.classList.add('error');
+    return;
+  }
+  await saveEmployeeHandbook({ fileUrl: url, fileName, year, uploadedAt: new Date().toISOString() });
+  await addActivityLog('Uploaded Employee Handbook' + (year ? ' (' + year + ')' : ''));
+  fileInput.value = '';
+  msg.textContent = 'Uploaded.';
+  msg.classList.remove('error');
+  await renderHandbookSection();
+}
+async function saveResidentPolicyFromForm(){
+  const msg = document.getElementById('residentPolicyMsg');
+  const text = document.getElementById('residentPolicyText').value;
+  await saveResidentPolicyText(text);
+  await addActivityLog('Updated Resident Engineer Policy text');
+  msg.textContent = 'Saved.';
+  msg.classList.remove('error');
+  setTimeout(() => { msg.textContent = ''; }, 2500);
 }
 
 // ---- 1. Payroll documents (monthly) ----
