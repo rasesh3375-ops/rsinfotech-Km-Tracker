@@ -1207,6 +1207,30 @@ function fmtKm(v){ return (Math.round(v*100)/100).toFixed(2); }
 // ============================================================
 const API_URL = 'https://script.google.com/macros/s/AKfycbxnSkQSJuAGYo6tpLhemAc8oT0-gjbYPqy_IUguGm9PenyzEsXwIdpYpQOR-MWjm6m8/exec';
 
+// Session token from server-side login (see serverLogin below). Required by
+// the backend for every action except login/setupHr/recoverHr/logout.
+let sessionToken = localStorage.getItem('kmt_session_token') || null;
+let sessionRole = localStorage.getItem('kmt_session_role') || null;
+function setSession(token, role){
+  sessionToken = token; sessionRole = role;
+  if(token){
+    localStorage.setItem('kmt_session_token', token);
+    localStorage.setItem('kmt_session_role', role);
+  } else {
+    localStorage.removeItem('kmt_session_token');
+    localStorage.removeItem('kmt_session_role');
+  }
+}
+// Called when the backend rejects a call as unauthorized. Only acts if we
+// thought we had a session — avoids falsely alarming someone who was never
+// logged in (e.g. mid password-reset, before any session exists).
+function onSessionExpired(){
+  if(!sessionToken) return;
+  setSession(null, null);
+  alert('Your session has expired. Please log in again.');
+  location.reload();
+}
+
 // Storage bridge: personal (shared=false) data stays on this device via localStorage.
 // Shared (shared=true) data goes to the Apps Script backend, so every engineer and
 // HR see the same data — stored in your own Google Sheet, no Claude account involved.
@@ -1214,7 +1238,7 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbxnSkQSJuAGYo6tpLhemAc8
 // which Apps Script Web Apps don't handle. This is a standard, well-known workaround.
 async function remoteGet(key){
   try{
-    const res = await fetch(API_URL + '?action=get&key=' + encodeURIComponent(key));
+    const res = await fetch(API_URL + '?action=get&key=' + encodeURIComponent(key) + '&token=' + encodeURIComponent(sessionToken || ''));
     const text = await res.text();
     let data;
     try{ data = JSON.parse(text); }
@@ -1222,6 +1246,7 @@ async function remoteGet(key){
       lastBackendError = 'GET returned non-JSON (status ' + res.status + '): ' + text.slice(0, 200);
       return null;
     }
+    if(data && data.error === 'unauthorized'){ onSessionExpired(); return null; }
     return (data && data.value !== undefined) ? data : null;
   }catch(e){ lastBackendError = 'GET network error: ' + e.message; return null; }
 }
@@ -1230,11 +1255,12 @@ async function remoteSet(key, value){
     const res = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'set', key, value })
+      body: JSON.stringify({ action: 'set', key, value, token: sessionToken })
     });
     const text = await res.text();
     try{
       const data = JSON.parse(text);
+      if(data && data.error === 'unauthorized'){ onSessionExpired(); return false; }
       if(!data || !data.ok){ lastBackendError = 'POST did not confirm ok (status ' + res.status + '): ' + text.slice(0, 200); return false; }
       return true;
     }catch(parseErr){
@@ -1248,7 +1274,7 @@ async function remoteDelete(key){
     await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'delete', key })
+      body: JSON.stringify({ action: 'delete', key, token: sessionToken })
     });
   }catch(e){}
 }
@@ -1261,7 +1287,7 @@ async function saveFileToDrive(folderPath, fileName, content, mimeType){
     await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'saveFile', folderPath, fileName, content, mimeType: mimeType || 'text/plain' })
+      body: JSON.stringify({ action: 'saveFile', folderPath, fileName, content, mimeType: mimeType || 'text/plain', token: sessionToken })
     });
   }catch(e){
     // Drive save is a bonus, not a requirement — the report already rendered fine either way
@@ -1281,7 +1307,7 @@ async function uploadDocumentToDrive(folderPath, fileName, file){
     const res = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'uploadDocument', folderPath, fileName, base64Data, mimeType: file.type || 'application/octet-stream' })
+      body: JSON.stringify({ action: 'uploadDocument', folderPath, fileName, base64Data, mimeType: file.type || 'application/octet-stream', token: sessionToken })
     });
     const data = await res.json();
     return data && data.fileUrl ? data.fileUrl : null;
@@ -1323,12 +1349,10 @@ async function testBackendConnection(){
   }
 }
 
-// Every "shared" key also gets a local mirror. This is what makes the app
-// actually work today: the API_URL above is still a placeholder, so every
-// remote call fails, and without this fallback nothing shared (employees,
-// trips, engineer logins, holidays, etc.) would ever save at all. Once a
-// real Apps Script URL is configured, remote reads/writes start succeeding
-// and take priority automatically — the local copy just stops being needed.
+// Every "shared" key also gets a local mirror, kept as a fallback for when
+// the backend is briefly unreachable (network blip, quota hit, etc.) — the
+// real Apps Script backend is configured above and is the source of truth
+// whenever it's reachable.
 async function safeGet(key, shared){
   try{
     if(!shared){
@@ -1557,6 +1581,75 @@ async function hashPassword(password, salt){
   return sha256Hex(salt + ':' + password);
 }
 
+// ---- server-side auth calls (backend now verifies logins itself) ----
+async function serverLogin(role, username, password){
+  try{
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'login', role, username, password })
+    });
+    return await res.json();
+  }catch(e){ return { error: 'Network error. Check your connection and try again.' }; }
+}
+async function serverLogout(){
+  try{
+    await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'logout', token: sessionToken })
+    });
+  }catch(e){}
+  setSession(null, null);
+}
+async function serverSetupHr(value){
+  try{
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'setupHr', value })
+    });
+    return await res.json();
+  }catch(e){ return { error: 'Network error. Check your connection and try again.' }; }
+}
+async function checkHrAccountExists(){
+  try{
+    const res = await fetch(API_URL + '?action=hrAccountExists');
+    return await res.json();
+  }catch(e){ return { exists: false }; }
+}
+async function serverRecoverHr(){
+  try{
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'recoverHr' })
+    });
+    return await res.json();
+  }catch(e){ return { error: 'Network error.' }; }
+}
+async function serverVerifyHrRecoveryAnswer(answer){
+  try{
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'verifyHrRecoveryAnswer', answer })
+    });
+    return await res.json();
+  }catch(e){ return { error: 'Network error.' }; }
+}
+async function serverResetHrPasswordWithToken(recoveryToken, newSalt, newHash){
+  try{
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'resetHrPasswordWithToken', recoveryToken, newSalt, newHash })
+    });
+    return await res.json();
+  }catch(e){ return { error: 'Network error.' }; }
+}
+let hrRecoveryToken = null;
+
 async function getUsers(){
   const v = await safeGet('users', true);
   return v ? JSON.parse(v) : [];
@@ -1778,7 +1871,8 @@ async function selectRole(role){
   if(role === 'engineer'){
     document.getElementById('engineerScreen').classList.remove('hidden');
     const savedUser = await safeGet('my_username', false);
-    if(savedUser){
+    const hasValidLocalSession = !!(sessionToken && sessionRole === 'engineer');
+    if(savedUser && hasValidLocalSession){
       const user = await findUser(savedUser);
       if(user && user.enabled !== false){
         engineerName = user.username;
@@ -1792,17 +1886,18 @@ async function selectRole(role){
     document.getElementById('loginGate').classList.remove('hidden');
     document.getElementById('engineerMain').classList.add('hidden');
     const msg = document.getElementById('loginMsg');
-    if(savedUser){
+    if(savedUser && hasValidLocalSession){
       msg.textContent = 'Your account is no longer active. Contact HR.';
       msg.classList.add('error');
     }
   } else {
     document.getElementById('hrScreen').classList.remove('hidden');
-    const hasHrPassword = !!(await getHrPasswordRecord());
+    const existsCheck = await checkHrAccountExists();
+    const hasHrPassword = !!(existsCheck && existsCheck.exists);
     const hrSession = await safeGet('hr_session', false);
     document.getElementById('hrGate').classList.remove('hidden');
     document.getElementById('hrMain').classList.add('hidden');
-    if(hrSession === 'yes' && hasHrPassword){
+    if(hrSession === 'yes' && hasHrPassword && sessionToken && sessionRole === 'hr'){
       document.getElementById('hrGate').classList.add('hidden');
       await enterHrMain();
       return;
@@ -1835,8 +1930,8 @@ function showHrSetup(){
 }
 async function showHrForgot(){
   hideAllHrGateSections();
-  const rec = await getHrPasswordRecord();
-  document.getElementById('hrForgotQuestionText').textContent = rec && rec.question ? rec.question : 'No recovery question is on file for this device.';
+  const result = await serverRecoverHr();
+  document.getElementById('hrForgotQuestionText').textContent = (result && result.question) ? result.question : 'No recovery question is on file.';
   document.getElementById('hrForgotAnswer').value = '';
   document.getElementById('hrForgotMsg').textContent = '';
   document.getElementById('hrGateForgot').classList.remove('hidden');
@@ -1851,12 +1946,13 @@ async function submitHrLogin(){
     msg.classList.add('error');
     return;
   }
-  const ok = await verifyHrLogin(username, pw);
-  if(!ok){
-    msg.textContent = 'Incorrect username or password.';
+  const result = await serverLogin('hr', normUsername(username), pw);
+  if(!result || !result.ok){
+    msg.textContent = (result && result.error) ? result.error : 'Incorrect username or password.';
     msg.classList.add('error');
     return;
   }
+  setSession(result.token, 'hr');
   await safeSet('hr_session', 'yes', false);
   msg.textContent = '';
   msg.classList.remove('error');
@@ -1881,7 +1977,19 @@ async function submitHrSetup(){
     msg.classList.add('error');
     return;
   }
-  await setHrCredentials(username, pw, question, answer);
+  const salt = randomHex(8);
+  const hash = await hashPassword(pw, salt);
+  const recoverySalt = randomHex(8);
+  const recoveryHash = await hashPassword(answer.trim().toLowerCase(), recoverySalt);
+  const rec = { username: normUsername(username), salt, hash, question, recoverySalt, recoveryHash };
+  const setupResult = await serverSetupHr(rec);
+  if(!setupResult || !setupResult.ok){
+    msg.textContent = (setupResult && setupResult.error) ? setupResult.error : 'Could not set up the HR account. Check the backend connection.';
+    msg.classList.add('error');
+    return;
+  }
+  const loginResult = await serverLogin('hr', normUsername(username), pw);
+  if(loginResult && loginResult.ok) setSession(loginResult.token, 'hr');
   await safeSet('hr_session', 'yes', false);
   msg.textContent = '';
   msg.classList.remove('error');
@@ -1898,12 +2006,13 @@ async function verifyHrRecoveryAnswer(){
     msg.classList.add('error');
     return;
   }
-  const ok = await verifyHrRecoveryAnswerValue(answer);
-  if(!ok){
+  const result = await serverVerifyHrRecoveryAnswer(answer);
+  if(!result || !result.ok){
     msg.textContent = 'That answer doesn\'t match. Try again, or contact whoever set up this device.';
     msg.classList.add('error');
     return;
   }
+  hrRecoveryToken = result.recoveryToken;
   msg.textContent = '';
   hideAllHrGateSections();
   document.getElementById('hrResetPassword').value = '';
@@ -1919,11 +2028,23 @@ async function submitHrPasswordReset(){
     msg.classList.add('error');
     return;
   }
-  await setHrNewPassword(pw);
+  if(!hrRecoveryToken){
+    msg.textContent = 'Recovery session expired. Start over.';
+    msg.classList.add('error');
+    return;
+  }
+  const newSalt = randomHex(8);
+  const newHash = await hashPassword(pw, newSalt);
+  const result = await serverResetHrPasswordWithToken(hrRecoveryToken, newSalt, newHash);
+  hrRecoveryToken = null;
+  if(!result || !result.ok){
+    msg.textContent = (result && result.error) ? result.error : 'Could not reset the password. Try again.';
+    msg.classList.add('error');
+    return;
+  }
   msg.textContent = '';
   alert('Password updated. Log in with your new password.');
   showHrLogin();
-  await addActivityLog('HR password reset via recovery question');
 }
 
 async function enterHrMain(){
@@ -1942,6 +2063,7 @@ async function enterHrMain(){
 async function logoutHr(){
   await addActivityLog('HR logout');
   await safeSet('hr_session', '', false);
+  await serverLogout();
   if(hrInterval){ clearInterval(hrInterval); hrInterval = null; }
   goHome();
 }
@@ -1955,18 +2077,15 @@ async function loginEngineer(){
     msg.classList.add('error');
     return;
   }
-  const result = await authenticateUser(username, password);
-  if(!result.ok){
-    if(result.reason === 'disabled'){
-      msg.textContent = 'This account has been disabled. Contact HR.';
-    } else {
-      msg.textContent = 'Incorrect username or password.';
-    }
+  const result = await serverLogin('engineer', normUsername(username), password);
+  if(!result || !result.ok){
+    msg.textContent = (result && result.error) ? result.error : 'Incorrect username or password.';
     msg.classList.add('error');
     return;
   }
-  engineerName = result.user.username;
-  engineerDisplayName = result.user.displayName || result.user.username;
+  setSession(result.token, 'engineer');
+  engineerName = normUsername(username);
+  engineerDisplayName = result.displayName || engineerName;
   await safeSet('my_username', engineerName, false);
   msg.textContent = '';
   msg.classList.remove('error');
@@ -2000,6 +2119,7 @@ function logoutEngineer(){
     return;
   }
   safeSet('my_username', '', false);
+  serverLogout();
   engineerName = null;
   engineerDisplayName = null;
   document.getElementById('loginGate').classList.remove('hidden');
@@ -3628,6 +3748,15 @@ function employeeModalHtml(emp){
         <label class="field">Full name</label>
         <input type="text" id="f_name" placeholder="Employee full name" value="${emp.name}">
         <div style="height:12px"></div>
+        <label class="field">Salutation</label>
+        <select class="field-input" id="f_salutation">
+          <option value="" ${!emp.salutation?'selected':''}>Not set</option>
+          <option value="Mr." ${emp.salutation==='Mr.'?'selected':''}>Mr. (he/him)</option>
+          <option value="Ms." ${emp.salutation==='Ms.'?'selected':''}>Ms. (she/her)</option>
+          <option value="Mrs." ${emp.salutation==='Mrs.'?'selected':''}>Mrs. (she/her)</option>
+        </select>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Used to get the pronouns right in generated letters (e.g. Experience Letter). Leave as "Not set" to use gender-neutral wording instead.</p>
+        <div style="height:12px"></div>
         <label class="field">Designation</label>
         <input type="text" id="f_designation" placeholder="e.g. Senior Executive" value="${emp.designation}">
         <div style="height:12px"></div>
@@ -3926,6 +4055,7 @@ async function saveEmployeeForm(){
 
   Object.assign(draft, {
     id, name,
+    salutation: document.getElementById('f_salutation').value,
     designation: document.getElementById('f_designation').value.trim(),
     department: document.getElementById('f_department').value.trim(),
     doj: document.getElementById('f_doj').value,
@@ -5110,13 +5240,29 @@ function letterTemplate(type, f){
   const company = f.company, name = f.name || '[Employee name]', designation = f.designation || '[Designation]',
         department = f.department || '[Department]', doj = f.doj || '[Date of joining]', lwd = f.lwd || '[Last working date]',
         issueDate = f.issueDate;
+  const niceDate_ = (isoStr) => {
+    if(!isoStr) return '';
+    const d = new Date(isoStr);
+    if(isNaN(d)) return isoStr;
+    return d.toLocaleDateString(undefined, { day: '2-digit', month: 'long', year: 'numeric' });
+  };
+  const pronounsFor_ = (salutation) => {
+    if(salutation === 'Mr.') return { subject: 'he', subjectCap: 'He', object: 'him', possessive: 'his', was: 'was' };
+    if(salutation === 'Ms.' || salutation === 'Mrs.') return { subject: 'she', subjectCap: 'She', object: 'her', possessive: 'her', was: 'was' };
+    return { subject: 'they', subjectCap: 'They', object: 'them', possessive: 'their', was: 'were' };
+  };
   switch(type){
     case 'Offer Letter':
       return `${company}\n\nDate: ${issueDate}\n\nDear ${name},\n\nFurther to your interview and discussions with us, we are pleased to offer you the position of ${designation}${department ? ' in the ' + department + ' department' : ''} at ${company}, with a proposed joining date of ${doj || '[to be confirmed]'}.\n\n${f.offeredSalary ? 'Offered compensation: ' + f.offeredSalary + '\n\n' : ''}This offer is subject to satisfactory verification of your documents and references, and does not constitute a confirmed appointment until you accept it and formally join the organisation. Detailed terms of employment will be shared in your appointment letter upon joining.\n\n${f.replyBy ? 'Please confirm your acceptance of this offer by ' + f.replyBy + '.\n\n' : ''}We look forward to welcoming you to ${company}.\n\nFor ${company}\n\nAuthorised Signatory`;
     case 'Appointment Letter':
       return `${company}\n\nDate: ${issueDate}\n\nDear ${name},\n\nWe are pleased to appoint you as ${designation} in the ${department} department at ${company}, effective from ${doj}.\n\nYour employment will be governed by the terms discussed with you and the company's HR policies, including working hours, leave entitlements, and code of conduct. Please treat this letter as confirmation of your appointment and report to work on your date of joining with the required documents.\n\nWe welcome you to the team and look forward to a long and successful association.\n\nFor ${company}\n\nAuthorised Signatory`;
-    case 'Experience Letter':
-      return `${company}\n\nDate: ${issueDate}\n\nTO WHOMSOEVER IT MAY CONCERN\n\nThis is to certify that ${name} was employed with ${company} as ${designation} in the ${department} department from ${doj} to ${lwd || 'present'}.\n\nDuring this period, we found ${name} to be sincere, hardworking and professional in conduct. We wish them the very best in their future endeavours.\n\nFor ${company}\n\nAuthorised Signatory`;
+    case 'Experience Letter': {
+      const p = pronounsFor_(f.salutation);
+      const displayName = (f.salutation ? f.salutation + ' ' : '') + name;
+      const dojNice = niceDate_(f.doj) || doj;
+      const lwdNice = niceDate_(f.lwd) || lwd;
+      return `EXPERIENCE LETTER\n\nDate: ${issueDate}\n\nTo Whomsoever It May Concern,\n\nThis is to certify that ${displayName} was employed with ${company} as ${designation} from ${dojNice} to ${lwdNice}.\n\nDuring ${p.possessive} tenure, ${p.subject} ${p.was} responsible for handling routine HR, Purchase work including maintaining Admin records, preparing salary and send to consultant. All HR & ADMIN files and documents maintaining, and supporting day-to-day accounts-related activities.\n\n${p.subjectCap} performed ${p.possessive} duties sincerely and maintained a professional attitude throughout ${p.possessive} period of employment.\n\nWe wish ${p.object} all the best for ${p.possessive} future endeavors.\n\nSincerely,\n\nFor ${company}\n\n____________________\nAuthorized Signatory\nName: ____________________\nDesignation: ____________________`;
+    }
     case 'Relieving Letter':
       return `${company}\n\nDate: ${issueDate}\n\nDear ${name},\n\nThis is to confirm that your resignation from the position of ${designation} in the ${department} department has been accepted, and you are relieved from services of ${company} with effect from ${lwd}.\n\nWe thank you for your contribution and wish you success in your future endeavours.\n\nFor ${company}\n\nAuthorised Signatory`;
     case 'Exit Letter':
@@ -5163,6 +5309,7 @@ async function generateLetter(){
   const f = {
     company: document.getElementById('genCompanyName').value.trim() || 'R.S.Infotech',
     name,
+    salutation: matched ? (matched.salutation || '') : '',
     designation: document.getElementById('genDesignation').value.trim(),
     department: document.getElementById('genDepartment').value.trim(),
     doj: document.getElementById('genDoj').value,
