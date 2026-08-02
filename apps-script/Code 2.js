@@ -319,3 +319,29 @@ function testDriveSave() {
   );
   Logger.log('Test file saved successfully — check HR Management > Dashboard > Salary Sheet in Drive.');
 }
+
+// Clears the brute-force lockout counters for every known account. Deliberately
+// a plain function and NOT a doGet/doPost action: it can only be run by someone
+// with editor access to this project, so it adds no public attack surface.
+// Run this from the editor when someone is locked out and can't wait it out —
+// note the failure count survives in cache for 6 hours, so after 5 bad attempts
+// a single further wrong guess re-locks the account for another 5 minutes.
+function clearLoginLockouts() {
+  const sheet = getSheet_();
+  const names = ['hr-recovery'];
+
+  const hrRow = findRow_(sheet, 'hr_password');
+  if (hrRow !== -1) {
+    names.push(JSON.parse(sheet.getRange(hrRow, 2).getValue()).username);
+  }
+
+  const usersRow = findRow_(sheet, 'users');
+  if (usersRow !== -1) {
+    JSON.parse(sheet.getRange(usersRow, 2).getValue() || '[]').forEach(function (u) {
+      names.push(u.username);
+    });
+  }
+
+  CacheService.getScriptCache().removeAll(names.map(function (n) { return 'fail_' + n; }));
+  Logger.log('Cleared login lockouts for: ' + names.join(', '));
+}
