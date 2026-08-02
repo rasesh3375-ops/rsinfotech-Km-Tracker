@@ -253,17 +253,6 @@
   .report-card .titlewrap strong{display:block;font-size:14.5px;}
   .report-card .titlewrap span{font-size:12px;color:var(--muted);}
 
-  /* HR panel headings reuse the report-card avatar so every section in the HR
-     app reads the same way. Opt a heading in with data-avatar="X". */
-  section.block h2[data-avatar]{display:flex;align-items:center;gap:12px;}
-  section.block h2[data-avatar]::before{
-    content:attr(data-avatar);
-    width:38px;height:38px;border-radius:50%;flex-shrink:0;
-    background:var(--amber-dark);color:#fff;
-    display:flex;align-items:center;justify-content:center;
-    font-weight:700;font-size:15px;
-  }
-
   .letter-choice{border:1px solid var(--line);border-left:4px solid transparent;border-radius:10px;padding:13px 14px;margin-bottom:8px;cursor:pointer;font-size:14px;display:flex;gap:12px;align-items:center;}
   .letter-choice .num{font-size:11px;color:var(--muted);font-weight:700;}
   .letter-choice.active{border-left-color:var(--amber-dark);background:var(--cream);font-weight:700;}
@@ -535,14 +524,14 @@
     <div id="hrTabTracking">
     <section class="block">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-        <h2 data-avatar="M" style="margin:0;">Manage team</h2>
+        <h2 style="margin:0;">Manage team</h2>
       </div>
       <p style="font-size:12.5px;color:var(--muted);margin:8px 0 14px;">Logins are created automatically from Employee Master when you mark an employee as needing km tracking. Manage existing logins below.</p>
       <div id="userListTable"></div>
     </section>
 
     <section class="block">
-      <h2 data-avatar="E">Expense rate</h2>
+      <h2>Expense rate</h2>
       <div class="row-inline">
         <div>
           <label class="field">Charge per km (₹)</label>
@@ -555,7 +544,7 @@
 
     <section class="block">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-        <h2 data-avatar="L" style="margin:0;">Live tracking status</h2>
+        <h2 style="margin:0;">Live tracking status</h2>
         <button class="linkbtn" style="padding:0" onclick="enableAlerts()" id="alertBtn">enable alerts</button>
       </div>
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">All checked-in engineers on one map — green means moving, red means stopped or unresponsive. Flags an engineer if their GPS goes quiet, location permission is off, or their phone/browser stops responding while checked in.</p>
@@ -572,7 +561,7 @@
     </section>
 
     <section class="block">
-      <h2 data-avatar="G" style="margin:0 0 4px;">Geofence zones</h2>
+      <h2 style="margin:0 0 4px;">Geofence zones</h2>
       <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Define office or client zones — an engineer checked in outside all of these will be flagged as "outside zone" on the map and status list above.</p>
       <div class="row-inline">
         <div>
@@ -604,7 +593,7 @@
     </section>
 
     <section class="block">
-      <h2 data-avatar="T">Team overview</h2>
+      <h2>Team overview</h2>
       <div id="hrSummaryGrid"></div>
       <div id="hrTable"></div>
       <div class="row-inline" style="margin-top:12px;margin-bottom:0;">
@@ -615,7 +604,7 @@
     </section>
 
     <section class="block">
-      <h2 data-avatar="D" style="margin:0 0 4px;">Daily Summary</h2>
+      <h2 style="margin:0 0 4px;">Daily Summary</h2>
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A one-tap digest of today's km, expenses and any flagged engineers — generate it and send by email or WhatsApp.</p>
       <button class="btn full" onclick="generateDailySummary()">Generate today's summary</button>
       <div id="dailySummaryOutput" class="hidden" style="margin-top:14px;">
@@ -630,7 +619,7 @@
 
     <section class="block">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-        <h2 data-avatar="B" style="margin:0;">By company</h2>
+        <h2 style="margin:0;">By company</h2>
         <select class="company-period" id="companyPeriod" onchange="loadCompanyReport()">
           <option value="7">Last 7 days</option>
           <option value="15">Last 15 days</option>
@@ -662,7 +651,7 @@
 
         <div id="dashSubAttendance">
           <section class="block">
-            <h2 data-avatar="A" style="margin:0 0 4px;">Attendance Sheet</h2>
+            <h2 style="margin:0 0 4px;">Attendance Sheet</h2>
             <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Auto-marks Present when an engineer checks in with their selfie. Everything else — leave, holidays, half-days — is entered or corrected by HR. Resident Engineers are excluded from the leave/late-coming rules; their days just track Present/Absent/Holiday.</p>
             <div class="row-inline">
               <div>
@@ -682,7 +671,7 @@
 
         <div id="dashSubSalary" class="hidden">
           <section class="block">
-            <h2 data-avatar="S" style="margin:0 0 4px;">Salary Sheet</h2>
+            <h2 style="margin:0 0 4px;">Salary Sheet</h2>
             <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by heading — set once per employee in Employee Master, and the Basic/HRA/LTA formula for that heading applies automatically every month. Leave days are pulled from the Attendance Sheet (Absent + LP days) for the month selected.</p>
             <div class="row-inline">
               <div>
@@ -725,7 +714,7 @@
             <div id="activityLogList"></div>
           </section>
           <section class="block">
-            <h2 data-avatar="B" style="margin:0 0 4px;font-size:15px;">Backend connection</h2>
+            <h2 style="margin:0 0 4px;font-size:15px;">Backend connection</h2>
             <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Checks whether this device can actually write to and read from your Google Sheet backend — not just whether it's configured.</p>
             <button class="btn ghost full" onclick="testBackendConnection()">Test connection</button>
             <div class="msg" id="backendTestResult" style="text-align:left;margin-top:10px;"></div>
@@ -756,7 +745,7 @@
         <div id="reportCardsBox"></div>
 
         <section class="block">
-          <h2 data-avatar="A" style="margin:0 0 4px;font-size:17px;">Attendance</h2>
+          <h2 style="margin:0 0 4px;font-size:17px;">Attendance</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Marked Present as soon as the engineer takes a check-in selfie that day — whether or not they end up recording a trip. Sundays are excluded automatically; add festivals or declared holidays below so they don't count as absent either.</p>
           <div class="row-inline">
             <div>
@@ -780,7 +769,7 @@
         </section>
 
         <section class="block">
-          <h2 data-avatar="H" style="margin:0 0 4px;font-size:17px;">Holidays</h2>
+          <h2 style="margin:0 0 4px;font-size:17px;">Holidays</h2>
           <div class="row-inline">
             <div>
               <label class="field">Date</label>
@@ -798,7 +787,7 @@
         </section>
 
         <section class="block">
-          <h2 data-avatar="H" style="margin:0 0 4px;font-size:17px;">Holiday List (to share with engineers)</h2>
+          <h2 style="margin:0 0 4px;font-size:17px;">Holiday List (to share with engineers)</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A printable holiday list with the company logo, for a chosen financial year (April–March) — built from the Holidays list above.</p>
           <label class="field">Financial year starting April of</label>
           <input type="number" id="holidayListYear" placeholder="e.g. 2026 for FY 2026-27" />
@@ -815,7 +804,7 @@
         </section>
 
         <section class="block">
-          <h2 data-avatar="E" style="margin:0 0 4px;font-size:17px;">EL Calculation Sheet</h2>
+          <h2 style="margin:0 0 4px;font-size:17px;">EL Calculation Sheet</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Earned Leave = 1 day per 25 days present, per the leave policy. Resident Engineers are excluded. This computes each employee's EL for the financial year you pick from the Attendance Sheet, and can carry the closing balance forward as next year's opening balance automatically.</p>
           <label class="field">Financial year starting April of</label>
           <input type="number" id="elCalcStartYear" placeholder="e.g. 2026 for FY 2026-27" />
@@ -826,7 +815,7 @@
         </section>
 
         <section class="block">
-          <h2 data-avatar="M" style="margin:0 0 4px;font-size:17px;">Monthly Leave Report</h2>
+          <h2 style="margin:0 0 4px;font-size:17px;">Monthly Leave Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Every employee's leave days (EL + SL + LP, half-days counted as 0.5) broken down month by month across the financial year — April through March — so you can see each person's full-year leave pattern at a glance.</p>
           <label class="field">Financial year starting April of</label>
           <input type="number" id="leaveReportStartYear" placeholder="e.g. 2026 for FY 2026-27" />
@@ -837,7 +826,7 @@
         </section>
 
         <section class="block">
-          <h2 data-avatar="P" style="margin:0 0 4px;font-size:17px;">PF Report</h2>
+          <h2 style="margin:0 0 4px;font-size:17px;">PF Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">PF deducted per employee for the month, pulled from the Salary Sheet. Apprentices, R.S.IT Solution and Contractors don't have PF, so they're excluded here.</p>
           <div class="row-inline">
             <div><label class="field">Month</label><select class="field-input" id="pfReportMonthSel"></select></div>
@@ -849,7 +838,7 @@
         </section>
 
         <section class="block">
-          <h2 data-avatar="E" style="margin:0 0 4px;font-size:17px;">ESI Report</h2>
+          <h2 style="margin:0 0 4px;font-size:17px;">ESI Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">ESI deducted per employee for the month, pulled from the Salary Sheet. Apprentices, R.S.IT Solution and Contractors don't have ESI, so they're excluded here.</p>
           <div class="row-inline">
             <div><label class="field">Month</label><select class="field-input" id="esiReportMonthSel"></select></div>
@@ -861,7 +850,7 @@
         </section>
 
         <section class="block">
-          <h2 data-avatar="P" style="margin:0 0 4px;font-size:17px;">PT Report</h2>
+          <h2 style="margin:0 0 4px;font-size:17px;">PT Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Professional Tax deducted per employee for the month, pulled from the Salary Sheet. Apprentices and Contractors don't have PT — Managerial, Seniors, Junior Engineers, and R.S.IT Solution do, when Gross exceeds ₹12,000.</p>
           <div class="row-inline">
             <div><label class="field">Month</label><select class="field-input" id="ptReportMonthSel"></select></div>
@@ -873,7 +862,7 @@
         </section>
 
         <section class="block">
-          <h2 data-avatar="A" style="margin:0 0 4px;font-size:17px;">Apprentice Salary Report</h2>
+          <h2 style="margin:0 0 4px;font-size:17px;">Apprentice Salary Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Full salary breakdown for employees under the Apprentices heading only, for the month you pick — pulled from the Salary Sheet.</p>
           <div class="row-inline">
             <div><label class="field">Month</label><select class="field-input" id="apprenticeReportMonthSel"></select></div>
@@ -885,7 +874,7 @@
         </section>
 
         <section class="block">
-          <h2 data-avatar="O" style="margin:0 0 4px;font-size:17px;">Overtime Report</h2>
+          <h2 style="margin:0 0 4px;font-size:17px;">Overtime Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Applies to Field Engineers per the overtime policy. Log hours HR has been informed of (by the following day, per policy) — this is manual since overtime is reported over WhatsApp, not through this app.</p>
           <div class="row-inline">
             <div>
@@ -991,7 +980,7 @@
       <div id="hrSubDocs" class="hidden">
 
         <section class="block">
-          <h2 data-avatar="1" style="margin:0 0 4px;font-size:17px;">Payroll Documents (monthly)</h2>
+          <h2 style="margin:0 0 4px;font-size:17px;">1. Payroll Documents (monthly)</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">PF Challan, ESI Challan, PT Challan, Wages Register, Pay Slip — upload each month's document manually; files are stored in Google Drive, not in the app itself.</p>
           <label class="field">Document type</label>
           <select class="field-input" id="payrollDocType">
@@ -1015,7 +1004,7 @@
         </section>
 
         <section class="block">
-          <h2 data-avatar="2" style="margin:0 0 4px;font-size:17px;">Apprentice Documents</h2>
+          <h2 style="margin:0 0 4px;font-size:17px;">2. Apprentice Documents</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Apprentice claim documents, contracts, and other important apprentice paperwork.</p>
           <label class="field">Category</label>
           <select class="field-input" id="apprenticeDocCategory">
@@ -1042,7 +1031,7 @@
         </section>
 
         <section class="block">
-          <h2 data-avatar="3" style="margin:0 0 4px;font-size:17px;">Holiday List — R.S. Infotech, Vadodara</h2>
+          <h2 style="margin:0 0 4px;font-size:17px;">3. Holiday List — R.S. Infotech, Vadodara</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The generated holiday list already lives in Reports → Holiday List. If you also have an official signed/stamped copy, upload it here for record-keeping.</p>
           <label class="field">File</label>
           <input type="file" id="companyDocFile_holidaylist" accept=".pdf,.jpg,.jpeg,.png">
@@ -1054,7 +1043,7 @@
         </section>
 
         <section class="block">
-          <h2 data-avatar="4" style="margin:0 0 4px;font-size:17px;">R.S. Infotech Profile</h2>
+          <h2 style="margin:0 0 4px;font-size:17px;">4. R.S. Infotech Profile</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Company profile documents — brochures, presentations, credentials.</p>
           <label class="field">File</label>
           <input type="file" id="companyDocFile_profile" accept=".pdf,.jpg,.jpeg,.png,.ppt,.pptx,.doc,.docx">
@@ -1066,7 +1055,7 @@
         </section>
 
         <section class="block">
-          <h2 data-avatar="5" style="margin:0 0 4px;font-size:17px;">R.S. Infotech Important Documents</h2>
+          <h2 style="margin:0 0 4px;font-size:17px;">5. R.S. Infotech Important Documents</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Registration certificates, licenses, and other important company documents.</p>
           <label class="field">Document name</label>
           <input type="text" id="importantDocName" placeholder="e.g. GST Registration Certificate">
@@ -1081,7 +1070,7 @@
         </section>
 
         <section class="block">
-          <h2 data-avatar="6" style="margin:0 0 4px;font-size:17px;">Workman Compensation &amp; Insurance</h2>
+          <h2 style="margin:0 0 4px;font-size:17px;">6. Workman Compensation &amp; Insurance</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Which employees are covered under Workman Compensation, with their insurance details — add or remove manually.</p>
           <label class="field">Add employee to this list</label>
           <select class="field-input" id="workmanEmpSelect">
@@ -1095,13 +1084,13 @@
         </section>
 
         <section class="block">
-          <h2 data-avatar="7" style="margin:0 0 4px;font-size:17px;">Uniform &amp; ID List</h2>
+          <h2 style="margin:0 0 4px;font-size:17px;">7. Uniform &amp; ID List</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Track uniform and ID card issue status for every employee, with supporting documents.</p>
           <div id="uniformIdList"></div>
         </section>
 
         <section class="block">
-          <h2 data-avatar="8" style="margin:0 0 4px;font-size:17px;">Employee Handbook</h2>
+          <h2 style="margin:0 0 4px;font-size:17px;">8. Employee Handbook</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Field and WFH engineers see the whole handbook. Resident Engineers only see the Resident Engineer Policy section below — not the full document. Update either whenever the policy changes, typically once a year.</p>
           <label class="field">Full handbook document (visible to Field / WFH engineers)</label>
           <input type="file" id="handbookFile" accept=".pdf,.doc,.docx">
