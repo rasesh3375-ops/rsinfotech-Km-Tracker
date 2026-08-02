@@ -247,12 +247,6 @@
   .modal-actions{display:flex;gap:10px;margin-top:18px;}
   .modal-actions .btn{flex:1;}
 
-  .report-card{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px;}
-  .report-card .head{display:flex;align-items:center;gap:12px;margin-bottom:12px;}
-  .report-card .avatar{width:38px;height:38px;border-radius:50%;background:var(--amber-dark);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0;}
-  .report-card .titlewrap strong{display:block;font-size:14.5px;}
-  .report-card .titlewrap span{font-size:12px;color:var(--muted);}
-
   .letter-choice{border:1px solid var(--line);border-left:4px solid transparent;border-radius:10px;padding:13px 14px;margin-bottom:8px;cursor:pointer;font-size:14px;display:flex;gap:12px;align-items:center;}
   .letter-choice .num{font-size:11px;color:var(--muted);font-weight:700;}
   .letter-choice.active{border-left-color:var(--amber-dark);background:var(--cream);font-weight:700;}
@@ -316,7 +310,7 @@
   body{background:linear-gradient(180deg, #FBFAF7 0%, var(--cream) 220px);}
   header.top{padding-bottom:16px;}
   header.top .brand img{border-radius:8px;box-shadow:0 1px 3px rgba(22,33,62,.15);}
-  section.block, .rolecard, .report-card, .emp-row, .letter-choice{
+  section.block, .rolecard, .emp-row, .letter-choice{
     box-shadow:0 1px 2px rgba(22,33,62,.04), 0 1px 8px rgba(22,33,62,.05);
   }
   section.block{transition:box-shadow .15s ease;}
@@ -734,10 +728,11 @@
         <section class="block">
           <div id="employeeListBox"></div>
         </section>
-        <div class="report-card">
-          <div class="head"><div class="avatar">L</div><div class="titlewrap"><strong>Left Employees</strong><span id="leftEmployeeCount">0 on file</span></div></div>
-          <button class="btn ghost" onclick="openLeftEmployeesModal()">View left employees</button>
-        </div>
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">Left Employees</h2>
+          <p style="font-size:13px;color:var(--muted);margin:0 0 14px;" id="leftEmployeeCount">0 on file</p>
+          <button class="btn full" onclick="openLeftEmployeesModal()">View left employees</button>
+        </section>
       </div>
 
       <!-- ===== Reports ===== -->
@@ -4247,22 +4242,23 @@ function closeLeftEmployeesModal(){
 async function renderReportsTab(){
   const employees = await getEmployees();
   const reports = [
-    {key:'contact', label:'Employee Contact Report', avatar:'E'},
-    {key:'birthday', label:'Birthday Report', avatar:'B'},
-    {key:'increment', label:'Increment Report', avatar:'I'},
-    {key:'diwali', label:'Diwali Bonus Report', avatar:'D'},
-    {key:'salary', label:'Salary Report', avatar:'S'},
-    {key:'ctc', label:'Cost to Company Report', avatar:'C'},
-    {key:'loan', label:'Loan & Advance Report', avatar:'L'},
-    {key:'retention', label:'Retention Money Detail', avatar:'R'}
+    {key:'contact', label:'Employee Contact Report'},
+    {key:'birthday', label:'Birthday Report'},
+    {key:'increment', label:'Increment Report'},
+    {key:'diwali', label:'Diwali Bonus Report'},
+    {key:'salary', label:'Salary Report'},
+    {key:'ctc', label:'Cost to Company Report'},
+    {key:'loan', label:'Loan & Advance Report'},
+    {key:'retention', label:'Retention Money Detail'}
   ];
   document.getElementById('reportCardsBox').innerHTML = reports.map(r => {
     const withData = employees.filter(e => reportHasData(r.key, e)).length;
-    return `<div class="report-card">
-      <div class="head"><div class="avatar">${r.avatar}</div><div class="titlewrap"><strong>${r.label}</strong><span>${withData} employees with data</span></div></div>
-      <button class="btn ghost" onclick="viewReport('${r.key}','${r.label}')">View report</button>
+    return `<section class="block">
+      <h2 style="margin:0 0 4px;font-size:17px;">${r.label}</h2>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">${withData} employees with data</p>
+      <button class="btn full" onclick="viewReport('${r.key}','${r.label}')">View report</button>
       <div id="reportBox_${r.key}"></div>
-    </div>`;
+    </section>`;
   }).join('');
   await populateAttendanceUserSelect();
   await renderHolidayList();
