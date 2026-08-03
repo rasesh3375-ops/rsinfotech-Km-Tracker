@@ -1751,10 +1751,16 @@ async function serverSetupHr(value){
   }catch(e){ return { error: 'Network error. Check your connection and try again.' }; }
 }
 async function checkHrAccountExists(){
+  // Returns {exists} only when the server actually answered. A failure must NOT
+  // come back as exists:false — the caller would read that as "no HR account"
+  // and offer to create one, hiding the login form over a momentary network
+  // blip or a slow Apps Script cold start.
   try{
     const res = await fetch(API_URL + '?action=hrAccountExists');
-    return await res.json();
-  }catch(e){ return { exists: false }; }
+    const data = await res.json();
+    if(data && typeof data.exists === 'boolean') return data;
+    return { error: 'Unexpected response from the server.' };
+  }catch(e){ return { error: 'Could not reach the server.' }; }
 }
 async function serverRecoverHr(){
   try{
@@ -2031,6 +2037,7 @@ async function selectRole(role){
   } else {
     document.getElementById('hrScreen').classList.remove('hidden');
     const existsCheck = await checkHrAccountExists();
+    const reachedServer = !(existsCheck && existsCheck.error);
     const hasHrPassword = !!(existsCheck && existsCheck.exists);
     const hrSession = await safeGet('hr_session', false);
     document.getElementById('hrGate').classList.remove('hidden');
@@ -2040,7 +2047,18 @@ async function selectRole(role){
       await enterHrMain();
       return;
     }
-    if(!hasHrPassword){
+    if(!reachedServer){
+      // Couldn't ask the server. Show the login form, never the setup form —
+      // offering to create an HR account here would hide the real login and
+      // invite a duplicate, when almost always an account does exist.
+      showHrLogin();
+      const msg = document.getElementById('hrGateMsg');
+      if(msg){
+        msg.innerHTML = "Couldn't reach the server — check your connection and " +
+          "<button class=\"linkbtn\" style=\"padding:0\" onclick=\"location.reload()\">try again</button>.";
+        msg.classList.add('error');
+      }
+    } else if(!hasHrPassword){
       showHrSetup();
     } else {
       showHrLogin();
