@@ -881,6 +881,18 @@
         </section>
 
         <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">Month-wise Salary Comparison</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Last month's total salary against the month you pick, and exactly what explains the gap — each new joiner that added to it, each leaver that took away from it, and anyone whose own salary moved. The reasons add up to the difference.</p>
+          <div class="row-inline">
+            <div><label class="field">Month</label><select class="field-input" id="salCompareMonthSel"></select></div>
+            <div><label class="field">Year</label><select class="field-input" id="salCompareYearSel"></select></div>
+          </div>
+          <button class="btn full" onclick="renderSalaryComparisonReport()">Generate salary comparison</button>
+          <div style="height:14px"></div>
+          <div id="salCompareBox"></div>
+        </section>
+
+        <section class="block">
           <h2 style="margin:0 0 4px;font-size:17px;">Overtime Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Applies to Field Engineers per the overtime policy. Log hours HR has been informed of (by the following day, per policy) — this is manual since overtime is reported over WhatsApp, not through this app.</p>
           <div class="row-inline">
@@ -3305,6 +3317,136 @@ async function renderConsultantReport(){
     toCsv(CONSULTANT_REPORT_COLS, rows), 'text/csv');
 }
 
+// ---- Month-wise Salary Comparison ----
+// Bridges last month's payroll total to the selected month's and names every
+// reason for the gap, so the reasons always add back up to the difference.
+
+function monthContext_(year, month){
+  const monthDays = new Date(year, month, 0).getDate();
+  const mm = String(month).padStart(2, '0');
+  const dateList = [];
+  for(let d=1; d<=monthDays; d++) dateList.push(`${year}-${mm}-${String(d).padStart(2,'0')}`);
+  return {
+    year, month, monthDays, dateList,
+    monthVal: `${year}-${mm}`,
+    label: `${MONTH_NAMES[month-1]} ${year}`,
+    start: `${year}-${mm}-01`,
+    end: `${year}-${mm}-${String(monthDays).padStart(2,'0')}`
+  };
+}
+
+// The Salary Sheet simply drops anyone marked left, which would make a leaver
+// vanish from both months and hide the very change this report exists to show.
+// Membership is decided per month from the joining and leaving dates instead.
+function employedInMonth_(emp, ctx){
+  if(emp.doj && emp.doj > ctx.end) return false;
+  if(emp.employmentStatus === 'left' && emp.leftDate && emp.leftDate < ctx.start) return false;
+  return true;
+}
+
+function fmtSigned_(n){
+  const v = Math.round(n * 100) / 100;
+  if(v === 0) return '₹0';
+  return (v > 0 ? '+₹' : '−₹') + fmtMoney(Math.abs(v));
+}
+
+async function renderSalaryComparisonReport(){
+  const box = document.getElementById('salCompareBox');
+  populateMonthYearSelects('salCompareMonthSel', 'salCompareYearSel');
+  const monthVal = getMonthYearValue('salCompareMonthSel', 'salCompareYearSel');
+  const [year, month] = monthVal.split('-').map(Number);
+  const curr = monthContext_(year, month);
+  const prev = monthContext_(month === 1 ? year - 1 : year, month === 1 ? 12 : month - 1);
+
+  const employees = await getEmployees();
+  if(!employees.length){
+    box.innerHTML = '<div class="empty">Add employees in Employee Master first.</div>';
+    return;
+  }
+  const holidayMap = await getHolidayMap_local();
+
+  let prevTotal = 0, currTotal = 0;
+  const joined = [], leavers = [], changed = [];
+  for(const emp of employees){
+    const inPrev = employedInMonth_(emp, prev);
+    const inCurr = employedInMonth_(emp, curr);
+    if(!inPrev && !inCurr) continue;
+    const p = inPrev ? (await computeSalaryForEmployee(emp, prev.dateList, prev.monthDays, holidayMap)).netSalary : 0;
+    const c = inCurr ? (await computeSalaryForEmployee(emp, curr.dateList, curr.monthDays, holidayMap)).netSalary : 0;
+    prevTotal += p;
+    currTotal += c;
+    if(!inPrev && inCurr) joined.push({ emp, amount: c });
+    else if(inPrev && !inCurr) leavers.push({ emp, amount: -p });
+    else if(Math.round((c - p) * 100) !== 0) changed.push({ emp, amount: c - p, from: p, to: c });
+  }
+  const difference = currTotal - prevTotal;
+
+  const csvRows = [];
+  let rowsHtml = '';
+  const group = (title, items, detailFor) => {
+    if(!items.length) return;
+    const sub = items.reduce((t, i) => t + i.amount, 0);
+    rowsHtml += `<tr class="sal-heading"><td colspan="3">${title}</td></tr>`;
+    csvRows.push([title, '', '']);
+    items.forEach(i => {
+      rowsHtml += `<tr><td class="sal-name">${i.emp.name}</td><td>${detailFor(i)}</td><td class="num">${fmtSigned_(i.amount)}</td></tr>`;
+      csvRows.push([i.emp.name, detailFor(i), Math.round(i.amount * 100) / 100]);
+    });
+    rowsHtml += `<tr class="sal-subtotal"><td></td><td>Subtotal</td><td class="num">${fmtSigned_(sub)}</td></tr>`;
+    csvRows.push(['', 'Subtotal', Math.round(sub * 100) / 100]);
+  };
+
+  group('New employees added', joined,
+    i => 'Joined ' + (i.emp.doj || '—') + ' — added to the total');
+  group('Employees who left', leavers,
+    i => 'Left ' + (i.emp.leftDate || '—') + ' — no longer in the total');
+  group('Salary changed (same employees)', changed,
+    i => `${fmtMoney(i.from)} → ${fmtMoney(i.to)} (increment, attendance or loan/advance)`);
+
+  if(!joined.length && !leavers.length && !changed.length){
+    rowsHtml = `<tr><td colspan="3" class="empty">Nothing changed between ${prev.label} and ${curr.label}.</td></tr>`;
+  }
+
+  // The three groups are mutually exclusive and cover every employee whose pay
+  // moved, so this must equal the headline difference. Shown so a mismatch is
+  // visible rather than silent.
+  const reconciled = Math.round((joined.concat(leavers, changed).reduce((t, i) => t + i.amount, 0) - difference) * 100) === 0;
+
+  box.innerHTML = `<div class="print-isolate" id="salComparePrintArea">
+      ${reportLogoHeader('Month-wise Salary Comparison — ' + curr.label)}
+      <table>
+        <tr><th>Month</th><th class="num">Total Salary</th></tr>
+        <tr><td>${prev.label} (last month)</td><td class="num">₹${fmtMoney(prevTotal)}</td></tr>
+        <tr><td>${curr.label} (this month)</td><td class="num">₹${fmtMoney(currTotal)}</td></tr>
+        <tr class="sal-grandtotal"><td><strong>Difference</strong></td><td class="num"><strong>${fmtSigned_(difference)}</strong></td></tr>
+      </table>
+      <h2 style="font-size:15px;margin:18px 0 8px;">Why the salary differs</h2>
+      <table>
+        <tr><th>Employee</th><th>Reason</th><th class="num">Effect on total</th></tr>
+        ${rowsHtml}
+        <tr class="sal-grandtotal"><td><strong>Grand Total</strong></td><td></td><td class="num"><strong>${fmtSigned_(difference)}</strong></td></tr>
+      </table>
+      <p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">
+        ${joined.length} joined · ${leavers.length} left · ${changed.length} changed.
+        ${reconciled ? 'Reasons add up to the difference exactly.' : '⚠ Reasons do not add up to the difference — please report this.'}
+      </p>
+    </div>
+    <div class="row-inline" style="margin-top:10px;margin-bottom:0;">
+      <button class="btn ghost" style="flex:1;" onclick="openFullscreenView('Month-wise Salary Comparison','salCompareBox')">⛶ Full screen</button>
+      <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
+    </div>`;
+
+  const csvHead = ['Employee', 'Reason', 'Effect on total'];
+  const csvAll = [
+    [prev.label + ' (last month) total', '', Math.round(prevTotal * 100) / 100],
+    [curr.label + ' (this month) total', '', Math.round(currTotal * 100) / 100],
+    ['Difference', '', Math.round(difference * 100) / 100],
+    ['', '', '']
+  ].concat(csvRows, [['Grand Total', '', Math.round(difference * 100) / 100]]);
+  saveFileToDrive(['HR Management','Reports','Salary Comparison'],
+    `Month-wise Salary Comparison - ${monthVal}.csv`, toCsv(csvHead, csvAll), 'text/csv');
+}
+
 // ---- geofence zones ----
 async function renderGeofenceZones(){
   const zones = await getGeofences();
@@ -4420,6 +4562,7 @@ async function renderReportsTab(){
   await populateOvertimeEmployeeSelect();
   // Show the current month straight away rather than an empty dropdown
   populateMonthYearSelects('consultantReportMonthSel', 'consultantReportYearSel');
+  populateMonthYearSelects('salCompareMonthSel', 'salCompareYearSel');
 }
 
 function reportHasData(key, e){
