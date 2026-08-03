@@ -195,6 +195,102 @@
   .hr-subtabs button{white-space:nowrap;border:none;background:transparent;color:var(--muted);font-size:13.5px;font-weight:600;padding:12px 16px;cursor:pointer;border-bottom:2px solid transparent;}
   .hr-subtabs button.active{color:var(--navy);border-bottom-color:var(--amber);}
 
+  /* ===== HR shell: sidebar + topbar on desktop, off-canvas drawer on mobile =====
+     The old tab bars stay in the DOM (other code toggles .active on their buttons)
+     but are hidden — the sidebar replaces all three levels of them. */
+  body.hr-shell .wrap{max-width:100%;padding:0;}
+  .hr-shell-hide{display:none !important;}
+
+  #hrShell{display:flex;align-items:flex-start;min-height:100vh;}
+  #hrSidebar{width:242px;flex-shrink:0;background:var(--paper);border-right:1px solid var(--line);
+    min-height:100vh;position:sticky;top:0;display:flex;flex-direction:column;padding:18px 12px;overflow-y:auto;}
+  #hrSidebar .side-title{font-size:16px;font-weight:700;color:var(--navy);padding:4px 10px 14px;}
+  .side-link{display:flex;align-items:center;gap:11px;width:100%;text-align:left;border:none;
+    background:transparent;color:var(--muted);font-size:13.5px;font-weight:600;padding:10px 12px;
+    border-radius:9px;cursor:pointer;margin-bottom:2px;}
+  .side-link:hover{background:#00000008;color:var(--navy);}
+  .side-link.active{background:var(--navy);color:#fff;}
+  .side-link .ic{width:18px;text-align:center;flex-shrink:0;}
+  #hrSidebar .side-foot{margin-top:auto;border:1px solid var(--line);border-radius:12px;padding:12px;}
+  #hrSidebar .side-foot .who{font-size:13px;font-weight:700;color:var(--navy);}
+  #hrSidebar .side-foot .sub{font-size:11px;color:var(--muted);margin-bottom:10px;}
+
+  #hrShellBody{flex:1;min-width:0;display:flex;flex-direction:column;}
+  #hrTopbar{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--paper);
+    border-bottom:1px solid var(--line);padding:12px 20px;position:sticky;top:0;z-index:20;}
+  #hrTopbar .tb-left{display:flex;align-items:center;gap:10px;min-width:0;}
+  #hrTopbar .tb-right{display:flex;align-items:center;gap:14px;font-size:13px;color:var(--muted);}
+  #hrBurger{display:none;border:none;background:transparent;font-size:20px;cursor:pointer;color:var(--navy);padding:2px 4px;}
+  #hrContent{padding:20px;}
+  #hrNavScrim{display:none;}
+
+  .kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px;}
+  .kpi{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:16px;}
+  .kpi .top{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+  .kpi .ic{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;
+    font-size:15px;flex-shrink:0;background:#EFF3FA;}
+  .kpi .cap{font-size:12.5px;font-weight:600;color:var(--muted);line-height:1.25;}
+  .kpi .n{font-size:28px;font-weight:700;color:var(--navy);line-height:1;}
+  .kpi .sub{font-size:11.5px;color:var(--muted);margin-top:6px;}
+  .kpi.alert{background:#FFF6F5;border-color:#F1D7D4;}
+  .kpi.alert .ic{background:#FBE3E0;}
+  .kpi.alert .cap,.kpi.alert .n{color:var(--red);}
+
+  .dash-2col{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;}
+  .dash-card{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px;}
+  .dash-2col .dash-card{margin-bottom:0;}
+  .dash-card h3{margin:0;font-size:16px;color:var(--navy);}
+  .dash-card .card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;}
+  .dash-card .card-sub{font-size:12.5px;color:var(--muted);margin:4px 0 14px;}
+
+  .legend-row{display:flex;align-items:center;justify-content:space-between;padding:11px 2px;
+    border-bottom:1px solid var(--line);font-size:13.5px;}
+  .legend-row:last-child{border-bottom:none;}
+  .legend-row .lbl{display:flex;align-items:center;gap:9px;color:var(--navy);}
+  .legend-row .n{font-weight:700;color:var(--navy);}
+  .swatch{width:10px;height:10px;border-radius:50%;flex-shrink:0;display:inline-block;}
+  .donut-wrap{display:flex;align-items:center;gap:18px;flex-wrap:wrap;}
+  .donut-wrap svg{flex-shrink:0;}
+  .donut-wrap .legend{flex:1;min-width:170px;}
+
+  .feed-row{display:flex;align-items:flex-start;gap:11px;padding:10px 0;border-bottom:1px solid var(--line);}
+  .feed-row:last-child{border-bottom:none;}
+  .feed-row .ic{width:32px;height:32px;border-radius:9px;background:#F1F4FA;display:flex;
+    align-items:center;justify-content:center;flex-shrink:0;font-size:14px;}
+  .feed-row .body{flex:1;min-width:0;}
+  .feed-row .t{font-size:13px;color:var(--navy);line-height:1.35;}
+  .feed-row .when{font-size:11.5px;color:var(--muted);margin-top:2px;}
+  .feed-tag{font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;flex-shrink:0;}
+
+  .qa-row{display:grid;grid-template-columns:repeat(7,1fr);gap:10px;}
+  .qa{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:14px 8px;
+    text-align:center;cursor:pointer;font-size:11.5px;font-weight:600;color:var(--navy);}
+  .qa:hover{border-color:var(--navy);}
+  .qa .ic{font-size:19px;display:block;margin-bottom:7px;}
+
+  @media (max-width: 1100px){
+    .kpi-row{grid-template-columns:repeat(2,1fr);}
+    .qa-row{grid-template-columns:repeat(4,1fr);}
+  }
+  @media (max-width: 900px){
+    /* Off-canvas by left offset rather than transform: same effect, but it can't
+       be defeated by a stacking or containing-block quirk on the flex parent. */
+    #hrSidebar{position:fixed;left:-262px;top:0;bottom:0;z-index:60;
+      transition:left .22s ease;box-shadow:0 0 30px rgba(22,33,62,.18);}
+    body.hr-nav-open #hrSidebar, #hrSidebar.open{left:0;}
+    #hrNavScrim{position:fixed;inset:0;background:rgba(22,33,62,.42);z-index:50;}
+    body.hr-nav-open #hrNavScrim{display:block;}
+    #hrBurger{display:block;}
+    #hrContent{padding:14px;}
+    .dash-2col{grid-template-columns:1fr;}
+  }
+  @media (max-width: 560px){
+    .kpi-row{grid-template-columns:1fr;}
+    .qa-row{grid-template-columns:repeat(3,1fr);}
+    #hrTopbar{padding:10px 12px;}
+    .hide-sm{display:none;}
+  }
+
   .stat-grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px;}
   .stat-card2{background:var(--paper);border:1px solid var(--line);border-left:4px solid var(--amber-dark);border-radius:10px;padding:16px;}
   .stat-card2 .n{font-family:"Courier New",monospace;font-size:26px;font-weight:700;color:var(--navy);}
@@ -505,18 +601,38 @@
     </div>
 
     <div id="hrMain" class="hidden">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-      <h2 style="margin:0;font-size:19px;color:var(--navy);font-weight:700;">R.S. Infotech HR</h2>
-      <button class="linkbtn" style="padding:0" onclick="logoutHr()">log out</button>
-    </div>
+    <div id="hrNavScrim" onclick="toggleHrNav(false)"></div>
+    <div id="hrShell">
+      <aside id="hrSidebar">
+        <div class="side-title">R.S. Infotech HR</div>
+        <nav id="hrSideNav"></nav>
+        <div class="side-foot">
+          <div class="who">Admin</div>
+          <div class="sub">HR administrator</div>
+          <button class="btn ghost full" onclick="logoutHr()">Log out</button>
+        </div>
+      </aside>
+      <div id="hrShellBody">
+        <header id="hrTopbar">
+          <div class="tb-left">
+            <button id="hrBurger" onclick="toggleHrNav()" aria-label="Menu">☰</button>
+            <strong id="hrPageTitle" style="font-size:15px;color:var(--navy);">Dashboard</strong>
+          </div>
+          <div class="tb-right">
+            <span class="hide-sm" id="hrTopDate"></span>
+            <span>Admin</span>
+          </div>
+        </header>
+        <main id="hrContent">
+        <div id="hrPageDashboard" class="hidden"></div>
 
-    <div class="hr-tabs">
+    <div class="hr-tabs hr-shell-hide">
       <button class="active" id="hrTabBtnTracking" onclick="switchHrTab('tracking')">📍 Tracking</button>
       <button id="hrTabBtnMgmt" onclick="switchHrTab('mgmt')">📋 HR Management</button>
     </div>
 
     <div id="hrTabTracking">
-    <section class="block">
+    <section class="block" id="secManageTeam">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
         <h2 style="margin:0;">Manage team</h2>
       </div>
@@ -524,7 +640,7 @@
       <div id="userListTable"></div>
     </section>
 
-    <section class="block">
+    <section class="block" id="secExpenseRate">
       <h2>Expense rate</h2>
       <div class="row-inline">
         <div>
@@ -536,7 +652,7 @@
       <div class="msg" id="rateMsg"></div>
     </section>
 
-    <section class="block">
+    <section class="block" id="secLiveTracking">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
         <h2 style="margin:0;">Live tracking status</h2>
         <button class="linkbtn" style="padding:0" onclick="enableAlerts()" id="alertBtn">enable alerts</button>
@@ -554,7 +670,7 @@
       <div id="liveStatusList"></div>
     </section>
 
-    <section class="block">
+    <section class="block" id="secGeofence">
       <h2 style="margin:0 0 4px;">Geofence zones</h2>
       <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Define office or client zones — an engineer checked in outside all of these will be flagged as "outside zone" on the map and status list above.</p>
       <div class="row-inline">
@@ -586,7 +702,7 @@
       <div id="geofenceZoneList"></div>
     </section>
 
-    <section class="block">
+    <section class="block" id="secTeamOverview">
       <h2>Team overview</h2>
       <div id="hrSummaryGrid"></div>
       <div id="hrTable"></div>
@@ -597,7 +713,7 @@
       </div>
     </section>
 
-    <section class="block">
+    <section class="block" id="secDailySummary">
       <h2 style="margin:0 0 4px;">Daily Summary</h2>
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A one-tap digest of today's km, expenses and any flagged engineers — generate it and send by email or WhatsApp.</p>
       <button class="btn full" onclick="generateDailySummary()">Generate today's summary</button>
@@ -611,7 +727,7 @@
       <p style="font-size:11.5px;color:var(--muted);margin:12px 0 0;">This is one-tap, not automatic. True unattended daily sending needs a scheduled job on your storage backend (the Google Apps Script project this app already uses) — ask if you'd like the script for that.</p>
     </section>
 
-    <section class="block">
+    <section class="block" id="secByCompany">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
         <h2 style="margin:0;">By company</h2>
         <select class="company-period" id="companyPeriod" onchange="loadCompanyReport()">
@@ -625,7 +741,7 @@
     </div><!-- /hrTabTracking -->
 
     <div id="hrTabMgmt" class="hidden">
-      <div class="hr-subtabs">
+      <div class="hr-subtabs hr-shell-hide">
         <button class="active" onclick="switchHrSub('dash')" id="hrSubBtnDash">Dashboard</button>
         <button onclick="switchHrSub('master')" id="hrSubBtnMaster">Employee Master</button>
         <button onclick="switchHrSub('reports')" id="hrSubBtnReports">Reports</button>
@@ -635,7 +751,7 @@
 
       <!-- ===== Dashboard ===== -->
       <div id="hrSubDash">
-        <div class="inner-tabs">
+        <div class="inner-tabs hr-shell-hide">
           <button class="active" onclick="switchDashSub('attendance')" id="dashSubBtnAttendance">Attendance Sheet</button>
           <button onclick="switchDashSub('salary')" id="dashSubBtnSalary">Salary Sheet</button>
           <button onclick="switchDashSub('reminders')" id="dashSubBtnReminders">Increment Reminders</button>
@@ -707,7 +823,7 @@
             <p style="font-size:12.5px;color:var(--muted);margin:0 0 14px;" id="activitySummaryLine"></p>
             <div id="activityLogList"></div>
           </section>
-          <section class="block">
+          <section class="block" id="secBackendConn">
             <h2 style="margin:0 0 4px;font-size:15px;">Backend connection</h2>
             <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Checks whether this device can actually write to and read from your Google Sheet backend — not just whether it's configured.</p>
             <button class="btn ghost full" onclick="testBackendConnection()">Test connection</button>
@@ -1131,6 +1247,9 @@
 
       </div>
     </div><!-- /hrTabMgmt -->
+        </main>
+      </div><!-- /hrShellBody -->
+    </div><!-- /hrShell -->
     </div>
   </div>
 
@@ -2076,7 +2195,11 @@ async function enterHrMain(){
   await loadCompanyReport();
   if(hrInterval) clearInterval(hrInterval);
   hrInterval = setInterval(() => { loadHR(); loadCompanyReport(); }, 12000);
-  switchHrTab('tracking');
+  document.body.classList.add('hr-shell');
+  const dateEl = document.getElementById('hrTopDate');
+  if(dateEl) dateEl.textContent = 'Today, ' + new Date().toLocaleDateString('en-IN', { day:'numeric', month:'long', year:'numeric' });
+  renderHrSideNav();
+  hrNavigate('dashboard');
 }
 
 async function logoutHr(){
@@ -2084,6 +2207,7 @@ async function logoutHr(){
   await safeSet('hr_session', '', false);
   await serverLogout();
   if(hrInterval){ clearInterval(hrInterval); hrInterval = null; }
+  document.body.classList.remove('hr-shell', 'hr-nav-open');
   goHome();
 }
 
@@ -3778,39 +3902,296 @@ async function getReminderEmail(){
 }
 
 // ---- tab switching ----
-function switchHrTab(tab){
-  document.getElementById('hrTabTracking').classList.toggle('hidden', tab !== 'tracking');
-  document.getElementById('hrTabMgmt').classList.toggle('hidden', tab !== 'mgmt');
-  document.getElementById('hrTabBtnTracking').classList.toggle('active', tab === 'tracking');
-  document.getElementById('hrTabBtnMgmt').classList.toggle('active', tab === 'mgmt');
-  if(tab === 'mgmt'){
-    switchHrSub('dash');
-  }
-  if(tab === 'tracking' && liveMap){
-    setTimeout(() => liveMap.invalidateSize(), 60);
-  }
+// ===== HR shell navigation =====
+// One flat sidebar replaces what used to be three nested levels of tabs. Rather
+// than moving markup around, each route just lists the containers it needs shown
+// — every existing element id and render function is left exactly as it was, so
+// nothing downstream had to change.
+const HR_PANELS = ['hrPageDashboard','hrTabTracking','hrTabMgmt','hrSubDash','hrSubMaster','hrSubReports',
+  'hrSubGenerator','hrSubDocs','dashSubAttendance','dashSubSalary','dashSubReminders','dashSubExpiry',
+  'dashSubActivity','secManageTeam','secExpenseRate','secLiveTracking','secGeofence','secTeamOverview',
+  'secDailySummary','secByCompany','secBackendConn'];
+
+const HR_ROUTES = {
+  dashboard:  { label:'Dashboard',           icon:'🏠', show:['hrPageDashboard'], run:() => renderHrDashboardHome() },
+  tracking:   { label:'Tracking',            icon:'📍', show:['hrTabTracking','secManageTeam','secLiveTracking','secByCompany'],
+                run:() => { loadHR(); loadCompanyReport(); if(liveMap) setTimeout(() => liveMap.invalidateSize(), 60); } },
+  employees:  { label:'Employee Master',     icon:'👥', show:['hrTabMgmt','hrSubMaster'], run:() => renderEmployeeList() },
+  attendance: { label:'Attendance Sheet',    icon:'🗓️', show:['hrTabMgmt','hrSubDash','dashSubAttendance'], run:() => renderAttendanceSheet() },
+  salary:     { label:'Salary Sheet',        icon:'₹',  show:['hrTabMgmt','hrSubDash','dashSubSalary'], run:() => renderSalarySheet() },
+  reminders:  { label:'Increment Reminders', icon:'📈', show:['hrTabMgmt','hrSubDash','dashSubReminders'], run:() => refreshDashboard() },
+  expiry:     { label:'Document Expiry',     icon:'📄', show:['hrTabMgmt','hrSubDash','dashSubExpiry'], run:() => renderDocExpiryList() },
+  activity:   { label:'Activity Log',        icon:'🕘', show:['hrTabMgmt','hrSubDash','dashSubActivity'], run:() => renderActivityLogList() },
+  reports:    { label:'Reports',             icon:'📊', show:['hrTabMgmt','hrSubReports'], run:() => renderReportsTab() },
+  generator:  { label:'Generator',           icon:'✉️', show:['hrTabMgmt','hrSubGenerator'], run:() => renderGeneratorTab() },
+  docs:       { label:'Office Documents',    icon:'🗂️', show:['hrTabMgmt','hrSubDocs'], run:() => renderOfficeDocumentsTab() },
+  team:       { label:'Team Overview',       icon:'👤', show:['hrTabTracking','secTeamOverview'], run:() => loadHR() },
+  daily:      { label:'Daily Summary',       icon:'📬', show:['hrTabTracking','secDailySummary'] },
+  settings:   { label:'Settings',            icon:'⚙️', show:['hrTabTracking','secExpenseRate','secGeofence','secBackendConn'],
+                run: async () => {
+                  const el = document.getElementById('rateInput');
+                  if(el) el.value = (await getRate()) || '';
+                  renderGeofenceZones();
+                } }
+};
+let hrRoute = 'dashboard';
+
+function renderHrSideNav(){
+  const nav = document.getElementById('hrSideNav');
+  if(!nav) return;
+  nav.innerHTML = Object.keys(HR_ROUTES).map(k =>
+    `<button class="side-link${k === hrRoute ? ' active' : ''}" onclick="hrNavigate('${k}')">
+       <span class="ic">${HR_ROUTES[k].icon}</span><span>${HR_ROUTES[k].label}</span>
+     </button>`).join('');
 }
-function switchHrSub(sub){
-  ['dash','master','reports','generator','docs'].forEach(s => {
-    document.getElementById('hrSub' + s.charAt(0).toUpperCase() + s.slice(1)).classList.toggle('hidden', s !== sub);
-    document.getElementById('hrSubBtn' + s.charAt(0).toUpperCase() + s.slice(1)).classList.toggle('active', s === sub);
+
+function toggleHrNav(force){
+  const open = typeof force === 'boolean' ? force : !document.body.classList.contains('hr-nav-open');
+  document.body.classList.toggle('hr-nav-open', open);
+  // Also flagged on the element itself: the body class alone drives the scrim
+  // fine, but a class on the drawer means its own position never depends on an
+  // ancestor's class being re-evaluated.
+  const sb = document.getElementById('hrSidebar');
+  if(sb) sb.classList.toggle('open', open);
+}
+
+function hrNavigate(route){
+  const cfg = HR_ROUTES[route];
+  if(!cfg) return;
+  hrRoute = route;
+  HR_PANELS.forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.classList.add('hidden');
   });
-  if(sub === 'dash') refreshDashboard();
-  if(sub === 'master') renderEmployeeList();
-  if(sub === 'reports') renderReportsTab();
-  if(sub === 'generator') renderGeneratorTab();
-  if(sub === 'docs') renderOfficeDocumentsTab();
+  cfg.show.forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.classList.remove('hidden');
+  });
+  const title = document.getElementById('hrPageTitle');
+  if(title) title.textContent = cfg.label;
+  renderHrSideNav();
+  toggleHrNav(false);
+  const content = document.getElementById('hrContent');
+  if(content) content.scrollTop = 0;
+  window.scrollTo(0, 0);
+  if(cfg.run) cfg.run();
+}
+
+// Kept so existing callers elsewhere keep working — they now just pick a route.
+function switchHrTab(tab){ hrNavigate(tab === 'tracking' ? 'tracking' : 'dashboard'); }
+function switchHrSub(sub){
+  hrNavigate({ dash:'dashboard', master:'employees', reports:'reports', generator:'generator', docs:'docs' }[sub] || 'dashboard');
 }
 function switchDashSub(sub){
-  ['attendance','salary','reminders','expiry','activity'].forEach(s => {
-    document.getElementById('dashSub' + s.charAt(0).toUpperCase() + s.slice(1)).classList.toggle('hidden', s !== sub);
-    document.getElementById('dashSubBtn' + s.charAt(0).toUpperCase() + s.slice(1)).classList.toggle('active', s === sub);
+  hrNavigate({ attendance:'attendance', salary:'salary', reminders:'reminders', expiry:'expiry', activity:'activity' }[sub] || 'attendance');
+}
+
+// ===== Dashboard overview =====
+// Donuts are hand-drawn SVG: the app has no chart library and no build step, and
+// a stroke-dasharray ring needs neither.
+function donutSvg(segments, size, centreTop, centreSub){
+  const total = segments.reduce((t, s) => t + s.value, 0);
+  const stroke = Math.round(size * 0.17);
+  const r = (size - stroke) / 2 - 1;
+  const c = size / 2;
+  const circ = 2 * Math.PI * r;
+  let offset = 0;
+  const ring = total
+    ? segments.filter(s => s.value > 0).map(s => {
+        const len = (s.value / total) * circ;
+        const el = `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${stroke}"
+          stroke-dasharray="${len} ${circ - len}" stroke-dashoffset="${-offset}"
+          transform="rotate(-90 ${c} ${c})"></circle>`;
+        offset += len;
+        return el;
+      }).join('')
+    : `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="#E3E1D8" stroke-width="${stroke}"></circle>`;
+  const centre = centreTop
+    ? `<text x="${c}" y="${c - 2}" text-anchor="middle" font-size="${Math.round(size*0.19)}" font-weight="700" fill="#16213E">${centreTop}</text>
+       <text x="${c}" y="${c + Math.round(size*0.14)}" text-anchor="middle" font-size="${Math.round(size*0.085)}" fill="#6B6B63">${centreSub || ''}</text>`
+    : '';
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${ring}${centre}</svg>`;
+}
+
+// Next occurrence of a dd from a stored yyyy-mm-dd, in days from today.
+function daysUntilAnniversary_(iso){
+  if(!iso) return null;
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(!m) return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  let next = new Date(today.getFullYear(), Number(m[2]) - 1, Number(m[3]));
+  if(next < today) next = new Date(today.getFullYear() + 1, Number(m[2]) - 1, Number(m[3]));
+  return Math.round((next - today) / 86400000);
+}
+function daysUntilDate_(iso){
+  if(!iso) return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const d = new Date(iso);
+  if(isNaN(d)) return null;
+  d.setHours(0,0,0,0);
+  return Math.round((d - today) / 86400000);
+}
+
+async function renderHrDashboardHome(){
+  const box = document.getElementById('hrPageDashboard');
+  if(!box) return;
+  box.innerHTML = '<div class="empty">Loading dashboard…</div>';
+
+  const employees = await getEmployees();
+  const onRoll = employees.filter(e => e.employmentStatus !== 'left');
+
+  // --- live engineer status, same rules the Tracking page uses ---
+  const users = await getUsers();
+  let moving = 0, stopped = 0, unresponsive = 0;
+  for(const u of users){
+    const act = await getActive(u.username);
+    if(!act) continue;
+    const st = computeStatus(act);
+    if(st.level === 'warn'){
+      if(/respond/i.test(st.label)) unresponsive++; else stopped++;
+    } else moving++;
+  }
+  const checkedIn = moving + stopped + unresponsive;
+
+  // --- attendance for the current month, across everyone on roll ---
+  const now = new Date();
+  const y = now.getFullYear(), mo = now.getMonth() + 1;
+  const mDays = new Date(y, mo, 0).getDate();
+  const dList = [];
+  for(let d=1; d<=mDays; d++) dList.push(`${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+  const holidayMap = await getHolidayMap_local();
+  let aPresent = 0, aAbsent = 0, aLeave = 0;
+  for(const e of onRoll){
+    const c = consultantDayCounts(await getAttendance(e.id), dList, holidayMap);
+    aPresent += c.present; aAbsent += c.absent; aLeave += c.el + c.sl;
+  }
+  const aTotal = aPresent + aAbsent + aLeave;
+  const pct = n => aTotal ? Math.round((n / aTotal) * 100) : 0;
+
+  // --- documents expiring within 30 days ---
+  const expiring = [];
+  onRoll.forEach(e => {
+    [['Driving License', e.licenseExpiry], ['Insurance', e.insuranceExpiry]].forEach(([kind, when]) => {
+      const d = daysUntilDate_(when);
+      if(d !== null && d >= 0 && d <= 30) expiring.push({ kind, who: e.name, when, days: d });
+    });
   });
-  if(sub === 'attendance') renderAttendanceSheet();
-  if(sub === 'salary') renderSalarySheet();
-  if(sub === 'reminders') renderIncrementReminders();
-  if(sub === 'expiry') renderDocExpiryList();
-  if(sub === 'activity') renderActivityLogList();
+  expiring.sort((a, b) => a.days - b.days);
+
+  // --- birthdays in the next 30 days ---
+  const birthdays = onRoll.map(e => ({ who: e.name, dob: e.dob, days: daysUntilAnniversary_(e.dob) }))
+    .filter(b => b.days !== null && b.days <= 30)
+    .sort((a, b) => a.days - b.days);
+
+  const log = (await getActivityLog()).slice(0, 6);
+
+  const kpi = (icon, cap, n, sub, alert) => `
+    <div class="kpi${alert ? ' alert' : ''}">
+      <div class="top"><div class="ic">${icon}</div><div class="cap">${cap}</div></div>
+      <div class="n">${n}</div><div class="sub">${sub}</div>
+    </div>`;
+
+  const legend = (color, label, n) =>
+    `<div class="legend-row"><span class="lbl"><span class="swatch" style="background:${color}"></span>${label}</span><span class="n">${n}</span></div>`;
+
+  const feed = log.length ? log.map(l => {
+    const d = new Date(l.ts);
+    return `<div class="feed-row">
+      <div class="ic">📝</div>
+      <div class="body"><div class="t">${l.text}</div>
+      <div class="when">${isNaN(d) ? '' : d.toLocaleString('en-IN', {hour:'2-digit', minute:'2-digit', day:'2-digit', month:'short', year:'numeric'})}</div></div>
+    </div>`;
+  }).join('') : '<div class="empty">No activity recorded yet.</div>';
+
+  const bdayList = birthdays.length ? birthdays.slice(0, 5).map(b => `
+    <div class="feed-row">
+      <div class="ic">🎂</div>
+      <div class="body"><div class="t"><strong>${b.who}</strong></div><div class="when">${consultantDate(b.dob)}</div></div>
+      <span class="feed-tag" style="background:#EEF0FB;color:#3B4A7A;">${b.days === 0 ? 'today' : b.days + (b.days === 1 ? ' day' : ' days')}</span>
+    </div>`).join('') : '<div class="empty">No birthdays in the next 30 days.</div>';
+
+  const expList = expiring.length ? expiring.slice(0, 6).map(x => `
+    <div class="feed-row">
+      <div class="ic">📄</div>
+      <div class="body"><div class="t"><strong>${x.kind}</strong> — ${x.who}</div>
+      <div class="when">Expiring on <span style="color:var(--red);font-weight:600;">${consultantDate(x.when)}</span></div></div>
+      <span class="feed-tag" style="background:#FBE3E0;color:#B23A32;">${x.days}d</span>
+    </div>`).join('') : '<div class="empty">Nothing expiring in the next 30 days.</div>';
+
+  const quick = [
+    ['attendance','🗓️','Attendance'], ['salary','₹','Salary Sheet'], ['reminders','📈','Increments'],
+    ['expiry','📄','Doc Expiry'], ['reports','📊','Reports'], ['generator','✉️','Generator'], ['team','👤','Team']
+  ].map(([r, i, l]) => `<div class="qa" onclick="hrNavigate('${r}')"><span class="ic">${i}</span>${l}</div>`).join('');
+
+  box.innerHTML = `
+    <div class="kpi-row">
+      ${kpi('👷','Active Engineers', moving, 'Currently on duty')}
+      ${kpi('⏹️','Stopped / Unresponsive', stopped + unresponsive, 'Not responding', true)}
+      ${kpi('👥','Total Engineers', onRoll.length, 'All registered')}
+      ${kpi('📄','Documents Expiring', expiring.length, 'Within 30 days')}
+    </div>
+
+    <div class="dash-2col">
+      <div class="dash-card">
+        <div class="card-head"><h3>Engineers Status</h3></div>
+        <div class="donut-wrap">
+          ${donutSvg([
+            {value: moving, color:'#2E7D4F'},
+            {value: stopped, color:'#B23A32'},
+            {value: unresponsive, color:'#F0A020'}
+          ], 168)}
+          <div class="legend">
+            ${legend('#2E7D4F','Moving', moving)}
+            ${legend('#B23A32','Stopped', stopped)}
+            ${legend('#F0A020','Unresponsive', unresponsive)}
+          </div>
+        </div>
+        <button class="btn ghost full" style="margin-top:14px;" onclick="hrNavigate('tracking')">View all engineers</button>
+      </div>
+
+      <div class="dash-card">
+        <div class="card-head"><h3>Attendance Overview <span style="font-weight:400;color:var(--muted);font-size:13px;">(${MONTH_NAMES[mo-1]} ${y})</span></h3></div>
+        <div class="donut-wrap">
+          ${donutSvg([
+            {value: aPresent, color:'#2E7D4F'},
+            {value: aAbsent, color:'#B23A32'},
+            {value: aLeave, color:'#F0A020'}
+          ], 168, pct(aPresent) + '%', 'Present')}
+          <div class="legend">
+            ${legend('#2E7D4F','Present', pct(aPresent) + '% (' + consultantDays(aPresent) + ')')}
+            ${legend('#B23A32','Absent', pct(aAbsent) + '% (' + consultantDays(aAbsent) + ')')}
+            ${legend('#F0A020','Leave', pct(aLeave) + '% (' + consultantDays(aLeave) + ')')}
+          </div>
+        </div>
+        <p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Counted in days across ${onRoll.length} employees.</p>
+        <button class="btn ghost full" style="margin-top:10px;" onclick="hrNavigate('attendance')">View attendance sheet</button>
+      </div>
+    </div>
+
+    <div class="dash-2col">
+      <div class="dash-card">
+        <div class="card-head"><h3>Recent Activity</h3><button class="linkbtn" style="padding:0" onclick="hrNavigate('activity')">View all</button></div>
+        ${feed}
+      </div>
+      <div class="dash-card">
+        <div class="card-head"><h3>Upcoming Birthdays</h3><button class="linkbtn" style="padding:0" onclick="hrNavigate('reports')">View all</button></div>
+        ${bdayList}
+      </div>
+    </div>
+
+    <div class="dash-card">
+      <div class="card-head"><h3>Upcoming Document Expiry</h3><button class="linkbtn" style="padding:0" onclick="hrNavigate('expiry')">View all</button></div>
+      ${expList}
+    </div>
+
+    <div class="dash-card">
+      <div class="card-head"><h3>Quick Actions</h3></div>
+      <div class="qa-row">${quick}</div>
+    </div>
+
+    <p style="text-align:center;font-size:11.5px;color:var(--muted);margin:18px 0 0;">
+      ${checkedIn} of ${users.length} tracking logins checked in right now.
+    </p>`;
 }
 
 // ---- dashboard ----
