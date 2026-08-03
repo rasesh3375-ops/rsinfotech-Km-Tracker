@@ -869,6 +869,18 @@
         </section>
 
         <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">Consultant Report</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The monthly attendance sheet in the exact column format the consultant asks for — one row per employee, built automatically from Employee Master and the month's attendance. Pick any month; export the CSV and send it on.</p>
+          <div class="row-inline">
+            <div><label class="field">Month</label><select class="field-input" id="consultantReportMonthSel"></select></div>
+            <div><label class="field">Year</label><select class="field-input" id="consultantReportYearSel"></select></div>
+          </div>
+          <button class="btn full" onclick="renderConsultantReport()">Generate consultant report</button>
+          <div style="height:14px"></div>
+          <div id="consultantReportBox"></div>
+        </section>
+
+        <section class="block">
           <h2 style="margin:0 0 4px;font-size:17px;">Overtime Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Applies to Field Engineers per the overtime policy. Log hours HR has been informed of (by the following day, per policy) — this is manual since overtime is reported over WhatsApp, not through this app.</p>
           <div class="row-inline">
@@ -3150,6 +3162,149 @@ async function renderApprenticeSalaryReport(){
   saveFileToDrive(['HR Management','Reports','Apprentice Salary Report'], `Apprentice Salary Report - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
 }
 
+// ---- Consultant Report ----
+// The monthly sheet the consultant works from. Column order and headings are
+// fixed to match the workbook they send back, so the CSV can be pasted straight
+// into their template — don't reorder these without checking with them first.
+const CONSULTANT_REPORT_COLS = [
+  'SR NO','EC','EmpName','Designation','BirthDate','JoiningDate','PFNo','Uan No','ESINo',
+  'GROSS SALARY(Including PT)','W.DYS','W.OFF','PRESENT DYS','PH','EL','SL',
+  'ABSENT DAYS','PAYABLE DYS','OTHER ALL IF ANY','I.T.','LOAN/ ADVANCE'
+];
+
+// The consultant's sheet writes dates as dd.mm.yyyy, not the ISO form stored here.
+function consultantDate(v){
+  if(!v) return '';
+  const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}.${m[2]}.${m[1]}` : String(v);
+}
+// Trim trailing zeros so half-days read as 25.5 and whole days as 26, not 26.0
+function consultantDays(n){
+  return String(Math.round((Number(n) || 0) * 100) / 100);
+}
+
+// The consultant's sheet splits days differently from computeAttendanceSummary,
+// which folds EL/SL into `present` because they are paid. Here PRESENT means days
+// actually worked, with leave in its own column — so a full EL day is 0 present +
+// 1 EL, while a half EL day is 0.5 present + 0.5 EL. That distinction is why this
+// counts the raw codes rather than deriving from the summary.
+function consultantDayCounts(att, dateList, holidayMap){
+  let present = 0, el = 0, sl = 0, absent = 0;
+  dateList.forEach(dateStr => {
+    const dow = new Date(dateStr).getDay();
+    const entry = att[dateStr];
+    const code = entry ? entry.code : (holidayMap[dateStr] ? 'H' : (dow === 0 ? 'H' : null));
+    switch(code){
+      case 'P': case 'SHORT': present += 1; break;
+      case 'EL': el += 1; break;
+      case 'SL': sl += 1; break;
+      case 'HEL': present += 0.5; el += 0.5; break;
+      case 'HSL': present += 0.5; sl += 0.5; break;
+      case 'HLP': present += 0.5; absent += 0.5; break;
+      case 'A': case 'LP': absent += 1; break;
+      case 'H': break; // week-off or declared holiday, counted separately
+      default: if(dateStr <= todayStr()) absent += 1; // unmarked past day, same rule as the Attendance Sheet
+    }
+  });
+  return { present, el, sl, absent };
+}
+
+async function renderConsultantReport(){
+  const box = document.getElementById('consultantReportBox');
+  populateMonthYearSelects('consultantReportMonthSel', 'consultantReportYearSel');
+  const monthVal = getMonthYearValue('consultantReportMonthSel', 'consultantReportYearSel');
+  const [year, month] = monthVal.split('-').map(Number);
+  const monthDays = new Date(year, month, 0).getDate();
+  const dateList = [];
+  for(let d=1; d<=monthDays; d++) dateList.push(year + '-' + String(month).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
+
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
+  if(!employees.length){
+    box.innerHTML = '<div class="empty">Add employees in Employee Master first.</div>';
+    return;
+  }
+  const holidayMap = await getHolidayMap_local();
+
+  // W.OFF is the Sundays in the month; PH is declared holidays that don't already
+  // fall on a Sunday (otherwise the same day would be counted twice).
+  let weekOff = 0, publicHolidays = 0;
+  dateList.forEach(dateStr => {
+    const isSunday = new Date(dateStr).getDay() === 0;
+    if(isSunday) weekOff++;
+    else if(holidayMap[dateStr]) publicHolidays++;
+  });
+  const workingDays = monthDays - weekOff;
+
+  const rows = [];
+  let sr = 0;
+  for(const emp of employees){
+    const att = await getAttendance(emp.id);
+    const c = consultantDayCounts(att, dateList, holidayMap);
+    const presentDays = c.present;
+    const absentDays = c.absent;
+    // Everything in the month is paid except unpaid absence (A and LP) — EL, SL,
+    // week-offs and public holidays are all paid. Deriving it by subtraction keeps
+    // this inside 0..monthDays even when someone checks in on a Sunday, which
+    // would otherwise be counted twice (once in `present`, once in weekOff).
+    const payableDays = Math.max(0, monthDays - absentDays);
+
+    const loanEmi = (emp.loanStatus === 'active' ? (Number(emp.emiPerMonth) || 0) : 0);
+    const advance = (Number(emp.advance) || 0) + (Number(emp.advanceTemp) || 0);
+    const deduction = loanEmi + advance;
+    let loanLabel = '';
+    if(loanEmi && advance) loanLabel = 'Loan / Advance';
+    else if(loanEmi) loanLabel = 'Loan';
+    else if(advance) loanLabel = 'Advance';
+
+    sr++;
+    rows.push([
+      sr,
+      emp.id || '',
+      emp.name || '',
+      emp.designation || '',
+      consultantDate(emp.dob),
+      consultantDate(emp.doj),
+      emp.pfNo || '',
+      emp.uan || 'NA',
+      emp.esiNumber || '',
+      Number(emp.ratePay) || 0,
+      consultantDays(workingDays),
+      consultantDays(weekOff),
+      consultantDays(presentDays),
+      consultantDays(publicHolidays),
+      consultantDays(c.el),
+      consultantDays(c.sl),
+      consultantDays(absentDays),
+      consultantDays(payableDays),
+      Number(emp.otherAllowances) ? fmtMoney(Number(emp.otherAllowances)) : 'NA',
+      deduction || '',
+      loanLabel
+    ]);
+  }
+
+  const head = CONSULTANT_REPORT_COLS.map(c => `<th>${c}</th>`).join('');
+  const body = rows.map(r => '<tr>' + r.map((cell, i) =>
+    `<td${i === 9 || i === 19 ? ' class="num"' : ''}>${cell === '' ? '' : cell}</td>`
+  ).join('') + '</tr>').join('');
+
+  box.innerHTML = `<div class="print-isolate" id="consultantReportPrintArea">
+      ${reportLogoHeader('Consultant Report — ' + monthVal)}
+      <div style="overflow-x:auto;">
+        <table style="min-width:1500px;font-size:11.5px;white-space:nowrap;">
+          <tr>${head}</tr>${body}
+        </table>
+      </div>
+      <p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">${rows.length} employees · ${monthDays} days · ${workingDays} working, ${weekOff} week-off, ${publicHolidays} public holiday${publicHolidays === 1 ? '' : 's'}.</p>
+    </div>
+    <div class="row-inline" style="margin-top:10px;margin-bottom:0;">
+      <button class="btn ghost" style="flex:1;" onclick="openFullscreenView('Consultant Report','consultantReportBox')">⛶ Full screen</button>
+      <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
+    </div>`;
+
+  saveFileToDrive(['HR Management','Reports','Consultant Report'], `Consultant Report - ${monthVal}.csv`,
+    toCsv(CONSULTANT_REPORT_COLS, rows), 'text/csv');
+}
+
 // ---- geofence zones ----
 async function renderGeofenceZones(){
   const zones = await getGeofences();
@@ -4263,6 +4418,8 @@ async function renderReportsTab(){
   await populateAttendanceUserSelect();
   await renderHolidayList();
   await populateOvertimeEmployeeSelect();
+  // Show the current month straight away rather than an empty dropdown
+  populateMonthYearSelects('consultantReportMonthSel', 'consultantReportYearSel');
 }
 
 function reportHasData(key, e){
