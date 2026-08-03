@@ -2231,19 +2231,30 @@ async function submitHrPasswordReset(){
 
 async function enterHrMain(){
   document.getElementById('hrMain').classList.remove('hidden');
-  const rate = await getRate();
-  if(rate) document.getElementById('rateInput').value = rate;
-  await renderUserList();
-  await renderGeofenceZones();
-  await loadHR();
-  await loadCompanyReport();
-  if(hrInterval) clearInterval(hrInterval);
-  hrInterval = setInterval(() => { loadHR(); loadCompanyReport(); }, 12000);
+  // Put the shell up and land on the Dashboard FIRST. These warm-up calls used
+  // to run before navigating, so one failed backend request threw, enterHrMain
+  // aborted, and the user was left on the Tracking page — the only panel that
+  // starts without .hidden — under a "Dashboard" title.
   document.body.classList.add('hr-shell');
   const dateEl = document.getElementById('hrTopDate');
   if(dateEl) dateEl.textContent = 'Today, ' + new Date().toLocaleDateString('en-IN', { day:'numeric', month:'long', year:'numeric' });
   renderHrSideNav();
   hrNavigate('dashboard');
+
+  // Warm-up, each guarded on its own: a flaky backend may degrade a panel but
+  // must never take the whole app down with it.
+  const safely = async (fn) => { try{ await fn(); }catch(e){ console.warn('HR warm-up step failed', e); } };
+  await safely(async () => {
+    const rate = await getRate();
+    const el = document.getElementById('rateInput');
+    if(rate && el) el.value = rate;
+  });
+  await safely(renderUserList);
+  await safely(renderGeofenceZones);
+  await safely(loadHR);
+  await safely(loadCompanyReport);
+  if(hrInterval) clearInterval(hrInterval);
+  hrInterval = setInterval(() => { safely(loadHR); safely(loadCompanyReport); }, 12000);
 }
 
 async function logoutHr(){
@@ -4018,7 +4029,15 @@ function hrNavigate(route){
   const content = document.getElementById('hrContent');
   if(content) content.scrollTop = 0;
   window.scrollTo(0, 0);
-  if(cfg.run) cfg.run();
+  // Navigation has already happened by this point. The loader is fired without
+  // awaiting and with its own catch, so a backend failure degrades one panel
+  // rather than aborting the switch and stranding the user on another page.
+  if(cfg.run){
+    try{
+      const p = cfg.run();
+      if(p && typeof p.catch === 'function') p.catch(e => console.warn('Panel failed to load', route, e));
+    }catch(e){ console.warn('Panel failed to load', route, e); }
+  }
 }
 
 // Kept so existing callers elsewhere keep working — they now just pick a route.
@@ -4080,7 +4099,19 @@ async function renderHrDashboardHome(){
   const box = document.getElementById('hrPageDashboard');
   if(!box) return;
   box.innerHTML = '<div class="empty">Loading dashboard…</div>';
+  try{
+    await buildHrDashboardHome(box);
+  }catch(e){
+    // Never leave "Loading dashboard…" on screen forever when the backend blips.
+    box.innerHTML = `<div class="dash-card">
+      <h3>Dashboard unavailable</h3>
+      <p class="card-sub">Couldn't load the figures — the backend didn't respond. Everything else in the sidebar still works.</p>
+      <button class="btn ghost full" onclick="renderHrDashboardHome()">Try again</button>
+    </div>`;
+  }
+}
 
+async function buildHrDashboardHome(box){
   const employees = await getEmployees();
   const onRoll = employees.filter(e => e.employmentStatus !== 'left');
 
