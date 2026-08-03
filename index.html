@@ -4125,16 +4125,36 @@ async function renderHrDashboardHome(){
   }
 }
 
+// Resolve to `fallback` if the promise rejects OR takes too long. The dashboard
+// must always draw: it is the landing screen, and a single unreachable read used
+// to leave it on "Loading dashboard…" indefinitely on a phone.
+function softly(promise, ms, fallback){
+  let timer;
+  return Promise.race([
+    Promise.resolve(promise).catch(() => { softly.degraded = true; return fallback; }),
+    new Promise(res => { timer = setTimeout(() => { softly.degraded = true; res(fallback); }, ms); })
+  ]).then(v => { clearTimeout(timer); return v; });
+}
+
 async function buildHrDashboardHome(box){
-  const employees = await getEmployees();
+  softly.degraded = false;
+  // ONE shared deadline for the whole gather, not one per read. Giving each read
+  // its own budget meant six of them queued up to six times the wait, which is
+  // why the spinner still outlasted every timeout.
+  const deadline = Date.now() + 10000;
+  const left = () => Math.max(400, deadline - Date.now());
+
+  // The four independent reads go together rather than one after another.
+  const [employees, users, holidays, rawLog] = await Promise.all([
+    softly(getEmployees(), left(), []),
+    softly(getUsers(), left(), []),
+    softly(getHolidays(), left(), []),
+    softly(getActivityLog(), left(), [])
+  ]);
   const onRoll = employees.filter(e => e.employmentStatus !== 'left');
 
   // --- live engineer status, same rules the Tracking page uses ---
-  const users = await getUsers();
-  // In parallel, and each failure isolated: these were sequential awaits, so on a
-  // slow connection the dashboard waited for one round trip per engineer before
-  // it could draw anything.
-  const actives = await Promise.all(users.map(u => getActive(u.username).catch(() => null)));
+  const actives = await softly(Promise.all(users.map(u => getActive(u.username).catch(() => null))), left(), []);
   let moving = 0, stopped = 0, unresponsive = 0;
   actives.forEach(act => {
     if(!act) return;
@@ -4151,9 +4171,10 @@ async function buildHrDashboardHome(box){
   const mDays = new Date(y, mo, 0).getDate();
   const dList = [];
   for(let d=1; d<=mDays; d++) dList.push(`${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
-  const holidayMap = await getHolidayMap_local();
+  const holidayMap = {};
+  holidays.forEach(h => { holidayMap[h.date] = h.name; });
   let aPresent = 0, aAbsent = 0, aLeave = 0;
-  const atts = await Promise.all(onRoll.map(e => getAttendance(e.id).catch(() => ({}))));
+  const atts = await softly(Promise.all(onRoll.map(e => getAttendance(e.id).catch(() => ({})))), left(), []);
   atts.forEach(att => {
     const c = consultantDayCounts(att, dList, holidayMap);
     aPresent += c.present; aAbsent += c.absent; aLeave += c.el + c.sl;
@@ -4176,7 +4197,7 @@ async function buildHrDashboardHome(box){
     .filter(b => b.days !== null && b.days <= 30)
     .sort((a, b) => a.days - b.days);
 
-  const log = (await getActivityLog()).slice(0, 6);
+  const log = rawLog.slice(0, 6);
 
   const kpi = (icon, cap, n, sub, alert) => `
     <div class="kpi${alert ? ' alert' : ''}">
@@ -4216,7 +4237,16 @@ async function buildHrDashboardHome(box){
     ['expiry','📄','Doc Expiry'], ['reports','📊','Reports'], ['generator','✉️','Generator'], ['team','👤','Team']
   ].map(([r, i, l]) => `<div class="qa" onclick="hrNavigate('${r}')"><span class="ic">${i}</span>${l}</div>`).join('');
 
-  box.innerHTML = `
+  // Drawn with whatever arrived. Say so plainly rather than presenting partial
+  // figures as if they were complete.
+  const degradedBanner = softly.degraded ? `
+    <div class="dash-card" style="background:#FFF6F5;border-color:#F1D7D4;">
+      <div class="card-head"><h3 style="color:var(--red);">Some figures couldn't be loaded</h3>
+        <button class="linkbtn" style="padding:0" onclick="renderHrDashboardHome()">Retry</button></div>
+      <p class="card-sub" style="margin:0;">The backend didn't answer in time, so the numbers below may be incomplete. Everything in the sidebar still works.</p>
+    </div>` : '';
+
+  box.innerHTML = degradedBanner + `
     <div class="kpi-row">
       ${kpi('👷','Active Engineers', moving, 'Currently on duty')}
       ${kpi('⏹️','Stopped / Unresponsive', stopped + unresponsive, 'Not responding', true)}
