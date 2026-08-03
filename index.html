@@ -1376,7 +1376,7 @@ function onSessionExpired(){
 // which Apps Script Web Apps don't handle. This is a standard, well-known workaround.
 async function remoteGet(key){
   try{
-    const res = await fetch(API_URL + '?action=get&key=' + encodeURIComponent(key) + '&token=' + encodeURIComponent(sessionToken || ''));
+    const res = await apiFetch(API_URL + '?action=get&key=' + encodeURIComponent(key) + '&token=' + encodeURIComponent(sessionToken || ''));
     const text = await res.text();
     let data;
     try{ data = JSON.parse(text); }
@@ -1390,7 +1390,7 @@ async function remoteGet(key){
 }
 async function remoteSet(key, value){
   try{
-    const res = await fetch(API_URL, {
+    const res = await apiFetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'set', key, value, token: sessionToken })
@@ -1409,7 +1409,7 @@ async function remoteSet(key, value){
 }
 async function remoteDelete(key){
   try{
-    await fetch(API_URL, {
+    await apiFetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'delete', key, token: sessionToken })
@@ -1422,7 +1422,7 @@ async function remoteDelete(key){
 // Non-blocking: if it fails, the report/letter itself still works normally.
 async function saveFileToDrive(folderPath, fileName, content, mimeType){
   try{
-    await fetch(API_URL, {
+    await apiFetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'saveFile', folderPath, fileName, content, mimeType: mimeType || 'text/plain', token: sessionToken })
@@ -1442,7 +1442,7 @@ async function uploadDocumentToDrive(folderPath, fileName, file){
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
-    const res = await fetch(API_URL, {
+    const res = await apiFetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'uploadDocument', folderPath, fileName, base64Data, mimeType: file.type || 'application/octet-stream', token: sessionToken })
@@ -1722,7 +1722,7 @@ async function hashPassword(password, salt){
 // ---- server-side auth calls (backend now verifies logins itself) ----
 async function serverLogin(role, username, password){
   try{
-    const res = await fetch(API_URL, {
+    const res = await apiFetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'login', role, username, password })
@@ -1732,7 +1732,7 @@ async function serverLogin(role, username, password){
 }
 async function serverLogout(){
   try{
-    await fetch(API_URL, {
+    await apiFetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'logout', token: sessionToken })
@@ -1742,7 +1742,7 @@ async function serverLogout(){
 }
 async function serverSetupHr(value){
   try{
-    const res = await fetch(API_URL, {
+    const res = await apiFetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'setupHr', value })
@@ -1750,13 +1750,39 @@ async function serverSetupHr(value){
     return await res.json();
   }catch(e){ return { error: 'Network error. Check your connection and try again.' }; }
 }
+// The Apps Script web app intermittently serves a Google Drive HTML error page
+// ("Sorry, unable to open the file at present") instead of running — measured at
+// roughly half of requests during one bad spell. A single failure there used to
+// surface as a broken screen, so every call to the backend goes through this:
+// it retries with backoff and treats a non-JSON body as a failure, since that
+// error page arrives with a perfectly normal HTTP 200.
+async function apiFetch(url, options, tries){
+  const attempts = tries || 4;
+  let lastErr = null;
+  for(let i = 0; i < attempts; i++){
+    try{
+      const res = await fetch(url, options);
+      const text = await res.text();
+      if(/^\s*[\[{]/.test(text)){
+        const data = JSON.parse(text);
+        return { ok: true, json: async () => data };
+      }
+      lastErr = new Error('Backend returned a non-JSON response');
+    }catch(e){
+      lastErr = e;
+    }
+    if(i < attempts - 1) await new Promise(r => setTimeout(r, 500 * Math.pow(3, i)));
+  }
+  throw lastErr || new Error('Request failed');
+}
+
 async function checkHrAccountExists(){
   // Returns {exists} only when the server actually answered. A failure must NOT
   // come back as exists:false — the caller would read that as "no HR account"
   // and offer to create one, hiding the login form over a momentary network
   // blip or a slow Apps Script cold start.
   try{
-    const res = await fetch(API_URL + '?action=hrAccountExists');
+    const res = await apiFetch(API_URL + '?action=hrAccountExists');
     const data = await res.json();
     if(data && typeof data.exists === 'boolean') return data;
     return { error: 'Unexpected response from the server.' };
@@ -1764,7 +1790,7 @@ async function checkHrAccountExists(){
 }
 async function serverRecoverHr(){
   try{
-    const res = await fetch(API_URL, {
+    const res = await apiFetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'recoverHr' })
@@ -1774,7 +1800,7 @@ async function serverRecoverHr(){
 }
 async function serverVerifyHrRecoveryAnswer(answer){
   try{
-    const res = await fetch(API_URL, {
+    const res = await apiFetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'verifyHrRecoveryAnswer', answer })
@@ -1784,7 +1810,7 @@ async function serverVerifyHrRecoveryAnswer(answer){
 }
 async function serverResetHrPasswordWithToken(recoveryToken, newSalt, newHash){
   try{
-    const res = await fetch(API_URL, {
+    const res = await apiFetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'resetHrPasswordWithToken', recoveryToken, newSalt, newHash })
