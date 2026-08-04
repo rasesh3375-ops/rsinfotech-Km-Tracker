@@ -224,24 +224,67 @@
   #hrContent{padding:20px;}
   #hrNavScrim{display:none;}
 
+  /* Each KPI carries a tone: a tinted wash, a matching icon chip and numeral,
+     and a top accent rule. One hue per card, so colour signals which metric you
+     are reading rather than decorating uniformly. */
   .kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px;}
-  .kpi{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:16px;}
+  .kpi{position:relative;border:1px solid var(--line);border-radius:14px;padding:17px 16px 16px;
+    background:var(--paper);overflow:hidden;transition:transform .16s ease, box-shadow .16s ease;}
+  .kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;
+    background:var(--tone,#3B5BA9);}
+  .kpi:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(22,33,62,.10);}
   .kpi .top{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
   .kpi .ic{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;
-    font-size:15px;flex-shrink:0;background:#EFF3FA;}
+    font-size:15px;flex-shrink:0;background:var(--tone-bg,#EFF3FA);}
   .kpi .cap{font-size:12.5px;font-weight:600;color:var(--muted);line-height:1.25;}
-  .kpi .n{font-size:28px;font-weight:700;color:var(--navy);line-height:1;}
+  .kpi .n{font-size:28px;font-weight:700;color:var(--tone,var(--navy));line-height:1;
+    font-variant-numeric:tabular-nums;}
   .kpi .sub{font-size:11.5px;color:var(--muted);margin-top:6px;}
-  .kpi.alert{background:#FFF6F5;border-color:#F1D7D4;}
-  .kpi.alert .ic{background:#FBE3E0;}
-  .kpi.alert .cap,.kpi.alert .n{color:var(--red);}
+
+  .kpi[data-tone="green"]{--tone:#2E7D4F;--tone-bg:#E7F3EC;
+    background:linear-gradient(160deg,#F2F9F5 0%,var(--paper) 62%);border-color:#CFE5D8;}
+  .kpi[data-tone="red"]{--tone:#B23A32;--tone-bg:#FBE3E0;
+    background:linear-gradient(160deg,#FDF1EF 0%,var(--paper) 62%);border-color:#F1D7D4;}
+  .kpi[data-tone="indigo"]{--tone:#3B5BA9;--tone-bg:#E7ECFA;
+    background:linear-gradient(160deg,#F0F3FC 0%,var(--paper) 62%);border-color:#D5DEF3;}
+  .kpi[data-tone="amber"]{--tone:#B96E0A;--tone-bg:#FDEFD8;
+    background:linear-gradient(160deg,#FEF7EB 0%,var(--paper) 62%);border-color:#F0DFC0;}
 
   .dash-2col{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;}
   .dash-card{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px;}
   .dash-2col .dash-card{margin-bottom:0;}
-  .dash-card h3{margin:0;font-size:16px;color:var(--navy);}
+  .dash-card h3{margin:0;font-size:16px;color:var(--navy);display:flex;align-items:center;gap:9px;}
+  /* A short accent rule against each heading — ties the sections together
+     without adding another box. */
+  .dash-card h3::before{content:'';width:4px;height:16px;border-radius:3px;flex-shrink:0;
+    background:linear-gradient(180deg,var(--amber),var(--amber-dark));}
   .dash-card .card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;}
   .dash-card .card-sub{font-size:12.5px;color:var(--muted);margin:4px 0 14px;}
+
+  /* ---- dashboard live map ---- */
+  .dash-map-wrap{position:relative;border-radius:12px;overflow:hidden;border:1px solid var(--line);}
+  #dashLiveMap{width:100%;height:268px;background:#EAEAE2;}
+  .map-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    background:linear-gradient(160deg,#F4F6FB 0%,#EDEFE9 100%);padding:16px;text-align:center;}
+  .map-empty.hidden{display:none;}
+  .map-empty-inner{display:flex;flex-direction:column;align-items:center;gap:5px;max-width:250px;}
+  .map-empty-inner .ic{font-size:26px;}
+  .map-empty-inner strong{font-size:14px;color:var(--navy);}
+  .map-empty-inner span{font-size:12px;color:var(--muted);line-height:1.45;}
+  .map-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:12px;font-size:12.5px;color:var(--navy);}
+  .map-legend span{display:flex;align-items:center;gap:7px;font-weight:600;}
+  .live-dot-label{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;
+    color:var(--green);white-space:nowrap;}
+  .live-dot{width:8px;height:8px;border-radius:50%;background:var(--green);flex-shrink:0;
+    box-shadow:0 0 0 0 rgba(46,125,79,.55);animation:livePulse 2s infinite;}
+  @keyframes livePulse{
+    70%{box-shadow:0 0 0 7px rgba(46,125,79,0);}
+    100%{box-shadow:0 0 0 0 rgba(46,125,79,0);}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .live-dot{animation:none;}
+    .kpi{transition:none;}
+  }
 
   .legend-row{display:flex;align-items:center;justify-content:space-between;padding:11px 2px;
     border-bottom:1px solid var(--line);font-size:13.5px;}
@@ -263,10 +306,23 @@
   .feed-tag{font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;flex-shrink:0;}
 
   .qa-row{display:grid;grid-template-columns:repeat(7,1fr);gap:10px;}
-  .qa{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:14px 8px;
-    text-align:center;cursor:pointer;font-size:11.5px;font-weight:600;color:var(--navy);}
-  .qa:hover{border-color:var(--navy);}
-  .qa .ic{font-size:19px;display:block;margin-bottom:7px;}
+  .qa{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:13px 8px;
+    text-align:center;cursor:pointer;font-size:11.5px;font-weight:600;color:var(--navy);
+    transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease;}
+  .qa:hover{border-color:var(--tone,var(--navy));transform:translateY(-2px);
+    box-shadow:0 6px 16px rgba(22,33,62,.09);}
+  /* The chip carries the colour so the row reads as a set of destinations
+     rather than seven identical grey tiles. */
+  .qa .ic{font-size:17px;display:flex;align-items:center;justify-content:center;
+    width:36px;height:36px;margin:0 auto 8px;border-radius:11px;
+    background:var(--tone-bg,#F1F4FA);color:var(--tone,var(--navy));}
+  .qa:nth-child(7n+1){--tone:#3B5BA9;--tone-bg:#E7ECFA;}
+  .qa:nth-child(7n+2){--tone:#2E7D4F;--tone-bg:#E7F3EC;}
+  .qa:nth-child(7n+3){--tone:#B96E0A;--tone-bg:#FDEFD8;}
+  .qa:nth-child(7n+4){--tone:#B23A32;--tone-bg:#FBE3E0;}
+  .qa:nth-child(7n+5){--tone:#4A5FA5;--tone-bg:#EAEDF8;}
+  .qa:nth-child(7n+6){--tone:#1F6E6B;--tone-bg:#E2F1F0;}
+  .qa:nth-child(7n+7){--tone:#7A4B8F;--tone-bg:#F0E8F5;}
 
   @media (max-width: 1100px){
     .kpi-row{grid-template-columns:repeat(2,1fr);}
@@ -1772,7 +1828,18 @@ async function apiFetch(url, options, tries){
       const text = await res.text();
       if(/^\s*[\[{]/.test(text)){
         const data = JSON.parse(text);
-        return { ok: true, json: async () => data };
+        // Mirror the whole Response surface the call sites actually use, not
+        // just json(). remoteGet and remoteSet read res.text() and res.status;
+        // returning an object without them threw "res.text is not a function"
+        // on every shared read and write, which their outer catch swallowed
+        // into null/false — so the app behaved exactly like a dead backend
+        // even when the server answered correctly.
+        return {
+          ok: true,
+          status: res.status,
+          text: async () => text,
+          json: async () => data
+        };
       }
       lastErr = new Error('Backend returned a non-JSON response');
     }catch(e){
@@ -2859,19 +2926,40 @@ function playAlertBeep(){
   }catch(e){}
 }
 
-let liveMap = null;
-let liveMapMarkers = {};
-let liveMapLines = {};
+// One entry per map container, keyed by element id. The Dashboard and the
+// Tracking page each show a live map, so a single instance pinned to #liveMap
+// would have let whichever rendered second steal the other's markers.
+const liveMaps = {};
 
-function ensureLiveMap(){
-  if(liveMap || typeof L === 'undefined') return;
-  const el = document.getElementById('liveMap');
-  if(!el) return;
-  liveMap = L.map(el, { zoomControl: true }).setView([20.5937, 78.9629], 5);
+function ensureLiveMap(mapId){
+  const id = mapId || 'liveMap';
+  if(typeof L === 'undefined') return null;
+  const el = document.getElementById(id);
+  if(!el) return null;
+  const existing = liveMaps[id];
+  if(existing){
+    // A panel re-render replaces the container node, which leaves the old
+    // instance bound to an element no longer in the document. Rebuild rather
+    // than hand back a map that will never paint again.
+    if(existing.el === el) return existing.map;
+    try{ existing.map.remove(); }catch(e){}
+    delete liveMaps[id];
+  }
+  const map = L.map(el, { zoomControl: true }).setView([20.5937, 78.9629], 5);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: '&copy; OpenStreetMap contributors'
-  }).addTo(liveMap);
+  }).addTo(map);
+  liveMaps[id] = { map, el, markers: {}, lines: {} };
+  return map;
+}
+
+// Leaflet renders blank if the container was hidden when it was created, so
+// every panel that reveals a map has to poke it afterwards.
+function invalidateLiveMaps(){
+  Object.keys(liveMaps).forEach(id => {
+    try{ liveMaps[id].map.invalidateSize(); }catch(e){}
+  });
 }
 
 function bearingBetween(a, b){
@@ -2882,15 +2970,20 @@ function bearingBetween(a, b){
   return (toDeg(Math.atan2(y, x)) + 360) % 360;
 }
 
-function updateLiveMap(activeOnes){
-  const el = document.getElementById('liveMap');
-  const emptyOverlay = document.getElementById('liveMapEmpty');
+function updateLiveMap(activeOnes, opts){
+  const o = opts || {};
+  const mapId = o.mapId || 'liveMap';
+  const emptyId = o.emptyId || 'liveMapEmpty';
+  const el = document.getElementById(mapId);
+  const emptyOverlay = document.getElementById(emptyId);
   if(!el) return;
   const withCoords = activeOnes.filter(i => i.active && i.active.lastCoord);
   emptyOverlay?.classList.toggle('hidden', withCoords.length > 0);
   if(!withCoords.length) return;
-  ensureLiveMap();
+  const liveMap = ensureLiveMap(mapId);
   if(!liveMap) return;
+  const liveMapMarkers = liveMaps[mapId].markers;
+  const liveMapLines = liveMaps[mapId].lines;
 
   const seenNames = new Set();
   const bounds = [];
@@ -2947,7 +3040,15 @@ function updateLiveMap(activeOnes){
   } else if(bounds.length > 1){
     liveMap.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 });
   }
-  setTimeout(() => liveMap.invalidateSize(), 50);
+  // Only resize if this instance is still the live one for the container. A
+  // re-render between scheduling and firing (the dashboard refreshes on a timer)
+  // tears the old map down, and invalidateSize on a removed map throws on
+  // _leaflet_pos — which killed the rest of the render.
+  setTimeout(() => {
+    const st = liveMaps[mapId];
+    if(!st || st.map !== liveMap) return;
+    try{ liveMap.invalidateSize(); }catch(e){}
+  }, 50);
 }
 
 function renderLiveStatus(infos){
@@ -3979,7 +4080,7 @@ const HR_PANELS = ['hrPageDashboard','hrTabTracking','hrTabMgmt','hrSubDash','hr
 const HR_ROUTES = {
   dashboard:  { label:'Dashboard',           icon:'🏠', show:['hrPageDashboard'], run:() => renderHrDashboardHome() },
   tracking:   { label:'Tracking',            icon:'📍', show:['hrTabTracking','secManageTeam','secLiveTracking','secByCompany'],
-                run:() => { loadHR(); loadCompanyReport(); if(liveMap) setTimeout(() => liveMap.invalidateSize(), 60); } },
+                run:() => { loadHR(); loadCompanyReport(); setTimeout(invalidateLiveMaps, 60); } },
   employees:  { label:'Employee Master',     icon:'👥', show:['hrTabMgmt','hrSubMaster'], run:() => renderEmployeeList() },
   attendance: { label:'Attendance Sheet',    icon:'🗓️', show:['hrTabMgmt','hrSubDash','dashSubAttendance'], run:() => renderAttendanceSheet() },
   salary:     { label:'Salary Sheet',        icon:'₹',  show:['hrTabMgmt','hrSubDash','dashSubSalary'], run:() => renderSalarySheet() },
@@ -4144,11 +4245,13 @@ async function buildHrDashboardHome(box){
   const deadline = Date.now() + 10000;
   const left = () => Math.max(400, deadline - Date.now());
 
-  // The four independent reads go together rather than one after another.
-  const [employees, users, holidays, rawLog] = await Promise.all([
+  // The independent reads go together rather than one after another.
+  // getHolidays() and the per-employee getAttendance() fan-out were dropped
+  // along with the Attendance Overview donut: they fed nothing else on this
+  // screen, and the fan-out was one request per employee on the critical path.
+  const [employees, users, rawLog] = await Promise.all([
     softly(getEmployees(), left(), []),
     softly(getUsers(), left(), []),
-    softly(getHolidays(), left(), []),
     softly(getActivityLog(), left(), [])
   ]);
   const onRoll = employees.filter(e => e.employmentStatus !== 'left');
@@ -4165,22 +4268,12 @@ async function buildHrDashboardHome(box){
   });
   const checkedIn = moving + stopped + unresponsive;
 
-  // --- attendance for the current month, across everyone on roll ---
-  const now = new Date();
-  const y = now.getFullYear(), mo = now.getMonth() + 1;
-  const mDays = new Date(y, mo, 0).getDate();
-  const dList = [];
-  for(let d=1; d<=mDays; d++) dList.push(`${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
-  const holidayMap = {};
-  holidays.forEach(h => { holidayMap[h.date] = h.name; });
-  let aPresent = 0, aAbsent = 0, aLeave = 0;
-  const atts = await softly(Promise.all(onRoll.map(e => getAttendance(e.id).catch(() => ({})))), left(), []);
-  atts.forEach(att => {
-    const c = consultantDayCounts(att, dList, holidayMap);
-    aPresent += c.present; aAbsent += c.absent; aLeave += c.el + c.sl;
+  // Shaped the way updateLiveMap expects, and labelled the way the Tracking
+  // page labels people, so the same engineer reads the same on both screens.
+  const mapInfos = users.map((u, i) => {
+    const active = actives[i] || null;
+    return { name: u.displayName || u.username, active, status: computeStatus(active) };
   });
-  const aTotal = aPresent + aAbsent + aLeave;
-  const pct = n => aTotal ? Math.round((n / aTotal) * 100) : 0;
 
   // --- documents expiring within 30 days ---
   const expiring = [];
@@ -4199,8 +4292,8 @@ async function buildHrDashboardHome(box){
 
   const log = rawLog.slice(0, 6);
 
-  const kpi = (icon, cap, n, sub, alert) => `
-    <div class="kpi${alert ? ' alert' : ''}">
+  const kpi = (icon, cap, n, sub, tone) => `
+    <div class="kpi" data-tone="${tone || 'indigo'}">
       <div class="top"><div class="ic">${icon}</div><div class="cap">${cap}</div></div>
       <div class="n">${n}</div><div class="sub">${sub}</div>
     </div>`;
@@ -4248,10 +4341,10 @@ async function buildHrDashboardHome(box){
 
   box.innerHTML = degradedBanner + `
     <div class="kpi-row">
-      ${kpi('👷','Active Engineers', moving, 'Currently on duty')}
-      ${kpi('⏹️','Stopped / Unresponsive', stopped + unresponsive, 'Not responding', true)}
-      ${kpi('👥','Total Engineers', onRoll.length, 'All registered')}
-      ${kpi('📄','Documents Expiring', expiring.length, 'Within 30 days')}
+      ${kpi('👷','Active Engineers', moving, 'Currently on duty', 'green')}
+      ${kpi('⏹️','Stopped / Unresponsive', stopped + unresponsive, 'Not responding', 'red')}
+      ${kpi('👥','Total Engineers', onRoll.length, 'All registered', 'indigo')}
+      ${kpi('📄','Documents Expiring', expiring.length, 'Within 30 days', 'amber')}
     </div>
 
     <div class="dash-2col">
@@ -4273,21 +4366,26 @@ async function buildHrDashboardHome(box){
       </div>
 
       <div class="dash-card">
-        <div class="card-head"><h3>Attendance Overview <span style="font-weight:400;color:var(--muted);font-size:13px;">(${MONTH_NAMES[mo-1]} ${y})</span></h3></div>
-        <div class="donut-wrap">
-          ${donutSvg([
-            {value: aPresent, color:'#2E7D4F'},
-            {value: aAbsent, color:'#B23A32'},
-            {value: aLeave, color:'#F0A020'}
-          ], 168, pct(aPresent) + '%', 'Present')}
-          <div class="legend">
-            ${legend('#2E7D4F','Present', pct(aPresent) + '% (' + consultantDays(aPresent) + ')')}
-            ${legend('#B23A32','Absent', pct(aAbsent) + '% (' + consultantDays(aAbsent) + ')')}
-            ${legend('#F0A020','Leave', pct(aLeave) + '% (' + consultantDays(aLeave) + ')')}
+        <div class="card-head">
+          <h3>Live Tracking</h3>
+          <span class="live-dot-label"><span class="live-dot"></span>${checkedIn} on air</span>
+        </div>
+        <div class="dash-map-wrap">
+          <div id="dashLiveMap"></div>
+          <div id="dashLiveMapEmpty" class="map-empty">
+            <div class="map-empty-inner">
+              <span class="ic">🛰️</span>
+              <strong>No live positions</strong>
+              <span>Engineer locations appear here once someone checks in.</span>
+            </div>
           </div>
         </div>
-        <p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Counted in days across ${onRoll.length} employees.</p>
-        <button class="btn ghost full" style="margin-top:10px;" onclick="hrNavigate('attendance')">View attendance sheet</button>
+        <div class="map-legend">
+          <span><span class="swatch" style="background:var(--green)"></span>Moving ${moving}</span>
+          <span><span class="swatch" style="background:var(--red)"></span>Stopped ${stopped}</span>
+          <span><span class="swatch" style="background:var(--amber)"></span>Unresponsive ${unresponsive}</span>
+        </div>
+        <button class="btn ghost full" style="margin-top:12px;" onclick="hrNavigate('tracking')">Open full tracking</button>
       </div>
     </div>
 
@@ -4315,6 +4413,12 @@ async function buildHrDashboardHome(box){
     <p style="text-align:center;font-size:11.5px;color:var(--muted);margin:18px 0 0;">
       ${checkedIn} of ${users.length} tracking logins checked in right now.
     </p>`;
+
+  // Only reachable now that innerHTML has written the container. ensureLiveMap
+  // detects the fresh node and rebuilds, so this survives every re-render;
+  // invalidateSize covers the case where the panel was hidden while laying out.
+  updateLiveMap(mapInfos, { mapId: 'dashLiveMap', emptyId: 'dashLiveMapEmpty' });
+  setTimeout(invalidateLiveMaps, 60);
 }
 
 // ---- dashboard ----
