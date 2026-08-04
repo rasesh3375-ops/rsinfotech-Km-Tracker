@@ -4229,35 +4229,61 @@ async function renderHrDashboardHome(){
 // Resolve to `fallback` if the promise rejects OR takes too long. The dashboard
 // must always draw: it is the landing screen, and a single unreachable read used
 // to leave it on "Loading dashboard…" indefinitely on a phone.
-function softly(promise, ms, fallback){
+function softly(promise, ms, fallback, label){
   let timer;
+  // Record which read gave way, not just that something did. "Some figures
+  // couldn't be loaded" with no detail is unactionable when six reads can fail
+  // independently.
+  // Bind to the list that exists now. A hung read's timer can fire long after a
+  // newer render has started and reset the list; without this, one dead read
+  // keeps marking every subsequent render degraded.
+  const sink = softly.failed;
+  const note = why => {
+    if(sink !== softly.failed) return;
+    softly.degraded = true;
+    const entry = label + (why ? ' (' + why + ')' : '');
+    if(label && sink.indexOf(entry) === -1) sink.push(entry);
+  };
   return Promise.race([
-    Promise.resolve(promise).catch(() => { softly.degraded = true; return fallback; }),
-    new Promise(res => { timer = setTimeout(() => { softly.degraded = true; res(fallback); }, ms); })
+    Promise.resolve(promise).catch(() => { note('error'); return fallback; }),
+    new Promise(res => { timer = setTimeout(() => { note('timed out'); res(fallback); }, ms); })
   ]).then(v => { clearTimeout(timer); return v; });
 }
+softly.failed = [];
 
 async function buildHrDashboardHome(box){
   softly.degraded = false;
-  // ONE shared deadline for the whole gather, not one per read. Giving each read
-  // its own budget meant six of them queued up to six times the wait, which is
-  // why the spinner still outlasted every timeout.
-  const deadline = Date.now() + 10000;
-  const left = () => Math.max(400, deadline - Date.now());
+  softly.failed = [];
+
+  // Two phases, each with its own budget, rather than one deadline shared by
+  // everything. The engineer positions depend on `users`, so they cannot start
+  // until the first group returns; under a single 10s deadline a slow first
+  // group left them the 400ms floor and they fell back to empty every time —
+  // the roster count would be right while the live counts sat at 0.
+  //
+  // Each phase is sized to clear one full apiFetch attempt (8s) plus margin.
+  // A phase budget shorter than a single attempt can never succeed, which is
+  // what made the retry logic in apiFetch unreachable from this screen.
+  const budget = ms => { const end = Date.now() + ms; return () => Math.max(400, end - Date.now()); };
+  const left = budget(10000);
 
   // The independent reads go together rather than one after another.
   // getHolidays() and the per-employee getAttendance() fan-out were dropped
   // along with the Attendance Overview donut: they fed nothing else on this
   // screen, and the fan-out was one request per employee on the critical path.
   const [employees, users, rawLog] = await Promise.all([
-    softly(getEmployees(), left(), []),
-    softly(getUsers(), left(), []),
-    softly(getActivityLog(), left(), [])
+    softly(getEmployees(), left(), [], 'employee list'),
+    softly(getUsers(), left(), [], 'tracking logins'),
+    softly(getActivityLog(), left(), [], 'activity log')
   ]);
   const onRoll = employees.filter(e => e.employmentStatus !== 'left');
 
   // --- live engineer status, same rules the Tracking page uses ---
-  const actives = await softly(Promise.all(users.map(u => getActive(u.username).catch(() => null))), left(), []);
+  // Its own budget, started here rather than inherited from the group above.
+  const left2 = budget(10000);
+  const actives = await softly(
+    Promise.all(users.map(u => getActive(u.username).catch(() => null))),
+    left2(), [], 'engineer positions');
   let moving = 0, stopped = 0, unresponsive = 0;
   actives.forEach(act => {
     if(!act) return;
@@ -4336,7 +4362,10 @@ async function buildHrDashboardHome(box){
     <div class="dash-card" style="background:#FFF6F5;border-color:#F1D7D4;">
       <div class="card-head"><h3 style="color:var(--red);">Some figures couldn't be loaded</h3>
         <button class="linkbtn" style="padding:0" onclick="renderHrDashboardHome()">Retry</button></div>
-      <p class="card-sub" style="margin:0;">The backend didn't answer in time, so the numbers below may be incomplete. Everything in the sidebar still works.</p>
+      <p class="card-sub" style="margin:0;">${softly.failed.length
+        ? 'Didn\'t answer in time: <strong>' + softly.failed.join('</strong>, <strong>') + '</strong>. Those figures show as 0 below; the rest are accurate.'
+        : 'The backend didn\'t answer in time, so the numbers below may be incomplete.'} Everything in the sidebar still works.</p>
+      ${lastBackendError ? `<p style="font-size:11px;color:var(--muted);margin:8px 0 0;word-break:break-word;">Last backend error: ${String(lastBackendError).slice(0, 180)}</p>` : ''}
     </div>` : '';
 
   box.innerHTML = degradedBanner + `
