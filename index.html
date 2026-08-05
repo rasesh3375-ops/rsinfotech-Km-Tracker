@@ -3805,6 +3805,84 @@ function buildPolicySummary(employees, attByEmp, dateList){
   </div>`;
 }
 
+
+// ---- identity & bank validation ----
+// Fields that must not be shared between two people. A repeated Aadhaar, PAN,
+// UAN, ESI or bank account is almost always a typo or a record being cloned,
+// and it reaches payroll and statutory filings if nobody catches it. A shared
+// phone or email is common enough in a family to be worth flagging rather than
+// refusing, so every case here warns and lets the user decide.
+const UNIQUE_EMPLOYEE_FIELDS = [
+  { id:'f_aadhaar',       key:'aadhaar',       label:'Aadhaar number' },
+  { id:'f_pan',           key:'pan',           label:'PAN' },
+  { id:'f_uan',           key:'uan',           label:'UAN' },
+  { id:'f_esiNumber',     key:'esiNumber',     label:'ESI number' },
+  { id:'f_accountNumber', key:'accountNumber', label:'Bank account number' },
+  { id:'f_phone',         key:'phone',         label:'Mobile number' },
+  { id:'f_email',         key:'email',         label:'Email address' }
+];
+
+const normId = v => String(v || '').replace(/[\s-]/g, '').toLowerCase();
+
+// Every clash against the saved roster, ignoring the record being edited.
+function findEmployeeDuplicates(employees, draftValues, editingId){
+  const out = [];
+  UNIQUE_EMPLOYEE_FIELDS.forEach(f => {
+    const v = normId(draftValues[f.key]);
+    if(!v) return;
+    employees.forEach(e => {
+      if(editingId && e.id === editingId) return;
+      if(normId(e[f.key]) === v){
+        out.push({ field:f.label, value:draftValues[f.key], employee:e.name || e.id, employeeId:e.id });
+      }
+    });
+  });
+  return out;
+}
+
+// The first four characters of an IFSC are the bank's own code, so the code and
+// the bank name cannot disagree — an Axis account cannot carry an HDFC IFSC.
+// Codes here are the issuing bank's; add to this list rather than to the logic.
+const IFSC_BANK_CODES = {
+  UTIB:'Axis Bank', HDFC:'HDFC Bank', ICIC:'ICICI Bank', SBIN:'State Bank of India',
+  PUNB:'Punjab National Bank', BARB:'Bank of Baroda', CNRB:'Canara Bank',
+  UBIN:'Union Bank of India', IOBA:'Indian Overseas Bank', IDIB:'Indian Bank',
+  KKBK:'Kotak Mahindra Bank', YESB:'Yes Bank', INDB:'IndusInd Bank',
+  BKID:'Bank of India', MAHB:'Bank of Maharashtra', CBIN:'Central Bank of India',
+  IBKL:'IDBI Bank', FDRL:'Federal Bank', SIBL:'South Indian Bank',
+  KARB:'Karnataka Bank', TMBL:'Tamilnad Mercantile Bank', RATN:'RBL Bank',
+  DCBL:'DCB Bank', BDBL:'Bandhan Bank', AUBL:'AU Small Finance Bank',
+  ESFB:'Equitas Small Finance Bank', UJVN:'Ujjivan Small Finance Bank',
+  PYTM:'Paytm Payments Bank', AIRP:'Airtel Payments Bank', SRCB:'Saraswat Bank'
+};
+
+function validateIfsc(ifsc, bankName){
+  const out = { ok:true, warnings:[] };
+  const code = String(ifsc || '').trim().toUpperCase();
+  if(!code) return out;
+  // Format: four letters, then 0, then six alphanumerics.
+  if(!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(code)){
+    out.ok = false;
+    out.warnings.push('IFSC "' + code + '" is not a valid format — it should be four letters, a zero, then six characters (for example UTIB0001234).');
+    return out;
+  }
+  const bank = IFSC_BANK_CODES[code.slice(0, 4)];
+  const typed = String(bankName || '').trim();
+  if(bank && typed){
+    // Compare on the distinctive word, so "Axis" matches "Axis Bank Ltd".
+    const a = typed.toLowerCase().replace(/\b(bank|ltd|limited|of|india|the)\b/g, '').replace(/[^a-z]/g, '');
+    const b = bank.toLowerCase().replace(/\b(bank|ltd|limited|of|india|the)\b/g, '').replace(/[^a-z]/g, '');
+    if(a && b && a !== b && a.indexOf(b) === -1 && b.indexOf(a) === -1){
+      out.ok = false;
+      out.warnings.push('IFSC ' + code + ' belongs to ' + bank + ', but the bank name says "' + typed +
+        '". One of the two is wrong — salary would go to the wrong bank.');
+    }
+  } else if(!bank && typed){
+    out.warnings.push('IFSC ' + code + ' is valid in format, but its bank code is not in the list here, so it could not be checked against "' + typed + '".');
+  }
+  return out;
+}
+
 const ATT_CODES = ['P','A','H','EL','SL','LP','HEL','HSL','HLP','SHORT'];
 const ATT_CODE_LABELS = { P:'Present', A:'Absent', H:'Holiday', EL:'EL', SL:'SL', LP:'LP (unpaid)', HEL:'Half EL', HSL:'Half SL', HLP:'Half LP', SHORT:'Short leave' };
 
@@ -6969,6 +7047,30 @@ async function saveEmployeeForm(){
   // Every heading the master says is derivable has to have actually produced a
   // figure. Saving on a formula that did not run would put a wrong salary into
   // the sheet silently, so the heading is named and the save refused.
+  // Identity clashes and bank details are checked BEFORE anything is written,
+  // so a shared Aadhaar or a mismatched IFSC is caught while the form is still
+  // open and correctable, not after it has reached payroll.
+  const dupValues = {};
+  UNIQUE_EMPLOYEE_FIELDS.forEach(f => {
+    const el = document.getElementById(f.id);
+    dupValues[f.key] = el ? el.value.trim() : '';
+  });
+  const dups = findEmployeeDuplicates(employees, dupValues, editingEmployeeId);
+  if(dups.length){
+    const lines = dups.map(d => '• ' + d.field + ' ' + d.value + ' is already used by ' + d.employee).join('\n');
+    if(!confirm('These details are already on another employee:\n\n' + lines +
+      '\n\nThis is usually a typo or a duplicated record. Save anyway?')) return;
+  }
+
+  const ifscEl = document.getElementById('f_ifsc');
+  const bankEl = document.getElementById('f_bankName');
+  if(ifscEl){
+    const bankCheck = validateIfsc(ifscEl.value, bankEl ? bankEl.value : '');
+    if(bankCheck.warnings.length){
+      if(!confirm(bankCheck.warnings.join('\n\n') + '\n\nSave anyway?')) return;
+    }
+  }
+
   const payrollErrors = payrollBlockingErrors();
   if(payrollErrors.length){
     msg.textContent = 'Payroll formula missing or invalid for: ' + payrollErrors.join(', ') +
