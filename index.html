@@ -7018,11 +7018,12 @@ function employeeModalHtml(emp){
           <option value="yes" ${emp.esiDisabled==='yes'?'selected':''}>Yes — ceiling ₹25,000</option>
         </select>
         <div style="height:10px"></div>
-        <label class="field">Was contributing to ESI when this period began?</label>
+        <label class="field">Was already contributing to ESI when this half-year began?</label>
         <select class="field-input" id="f_esiCovered" onchange="toggleStatutoryFieldsForHeading()">
-          <option value="no" ${emp.esiCoveredAtPeriodStart!=='yes'?'selected':''}>No</option>
-          <option value="yes" ${emp.esiCoveredAtPeriodStart==='yes'?'selected':''}>Yes — must continue to period end</option>
+          <option value="no" ${emp.esiCoveredAtPeriodStart!=='yes'?'selected':''}>No — new joiner, or was above the ceiling</option>
+          <option value="yes" ${emp.esiCoveredAtPeriodStart==='yes'?'selected':''}>Yes — keep deducting to period end even if pay rises</option>
         </select>
+        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Only matters once someone's gross goes above the ceiling. Answer No for a new employee — they were not contributing before they joined. Change it to Yes for an existing member whose pay rises past the ceiling mid half-year, so deductions carry on to 30 September or 31 March as the rules require.</p>
         <div style="height:10px"></div>
         <label class="field">Had a UAN or EPF account before?</label>
         <select class="field-input" id="f_hasPriorUan" onchange="toggleStatutoryFieldsForHeading()">
