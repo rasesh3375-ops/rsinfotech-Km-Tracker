@@ -4537,6 +4537,31 @@ function computeRetentionForMonth(emp, year, month){
   return Math.round((money / months) * 100) / 100;
 }
 
+// The financial year runs April to March, so a date in January belongs to the
+// year that began the previous April.
+function financialYearStart(dateStr){
+  const d = new Date(dateStr);
+  const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+  return y + '-04-01';
+}
+
+// Leave used from 1 April up to and including the month being paid. Half days
+// count as half, matching how the attendance summary treats them, so a balance
+// cannot be run down twice as fast by marking half days.
+function leaveUsedThisFinancialYear(att, upToDate){
+  const from = financialYearStart(upToDate);
+  let el = 0, sl = 0;
+  Object.keys(att || {}).forEach(d => {
+    if(d < from || d > upToDate) return;
+    const c = (att[d] || {}).code;
+    if(c === 'EL') el += 1;
+    else if(c === 'HEL') el += 0.5;
+    else if(c === 'SL') sl += 1;
+    else if(c === 'HSL') sl += 0.5;
+  });
+  return { el, sl };
+}
+
 async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   const att = await getAttendance(emp.id);
   const summary = computeAttendanceSummary(att, emp, dateList, holidayMap);
@@ -4586,8 +4611,12 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   // closing figure is what the next month opens with.
   const advanceOpening = Number(emp.advanceOpening) || 0;
   const advanceBalance = Math.max(0, advanceOpening - advanceTemp - advance);
-  const fullDayLeaveBal = Math.max(0, (Number(emp.elOpening) || 0) - summary.elUsed);
-  const halfDayLeaveBal = Math.max(0, (Number(emp.slOpening) || 0) - summary.slUsed);
+  // Leave balance is the opening figure less everything used since the
+  // financial year began, not just this month. Taking only the current month
+  // would show the same balance every month and never run down.
+  const ytd = leaveUsedThisFinancialYear(att, dateList[dateList.length - 1]);
+  const fullDayLeaveBal = Math.max(0, (Number(emp.elOpening) || 0) - ytd.el);
+  const halfDayLeaveBal = Math.max(0, (Number(emp.slOpening) || 0) - ytd.sl);
   return { rate, leaveDays, leaveAmount, basic, hra, lta, gross, pf, esi, pt, advanceTemp, advance,
            retention, totalDeduction, netSalary, pen, employerPf, pfAdmin, edli, employerCont, ctc,
            esiEmployer, advanceBalance, fullDayLeaveBal, halfDayLeaveBal };
