@@ -210,6 +210,10 @@
   .hr-shell-hide{display:none !important;}
 
   #hrShell{display:flex;align-items:flex-start;min-height:100vh;}
+  /* Collapsed sidebar: width goes to zero and the content takes the space.
+     Transitioned so it reads as folding away rather than snapping. */
+  #hrSidebar{transition:width .18s ease;}
+  body.hr-rail #hrSidebar{width:0;overflow:hidden;border-right:none;}
   #hrSidebar{width:242px;flex-shrink:0;background:var(--paper);border-right:1px solid var(--line);
     min-height:100vh;position:sticky;top:0;display:flex;flex-direction:column;padding:18px 12px;overflow-y:auto;}
   #hrSidebar .side-title{font-size:16px;font-weight:700;color:var(--navy);padding:4px 10px 14px;}
@@ -386,7 +390,10 @@
   .feed-row .when{font-size:11.5px;color:var(--muted);margin-top:2px;}
   .feed-tag{font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;flex-shrink:0;}
 
-  .qa-row{display:grid;grid-template-columns:repeat(7,1fr);gap:10px;}
+  /* One row, every tile an equal share of the width, so there is no dead space
+     on the right however many actions there are. */
+  .qa-row{display:flex;gap:10px;}
+  .qa-row .qa{flex:1 1 0;min-width:0;}
   .qa{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:13px 8px;
     text-align:center;cursor:pointer;font-size:11.5px;font-weight:600;color:var(--navy);
     transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease;}
@@ -407,7 +414,8 @@
 
   @media (max-width: 1100px){
     .kpi-row{grid-template-columns:repeat(2,1fr);}
-    .qa-row{grid-template-columns:repeat(4,1fr);}
+    .qa-row{flex-wrap:wrap;}
+    .qa-row .qa{flex:1 1 30%;}
   }
   @media (max-width: 900px){
     /* Off-canvas by left offset rather than transform: same effect, but it can't
@@ -423,7 +431,8 @@
   }
   @media (max-width: 560px){
     .kpi-row{grid-template-columns:1fr;}
-    .qa-row{grid-template-columns:repeat(3,1fr);}
+    .qa-row{flex-wrap:wrap;}
+    .qa-row .qa{flex:1 1 45%;}
     #hrTopbar{padding:10px 12px;}
     .hide-sm{display:none;}
   }
@@ -831,6 +840,8 @@
         <header id="hrTopbar">
           <div class="tb-left">
             <button id="hrBurger" onclick="toggleHrNav()" aria-label="Menu">☰</button>
+            <button class="icon-btn hide-sm" id="hrRail" onclick="toggleHrSidebar()"
+                    title="Hide or show the menu" aria-label="Hide or show the menu">⯇</button>
             <strong id="hrPageTitle" style="font-size:15px;color:var(--navy);">Dashboard</strong>
           </div>
           <div class="tb-right">
@@ -2551,6 +2562,7 @@ async function enterHrMain(){
   const dateEl = document.getElementById('hrTopDate');
   if(dateEl) dateEl.textContent = 'Today, ' + new Date().toLocaleDateString('en-IN', { day:'numeric', month:'long', year:'numeric' });
   renderHrSideNav();
+  restoreHrSidebar();
   hrNavigate('dashboard');
   armExitGuard();
 
@@ -4891,6 +4903,27 @@ function renderHrSideNav(){
      </button>`).join('');
 }
 
+// Desktop only — the burger already handles the phone, where the sidebar is an
+// overlay. Here it collapses to nothing and gives the content the full width.
+// The choice is remembered, so it survives a reload.
+function toggleHrSidebar(){
+  const hidden = document.body.classList.toggle('hr-rail');
+  try{ localStorage.setItem('kmt_hr_rail', hidden ? '1' : ''); }catch(e){}
+  const btn = document.getElementById('hrRail');
+  if(btn) btn.textContent = hidden ? '⯈' : '⯇';
+  // Leaflet lays out against a container that just changed width.
+  setTimeout(invalidateLiveMaps, 220);
+}
+function restoreHrSidebar(){
+  let hidden = '';
+  try{ hidden = localStorage.getItem('kmt_hr_rail') || ''; }catch(e){}
+  if(hidden){
+    document.body.classList.add('hr-rail');
+    const btn = document.getElementById('hrRail');
+    if(btn) btn.textContent = '⯈';
+  }
+}
+
 function toggleHrNav(force){
   const open = typeof force === 'boolean' ? force : !document.body.classList.contains('hr-nav-open');
   document.body.classList.toggle('hr-nav-open', open);
@@ -5135,7 +5168,7 @@ async function buildHrDashboardHome(box){
   const quick = [
     // Attendance and Doc Expiry are not here: Attendance has its own card on
     // the dashboard now, and Doc Expiry has its own section further down.
-    ['salary','₹','Salary Sheet'], ['reminders','📈','Increments'],
+    ['salary','₹','Salary Sheet'], ['reminders','📈','Increments'], ['daily','📬','Daily Summary'],
     ['reports','📊','Reports'], ['generator','✉️','Generator'], ['team','👤','Team']
   ].map(([r, i, l]) => `<div class="qa" onclick="hrNavigate('${r}')"><span class="ic">${i}</span>${l}</div>`).join('');
 
@@ -5154,7 +5187,7 @@ async function buildHrDashboardHome(box){
   box.innerHTML = degradedBanner + `
     <div class="kpi-row">
       ${kpi('👥','Employee Master', onRoll.length, 'Open employee records', 'indigo', null, 'employees')}
-      ${kpi('🗓️','Attendance Sheet', 'Open', 'Mark and review attendance', 'green', null, 'attendance')}
+      ${kpi('🗓️','Attendance Sheet', '', 'Mark and review attendance', 'green', null, 'attendance')}
       ${kpi('🚫','Absent Today', '—', 'Marked absent or LP', 'red', 'dashAbsentCount')}
       ${kpi('📄','Documents Expiring', expiring.length, 'Within 30 days', 'amber')}
     </div>
