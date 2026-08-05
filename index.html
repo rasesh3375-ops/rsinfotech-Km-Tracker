@@ -3700,9 +3700,11 @@ function validateLeaveApplication(req, ctx, P){
 // they trigger, short leaves and what the next one becomes, sick and PL usage
 // against balance. Every threshold quoted comes from the policy config, so this
 // panel changes with the policy and never disagrees with the engine.
-function buildPolicySummary(employees, attByEmp, dateList){
+// One computation, used by both the Attendance Sheet panel and the dashboard
+// alerts, so the two can never report different violations for the same month.
+function policyRowsFor(employees, attByEmp, dateList){
   const P = LEAVE_POLICY;
-  const rows = employees.map(emp => {
+  return employees.map(emp => {
     const att = attByEmp[emp.id] || {};
     let lateCount = 0, shortLeaves = 0, sickUsed = 0, plUsed = 0, lwp = 0, halfDays = 0, attendanceDays = 0;
     dateList.forEach(d => {
@@ -3737,7 +3739,10 @@ function buildPolicySummary(employees, attByEmp, dateList){
     if(!bal.plUsable && bal.plEarned > 0) warn.push('PL earned this year is usable from the next financial year');
     return { emp, lateCount, shortLeaves, sickUsed, plUsed, lwp, halfDays, attendanceDays, bal, warn };
   });
+}
 
+function buildPolicySummary(employees, attByEmp, dateList){
+  const rows = policyRowsFor(employees, attByEmp, dateList);
   const body = rows.map(r => `
     <tr class="${r.warn.length ? 'pol-warn-row' : ''}">
       <td><strong>${escapeHtml(r.emp.name)}</strong>
@@ -3962,7 +3967,12 @@ async function renderAttendanceSheet(){
   let headerRow = '<tr><th>S.No</th><th style="text-align:left;">Name</th>' +
     dateList.map(d => `<th>${parseInt(d.slice(8),10)}</th>`).join('') +
     '<th>Present</th><th>Absent</th><th>EL</th><th>SL</th><th>LP</th><th>Half</th><th>Short</th><th>Late</th></tr>';
-  const csvHeader = ['S.No','Name', ...dateList.map(d => parseInt(d.slice(8),10)), 'Present','Absent','EL','SL','LP','Half','Short','Late'];
+  // Policy columns follow the day grid, so the export carries the same
+  // judgement the on-screen panel shows rather than raw codes alone.
+  const csvHeader = ['S.No','Name', ...dateList.map(d => parseInt(d.slice(8),10)),
+    'Present','Absent','EL','SL','LP','Half','Short','Late',
+    'Employee Type','Late Count','Short Leaves','Half Days','Sick Used','Sick Balance',
+    'PL Earned','PL Used','PL Balance','LWP','Attendance Days','Policy Rule Applied','Violation Reason'];
   const csvRows = [];
 
   let bodyRows = '';
@@ -4003,6 +4013,21 @@ async function renderAttendanceSheet(){
     <button class="btn ghost full" style="margin-top:12px;" onclick="openFullscreenView('Attendance Sheet','attendanceSheetBox')">⛶ Full screen</button>`
     // Policy position for the same month, from the same records already read.
     + buildPolicySummary(employees, attByEmp, dateList);
+
+  // Same computation again for the export, so a downloaded sheet and the panel
+  // on screen can never disagree about who breached what.
+  policyRowsFor(employees, attByEmp, dateList).forEach((r, i) => {
+    if(!csvRows[i]) return;
+    csvRows[i].push(
+      r.emp.employeeType === 'part' ? 'Part-time' : 'Full-time',
+      r.lateCount, r.shortLeaves, r.halfDays,
+      r.sickUsed, r.bal.sickLeft,
+      r.bal.plEarned, r.plUsed, r.bal.plLeft,
+      r.lwp, r.attendanceDays,
+      LEAVE_POLICY.version,
+      r.warn.length ? r.warn.join('; ') : 'Within policy'
+    );
+  });
 }
 
 // Edits are collected here and written when Save is pressed. Every change used
@@ -5835,6 +5860,13 @@ async function buildHrDashboardHome(box){
     </div>
 
     <div class="dash-card">
+      <div class="card-head"><h3>Policy Alerts</h3>
+        <button class="linkbtn" style="padding:0" onclick="hrNavigate('attendance')">Attendance sheet</button></div>
+      <p class="card-sub" style="margin:0 0 10px;">Leave and attendance breaches this month, per ${escapeHtml(LEAVE_POLICY.version)}.</p>
+      <div id="dashPolicyAlerts"><p class="dash-muted">Checking policy…</p></div>
+    </div>
+
+    <div class="dash-card">
       <div class="card-head"><h3>Quick Actions</h3></div>
       <div class="qa-row">${quick}</div>
     </div>
@@ -5899,6 +5931,36 @@ async function loadDashboardAbsentToday(onRoll){
     countEl.textContent = absent;
     if(unread) countEl.title = unread + ' employee(s) could not be checked — attendance did not load.';
   }
+  renderPolicyAlerts(onRoll, byId);
+}
+
+// Policy violations for the current month, from the attendance already fetched
+// for the absent count — so the alerts cost no extra backend call.
+function renderPolicyAlerts(onRoll, attByEmp){
+  const box = document.getElementById('dashPolicyAlerts');
+  if(!box) return;
+  const now = new Date(), y = now.getFullYear(), mo = now.getMonth() + 1;
+  const days = new Date(y, mo, 0).getDate();
+  const dateList = [];
+  for(let d = 1; d <= days; d++) dateList.push(`${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+
+  const flagged = policyRowsFor(onRoll, attByEmp, dateList).filter(r => r.warn.length);
+  if(!flagged.length){
+    box.innerHTML = '<p class="dash-muted">✓ No policy violations this month.</p>';
+    return;
+  }
+  // Most breaches first — the person with three problems needs attention
+  // before the one with a single late.
+  flagged.sort((a, b) => b.warn.length - a.warn.length);
+  box.innerHTML = flagged.slice(0, 8).map(r => `
+    <div class="legend-row" style="align-items:flex-start;cursor:pointer"
+         onclick="hrNavigate('attendance')" title="Open the Attendance Sheet">
+      <span><strong>${escapeHtml(r.emp.name)}</strong>
+        <span class="inc-sub">${escapeHtml(r.emp.department || '—')}</span></span>
+      <span style="text-align:right;max-width:62%">${
+        r.warn.map(w => '<div class="pol-warn">⚠ ' + escapeHtml(w) + '</div>').join('')}</span>
+    </div>`).join('') +
+    (flagged.length > 8 ? `<p class="dash-muted" style="margin-top:8px;">and ${flagged.length - 8} more — see the Attendance Sheet.</p>` : '');
 }
 
 // ---- increment reminder widget ----
