@@ -229,6 +229,53 @@ function doUploadDocument_(body) {
   return { ok: true, fileUrl: file.getUrl() };
 }
 
+// ===== one-off: file existing reports under their financial year =====
+// Reports used to be written to HR Management > Dashboard > ... and
+// HR Management > Reports > ...; they now go to HR Management > 2026-27 > ...
+// This walks the old locations and moves each file into the year its filename
+// belongs to, so history sits alongside everything written from now on.
+//
+// Run it from the Apps Script editor: select organiseReportsByYear and press
+// Run. It is safe to run twice — a file already in a year folder is left
+// alone. Nothing is deleted; files are moved, and the log lists every one.
+function organiseReportsByYear() {
+  var root = getOrCreateFolderPath_(['HR Management']);
+  var moved = 0, skipped = 0, unnamed = 0;
+
+  ['Dashboard', 'Reports'].forEach(function (section) {
+    var it = root.getFoldersByName(section);
+    if (!it.hasNext()) return;
+    var sectionFolder = it.next();
+    var subs = sectionFolder.getFolders();
+    while (subs.hasNext()) {
+      var sub = subs.next();                       // e.g. "Salary Sheet", "PF"
+      var files = sub.getFiles();
+      while (files.hasNext()) {
+        var file = files.next();
+        // Filenames carry the month: "Salary Sheet - 2026-08.csv".
+        var m = /(\d{4})-(\d{2})/.exec(file.getName());
+        if (!m) { unnamed++; continue; }
+        var year = parseInt(m[1], 10), mon = parseInt(m[2], 10);
+        // April to March, so January belongs to the year that opened in April.
+        var fyStart = mon >= 4 ? year : year - 1;
+        var label = fyStart + '-' + ('0' + ((fyStart + 1) % 100)).slice(-2);
+        var target = getOrCreateFolderPath_(['HR Management', label, section, sub.getName()]);
+        // Already there? leave it.
+        var existing = target.getFilesByName(file.getName());
+        if (existing.hasNext()) { skipped++; continue; }
+        target.addFile(file);
+        sub.removeFile(file);
+        moved++;
+        Logger.log('moved: ' + file.getName() + ' -> HR Management/' + label + '/' + section + '/' + sub.getName());
+      }
+    }
+  });
+  var msg = 'Moved ' + moved + ' file(s). Skipped ' + skipped +
+            ' already in place. ' + unnamed + ' had no date in the filename and were left alone.';
+  Logger.log(msg);
+  return msg;
+}
+
 function jsonOut_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
