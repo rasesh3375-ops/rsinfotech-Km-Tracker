@@ -3486,9 +3486,13 @@ const LEAVE_POLICY = {
   shift: {
     // "up to 15 minutes late (by 9:45 AM)" fixes the start at 09:30.
     startMin: 9 * 60 + 30,
-    // The document does not state an end time or a daily hour requirement.
-    endMin: null,
-    workingMinutes: null
+    endMin: 19 * 60,                  // 19:00, confirmed by HR
+    // Derived from the shift, not a separate figure: 09:30 to 19:00.
+    get workingMinutes(){ return this.endMin - this.startMin; },
+    // Overtime is counted from 20:00, also confirmed by HR. The hour between
+    // shift end and this is neither shift nor overtime — staying until 19:45
+    // earns nothing, and no rate is invented for it.
+    overtimeFromMin: 20 * 60
   },
   lateComing: {
     graceMinutes: 15,                 // permissible up to 09:45
@@ -3551,9 +3555,26 @@ function evaluateAttendanceDay(inp, P){
   }
   if(inp.outMin !== null && inp.outMin !== undefined){
     r.facts.push({ k:'Out time', v:minToHHMM(inp.outMin) });
+    r.facts.push({ k:'Shift end', v:minToHHMM(P.shift.endMin) });
     if(inp.inMin !== null && inp.inMin !== undefined){
       const w = inp.outMin - inp.inMin;
+      r.workedMinutes = w;
       r.facts.push({ k:'Working hours', v:Math.floor(w/60)+'h '+(w%60)+'m' });
+      // Deliberately NOT compared against the full 09:30–19:00 span. Grace
+      // permits a late arrival, so measuring hours worked against the whole
+      // shift would flag every person who used their grace as short — which
+      // would make the grace period meaningless. Leaving before shift end is
+      // the rule that matters, and it is reported below on its own.
+    }
+    if(P.shift.endMin !== null && inp.outMin < P.shift.endMin){
+      r.earlyMinutes = P.shift.endMin - inp.outMin;
+      r.warnings.push('Left ' + r.earlyMinutes + ' minutes before shift end');
+    }
+    // Overtime starts at the configured hour, not at shift end.
+    if(P.shift.overtimeFromMin !== null && inp.outMin > P.shift.overtimeFromMin){
+      r.overtimeMinutes = inp.outMin - P.shift.overtimeFromMin;
+      r.facts.push({ k:'Overtime', v:Math.floor(r.overtimeMinutes/60)+'h '+(r.overtimeMinutes%60)+'m' });
+      r.rules.push('Overtime counted from ' + minToHHMM(P.shift.overtimeFromMin));
     }
   }
 
@@ -3735,7 +3756,9 @@ function buildPolicySummary(employees, attByEmp, dateList){
   const S = LEAVE_POLICY.shortLeave, L = LEAVE_POLICY.lateComing;
   return `<div class="dash-card" style="margin-top:16px;">
     <div class="card-head"><h3>Policy check — ${escapeHtml(LEAVE_POLICY.version)}</h3></div>
-    <p class="card-sub" style="margin:0 0 10px;">Grace to ${minToHHMM(LEAVE_POLICY.shift.startMin + L.graceMinutes)} ·
+    <p class="card-sub" style="margin:0 0 10px;">Shift ${minToHHMM(LEAVE_POLICY.shift.startMin)}–${minToHHMM(LEAVE_POLICY.shift.endMin)} ·
+      overtime from ${minToHHMM(LEAVE_POLICY.shift.overtimeFromMin)} ·
+      grace to ${minToHHMM(LEAVE_POLICY.shift.startMin + L.graceMinutes)} ·
       late beyond ${L.shortLeaveAfterMinutes} min becomes Short Leave ·
       ${L.freeInstancesPerMonth} late entries allowed, then a half day per ${L.halfDayPerExtraInstances} ·
       ${S.perMonth} Short Leaves a month, over ${S.compOffThreshold} becomes compensatory off.</p>
