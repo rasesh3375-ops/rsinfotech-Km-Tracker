@@ -6843,6 +6843,10 @@ function toggleStatutoryFieldsForHeading(){
   const notes = [];
   [['f_pf','pf','PF'], ['f_esiDeduction','esi','ESI'], ['f_pt','pt','PT']].forEach(([id, flag, label]) => {
     const input = document.getElementById(id);
+    // The form may not be on screen — this also runs from the heading dropdown
+    // during a render — and reading .disabled off null would abort the whole
+    // toggle, leaving the other fields in whatever state they were in.
+    if(!input) return;
     const applies = heading[flag];
     // PT stays read-only whether or not it applies: it is derived from gross,
     // never entered. PF and ESI have no configured rate, so they are typed.
