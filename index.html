@@ -405,6 +405,20 @@
   .calc-tag{font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;
     background:#E7ECFA;color:#3B5BA9;}
   .calc-empty{font-size:12.5px;color:var(--muted);margin:12px 0 0;}
+
+  /* Live salary breakdown under Rate of Pay. */
+  .pay-box{margin-top:12px;border:1px solid var(--line);border-left:3px solid var(--green);
+    border-radius:10px;background:#FAFBFD;padding:12px 13px;}
+  .pay-head{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+    color:var(--green);margin-bottom:8px;}
+  .pay-table{width:100%;border-collapse:collapse;font-size:12px;}
+  .pay-table td{padding:5px 4px;border-bottom:1px solid #E7EAF0;vertical-align:top;}
+  .pay-table td.num{text-align:right;white-space:nowrap;font-weight:600;}
+  .pay-table tr.pay-total td{font-weight:800;color:var(--navy);border-top:1px solid var(--line);}
+  .pay-formula{font-size:10.5px;color:var(--muted);white-space:normal;}
+  .pay-auto{cursor:help;}
+  .pay-manual{font-size:10px;font-weight:700;color:var(--amber-dark);cursor:help;white-space:nowrap;}
+  .pay-warn{font-size:11.5px;color:var(--red);margin:8px 0 0;line-height:1.5;}
   .field-group .sec-title:first-child{border-top:none;padding-top:0;margin-top:0;}
   select.field-input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;font-size:14.5px;background:var(--paper);color:var(--navy);}
   input[type=date]{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;background:var(--paper);color:var(--navy);}
@@ -4287,6 +4301,96 @@ let lastGeneratedLetter = null;
 let editingEmployeeId = null;
 let currentChecklistType = null;
 
+// ---- payroll formula master ----
+// The single place that says how each salary heading is arrived at. The engine
+// below walks this list; it knows nothing about Basic or HRA specifically, so
+// adding a heading or changing how one is computed is an edit HERE and nowhere
+// else. Percentages themselves are not repeated here — the split lives in
+// SALARY_HEADINGS, which is what the Salary Sheet itself reads, so the form and
+// the sheet cannot drift apart.
+//
+// source:
+//   split   — a share of Rate of Pay taken from the selected heading
+//   ptRule  — the configured professional tax rule
+//   sum     — adds other components
+//   diff    — subtracts other components
+//   manual  — NO formula is configured for this heading, so HR types the amount
+//
+// A heading is manual only because the master says so. Configure a rate for PF
+// or ESI here (source:'percent', of:'basic', pct:0.12) and the form will derive
+// it automatically from the next render on, with no code change.
+const PAYROLL_MASTER = [
+  { key:'basic', label:'Basic Pay',  group:'earning',   source:'split', part:'basic' },
+  { key:'hra',   label:'HRA',        group:'earning',   source:'split', part:'hra'   },
+  { key:'lta',   label:'LTA',        group:'earning',   source:'split', part:'lta'   },
+  { key:'gross', label:'Gross Salary', group:'total',   source:'sum',   of:['basic','hra','lta'] },
+  { key:'pf',    label:'PF (employee)',  group:'deduction', source:'manual', flag:'pf',
+    note:'No PF rate is configured in the payroll master, so this is entered per employee.' },
+  { key:'esi',   label:'ESI (employee)', group:'deduction', source:'manual', flag:'esi',
+    note:'No ESI rate is configured in the payroll master, so this is entered per employee.' },
+  { key:'pt',    label:'Professional Tax (PT)', group:'deduction', source:'ptRule', flag:'pt' },
+  { key:'totalDeduction', label:'Total Deductions', group:'total', source:'sum', of:['pf','esi','pt'] },
+  { key:'net',   label:'Net Salary', group:'total', source:'diff', from:'gross', minus:['totalDeduction'] }
+];
+
+// Runs the master against one Rate of Pay and one heading. Returns every
+// component with its value, whether it was derived or typed, and the formula
+// used — the same numbers computeSalaryForEmployee produces for a full-
+// attendance month, because both read the split from SALARY_HEADINGS.
+function computePayrollComponents(rate, headingKey, manual){
+  const h = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
+  const r = Number(rate) || 0;
+  const m = manual || {};
+  const out = [];
+  const val = k => { const c = out.find(x => x.key === k); return c ? c.value : 0; };
+
+  PAYROLL_MASTER.forEach(def => {
+    // A heading the selected structure does not attract at all is not shown.
+    if(def.flag && !h[def.flag]){
+      out.push({ ...def, applies:false, auto:true, value:0, formula:'Not applicable to ' + h.label });
+      return;
+    }
+    let value = 0, formula = '', auto = true, missing = false;
+
+    if(def.source === 'split'){
+      const pct = h.flat ? (def.part === 'basic' ? 1 : 0) : h[def.part + 'Pct'];
+      if(typeof pct !== 'number'){ missing = true; formula = 'No share configured for ' + def.label; }
+      else { value = r * pct; formula = h.flat && def.part === 'basic'
+        ? 'Rate of Pay (this structure pays the full rate as Basic)'
+        : 'Rate of Pay × ' + headingPct(pct); }
+    } else if(def.source === 'percent'){          // available for future config
+      const base = def.of === 'rate' ? r : val(def.of);
+      if(typeof def.pct !== 'number'){ missing = true; formula = 'No rate configured'; }
+      else { value = base * def.pct; formula = (def.of === 'rate' ? 'Rate of Pay' : def.of) + ' × ' + headingPct(def.pct); }
+    } else if(def.source === 'ptRule'){
+      const gross = val('gross');
+      value = gross > PT_GROSS_THRESHOLD ? PT_AMOUNT : 0;
+      formula = '₹' + fmtMoney(PT_AMOUNT) + ' when Gross exceeds ₹' + fmtMoney(PT_GROSS_THRESHOLD) + ', else ₹0';
+    } else if(def.source === 'sum'){
+      value = def.of.reduce((s, k) => s + val(k), 0);
+      formula = def.of.map(k => (PAYROLL_MASTER.find(x => x.key === k) || {}).label || k).join(' + ');
+    } else if(def.source === 'diff'){
+      value = val(def.from) - def.minus.reduce((s, k) => s + val(k), 0);
+      formula = (PAYROLL_MASTER.find(x => x.key === def.from) || {}).label + ' − ' +
+                def.minus.map(k => (PAYROLL_MASTER.find(x => x.key === k) || {}).label || k).join(' − ');
+    } else if(def.source === 'manual'){
+      auto = false;
+      value = Number(m[def.key]) || 0;
+      formula = def.note || 'Entered manually.';
+    } else {
+      missing = true; formula = 'Unknown formula type "' + def.source + '"';
+    }
+    out.push({ ...def, applies:true, auto, value, formula, missing });
+  });
+  return out;
+}
+
+// Named so the save path can refuse and tell HR which heading is at fault,
+// rather than saving a record built on a formula that did not run.
+function validatePayrollComponents(components){
+  return components.filter(c => c.applies && c.missing).map(c => c.label);
+}
+
 // ---- role knowledge engine ----
 // Turns an employee's own words — job profile, listed responsibilities,
 // designation, department — into the KPIs, risks, compliance points and
@@ -5258,7 +5362,8 @@ function employeeModalHtml(emp){
         <div id="headingCalcBox"></div>
         <div style="height:14px"></div>
         <label class="field">Rate of pay (monthly)</label>
-        <input type="number" id="f_ratePay" placeholder="0" value="${emp.ratePay||''}">
+        <input type="number" id="f_ratePay" placeholder="0" value="${emp.ratePay||''}" oninput="renderPayrollBreakdown()">
+        <div id="payrollBreakdownBox"></div>
         <div style="height:12px"></div>
         <label class="field">Advance for temporary</label>
         <input type="number" id="f_advanceTemp" placeholder="0" value="${emp.advanceTemp||''}">
@@ -5383,12 +5488,7 @@ function employeeModalHtml(emp){
 
       <div class="field-group">
         <div class="sec-title">Salary structure (for salary slip)</div>
-        <label class="field">Basic salary</label>
-        <input type="number" id="f_basic" placeholder="0" value="${emp.basic||''}" oninput="updateBonusPreview()">
-        <div style="height:12px"></div>
-        <label class="field">HRA</label>
-        <input type="number" id="f_hra" placeholder="0" value="${emp.hra||''}" oninput="updateBonusPreview()">
-        <div style="height:12px"></div>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Basic and HRA are worked out from Rate of Pay and the salary heading — they are shown in the breakdown above and are no longer typed here, because the Salary Sheet has always derived them and ignored anything entered by hand.</p>
         <label class="field">Other allowances</label>
         <input type="number" id="f_otherAllowances" placeholder="0" value="${emp.otherAllowances||''}" oninput="updateBonusPreview()">
         <div style="height:12px"></div>
@@ -5402,10 +5502,10 @@ function employeeModalHtml(emp){
         <input type="number" id="f_stdDeductions" placeholder="0" value="${emp.stdDeductions||''}">
         <div style="height:12px"></div>
         <label class="field" id="f_pf_label">PF (provident fund)</label>
-        <input type="number" id="f_pf" placeholder="0" value="${emp.pf||''}">
+        <input type="number" id="f_pf" placeholder="0" value="${emp.pf||''}" oninput="renderPayrollBreakdown()">
         <div style="height:12px"></div>
         <label class="field" id="f_esiDeduction_label">ESI</label>
-        <input type="number" id="f_esiDeduction" placeholder="0" value="${emp.esiDeduction||''}">
+        <input type="number" id="f_esiDeduction" placeholder="0" value="${emp.esiDeduction||''}" oninput="renderPayrollBreakdown()">
         <div style="height:12px"></div>
         <label class="field" id="f_pt_label">PT (professional tax)</label>
         <input type="number" id="f_pt" placeholder="0" value="${emp.pt||''}">
@@ -5519,13 +5619,80 @@ function toggleStatutoryFieldsForHeading(){
   // Same handler the dropdown already fired, so the card follows the heading
   // the moment it changes.
   renderHeadingExplainer();
+  renderPayrollBreakdown();
 }
 
 let editingEmployeeDraft = null;
 
+// Live salary breakdown under Rate of Pay. Redrawn on every keystroke and on
+// every heading change, so nothing has to be saved or reloaded to see the
+// effect. Everything the master can derive is read-only; only headings the
+// master marks manual stay editable.
+// One derived heading, straight from the master, for the save path and the
+// bonus preview. Reads the form as it stands right now.
+function payrollValue(key){
+  const rate = Number((document.getElementById('f_ratePay') || {}).value) || 0;
+  const headingKey = (document.getElementById('f_salaryHeading') || {}).value || 'managerial';
+  const manual = {
+    pf:  Number((document.getElementById('f_pf') || {}).value) || 0,
+    esi: Number((document.getElementById('f_esiDeduction') || {}).value) || 0
+  };
+  const c = computePayrollComponents(rate, headingKey, manual).find(x => x.key === key);
+  return c ? Math.round(c.value * 100) / 100 : 0;
+}
+
+// Refuses the save and names the heading, rather than storing an employee whose
+// salary rests on a formula that did not run.
+function payrollBlockingErrors(){
+  const rate = Number((document.getElementById('f_ratePay') || {}).value) || 0;
+  const headingKey = (document.getElementById('f_salaryHeading') || {}).value || 'managerial';
+  return validatePayrollComponents(computePayrollComponents(rate, headingKey, {}));
+}
+
+function renderPayrollBreakdown(){
+  const box = document.getElementById('payrollBreakdownBox');
+  if(!box) return;
+  const rate = Number((document.getElementById('f_ratePay') || {}).value) || 0;
+  const headingKey = (document.getElementById('f_salaryHeading') || {}).value || 'managerial';
+  const manual = {
+    pf:  Number((document.getElementById('f_pf') || {}).value) || 0,
+    esi: Number((document.getElementById('f_esiDeduction') || {}).value) || 0
+  };
+  const comps = computePayrollComponents(rate, headingKey, manual);
+  const missing = validatePayrollComponents(comps);
+
+  if(!rate){
+    box.innerHTML = '<p class="calc-empty">Enter a Rate of Pay to see the full salary breakdown.</p>';
+    return;
+  }
+  const auto = '<span class="pay-auto" title="Calculated automatically from the configured payroll formula.">🧮</span>';
+  const rows = comps.filter(c => c.applies).map(c => `
+    <tr class="${c.group === 'total' ? 'pay-total' : ''}">
+      <td>${escapeHtml(c.label)} ${c.auto ? auto : '<span class="pay-manual" title="No formula is configured for this heading in the payroll master, so it is entered by hand.">✏️ manual</span>'}</td>
+      <td class="num">${c.missing ? '<span style="color:var(--red)">not configured</span>' : '₹' + fmtMoney(c.value)}</td>
+      <td class="pay-formula">${escapeHtml(c.formula)}</td>
+    </tr>`).join('');
+  const na = comps.filter(c => !c.applies).map(c => c.label);
+
+  box.innerHTML = `<div class="pay-box">
+    <div class="pay-head">Calculated from Rate of Pay — full month, before leave deduction</div>
+    <table class="pay-table"><tbody>${rows}</tbody></table>
+    ${na.length ? `<p class="calc-note">Not applicable to this heading: ${escapeHtml(na.join(', '))}.</p>` : ''}
+    ${missing.length ? `<p class="pay-warn">No formula configured for: <strong>${escapeHtml(missing.join(', '))}</strong>. Fix the payroll master before saving.</p>` : ''}
+    <p class="calc-note">Leave days reduce each earning in proportion on the Salary Sheet; this shows a full month.</p>
+  </div>`;
+}
+
 function updateBonusPreview(){
-  const basic = Number(document.getElementById('f_basic').value)||0;
-  const hra = Number(document.getElementById('f_hra').value)||0;
+  // Basic and HRA come from the payroll master now, not from typed boxes — the
+  // bonus used to be worked out from figures the Salary Sheet ignored, so the
+  // two could disagree for the same employee.
+  const rate = Number((document.getElementById('f_ratePay') || {}).value) || 0;
+  const headingKey = (document.getElementById('f_salaryHeading') || {}).value || 'managerial';
+  const comps = computePayrollComponents(rate, headingKey, {});
+  const pick = k => (comps.find(c => c.key === k) || {}).value || 0;
+  const basic = pick('basic');
+  const hra = pick('hra');
   const other = Number(document.getElementById('f_otherAllowances').value)||0;
   const eligible = document.getElementById('f_diwaliEligible').value;
   const bonus = eligible === 'yes' ? (basic+hra+other) : 0;
@@ -5595,6 +5762,16 @@ async function saveEmployeeForm(){
     msg.classList.add('error');
     return;
   }
+  // Every heading the master says is derivable has to have actually produced a
+  // figure. Saving on a formula that did not run would put a wrong salary into
+  // the sheet silently, so the heading is named and the save refused.
+  const payrollErrors = payrollBlockingErrors();
+  if(payrollErrors.length){
+    msg.textContent = 'Payroll formula missing or invalid for: ' + payrollErrors.join(', ') +
+      '. Correct the payroll master before saving this employee.';
+    msg.classList.add('error');
+    return;
+  }
   const needsTracking = document.getElementById('f_needsTracking').value;
   const draft = editingEmployeeDraft;
 
@@ -5645,8 +5822,8 @@ async function saveEmployeeForm(){
     phone: document.getElementById('f_phone').value.trim(),
     email: document.getElementById('f_email').value.trim(),
     address: document.getElementById('f_address').value.trim(),
-    basic: Number(document.getElementById('f_basic').value)||0,
-    hra: Number(document.getElementById('f_hra').value)||0,
+    basic: payrollValue('basic'),
+    hra: payrollValue('hra'),
     otherAllowances: Number(document.getElementById('f_otherAllowances').value)||0,
     dressAllowance: Number(document.getElementById('f_dressAllowance').value)||0,
     mobileExpense: Number(document.getElementById('f_mobileExpense').value)||0,
