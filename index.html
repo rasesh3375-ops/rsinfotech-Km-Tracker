@@ -381,6 +381,9 @@
   .pol-ok{font-size:11.5px;color:var(--green);font-weight:700;}
   .pol-warn-row td:first-child{box-shadow:inset 3px 0 0 var(--red);}
 
+  .cheque-img{width:100%;max-width:420px;border:1px solid var(--line);border-radius:10px;
+    margin-top:8px;display:block;}
+
   .draft-note{display:block;font-size:11px;color:var(--muted);margin-top:8px;text-align:center;}
 
   /* ---- loading skeletons ---- */
@@ -2478,7 +2481,7 @@ async function compressImageFile(file){
         const scale = Math.max(size / img.width, size / img.height);
         const w = img.width * scale, h = img.height * scale;
         ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
-        resolve(canvas.toDataURL('image/jpeg', 0.55));
+        resolve(canvas.toDataURL('image/jpeg', qualityOverride || 0.55));
       };
       img.onerror = reject;
       img.src = reader.result;
@@ -6490,8 +6493,8 @@ async function renderActivityLogList(){
 // is stored base64 inside the employees record, so its size is paid again on
 // every single save of any employee — 900px at quality 0.7 was roughly four
 // times bigger than it needed to be for reading an Aadhaar or PAN number.
-async function compressDocumentFile(file){
-  const maxDim = 640;
+async function compressDocumentFile(file, dimOverride, qualityOverride){
+  const maxDim = dimOverride || 640;
   return new Promise((resolve, reject) => {
     const img = new Image();
     const reader = new FileReader();
@@ -6696,6 +6699,10 @@ function employeeModalHtml(emp){
 
       <div class="field-group">
         <div class="sec-title">Statutory &amp; bank details</div>
+        <label class="field">Cancelled cheque</label>
+        <input type="file" accept="image/*" id="f_chequeFile" onchange="handleChequeUpload(event)">
+        <div id="chequePreview">${emp.chequeImg ? `<img class="cheque-img" src="${emp.chequeImg}" alt="Cancelled cheque">` : ''}</div>
+        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 12px;">The cheque stays on screen while you fill in the fields below, so the account number and IFSC are copied from the document rather than from memory. The IFSC is checked against the bank name as you type.</p>
         <label class="field">PAN number</label>
         <input type="text" id="f_pan" placeholder="ABCDE1234F" value="${emp.pan}">
         <div style="height:12px"></div>
@@ -6709,10 +6716,10 @@ function employeeModalHtml(emp){
         <input type="text" id="f_esiNumber" placeholder="ESI number" value="${emp.esiNumber}">
         <div style="height:12px"></div>
         <label class="field">Bank name</label>
-        <input type="text" id="f_bankName" placeholder="e.g. HDFC Bank" value="${emp.bankName}">
+        <input type="text" oninput="checkBankFieldsLive()" id="f_bankName" placeholder="e.g. HDFC Bank" value="${emp.bankName}">
         <div style="height:12px"></div>
         <label class="field">IFSC code</label>
-        <input type="text" id="f_ifsc" placeholder="e.g. HDFC0001234" value="${emp.ifsc}">
+        <input type="text" oninput="checkBankFieldsLive()" id="f_ifsc" placeholder="e.g. HDFC0001234" value="${emp.ifsc}">
         <div style="height:12px"></div>
         <label class="field">Bank account number</label>
         <input type="text" id="f_accountNumber" placeholder="Account number" value="${emp.accountNumber}">
@@ -6771,6 +6778,18 @@ function employeeModalHtml(emp){
         <label class="field">PAN card</label>
         <input type="file" accept="image/*" id="f_panFile" onchange="handleDocUpload(event,'panCardImg')">
         ${emp.panCardImg ? '<div class="doc-card">✓ Saved</div>' : ''}
+        <div style="height:12px"></div>
+        <label class="field">Passport photo</label>
+        <input type="file" accept="image/*" id="f_photoFile" onchange="handleDocUpload(event,'photoImg')">
+        ${emp.photoImg ? '<div class="doc-card">✓ Saved</div>' : ''}
+        <div style="height:12px"></div>
+        <label class="field">Residence proof</label>
+        <input type="file" accept="image/*" id="f_residenceFile" onchange="handleDocUpload(event,'residenceProofImg')">
+        ${emp.residenceProofImg ? '<div class="doc-card">✓ Saved</div>' : ''}
+        <div style="height:12px"></div>
+        <label class="field">Last salary slip</label>
+        <input type="file" accept="image/*" id="f_lastSlipFile" onchange="handleDocUpload(event,'lastSalarySlipImg')">
+        ${emp.lastSalarySlipImg ? '<div class="doc-card">✓ Saved</div>' : ''}
         <div style="height:12px"></div>
         <label class="field">Other documents</label>
         <a href="#" onclick="addOtherDocSlot();return false;" style="font-size:13px;color:var(--amber-dark);font-weight:600;">+ Add another document</a>
@@ -6890,6 +6909,33 @@ function updateBonusPreview(){
   const eligible = document.getElementById('f_diwaliEligible').value;
   const bonus = eligible === 'yes' ? (basic+hra+other) : 0;
   document.getElementById('bonusPreview').textContent = 'Calculated Diwali bonus: Rs. ' + bonus;
+}
+
+// The cheque is kept at a higher resolution than an ID scan, because the whole
+// point is reading an account number off it. Its own limit, not the shared one.
+async function handleChequeUpload(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const box = document.getElementById('chequePreview');
+  if(box) box.innerHTML = '<p class="dash-muted">Reading cheque…</p>';
+  const dataUrl = await compressDocumentFile(file, 1400, 0.72);
+  editingEmployeeDraft.chequeImg = dataUrl;
+  if(box) box.innerHTML = '<img class="cheque-img" src="' + dataUrl + '" alt="Cancelled cheque">';
+  scheduleEmployeeDraftSave();
+  checkBankFieldsLive();
+}
+
+// Runs as the bank fields are typed, so a mismatch is caught against the cheque
+// still on screen rather than at save time.
+function checkBankFieldsLive(){
+  const note = document.getElementById('bankLiveNote');
+  if(!note) return;
+  const ifsc = (document.getElementById('f_ifsc') || {}).value || '';
+  const bank = (document.getElementById('f_bankName') || {}).value || '';
+  const r = validateIfsc(ifsc, bank);
+  note.innerHTML = r.warnings.length
+    ? r.warnings.map(w => '<span class="pol-warn">⚠ ' + escapeHtml(w) + '</span>').join('')
+    : (ifsc.trim() ? '<span class="pol-ok">✓ IFSC format valid and consistent with the bank name</span>' : '');
 }
 
 async function handleDocUpload(event, field){
