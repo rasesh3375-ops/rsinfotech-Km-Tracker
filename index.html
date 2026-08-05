@@ -6544,62 +6544,7 @@ function employeeModalHtml(emp){
       <h2>${editingEmployeeId ? 'Edit employee' : 'Add employee'}</h2>
       <p class="hint">This information is stored once and auto-fills letters and payslips for this employee — no need to retype it each time.</p>
 
-      <div class="field-group">
-        <div class="sec-title">Salary sheet heading</div>
-        <label class="field">Heading</label>
-        <select class="field-input" id="f_salaryHeading" onchange="toggleStatutoryFieldsForHeading()">
-          ${Object.keys(SALARY_HEADINGS).map(k => `<option value="${k}" ${(emp.salaryHeading===k || (!emp.salaryHeading && k==='managerial'))?'selected':''}>${SALARY_HEADINGS[k].label}</option>`).join('')}
-        </select>
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Picks which Basic/HRA/LTA split formula applies to this employee on the Salary Sheet, and which of PF/ESI/PT apply at all — set once here, applied automatically every month.</p>
-        <div id="headingCalcBox"></div>
-        <div style="height:14px"></div>
-        <label class="field">Rate of pay (monthly)</label>
-        <input type="number" id="f_ratePay" placeholder="0" value="${emp.ratePay||''}" oninput="renderPayrollBreakdown()">
-        <div id="payrollBreakdownBox"></div>
-        <div style="height:12px"></div>
-        <label class="field">Advance for temporary</label>
-        <input type="number" id="f_advanceTemp" placeholder="0" value="${emp.advanceTemp||''}">
-        <div style="height:12px"></div>
-        <label class="field">Advance</label>
-        <input type="number" id="f_advance" placeholder="0" value="${emp.advance||''}">
-      </div>
-
-      <div class="field-group">
-        <div class="sec-title">Work policy</div>
-        <label class="field">Employee type</label>
-        <select class="field-input" id="f_employeeType" onchange="toggleLeaveFieldsForType()">
-          <option value="field" ${(!emp.employeeType || emp.employeeType==='field')?'selected':''}>Field Engineer</option>
-          <option value="wfh" ${emp.employeeType==='wfh'?'selected':''}>Work From Home</option>
-          <option value="resident" ${emp.employeeType==='resident'?'selected':''}>Resident Engineer</option>
-        </select>
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">This decides which leave rules apply. Resident Engineers are excluded entirely from SL/EL balances, overtime, short leave, late-coming and sandwich-leave rules. Field Engineers get the full policy including overtime; Work From Home gets 4 sick leaves/year (instead of 7) and no short leave.</p>
-        <div id="leaveOpeningFields" class="${emp.employeeType==='resident'?'hidden':''}" style="margin-top:14px;">
-          <label class="field">SL opening balance (this year)</label>
-          <input type="number" id="f_slOpening" placeholder="0" value="${emp.slOpening??''}">
-          <div style="height:12px"></div>
-          <label class="field">EL opening balance (this year)</label>
-          <input type="number" id="f_elOpening" placeholder="0" value="${emp.elOpening??''}">
-          <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Enter manually for this year only. From next year onward, the EL Calculation Sheet report carries the closing balance forward automatically.</p>
-        </div>
-      </div>
-
-      <div class="field-group">
-        <div class="sec-title">Bond &amp; retention money</div>
-        <label class="field">Bond start date</label>
-        <input type="date" id="f_bondStart" value="${emp.bondStart||''}">
-        <div style="height:12px"></div>
-        <label class="field">Bond end date</label>
-        <input type="date" id="f_bondEnd" value="${emp.bondEnd||''}">
-        <div style="height:12px"></div>
-        <label class="field">Retention money (total)</label>
-        <input type="number" id="f_retentionMoney" placeholder="0" value="${emp.retentionMoney||''}">
-        <div style="height:12px"></div>
-        <label class="field">Number of months to deduct over</label>
-        <input type="number" id="f_retentionMonths" placeholder="e.g. 12" value="${emp.retentionMonths||''}">
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">If retention money is set, it's split evenly across these months starting from the bond start date, and deducted from the Salary Sheet automatically each month — shown as its own line item, and tracked in the Retention Money Detail report.</p>
-      </div>
-
-      <div class="field-group">
+            <div class="field-group">
         <div class="sec-title">Basic details</div>
         <label class="field">Employee ID</label>
         <input type="text" id="f_id" placeholder="EMP-1001" value="${emp.id}">
@@ -6631,6 +6576,27 @@ function employeeModalHtml(emp){
       </div>
 
       <div class="field-group">
+        <div class="sec-title">Contact</div>
+        <label class="field">Phone</label>
+        <input type="text" id="f_phone" placeholder="10-digit mobile number" value="${escapeHtml(emp.phone)}">
+        <div style="height:12px"></div>
+        <label class="field">Email</label>
+        <input type="text" id="f_email" placeholder="name@company.com" value="${escapeHtml(emp.email)}">
+        <div style="height:12px"></div>
+        <label class="field">Address</label>
+        <input type="text" id="f_address" placeholder="Residential address" value="${escapeHtml(emp.address)}">
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Emergency contact</div>
+        <label class="field">Contact name</label>
+        <input type="text" id="f_emergencyName" placeholder="Full name" value="${emp.emergencyName}">
+        <div style="height:12px"></div>
+        <label class="field">Contact number</label>
+        <input type="text" id="f_emergencyNumber" placeholder="10-digit mobile number" value="${emp.emergencyNumber}">
+      </div>
+
+      <div class="field-group">
         <div class="sec-title">Employment dates</div>
         <label class="field">Date of joining</label>
         <input type="date" id="f_doj" value="${emp.doj}">
@@ -6643,39 +6609,63 @@ function employeeModalHtml(emp){
       </div>
 
       <div class="field-group">
-        <div class="sec-title">Statutory &amp; bank details</div>
-        <label class="field">PAN number</label>
-        <input type="text" id="f_pan" placeholder="ABCDE1234F" value="${emp.pan}">
-        <div style="height:12px"></div>
-        <label class="field">Aadhaar number</label>
-        <input type="text" id="f_aadhaar" placeholder="XXXX XXXX XXXX" value="${emp.aadhaar}">
-        <div style="height:12px"></div>
-        <label class="field">UAN (PF number)</label>
-        <input type="text" id="f_uan" placeholder="10-digit UAN" value="${emp.uan}">
-        <div style="height:12px"></div>
-        <label class="field">ESI number</label>
-        <input type="text" id="f_esiNumber" placeholder="ESI number" value="${emp.esiNumber}">
-        <div style="height:12px"></div>
-        <label class="field">Bank name</label>
-        <input type="text" id="f_bankName" placeholder="e.g. HDFC Bank" value="${emp.bankName}">
-        <div style="height:12px"></div>
-        <label class="field">IFSC code</label>
-        <input type="text" id="f_ifsc" placeholder="e.g. HDFC0001234" value="${emp.ifsc}">
-        <div style="height:12px"></div>
-        <label class="field">Bank account number</label>
-        <input type="text" id="f_accountNumber" placeholder="Account number" value="${emp.accountNumber}">
+        <div class="sec-title">Work policy</div>
+        <label class="field">Employee type</label>
+        <select class="field-input" id="f_employeeType" onchange="toggleLeaveFieldsForType()">
+          <option value="field" ${(!emp.employeeType || emp.employeeType==='field')?'selected':''}>Field Engineer</option>
+          <option value="wfh" ${emp.employeeType==='wfh'?'selected':''}>Work From Home</option>
+          <option value="resident" ${emp.employeeType==='resident'?'selected':''}>Resident Engineer</option>
+        </select>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">This decides which leave rules apply. Resident Engineers are excluded entirely from SL/EL balances, overtime, short leave, late-coming and sandwich-leave rules. Field Engineers get the full policy including overtime; Work From Home gets 4 sick leaves/year (instead of 7) and no short leave.</p>
+        <div id="leaveOpeningFields" class="${emp.employeeType==='resident'?'hidden':''}" style="margin-top:14px;">
+          <label class="field">SL opening balance (this year)</label>
+          <input type="number" id="f_slOpening" placeholder="0" value="${emp.slOpening??''}">
+          <div style="height:12px"></div>
+          <label class="field">EL opening balance (this year)</label>
+          <input type="number" id="f_elOpening" placeholder="0" value="${emp.elOpening??''}">
+          <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Enter manually for this year only. From next year onward, the EL Calculation Sheet report carries the closing balance forward automatically.</p>
+        </div>
       </div>
 
       <div class="field-group">
-        <div class="sec-title">Contact</div>
-        <label class="field">Phone</label>
-        <input type="text" id="f_phone" placeholder="10-digit mobile number" value="${escapeHtml(emp.phone)}">
+        <div class="sec-title">Field tracking</div>
+        <label class="field">Does this employee need km tracking (field engineer)?</label>
+        <select class="field-input" id="f_needsTracking" onchange="toggleTrackingFields()">
+          <option value="no" ${emp.trackingEnabled!=='yes'?'selected':''}>No</option>
+          <option value="yes" ${emp.trackingEnabled==='yes'?'selected':''}>Yes</option>
+        </select>
+        <div id="trackingLoginFields" class="${emp.trackingEnabled==='yes'?'':'hidden'}" style="margin-top:12px;">
+          ${emp.trackingUsername ? `
+            <p style="font-size:12.5px;color:var(--muted);margin:0;">Tracking login already created: <strong style="color:var(--navy);">@${escapeHtml(emp.trackingUsername)}</strong>. Use "Reset password" in the Tracking tab if they need a new one.</p>
+          ` : `
+            <label class="field">Username for their tracking login</label>
+            <input type="text" id="f_trackingUsername" placeholder="e.g. ramesh.patil" autocapitalize="none" autocorrect="off" value="${escapeHtml(emp.trackingUsername||'')}">
+            <div style="height:12px"></div>
+            <label class="field">Temporary password</label>
+            <input type="text" id="f_trackingPassword" placeholder="e.g. field2026">
+            <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Saving this employee will create their km-tracking login automatically — share the username and password with them directly.</p>
+          `}
+        </div>
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Salary sheet heading</div>
+        <label class="field">Heading</label>
+        <select class="field-input" id="f_salaryHeading" onchange="toggleStatutoryFieldsForHeading()">
+          ${Object.keys(SALARY_HEADINGS).map(k => `<option value="${k}" ${(emp.salaryHeading===k || (!emp.salaryHeading && k==='managerial'))?'selected':''}>${SALARY_HEADINGS[k].label}</option>`).join('')}
+        </select>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Picks which Basic/HRA/LTA split formula applies to this employee on the Salary Sheet, and which of PF/ESI/PT apply at all — set once here, applied automatically every month.</p>
+        <div id="headingCalcBox"></div>
+        <div style="height:14px"></div>
+        <label class="field">Rate of pay (monthly)</label>
+        <input type="number" id="f_ratePay" placeholder="0" value="${emp.ratePay||''}" oninput="renderPayrollBreakdown()">
+        <div id="payrollBreakdownBox"></div>
         <div style="height:12px"></div>
-        <label class="field">Email</label>
-        <input type="text" id="f_email" placeholder="name@company.com" value="${escapeHtml(emp.email)}">
+        <label class="field">Advance for temporary</label>
+        <input type="number" id="f_advanceTemp" placeholder="0" value="${emp.advanceTemp||''}">
         <div style="height:12px"></div>
-        <label class="field">Address</label>
-        <input type="text" id="f_address" placeholder="Residential address" value="${escapeHtml(emp.address)}">
+        <label class="field">Advance</label>
+        <input type="number" id="f_advance" placeholder="0" value="${emp.advance||''}">
       </div>
 
       <div class="field-group">
@@ -6705,6 +6695,30 @@ function employeeModalHtml(emp){
       </div>
 
       <div class="field-group">
+        <div class="sec-title">Statutory &amp; bank details</div>
+        <label class="field">PAN number</label>
+        <input type="text" id="f_pan" placeholder="ABCDE1234F" value="${emp.pan}">
+        <div style="height:12px"></div>
+        <label class="field">Aadhaar number</label>
+        <input type="text" id="f_aadhaar" placeholder="XXXX XXXX XXXX" value="${emp.aadhaar}">
+        <div style="height:12px"></div>
+        <label class="field">UAN (PF number)</label>
+        <input type="text" id="f_uan" placeholder="10-digit UAN" value="${emp.uan}">
+        <div style="height:12px"></div>
+        <label class="field">ESI number</label>
+        <input type="text" id="f_esiNumber" placeholder="ESI number" value="${emp.esiNumber}">
+        <div style="height:12px"></div>
+        <label class="field">Bank name</label>
+        <input type="text" id="f_bankName" placeholder="e.g. HDFC Bank" value="${emp.bankName}">
+        <div style="height:12px"></div>
+        <label class="field">IFSC code</label>
+        <input type="text" id="f_ifsc" placeholder="e.g. HDFC0001234" value="${emp.ifsc}">
+        <div style="height:12px"></div>
+        <label class="field">Bank account number</label>
+        <input type="text" id="f_accountNumber" placeholder="Account number" value="${emp.accountNumber}">
+      </div>
+
+      <div class="field-group">
         <div class="sec-title">Loan &amp; advance</div>
         <label class="field">Loan / advance amount</label>
         <input type="number" id="f_loanAmount" placeholder="0" value="${emp.loanAmount||''}">
@@ -6721,6 +6735,22 @@ function employeeModalHtml(emp){
       </div>
 
       <div class="field-group">
+        <div class="sec-title">Bond &amp; retention money</div>
+        <label class="field">Bond start date</label>
+        <input type="date" id="f_bondStart" value="${emp.bondStart||''}">
+        <div style="height:12px"></div>
+        <label class="field">Bond end date</label>
+        <input type="date" id="f_bondEnd" value="${emp.bondEnd||''}">
+        <div style="height:12px"></div>
+        <label class="field">Retention money (total)</label>
+        <input type="number" id="f_retentionMoney" placeholder="0" value="${emp.retentionMoney||''}">
+        <div style="height:12px"></div>
+        <label class="field">Number of months to deduct over</label>
+        <input type="number" id="f_retentionMonths" placeholder="e.g. 12" value="${emp.retentionMonths||''}">
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">If retention money is set, it's split evenly across these months starting from the bond start date, and deducted from the Salary Sheet automatically each month — shown as its own line item, and tracked in the Retention Money Detail report.</p>
+      </div>
+
+      <div class="field-group">
         <div class="sec-title">Diwali bonus eligibility</div>
         <label class="field">Eligible this year?</label>
         <select class="field-input" id="f_diwaliEligible" onchange="updateBonusPreview()">
@@ -6729,36 +6759,6 @@ function employeeModalHtml(emp){
         </select>
         <div class="bonus-callout" id="bonusPreview" style="margin-top:12px;">Calculated Diwali bonus: Rs. ${diwaliBonusFor(emp)}</div>
         <p style="font-size:12px;color:var(--muted);margin:0;">Bonus amount is calculated automatically as Basic + HRA + Other allowances (PF, ESI, and PT are not included) - no need to enter it manually.</p>
-      </div>
-
-      <div class="field-group">
-        <div class="sec-title">Emergency contact</div>
-        <label class="field">Contact name</label>
-        <input type="text" id="f_emergencyName" placeholder="Full name" value="${emp.emergencyName}">
-        <div style="height:12px"></div>
-        <label class="field">Contact number</label>
-        <input type="text" id="f_emergencyNumber" placeholder="10-digit mobile number" value="${emp.emergencyNumber}">
-      </div>
-
-      <div class="field-group">
-        <div class="sec-title">Field tracking</div>
-        <label class="field">Does this employee need km tracking (field engineer)?</label>
-        <select class="field-input" id="f_needsTracking" onchange="toggleTrackingFields()">
-          <option value="no" ${emp.trackingEnabled!=='yes'?'selected':''}>No</option>
-          <option value="yes" ${emp.trackingEnabled==='yes'?'selected':''}>Yes</option>
-        </select>
-        <div id="trackingLoginFields" class="${emp.trackingEnabled==='yes'?'':'hidden'}" style="margin-top:12px;">
-          ${emp.trackingUsername ? `
-            <p style="font-size:12.5px;color:var(--muted);margin:0;">Tracking login already created: <strong style="color:var(--navy);">@${escapeHtml(emp.trackingUsername)}</strong>. Use "Reset password" in the Tracking tab if they need a new one.</p>
-          ` : `
-            <label class="field">Username for their tracking login</label>
-            <input type="text" id="f_trackingUsername" placeholder="e.g. ramesh.patil" autocapitalize="none" autocorrect="off" value="${escapeHtml(emp.trackingUsername||'')}">
-            <div style="height:12px"></div>
-            <label class="field">Temporary password</label>
-            <input type="text" id="f_trackingPassword" placeholder="e.g. field2026">
-            <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Saving this employee will create their km-tracking login automatically — share the username and password with them directly.</p>
-          `}
-        </div>
       </div>
 
       <div class="field-group">
