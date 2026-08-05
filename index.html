@@ -4018,6 +4018,65 @@ function computePf(wage){
   };
 }
 
+// ---- employees' state insurance ----
+const ESI_RULES = {
+  employeePct: 0.0075,
+  employerPct: 0.0325,
+  wageCeiling: 21000,           // exempt strictly above this gross
+  disabledCeiling: 25000,       // higher ceiling for persons with disabilities
+  lowWageDailyLimit: 176,       // at or below this daily wage the employee share is waived
+  daysInMonthForDailyWage: 26   // wage days used to derive a daily rate
+};
+
+// Which half-yearly contribution period a date falls in, and when it ends.
+// This matters because coverage cannot be dropped mid-period.
+function esiContributionPeriod(d){
+  const dt = d ? new Date(d) : new Date();
+  const y = dt.getFullYear(), m = dt.getMonth();   // 0-11
+  return (m >= 3 && m <= 8)
+    ? { label:'April–September', endsOn: new Date(y, 8, 30) }
+    : { label:'October–March',   endsOn: m >= 9 ? new Date(y + 1, 2, 31) : new Date(y, 2, 31) };
+}
+
+// gross is the ESI wage: Basic, DA/HRA, overtime and regular monthly
+// allowances. Annual bonus, gratuity and the employer's PF share are excluded,
+// so this is deliberately NOT the CTC figure.
+function computeEsi(gross, opts){
+  const o = opts || {};
+  const g = Number(gross) || 0;
+  const ceiling = o.isDisabled ? ESI_RULES.disabledCeiling : ESI_RULES.wageCeiling;
+  const aboveCeiling = g > ceiling;
+
+  // "Once covered, always covered": an employee already contributing when the
+  // period began keeps contributing to the end of it, on the NEW wage, even
+  // after a rise past the ceiling. Dropping them the month of the increment is
+  // the usual mistake and it leaves the return short.
+  const period = esiContributionPeriod(o.asOf);
+  const mustContinue = aboveCeiling && !!o.coveredAtPeriodStart;
+  const covered = !aboveCeiling || mustContinue;
+
+  if(!covered){
+    return { covered:false, employee:0, employer:0, total:0, ceiling, period,
+             reason:'Gross of ₹' + fmtMoney(g) + ' is above the ₹' + fmtMoney(ceiling) + ' ceiling.' };
+  }
+  // Low earners keep their share; the employer still pays the full 3.25%.
+  const dailyWage = g / ESI_RULES.daysInMonthForDailyWage;
+  const lowWage = dailyWage <= ESI_RULES.lowWageDailyLimit;
+  const employee = lowWage ? 0 : g * ESI_RULES.employeePct;
+  const employer = g * ESI_RULES.employerPct;
+  return {
+    covered:true, employee, employer, total: employee + employer, ceiling, period, lowWage,
+    reason: mustContinue
+      ? 'Above the ceiling, but coverage continues to ' + period.endsOn.toLocaleDateString('en-IN') +
+        ' — contributions cannot stop mid-period.'
+      : lowWage
+        ? 'Daily wage of ₹' + fmtMoney(Math.round(dailyWage)) + ' is at or below ₹' +
+          ESI_RULES.lowWageDailyLimit + ', so the employee share is waived and the employer pays the full ' +
+          headingPct(ESI_RULES.employerPct) + '.'
+        : headingPct(ESI_RULES.employeePct) + ' employee and ' + headingPct(ESI_RULES.employerPct) + ' employer on ₹' + fmtMoney(g) + '.'
+  };
+}
+
 const PT_GROSS_THRESHOLD = 12000;   // nil at or below this gross
 const PT_AMOUNT = 200;              // flat, per month, above it
 const PT_ANNUAL_CAP = 2500;         // statutory ceiling for the year
@@ -4496,7 +4555,12 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   }
   const gross = basic + hra + lta;
   const pf = heading.pf ? (Number(emp.pf) || 0) : 0;
-  const esi = heading.esi ? (Number(emp.esiDeduction) || 0) : 0;
+  const esiCalc = heading.esi ? computeEsi(gross, {
+        isDisabled: emp.esiDisabled === 'yes',
+        coveredAtPeriodStart: emp.esiCoveredAtPeriodStart === 'yes',
+        asOf: dateList[0]
+      }) : { employee:0, employer:0 };
+  const esi = esiCalc.employee;
   const pt = heading.pt ? monthlyPtFor(gross, emp.ptPaidThisYear) : 0;
   const advanceTemp = Number(emp.advanceTemp) || 0;
   const advance = Number(emp.advance) || 0;
@@ -4514,7 +4578,8 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   const employerPf = e.employerEpf;
   const pfAdmin = (heading.pf && !excluded) ? pfWage * PF_RULES.adminPct : 0;
   const edli    = (heading.pf && !excluded) ? pfWage * PF_RULES.edliPct  : 0;
-  const employerCont = pen + employerPf + pfAdmin + edli;
+  const esiEmployer = esiCalc.employer;
+  const employerCont = pen + employerPf + pfAdmin + edli + esiEmployer;
   const ctc = gross + employerCont;
   // Balances carried forward. Opening figures are entered once per employee;
   // from there the sheet subtracts what this month recovers or uses, so the
@@ -4525,7 +4590,7 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   const halfDayLeaveBal = Math.max(0, (Number(emp.slOpening) || 0) - summary.slUsed);
   return { rate, leaveDays, leaveAmount, basic, hra, lta, gross, pf, esi, pt, advanceTemp, advance,
            retention, totalDeduction, netSalary, pen, employerPf, pfAdmin, edli, employerCont, ctc,
-           advanceBalance, fullDayLeaveBal, halfDayLeaveBal };
+           esiEmployer, advanceBalance, fullDayLeaveBal, halfDayLeaveBal };
 }
 
 async function renderSalarySheet(){
@@ -4550,19 +4615,19 @@ async function renderSalarySheet(){
   // company cost, not money withheld from the employee.
   const cols = ['SR NO','Name','Rate of Pay','Leave Days','Leave Amount','Basic','HRA','LTA','Gross',
     'PF','ESI','PT','Advance Temp','Advance','Retention','Total Deduction','Net Salary',
-    'PEN','Employer PF','PF Admin','EDLI','Employer Cont.','CTC',
+    'PEN','Employer PF','PF Admin','EDLI','ESI Employer','Employer Cont.','CTC',
     'Advance Balance','Full Day Leave Bal','Half Day Leave Bal'];
   let bodyRows = '';
   let srNo = 1;
-  const grand = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, employerCont:0, ctc:0, advanceBalance:0 };
+  const grand = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0 };
   const csvRows = [];
 
   for(const headingKey of SALARY_HEADING_ORDER){
     const group = employees.filter(e => (e.salaryHeading||'managerial') === headingKey);
     if(!group.length) continue;
-    bodyRows += `<tr class="sal-heading"><td colspan="26">${SALARY_HEADINGS[headingKey].label}</td></tr>`;
+    bodyRows += `<tr class="sal-heading"><td colspan="27">${SALARY_HEADINGS[headingKey].label}</td></tr>`;
     csvRows.push([SALARY_HEADINGS[headingKey].label]);
-    const sub = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, employerCont:0, ctc:0, advanceBalance:0 };
+    const sub = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0 };
     for(const emp of group){
       const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
       bodyRows += `<tr><td>${srNo++}</td><td class="sal-name">${escapeHtml(emp.name)}</td><td>${fmtMoney(s.rate)}</td><td>${s.leaveDays}</td><td>${fmtMoney(s.leaveAmount)}</td>` +
@@ -4570,19 +4635,19 @@ async function renderSalarySheet(){
         `<td>${fmtMoney(s.pf)}</td><td>${fmtMoney(s.esi)}</td><td>${fmtMoney(s.pt)}</td><td>${fmtMoney(s.advanceTemp)}</td><td>${fmtMoney(s.advance)}</td><td>${fmtMoney(s.retention)}</td>` +
         `<td>${fmtMoney(s.totalDeduction)}</td><td>${fmtMoney(s.netSalary)}</td>` +
         `<td>${fmtMoney(s.pen)}</td><td>${fmtMoney(s.employerPf)}</td><td>${fmtMoney(s.pfAdmin)}</td>` +
-        `<td>${fmtMoney(s.edli)}</td><td>${fmtMoney(s.employerCont)}</td><td>${fmtMoney(s.ctc)}</td>` +
+        `<td>${fmtMoney(s.edli)}</td><td>${fmtMoney(s.esiEmployer)}</td><td>${fmtMoney(s.employerCont)}</td><td>${fmtMoney(s.ctc)}</td>` +
         `<td>${fmtMoney(s.advanceBalance)}</td><td>${s.fullDayLeaveBal}</td><td>${s.halfDayLeaveBal}</td></tr>`;
       csvRows.push([srNo-1, emp.name, s.rate, s.leaveDays, s.leaveAmount, s.basic, s.hra, s.lta, s.gross, s.pf, s.esi, s.pt, s.advanceTemp, s.advance, s.retention, s.totalDeduction, s.netSalary,
-        s.pen, s.employerPf, s.pfAdmin, s.edli, s.employerCont, s.ctc,
+        s.pen, s.employerPf, s.pfAdmin, s.edli, s.esiEmployer, s.employerCont, s.ctc,
         s.advanceBalance, s.fullDayLeaveBal, s.halfDayLeaveBal]);
-      ['rate','leaveAmount','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','retention','totalDeduction','netSalary','pen','employerPf','pfAdmin','edli','employerCont','ctc','advanceBalance'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; });
+      ['rate','leaveAmount','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','retention','totalDeduction','netSalary','pen','employerPf','pfAdmin','edli','employerCont','ctc','esiEmployer','advanceBalance'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; });
     }
     bodyRows += `<tr class="sal-subtotal"><td></td><td>Subtotal</td><td>${fmtMoney(sub.rate)}</td><td></td><td>${fmtMoney(sub.leaveAmount)}</td>` +
       `<td>${fmtMoney(sub.basic)}</td><td>${fmtMoney(sub.hra)}</td><td>${fmtMoney(sub.lta)}</td><td>${fmtMoney(sub.gross)}</td>` +
       `<td>${fmtMoney(sub.pf)}</td><td>${fmtMoney(sub.esi)}</td><td>${fmtMoney(sub.pt)}</td><td>${fmtMoney(sub.advanceTemp)}</td><td>${fmtMoney(sub.advance)}</td><td>${fmtMoney(sub.retention)}</td>` +
       `<td>${fmtMoney(sub.totalDeduction)}</td><td>${fmtMoney(sub.netSalary)}</td>` +
       `<td>${fmtMoney(sub.pen)}</td><td>${fmtMoney(sub.employerPf)}</td><td>${fmtMoney(sub.pfAdmin)}</td>` +
-      `<td>${fmtMoney(sub.edli)}</td><td>${fmtMoney(sub.employerCont)}</td><td>${fmtMoney(sub.ctc)}</td>` +
+      `<td>${fmtMoney(sub.edli)}</td><td>${fmtMoney(sub.esiEmployer)}</td><td>${fmtMoney(sub.employerCont)}</td><td>${fmtMoney(sub.ctc)}</td>` +
       `<td>${fmtMoney(sub.advanceBalance)}</td><td></td><td></td></tr>`;
     csvRows.push(['', 'Subtotal', sub.rate, '', sub.leaveAmount, sub.basic, sub.hra, sub.lta, sub.gross, sub.pf, sub.esi, sub.pt, sub.advanceTemp, sub.advance, sub.retention, sub.totalDeduction, sub.netSalary]);
   }
@@ -4592,10 +4657,10 @@ async function renderSalarySheet(){
     `<td>${fmtMoney(grand.pf)}</td><td>${fmtMoney(grand.esi)}</td><td>${fmtMoney(grand.pt)}</td><td>${fmtMoney(grand.advanceTemp)}</td><td>${fmtMoney(grand.advance)}</td><td>${fmtMoney(grand.retention)}</td>` +
     `<td>${fmtMoney(grand.totalDeduction)}</td><td>${fmtMoney(grand.netSalary)}</td>` +
     `<td>${fmtMoney(grand.pen)}</td><td>${fmtMoney(grand.employerPf)}</td><td>${fmtMoney(grand.pfAdmin)}</td>` +
-    `<td>${fmtMoney(grand.edli)}</td><td>${fmtMoney(grand.employerCont)}</td><td>${fmtMoney(grand.ctc)}</td>` +
+    `<td>${fmtMoney(grand.edli)}</td><td>${fmtMoney(grand.esiEmployer)}</td><td>${fmtMoney(grand.employerCont)}</td><td>${fmtMoney(grand.ctc)}</td>` +
     `<td>${fmtMoney(grand.advanceBalance)}</td><td></td><td></td></tr>`;
   csvRows.push(['', 'Grand Total', grand.rate, '', grand.leaveAmount, grand.basic, grand.hra, grand.lta, grand.gross, grand.pf, grand.esi, grand.pt, grand.advanceTemp, grand.advance, grand.retention, grand.totalDeduction, grand.netSalary,
-    grand.pen, grand.employerPf, grand.pfAdmin, grand.edli, grand.employerCont, grand.ctc,
+    grand.pen, grand.employerPf, grand.pfAdmin, grand.edli, grand.esiEmployer, grand.employerCont, grand.ctc,
     grand.advanceBalance, '', '']);
 
   saveFileToDrive(['HR Management','Dashboard','Salary Sheet'], `Salary Sheet - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
@@ -5315,8 +5380,8 @@ const PAYROLL_MASTER = [
   { key:'pf',    label:'PF — employee (12%)', group:'deduction', source:'pfEmployee', flag:'pf' },
   { key:'pfEmployerEps', label:'PF — employer to EPS (8.33%)', group:'employer', source:'pfEps', flag:'pf' },
   { key:'pfEmployerEpf', label:'PF — employer to EPF (3.67%)', group:'employer', source:'pfEpf', flag:'pf' },
-  { key:'esi',   label:'ESI (employee)', group:'deduction', source:'manual', flag:'esi',
-    note:'No ESI rate is configured in the payroll master, so this is entered per employee.' },
+  { key:'esi',   label:'ESI — employee (0.75%)', group:'deduction', source:'esiEmployee', flag:'esi' },
+  { key:'esiEmployer', label:'ESI — employer (3.25%)', group:'employer', source:'esiEmployer', flag:'esi' },
   { key:'pt',    label:'Professional Tax (PT)', group:'deduction', source:'ptRule', flag:'pt' },
   { key:'totalDeduction', label:'Total Deductions', group:'total', source:'sum', of:['pf','esi','pt'] },
   { key:'net',   label:'Net Salary', group:'total', source:'diff', from:'gross', minus:['totalDeduction'] },
@@ -5384,6 +5449,14 @@ function computePayrollComponents(rate, headingKey, manual){
               ' because the wage is above ₹' + fmtMoney(PF_RULES.epsWageCeiling) : '')
           : headingPct(PF_RULES.employerPct) + ' of ' + base + ' less the EPS share' +
             (pf.capApplied ? ' — more than ' + headingPct(0.0367) + ' here, since EPS is capped' : '');
+    } else if(def.source === 'esiEmployee' || def.source === 'esiEmployer'){
+      const gr = out.find(x => x.key === 'gross');
+      const r = computeEsi(gr ? gr.value : 0, {
+        isDisabled: (document.getElementById('f_esiDisabled') || {}).value === 'yes',
+        coveredAtPeriodStart: (document.getElementById('f_esiCovered') || {}).value === 'yes'
+      });
+      value = def.source === 'esiEmployee' ? r.employee : r.employer;
+      formula = r.reason;
     } else if(def.source === 'ptRule'){
       const gross = val('gross');
       value = monthlyPtFor(gross, 0);
@@ -6882,6 +6955,18 @@ function employeeModalHtml(emp){
         <label class="field">Standard deductions</label>
         <input type="number" id="f_stdDeductions" placeholder="0" value="${emp.stdDeductions||''}">
         <div style="height:12px"></div>
+        <label class="field">Person with disability? (raises the ESI ceiling)</label>
+        <select class="field-input" id="f_esiDisabled" onchange="toggleStatutoryFieldsForHeading()">
+          <option value="no" ${emp.esiDisabled!=='yes'?'selected':''}>No</option>
+          <option value="yes" ${emp.esiDisabled==='yes'?'selected':''}>Yes — ceiling ₹25,000</option>
+        </select>
+        <div style="height:10px"></div>
+        <label class="field">Was contributing to ESI when this period began?</label>
+        <select class="field-input" id="f_esiCovered" onchange="toggleStatutoryFieldsForHeading()">
+          <option value="no" ${emp.esiCoveredAtPeriodStart!=='yes'?'selected':''}>No</option>
+          <option value="yes" ${emp.esiCoveredAtPeriodStart==='yes'?'selected':''}>Yes — must continue to period end</option>
+        </select>
+        <div style="height:10px"></div>
         <label class="field">Had a UAN or EPF account before?</label>
         <select class="field-input" id="f_hasPriorUan" onchange="toggleStatutoryFieldsForHeading()">
           <option value="yes" ${emp.hasPriorUan!=='no'?'selected':''}>Yes — has a prior UAN</option>
@@ -6901,7 +6986,10 @@ function employeeModalHtml(emp){
         <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;" id="pfRuleNote"></p>
         <div style="height:12px"></div>
         <label class="field" id="f_esiDeduction_label">ESI</label>
-        <input type="number" id="f_esiDeduction" placeholder="0" value="${emp.esiDeduction||''}" oninput="renderPayrollBreakdown()">
+        <input type="number" id="f_esiDeduction" value="${emp.esiDeduction||''}" readonly
+               title="Calculated automatically from the configured payroll formula."
+               style="background:#F1F4FA;cursor:not-allowed;">
+        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;" id="esiRuleNote"></p>
         <div style="height:12px"></div>
         <label class="field" id="f_pt_label">PT (professional tax)</label>
         <input type="number" id="f_pt" value="${emp.pt||''}" readonly
@@ -7045,7 +7133,7 @@ function toggleStatutoryFieldsForHeading(){
     // PT stays read-only whether or not it applies: it is derived from gross,
     // never entered. PF and ESI have no configured rate, so they are typed.
     // PF and PT are both derived; only ESI is genuinely typed.
-    const derived = (id === 'f_pt' || id === 'f_pf');
+    const derived = (id === 'f_pt' || id === 'f_pf' || id === 'f_esiDeduction');
     input.disabled = derived ? false : !applies;
     if(derived) input.readOnly = true;
     if(!applies){ input.value = ''; input.placeholder = 'Not applicable'; }
@@ -7084,6 +7172,24 @@ function toggleStatutoryFieldsForHeading(){
           fmtMoney(pf.employerTotal) + ' — ₹' + fmtMoney(pf.employerEps) + ' to pension' +
           (pf.capApplied ? ' (capped)' : '') + ' and ₹' + fmtMoney(pf.employerEpf) + ' to EPF.' + why;
       }
+    }
+  }
+
+  const esiEl = document.getElementById('f_esiDeduction');
+  const esiNote = document.getElementById('esiRuleNote');
+  if(esiEl){
+    const hdE = SALARY_HEADINGS[document.getElementById('f_salaryHeading').value] || SALARY_HEADINGS.managerial;
+    if(!hdE.esi){
+      esiEl.value = ''; esiEl.placeholder = 'Not applicable';
+      if(esiNote) esiNote.textContent = 'ESI does not apply to ' + hdE.label + '.';
+    } else {
+      const r = computeEsi(payrollValue('gross'), {
+        isDisabled: (document.getElementById('f_esiDisabled') || {}).value === 'yes',
+        coveredAtPeriodStart: (document.getElementById('f_esiCovered') || {}).value === 'yes'
+      });
+      esiEl.value = Math.round(r.employee * 100) / 100;
+      if(esiNote) esiNote.textContent = r.reason +
+        (r.covered ? ' Employer pays ₹' + fmtMoney(r.employer) + '. Period: ' + r.period.label + '.' : '');
     }
   }
 
@@ -7514,6 +7620,9 @@ async function saveEmployeeForm(){
     stdDeductions: Number(document.getElementById('f_stdDeductions').value)||0,
     pt: payrollValue('pt'),
     advanceOpening: Number(document.getElementById('f_advanceOpening').value)||0,
+    esiDisabled: document.getElementById('f_esiDisabled').value,
+    esiCoveredAtPeriodStart: document.getElementById('f_esiCovered').value,
+    esiEmployer: payrollValue('esiEmployer'),
     hasPriorUan: document.getElementById('f_hasPriorUan').value,
     form11Submitted: document.getElementById('f_form11').value,
     pfEmployerEps: payrollValue('pfEmployerEps'),
