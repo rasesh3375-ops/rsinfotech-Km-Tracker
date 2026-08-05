@@ -286,6 +286,9 @@
     .kpi{transition:none;}
   }
 
+  /* Placeholder / empty-state line inside a dashboard card. */
+  .dash-muted{font-size:13px;color:var(--muted);margin:0;padding:6px 2px;}
+
   .legend-row{display:flex;align-items:center;justify-content:space-between;padding:11px 2px;
     border-bottom:1px solid var(--line);font-size:13.5px;}
   .legend-row:last-child{border-bottom:none;}
@@ -4489,14 +4492,13 @@ async function buildHrDashboardHome(box){
 
   const log = rawLog.slice(0, 6);
 
-  const kpi = (icon, cap, n, sub, tone) => `
+  // `id` is optional and only used by figures that arrive after the first
+  // paint, so they can be filled in without redrawing the whole screen.
+  const kpi = (icon, cap, n, sub, tone, id) => `
     <div class="kpi" data-tone="${tone || 'indigo'}">
       <div class="top"><div class="ic">${icon}</div><div class="cap">${cap}</div></div>
-      <div class="n">${n}</div><div class="sub">${sub}</div>
+      <div class="n"${id ? ` id="${id}"` : ''}>${n}</div><div class="sub">${sub}</div>
     </div>`;
-
-  const legend = (color, label, n) =>
-    `<div class="legend-row"><span class="lbl"><span class="swatch" style="background:${color}"></span>${label}</span><span class="n">${n}</span></div>`;
 
   const feed = log.length ? log.map(l => {
     const d = new Date(l.ts);
@@ -4542,27 +4544,17 @@ async function buildHrDashboardHome(box){
   box.innerHTML = degradedBanner + `
     <div class="kpi-row">
       ${kpi('👷','Active Engineers', moving, 'Currently on duty', 'green')}
-      ${kpi('⏹️','Stopped / Unresponsive', stopped + unresponsive, 'Not responding', 'red')}
+      ${kpi('🚫','Absent Today', '—', 'Marked absent or LP', 'red', 'dashAbsentCount')}
       ${kpi('👥','Total Engineers', onRoll.length, 'All registered', 'indigo')}
       ${kpi('📄','Documents Expiring', expiring.length, 'Within 30 days', 'amber')}
     </div>
 
     <div class="dash-2col">
       <div class="dash-card">
-        <div class="card-head"><h3>Engineers Status</h3></div>
-        <div class="donut-wrap">
-          ${donutSvg([
-            {value: moving, color:'#2E7D4F'},
-            {value: stopped, color:'#B23A32'},
-            {value: unresponsive, color:'#F0A020'}
-          ], 168)}
-          <div class="legend">
-            ${legend('#2E7D4F','Moving', moving)}
-            ${legend('#B23A32','Stopped', stopped)}
-            ${legend('#F0A020','Unresponsive', unresponsive)}
-          </div>
-        </div>
-        <button class="btn ghost full" style="margin-top:14px;" onclick="hrNavigate('tracking')">View all engineers</button>
+        <div class="card-head"><h3>Absent Today</h3>
+          <button class="linkbtn" style="padding:0" onclick="hrNavigate('attendance')">Attendance sheet</button></div>
+        <p class="card-sub" style="margin:0 0 10px;">${todayStr()} — anyone marked A, LP or half-day LP.</p>
+        <div id="dashAbsentBox"><p class="dash-muted">Checking attendance…</p></div>
       </div>
 
       <div class="dash-card">
@@ -4619,6 +4611,62 @@ async function buildHrDashboardHome(box){
   // invalidateSize covers the case where the panel was hidden while laying out.
   updateLiveMap(mapInfos, { mapId: 'dashLiveMap', emptyId: 'dashLiveMapEmpty' });
   setTimeout(invalidateLiveMaps, 60);
+
+  // Deliberately after the paint and deliberately not awaited. Today's absences
+  // need one attendance read per employee, which is exactly the fan-out that
+  // was taken off this screen's critical path — leaving it there would put the
+  // whole dashboard behind however many people are on roll. The card and its
+  // KPI fill themselves in when the reads land.
+  loadDashboardAbsentToday(onRoll);
+}
+
+// Anyone marked absent for today. Read straight from the Attendance Sheet's own
+// codes, so the dashboard and the sheet can never disagree.
+const ABSENT_TODAY_CODES = { A: 'Absent', LP: 'Leave without pay', HLP: 'Half day (LP)' };
+
+// Bumped on every dashboard render so a slow fan-out from a previous visit
+// can't overwrite the card belonging to a newer one.
+let dashAbsentRender = 0;
+
+async function loadDashboardAbsentToday(onRoll){
+  const token = ++dashAbsentRender;
+  const box = document.getElementById('dashAbsentBox');
+  const countEl = document.getElementById('dashAbsentCount');
+  if(!box) return;
+
+  const today = todayStr();
+  // Its own timeout per read, and its own fallback — this must not flip the
+  // "Some figures couldn't be loaded" banner, which describes the first paint.
+  const ms = BACKEND_BUDGET_MS + 1000;
+  const read = p => Promise.race([
+    Promise.resolve(p).catch(() => null),
+    new Promise(r => setTimeout(() => r(null), ms))
+  ]);
+  const atts = await Promise.all(onRoll.map(e => read(getAttendance(e.id))));
+  if(token !== dashAbsentRender) return;
+
+  const absent = [];
+  let unread = 0;
+  onRoll.forEach((e, i) => {
+    const att = atts[i];
+    // A read that failed is unknown, not absent. And a day nobody has marked
+    // yet is not an absence either — the day isn't over. Counting either as
+    // absent would put people on this list who are at work.
+    if(!att){ unread++; return; }
+    const entry = att[today];
+    const label = entry && ABSENT_TODAY_CODES[entry.code];
+    if(label) absent.push({ name: e.name || '—', label });
+  });
+
+  if(countEl) countEl.textContent = absent.length;
+  const note = unread
+    ? `<p class="dash-muted" style="margin-top:10px;">${unread} employee${unread === 1 ? '' : 's'} couldn't be checked — attendance didn't load.</p>`
+    : '';
+  box.innerHTML = absent.length
+    ? absent.sort((a, b) => a.name.localeCompare(b.name)).map(a => `
+        <div class="legend-row"><span>${a.name}</span>
+          <span class="feed-tag" style="background:#FBE3E0;color:#B23A32;">${a.label}</span></div>`).join('') + note
+    : `<p class="dash-muted">Nobody is marked absent today.</p>${note}`;
 }
 
 // ---- dashboard ----
