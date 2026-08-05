@@ -350,6 +350,25 @@
     #hrContent select,#hrContent input,#hrContent textarea{font-size:16px;}
   }
 
+  /* ---- global search ---- */
+  .gs-overlay{position:fixed;inset:0;z-index:90;background:rgba(22,33,62,.34);
+    display:flex;align-items:flex-start;justify-content:center;padding:12vh 16px 16px;}
+  .gs-panel{width:100%;max-width:560px;background:var(--paper);border:1px solid var(--line);
+    border-radius:14px;box-shadow:0 18px 50px rgba(22,33,62,.3);overflow:hidden;}
+  .gs-input{width:100%;box-sizing:border-box;border:none;border-bottom:1px solid var(--line);
+    padding:16px 18px;font-size:16px;color:var(--navy);outline:none;background:none;}
+  .gs-results{max-height:52vh;overflow-y:auto;}
+  .gs-row{display:flex;align-items:center;gap:11px;padding:11px 18px;cursor:pointer;}
+  .gs-row:hover,.gs-row.sel{background:#EEF1F7;}
+  .gs-row .gs-ic{width:28px;height:28px;border-radius:8px;background:#E7ECFA;display:flex;
+    align-items:center;justify-content:center;font-size:14px;flex-shrink:0;}
+  .gs-row .gs-t{font-size:13.5px;color:var(--navy);font-weight:600;}
+  .gs-row .gs-s{font-size:11.5px;color:var(--muted);margin-top:1px;}
+  .gs-kind{margin-left:auto;font-size:10px;font-weight:700;text-transform:uppercase;
+    letter-spacing:.4px;color:var(--muted);flex-shrink:0;}
+  .gs-hint{padding:9px 18px;border-top:1px solid var(--line);font-size:11px;color:var(--muted);}
+  .gs-empty{padding:20px 18px;font-size:13px;color:var(--muted);}
+
   .draft-note{display:block;font-size:11px;color:var(--muted);margin-top:8px;text-align:center;}
 
   /* ---- loading skeletons ---- */
@@ -878,6 +897,7 @@
         <header id="hrTopbar">
           <div class="tb-left">
             <button id="hrBurger" onclick="toggleHrNav()" aria-label="Menu">☰</button>
+            <button class="icon-btn" onclick="openGlobalSearch()" title="Search — Ctrl+K" aria-label="Search">🔍</button>
             <button class="icon-btn" onclick="hrNavigate('dashboard')" title="Back to Dashboard" aria-label="Back to Dashboard">🏠</button>
             <button class="icon-btn hide-sm" id="hrRail" onclick="toggleHrSidebar()"
                     title="Hide or show the menu" aria-label="Hide or show the menu">⯇</button>
@@ -902,6 +922,15 @@
             </div>
           </div>
         </header>
+        <div id="gsOverlay" class="gs-overlay hidden" onclick="if(event.target===this)closeGlobalSearch()">
+          <div class="gs-panel" role="dialog" aria-modal="true" aria-label="Search">
+            <input id="gsInput" class="gs-input" type="search" autocomplete="off"
+                   placeholder="Search employees or screens…"
+                   oninput="runGlobalSearch()" onkeydown="globalSearchKey(event)">
+            <div id="gsResults" class="gs-results"></div>
+            <div class="gs-hint">↑ ↓ to move · Enter to open · Esc to close</div>
+          </div>
+        </div>
         <main id="hrContent">
         <div id="hrPageDashboard" class="hidden"></div>
 
@@ -5547,6 +5576,91 @@ function openEmployeeFromDashboard(id){
   // Let the panel swap land before opening the record on top of it.
   setTimeout(() => openAddEmployeeModal(id), 60);
 }
+
+// ---- global search ----
+// One box for the whole app: every screen in the sidebar and every employee on
+// roll. Employees come from the cached read, so opening it costs no network
+// after the first time and typing never waits on the backend.
+let gsItems = [];
+let gsSel = 0;
+
+async function openGlobalSearch(){
+  const ov = document.getElementById('gsOverlay');
+  if(!ov) return;
+  ov.classList.remove('hidden');
+  const input = document.getElementById('gsInput');
+  if(input){ input.value = ''; input.focus(); }
+  gsItems = Object.keys(HR_ROUTES).map(k => ({
+    kind:'Screen', icon:HR_ROUTES[k].icon || '📄', title:HR_ROUTES[k].label,
+    sub:'Open this screen', go:() => hrNavigate(k)
+  }));
+  runGlobalSearch();
+  try{
+    const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
+    gsItems = gsItems.concat(employees.map(e => ({
+      kind:'Employee', icon:'👤', title:e.name || '(unnamed)',
+      sub:[e.id, e.designation, e.department].filter(Boolean).join(' · '),
+      go:() => openEmployeeFromDashboard(e.id)
+    })));
+    if(!ov.classList.contains('hidden')) runGlobalSearch();
+  }catch(err){}
+}
+
+function closeGlobalSearch(){
+  document.getElementById('gsOverlay')?.classList.add('hidden');
+}
+
+function runGlobalSearch(){
+  const box = document.getElementById('gsResults');
+  const q = (document.getElementById('gsInput')?.value || '').trim().toLowerCase();
+  if(!box) return;
+  // No query: show the screens, so the box is useful before typing anything.
+  const pool = q
+    ? gsItems.filter(i => (i.title + ' ' + i.sub).toLowerCase().includes(q))
+    : gsItems.filter(i => i.kind === 'Screen');
+  const rows = pool.slice(0, 40);
+  gsSel = 0;
+  box.innerHTML = rows.length ? rows.map((i, n) => `
+    <div class="gs-row${n === 0 ? ' sel' : ''}" data-n="${n}" onclick="pickGlobalSearch(${n})">
+      <span class="gs-ic">${i.icon}</span>
+      <span><span class="gs-t">${escapeHtml(i.title)}</span>
+        ${i.sub ? `<span class="gs-s">${escapeHtml(i.sub)}</span>` : ''}</span>
+      <span class="gs-kind">${i.kind}</span>
+    </div>`).join('') : '<div class="gs-empty">Nothing matches that.</div>';
+  box._rows = rows;
+}
+
+function pickGlobalSearch(n){
+  const box = document.getElementById('gsResults');
+  const item = box && box._rows && box._rows[n];
+  if(!item) return;
+  closeGlobalSearch();
+  item.go();
+}
+
+function globalSearchKey(ev){
+  const box = document.getElementById('gsResults');
+  const rows = (box && box._rows) || [];
+  if(ev.key === 'Escape'){ closeGlobalSearch(); return; }
+  if(ev.key === 'Enter'){ ev.preventDefault(); pickGlobalSearch(gsSel); return; }
+  if(ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp') return;
+  ev.preventDefault();
+  if(!rows.length) return;
+  gsSel = (gsSel + (ev.key === 'ArrowDown' ? 1 : rows.length - 1)) % rows.length;
+  box.querySelectorAll('.gs-row').forEach((el, n) => el.classList.toggle('sel', n === gsSel));
+  box.querySelectorAll('.gs-row')[gsSel]?.scrollIntoView({ block:'nearest' });
+}
+
+// Ctrl+K / Cmd+K from anywhere in the HR shell. Deliberately not "/" alone —
+// that would fire while someone is typing a name into a form.
+document.addEventListener('keydown', ev => {
+  if((ev.ctrlKey || ev.metaKey) && (ev.key === 'k' || ev.key === 'K')){
+    if(currentRole !== 'hr' || !isSignedIn()) return;
+    ev.preventDefault();
+    const ov = document.getElementById('gsOverlay');
+    if(ov && ov.classList.contains('hidden')) openGlobalSearch(); else closeGlobalSearch();
+  }
+});
 
 // ---- header user menu ----
 function toggleUserMenu(ev){
