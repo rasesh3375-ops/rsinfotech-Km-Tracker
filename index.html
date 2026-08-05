@@ -3146,6 +3146,24 @@ async function saveTripWithCompany(){
   await saveTrips(engineerName, trips);
   await clearActive(engineerName);
 
+  // Record the checkout time on today's attendance. Check-in already wrote
+  // checkinTime; without its counterpart the policy engine has no out time, so
+  // working hours, early leaving and overtime could not be judged for anyone —
+  // the rules existed but nothing could ever trigger them.
+  try{
+    const emp = await findEmployeeByTrackingUsername(engineerName);
+    if(emp){
+      const today = todayStr();
+      const att = await getAttendance(emp.id);
+      const entry = att[today] || {};
+      const outTime = new Date().toTimeString().slice(0, 5);
+      // The last checkout of the day wins, so a second trip extends the day
+      // rather than truncating it.
+      await setAttendanceDay(emp.id, today, entry.code || 'P',
+        Object.assign({}, entry, { checkoutTime: outTime }));
+    }
+  }catch(e){}
+
   accumulatedKm = 0;
   lastCoord = null;
   tripTrail = [];
@@ -3708,6 +3726,7 @@ function policyRowsFor(employees, attByEmp, dateList){
   return employees.map(emp => {
     const att = attByEmp[emp.id] || {};
     let lateCount = 0, shortLeaves = 0, sickUsed = 0, plUsed = 0, lwp = 0, halfDays = 0, attendanceDays = 0;
+    let otMinutes = 0, earlyDays = 0;
     dateList.forEach(d => {
       const e = att[d];
       if(!e) return;
@@ -3719,6 +3738,14 @@ function policyRowsFor(employees, attByEmp, dateList){
       if(c === 'HEL' || c === 'HSL' || c === 'HLP') halfDays++;
       if(c === 'P' || c === 'SHORT' || c === 'EL' || c === 'SL') attendanceDays++;
       if(e.lateFlag) lateCount++;
+      // Judge the day itself whenever both punches exist, so early leaving and
+      // overtime are counted rather than merely storable.
+      if(e.checkinTime && e.checkoutTime){
+        const toMin = t => { const [h,m] = t.split(':').map(Number); return h*60+m; };
+        const day = evaluateAttendanceDay({ inMin: toMin(e.checkinTime), outMin: toMin(e.checkoutTime) });
+        if(day.overtimeMinutes) otMinutes += day.overtimeMinutes;
+        if(day.earlyMinutes) earlyDays++;
+      }
     });
     const type = emp.employeeType === 'part' ? 'part' : 'full';
     const bal = leaveBalances({ employeeType: type, isFirstFinancialYear: !!emp.isFirstFinancialYear },
@@ -3738,7 +3765,9 @@ function policyRowsFor(employees, attByEmp, dateList){
     if(plUsed > P.privilegeLeave.maxPerMonth)
       warn.push('More than ' + P.privilegeLeave.maxPerMonth + ' PL this month — excess deducted from salary');
     if(!bal.plUsable && bal.plEarned > 0) warn.push('PL earned this year is usable from the next financial year');
-    return { emp, lateCount, shortLeaves, sickUsed, plUsed, lwp, halfDays, attendanceDays, bal, warn };
+    if(earlyDays) warn.push(earlyDays + ' day(s) left before shift end (' + minToHHMM(P.shift.endMin) + ')');
+    return { emp, lateCount, shortLeaves, sickUsed, plUsed, lwp, halfDays, attendanceDays,
+             otMinutes, earlyDays, bal, warn };
   });
 }
 
@@ -3754,6 +3783,7 @@ function buildPolicySummary(employees, attByEmp, dateList){
       <td class="num">${r.sickUsed} / ${r.bal.sickTotal}</td>
       <td class="num">${r.plUsed} used · ${r.bal.plEarned} earned</td>
       <td class="num">${r.lwp || '—'}</td>
+      <td class="num">${r.otMinutes ? Math.floor(r.otMinutes/60)+'h '+(r.otMinutes%60)+'m' : '—'}</td>
       <td>${r.warn.length
         ? r.warn.map(w => '<div class="pol-warn">⚠ ' + escapeHtml(w) + '</div>').join('')
         : '<span class="pol-ok">✓ Within policy</span>'}</td>
@@ -3770,7 +3800,7 @@ function buildPolicySummary(employees, attByEmp, dateList){
       ${S.perMonth} Short Leaves a month, over ${S.compOffThreshold} becomes compensatory off.</p>
     <div class="inc-scroll"><table class="inc-table">
       <thead><tr><th>Employee</th><th class="num">Late</th><th class="num">Short</th><th class="num">Half</th>
-        <th class="num">Sick</th><th class="num">PL</th><th class="num">LWP</th><th>Policy</th></tr></thead>
+        <th class="num">Sick</th><th class="num">PL</th><th class="num">LWP</th><th class="num">OT</th><th>Policy</th></tr></thead>
       <tbody>${body}</tbody></table></div>
   </div>`;
 }
@@ -3973,7 +4003,8 @@ async function renderAttendanceSheet(){
   const csvHeader = ['S.No','Name', ...dateList.map(d => parseInt(d.slice(8),10)),
     'Present','Absent','EL','SL','LP','Half','Short','Late',
     'Employee Type','Late Count','Short Leaves','Half Days','Sick Used','Sick Balance',
-    'PL Earned','PL Used','PL Balance','LWP','Attendance Days','Policy Rule Applied','Violation Reason'];
+    'PL Earned','PL Used','PL Balance','LWP','Attendance Days','Overtime Minutes','Early Leaving Days',
+    'Policy Rule Applied','Violation Reason'];
   const csvRows = [];
 
   let bodyRows = '';
@@ -4025,7 +4056,7 @@ async function renderAttendanceSheet(){
       r.lateCount, r.shortLeaves, r.halfDays,
       r.sickUsed, r.bal.sickLeft,
       r.bal.plEarned, r.plUsed, r.bal.plLeft,
-      r.lwp, r.attendanceDays,
+      r.lwp, r.attendanceDays, r.otMinutes || 0, r.earlyDays || 0,
       LEAVE_POLICY.version,
       r.warn.length ? r.warn.join('; ') : 'Within policy'
     );
