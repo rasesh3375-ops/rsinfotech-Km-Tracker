@@ -3918,8 +3918,17 @@ const CONSULTANT_REPORT_HEADINGS = ['managerial','senior','junior'];
 // PT is the one deduction whose amount is decided by a rule rather than typed
 // in per employee. Named so the Salary Sheet and the heading explainer below
 // read the same numbers — the calculation is unchanged.
-const PT_GROSS_THRESHOLD = 12000;
-const PT_AMOUNT = 200;
+const PT_GROSS_THRESHOLD = 12000;   // nil at or below this gross
+const PT_AMOUNT = 200;              // flat, per month, above it
+const PT_ANNUAL_CAP = 2500;         // statutory ceiling for the year
+// Worth stating plainly: at ₹200 a month the year comes to ₹2,400, which is
+// already under the ₹2,500 cap, so the cap never binds at the current rate. It
+// is implemented anyway, so raising PT_AMOUNT later cannot quietly overshoot.
+function monthlyPtFor(gross, ptPaidSoFarThisYear){
+  if(!(gross > PT_GROSS_THRESHOLD)) return 0;
+  const paid = Number(ptPaidSoFarThisYear) || 0;
+  return Math.max(0, Math.min(PT_AMOUNT, PT_ANNUAL_CAP - paid));
+}
 
 // ---- what the selected heading actually does, in words ----
 // Read only. Every line the card shows — the formula, the field list, the
@@ -4386,7 +4395,7 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   const gross = basic + hra + lta;
   const pf = heading.pf ? (Number(emp.pf) || 0) : 0;
   const esi = heading.esi ? (Number(emp.esiDeduction) || 0) : 0;
-  const pt = heading.pt ? (gross > PT_GROSS_THRESHOLD ? PT_AMOUNT : 0) : 0;
+  const pt = heading.pt ? monthlyPtFor(gross, emp.ptPaidThisYear) : 0;
   const advanceTemp = Number(emp.advanceTemp) || 0;
   const advance = Number(emp.advance) || 0;
   const [dYear, dMonth] = dateList[0].split('-').map(Number);
@@ -5202,8 +5211,9 @@ function computePayrollComponents(rate, headingKey, manual){
       else { value = base * def.pct; formula = (def.of === 'rate' ? 'Rate of Pay' : def.of) + ' × ' + headingPct(def.pct); }
     } else if(def.source === 'ptRule'){
       const gross = val('gross');
-      value = gross > PT_GROSS_THRESHOLD ? PT_AMOUNT : 0;
-      formula = '₹' + fmtMoney(PT_AMOUNT) + ' when Gross exceeds ₹' + fmtMoney(PT_GROSS_THRESHOLD) + ', else ₹0';
+      value = monthlyPtFor(gross, 0);
+      formula = 'Nil up to ₹' + fmtMoney(PT_GROSS_THRESHOLD) + ' gross; ₹' + fmtMoney(PT_AMOUNT) +
+                ' a month above it, capped at ₹' + fmtMoney(PT_ANNUAL_CAP) + ' a year';
     } else if(def.source === 'sum'){
       value = def.of.reduce((s, k) => s + val(k), 0);
       formula = def.of.map(k => (PAYROLL_MASTER.find(x => x.key === k) || {}).label || k).join(' + ');
@@ -6700,7 +6710,10 @@ function employeeModalHtml(emp){
         <input type="number" id="f_esiDeduction" placeholder="0" value="${emp.esiDeduction||''}" oninput="renderPayrollBreakdown()">
         <div style="height:12px"></div>
         <label class="field" id="f_pt_label">PT (professional tax)</label>
-        <input type="number" id="f_pt" placeholder="0" value="${emp.pt||''}">
+        <input type="number" id="f_pt" value="${emp.pt||''}" readonly
+               title="Calculated automatically from the configured payroll formula."
+               style="background:#F1F4FA;cursor:not-allowed;">
+        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;" id="ptRuleNote"></p>
         <p style="font-size:11.5px;color:var(--muted);margin:8px 0 0;" id="statutoryHint"></p>
       </div>
 
@@ -6831,11 +6844,35 @@ function toggleStatutoryFieldsForHeading(){
   [['f_pf','pf','PF'], ['f_esiDeduction','esi','ESI'], ['f_pt','pt','PT']].forEach(([id, flag, label]) => {
     const input = document.getElementById(id);
     const applies = heading[flag];
-    input.disabled = !applies;
+    // PT stays read-only whether or not it applies: it is derived from gross,
+    // never entered. PF and ESI have no configured rate, so they are typed.
+    input.disabled = (id === 'f_pt') ? false : !applies;
+    if(id === 'f_pt') input.readOnly = true;
     if(!applies){ input.value = ''; input.placeholder = 'Not applicable'; }
-    else { input.placeholder = '0'; }
+    else if(id !== 'f_pt'){ input.placeholder = '0'; }
     if(!applies) notes.push(label);
   });
+  // PT is never typed: it follows gross and the heading. Filling it here means
+  // the figure on the form is the one the Salary Sheet will use, rather than
+  // whatever somebody keyed in.
+  const ptEl = document.getElementById('f_pt');
+  const ptNote = document.getElementById('ptRuleNote');
+  if(ptEl){
+    const hd = SALARY_HEADINGS[document.getElementById('f_salaryHeading').value] || SALARY_HEADINGS.managerial;
+    if(!hd.pt){
+      ptEl.value = '';
+      ptEl.placeholder = 'Not applicable';
+      if(ptNote) ptNote.textContent = 'Professional Tax does not apply to ' + hd.label + '.';
+    } else {
+      const gross = payrollValue('gross');
+      const pt = monthlyPtFor(gross, 0);
+      ptEl.value = pt || 0;
+      if(ptNote) ptNote.textContent = gross > PT_GROSS_THRESHOLD
+        ? '₹' + fmtMoney(PT_AMOUNT) + ' per month — gross of ₹' + fmtMoney(gross) + ' is above ₹' + fmtMoney(PT_GROSS_THRESHOLD) + '. Capped at ₹' + fmtMoney(PT_ANNUAL_CAP) + ' a year.'
+        : 'Nil — gross of ₹' + fmtMoney(gross) + ' is at or below ₹' + fmtMoney(PT_GROSS_THRESHOLD) + '.';
+    }
+  }
+
   const hint = document.getElementById('statutoryHint');
   if(hint) hint.textContent = notes.length ? (notes.join(', ') + ' not applicable for ' + SALARY_HEADINGS[document.getElementById('f_salaryHeading').value].label + ' — greyed out and excluded from the Salary Sheet automatically.') : '';
   // Same handler the dropdown already fired, so the card follows the heading
@@ -7234,6 +7271,7 @@ async function saveEmployeeForm(){
     dressAllowance: Number(document.getElementById('f_dressAllowance').value)||0,
     mobileExpense: Number(document.getElementById('f_mobileExpense').value)||0,
     stdDeductions: Number(document.getElementById('f_stdDeductions').value)||0,
+    pt: payrollValue('pt'),
     pf: Number(document.getElementById('f_pf').value)||0,
     esiDeduction: Number(document.getElementById('f_esiDeduction').value)||0,
     pt: Number(document.getElementById('f_pt').value)||0,
