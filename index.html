@@ -377,6 +377,9 @@
   .gs-hint{padding:9px 18px;border-top:1px solid var(--line);font-size:11px;color:var(--muted);}
   .gs-empty{padding:20px 18px;font-size:13px;color:var(--muted);}
 
+  .inc-table .th-sub{display:block;font-size:9px;font-weight:400;text-transform:none;
+    letter-spacing:0;color:var(--muted);margin-top:1px;}
+
   .pol-warn{font-size:11.5px;color:var(--red);line-height:1.5;}
   .pol-ok{font-size:11.5px;color:var(--green);font-weight:700;}
   .pol-warn-row td:first-child{box-shadow:inset 3px 0 0 var(--red);}
@@ -3822,8 +3825,15 @@ function buildPolicySummary(employees, attByEmp, dateList){
       ${L.freeInstancesPerMonth} late entries allowed, then a half day per ${L.halfDayPerExtraInstances} ·
       ${S.perMonth} Short Leaves a month, over ${S.compOffThreshold} becomes compensatory off.</p>
     <div class="inc-scroll"><table class="inc-table">
-      <thead><tr><th>Employee</th><th class="num">Late</th><th class="num">Short</th><th class="num">Half</th>
-        <th class="num">Sick</th><th class="num">PL</th><th class="num">LWP</th><th class="num">OT</th><th>Policy</th></tr></thead>
+      <thead><tr><th>Employee</th>
+        <th class="num" title="Days arriving after the grace period">Late<br><span class="th-sub">arrivals</span></th>
+        <th class="num" title="Short leaves taken this month">Short<br><span class="th-sub">leave</span></th>
+        <th class="num" title="Half days recorded this month">Half<br><span class="th-sub">days</span></th>
+        <th class="num" title="Sick leave used against the yearly allowance">Sick<br><span class="th-sub">used / total</span></th>
+        <th class="num" title="Privilege leave used and earned">PL<br><span class="th-sub">used / earned</span></th>
+        <th class="num" title="Leave without pay — unpaid days">Unpaid<br><span class="th-sub">days</span></th>
+        <th class="num" title="Overtime past the configured hour">Overtime<br><span class="th-sub">this month</span></th>
+        <th>What the policy says</th></tr></thead>
       <tbody>${body}</tbody></table></div>
     </div>
   </details>`;
@@ -6101,7 +6111,7 @@ async function buildHrDashboardHome(box){
     <div class="dash-card">
       <div class="card-head"><h3>Policy Alerts</h3>
         <button class="linkbtn" style="padding:0" onclick="hrNavigate('attendance')">Attendance sheet</button></div>
-      <p class="card-sub" style="margin:0 0 10px;">Leave and attendance breaches this month, per ${escapeHtml(LEAVE_POLICY.version)}.</p>
+      <p class="card-sub" style="margin:0 0 10px;">Who needs attention this month — late arrivals, leave limits and unpaid days, per ${escapeHtml(LEAVE_POLICY.version)}. Tap anyone to open the Attendance Sheet.</p>
       <div id="dashPolicyAlerts"><p class="dash-muted">Checking policy…</p></div>
     </div>
 
@@ -6954,11 +6964,11 @@ function renderPayrollBreakdown(){
   const na = comps.filter(c => !c.applies).map(c => c.label);
 
   box.innerHTML = `<details class="pay-box fold-card" open>
-    <summary class="pay-head">Calculated from Rate of Pay — full month, before leave deduction</summary>
+    <summary class="pay-head">Salary breakdown — worked out from Rate of Pay</summary>
     <table class="pay-table"><tbody>${rows}</tbody></table>
     ${na.length ? `<p class="calc-note">Not applicable to this heading: ${escapeHtml(na.join(', '))}.</p>` : ''}
     ${missing.length ? `<p class="pay-warn">No formula configured for: <strong>${escapeHtml(missing.join(', '))}</strong>. Fix the payroll master before saving.</p>` : ''}
-    <p class="calc-note">Leave days reduce each earning in proportion on the Salary Sheet; this shows a full month.</p>
+    <p class="calc-note">🧮 means the figure is worked out for you and cannot be typed. ✏️ means there is no formula configured, so it is entered by hand. This shows a full month — leave days reduce each earning in proportion on the Salary Sheet.</p>
   </details>`;
 }
 
