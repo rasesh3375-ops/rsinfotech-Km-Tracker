@@ -235,7 +235,7 @@
   /* Each KPI carries a tone: a tinted wash, a matching icon chip and numeral,
      and a top accent rule. One hue per card, so colour signals which metric you
      are reading rather than decorating uniformly. */
-  .kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px;}
+  .kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-bottom:16px;align-items:stretch;}
   .kpi{position:relative;border:1px solid var(--line);border-radius:14px;padding:17px 16px 16px;
     background:var(--paper);overflow:hidden;transition:transform .16s ease, box-shadow .16s ease;}
   .kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;
@@ -299,6 +299,30 @@
   .kpi-link{cursor:pointer;}
   .kpi-link:hover{box-shadow:0 8px 22px rgba(22,33,62,.14);}
   .kpi-link:focus-visible{outline:2px solid var(--tone,#3B5BA9);outline-offset:2px;}
+
+  /* ---- collapsible dashboard sections ---- */
+  /* <details> rather than a JS toggle: it is closed by default, opens on click
+     or Enter, and is reachable by keyboard and screen readers without any of
+     that being written by hand. */
+  .dash-fold{padding:0;}
+  .dash-fold > summary{list-style:none;cursor:pointer;padding:15px 18px;display:flex;
+    align-items:center;justify-content:space-between;gap:10px;border-radius:14px;
+    font-size:16px;color:var(--navy);}
+  .dash-fold > summary::-webkit-details-marker{display:none;}
+  .dash-fold > summary:hover{background:#F5F7FB;}
+  .dash-fold > summary:focus-visible{outline:2px solid var(--navy);outline-offset:-2px;}
+  .dash-fold .fold-t{display:flex;align-items:center;gap:9px;font-weight:700;}
+  .dash-fold .fold-t::before{content:'';width:4px;height:16px;border-radius:3px;flex-shrink:0;
+    background:linear-gradient(180deg,var(--amber),var(--amber-dark));}
+  .dash-fold .fold-x{color:var(--muted);font-size:13px;transition:transform .18s ease;}
+  .dash-fold[open] > summary .fold-x{transform:rotate(180deg);}
+  .dash-fold[open] > summary{border-bottom:1px solid var(--line);border-radius:14px 14px 0 0;}
+  .dash-fold .fold-body{padding:14px 18px 18px;}
+
+  .icon-btn{background:none;border:1px solid transparent;border-radius:8px;padding:5px 8px;
+    font-size:16px;cursor:pointer;line-height:1;}
+  .icon-btn:hover{background:#EEF1F7;border-color:var(--line);}
+  .icon-btn:focus-visible{outline:2px solid var(--navy);outline-offset:2px;}
 
   /* ---- header user menu ---- */
   .user-menu{position:relative;}
@@ -811,6 +835,7 @@
           </div>
           <div class="tb-right">
             <span class="hide-sm" id="hrTopDate"></span>
+            <button class="icon-btn" onclick="hrNavigate('activity')" title="Activity log — every action with its date and time" aria-label="Activity log">🕘</button>
             <div class="user-menu">
               <button class="user-btn" id="hrUserBtn" onclick="toggleUserMenu(event)"
                       aria-haspopup="true" aria-expanded="false">
@@ -819,6 +844,8 @@
               <div class="user-drop hidden" id="hrUserDrop" role="menu">
                 <button role="menuitem" onclick="openMyProfile()">👤 My Profile</button>
                 <button role="menuitem" onclick="openChangePassword()">🔑 Change Password</button>
+                <button role="menuitem" onclick="hrNavigate('settings')">⚙️ Admin Settings</button>
+                <button role="menuitem" onclick="hrNavigate('activity')">🕘 Activity Log</button>
                 <div class="user-drop-sep"></div>
                 <button role="menuitem" class="danger" onclick="logoutHr()">⏻ Logout</button>
               </div>
@@ -5029,10 +5056,12 @@ async function buildHrDashboardHome(box){
   // getHolidays() and the per-employee getAttendance() fan-out were dropped
   // along with the Attendance Overview donut: they fed nothing else on this
   // screen, and the fan-out was one request per employee on the critical path.
-  const [employees, users, rawLog] = await Promise.all([
+  // The activity log read went with the Recent Activity card — activity is
+  // reached from the clock icon in the header now, and that screen loads its
+  // own copy, so fetching it here was a backend call for nothing.
+  const [employees, users] = await Promise.all([
     softly(getEmployees(), left(), [], 'employee list'),
-    softly(getUsers(), left(), [], 'tracking logins'),
-    softly(getActivityLog(), left(), [], 'activity log')
+    softly(getUsers(), left(), [], 'tracking logins')
   ]);
   const onRoll = employees.filter(e => e.employmentStatus !== 'left');
 
@@ -5074,7 +5103,6 @@ async function buildHrDashboardHome(box){
     .filter(b => b.days !== null && b.days <= 30)
     .sort((a, b) => a.days - b.days);
 
-  const log = rawLog.slice(0, 6);
 
   // `id` is optional and only used by figures that arrive after the first
   // paint, so they can be filled in without redrawing the whole screen.
@@ -5088,15 +5116,6 @@ async function buildHrDashboardHome(box){
       <div class="top"><div class="ic">${icon}</div><div class="cap">${cap}</div></div>
       <div class="n"${id ? ` id="${id}"` : ''}>${n}</div><div class="sub">${sub}</div>
     </div>`;
-
-  const feed = log.length ? log.map(l => {
-    const d = new Date(l.ts);
-    return `<div class="feed-row">
-      <div class="ic">📝</div>
-      <div class="body"><div class="t">${l.text}</div>
-      <div class="when">${isNaN(d) ? '' : d.toLocaleString('en-IN', {hour:'2-digit', minute:'2-digit', day:'2-digit', month:'short', year:'numeric'})}</div></div>
-    </div>`;
-  }).join('') : '<div class="empty">No activity recorded yet.</div>';
 
   const bdayList = birthdays.length ? birthdays.slice(0, 5).map(b => `
     <div class="feed-row">
@@ -5136,14 +5155,14 @@ async function buildHrDashboardHome(box){
     <div class="kpi-row">
       ${kpi('👥','Employee Master', onRoll.length, 'Open employee records', 'indigo', null, 'employees')}
       ${kpi('🗓️','Attendance Sheet', 'Open', 'Mark and review attendance', 'green', null, 'attendance')}
-      ${kpi('👷','Total Engineers', users.length, 'Tracking logins', 'indigo')}
+      ${kpi('🚫','Absent Today', '—', 'Marked absent or LP', 'red', 'dashAbsentCount')}
       ${kpi('📄','Documents Expiring', expiring.length, 'Within 30 days', 'amber')}
     </div>
 
     <div class="dash-2col">
-      <div class="dash-card">
-        <div class="card-head"><h3>Increment Reminder</h3>
-          <button class="linkbtn" style="padding:0" onclick="hrNavigate('reminders')">Open increments</button></div>
+      <details class="dash-card dash-fold" open>
+        <summary><span class="fold-t">Increment Reminder</span><span class="fold-x">▾</span></summary>
+        <div class="fold-body">
         <div class="inc-controls">
           <input class="field-input inc-search" id="incSearch" type="search" placeholder="Search name, ID, department…" oninput="renderIncrementWidget()">
           <select class="field-input" id="incRange" onchange="renderIncrementWidget()">
@@ -5161,13 +5180,13 @@ async function buildHrDashboardHome(box){
           </select>
         </div>
         <div id="dashIncrementBox"><p class="dash-muted">Loading increments…</p></div>
-      </div>
-
-      <div class="dash-card">
-        <div class="card-head">
-          <h3>Live Tracking</h3>
-          <span class="live-dot-label"><span class="live-dot"></span>${checkedIn} on air</span>
         </div>
+      </details>
+
+      <details class="dash-card dash-fold" open ontoggle="setTimeout(invalidateLiveMaps,60)">
+        <summary><span class="fold-t">Live Tracking</span>
+          <span class="live-dot-label"><span class="live-dot"></span>${checkedIn} on air</span></summary>
+        <div class="fold-body">
         <div class="dash-map-wrap">
           <div id="dashLiveMap"></div>
           <div id="dashLiveMapEmpty" class="map-empty">
@@ -5184,29 +5203,25 @@ async function buildHrDashboardHome(box){
           <span><span class="swatch" style="background:var(--amber)"></span>Unresponsive ${unresponsive}</span>
         </div>
         <button class="btn ghost full" style="margin-top:12px;" onclick="hrNavigate('tracking')">Open full tracking</button>
-      </div>
+        </div>
+      </details>
     </div>
 
     <div class="dash-2col">
-      <div class="dash-card">
-        <div class="card-head"><h3>Recent Activity</h3><button class="linkbtn" style="padding:0" onclick="hrNavigate('activity')">View all</button></div>
-        ${feed}
-      </div>
-      <div class="dash-card">
-        <div class="card-head"><h3>Upcoming Birthdays</h3><button class="linkbtn" style="padding:0" onclick="hrNavigate('reports')">View all</button></div>
-        ${bdayList}
-      </div>
+      <details class="dash-card dash-fold">
+        <summary><span class="fold-t">Upcoming Birthdays</span><span class="fold-x">▾</span></summary>
+        <div class="fold-body">${bdayList}</div>
+      </details>
+      <details class="dash-card dash-fold">
+        <summary><span class="fold-t">Upcoming Document Expiry</span><span class="fold-x">▾</span></summary>
+        <div class="fold-body">${expList}</div>
+      </details>
     </div>
 
-    <div class="dash-card">
-      <div class="card-head"><h3>Upcoming Document Expiry</h3><button class="linkbtn" style="padding:0" onclick="hrNavigate('expiry')">View all</button></div>
-      ${expList}
-    </div>
-
-    <div class="dash-card">
-      <div class="card-head"><h3>Quick Actions</h3></div>
-      <div class="qa-row">${quick}</div>
-    </div>
+    <details class="dash-card dash-fold">
+      <summary><span class="fold-t">Quick Actions</span><span class="fold-x">▾</span></summary>
+      <div class="fold-body"><div class="qa-row">${quick}</div></div>
+    </details>
 
     <p style="text-align:center;font-size:11.5px;color:var(--muted);margin:18px 0 0;">
       ${checkedIn} of ${users.length} tracking logins checked in right now.
@@ -5225,6 +5240,43 @@ async function buildHrDashboardHome(box){
   // KPI fill themselves in when the reads land.
   dashIncrementRows = buildIncrementRows(onRoll);
   renderIncrementWidget();
+  loadDashboardAbsentToday(onRoll);
+}
+
+// ---- absent today ----
+// Read straight from the Attendance Sheet's own codes, so the dashboard and the
+// sheet cannot disagree.
+const ABSENT_TODAY_CODES = { A:'Absent', LP:'Leave without pay', HLP:'Half day (LP)' };
+let dashAbsentRender = 0;
+
+async function loadDashboardAbsentToday(onRoll){
+  const token = ++dashAbsentRender;
+  const countEl = document.getElementById('dashAbsentCount');
+  const today = todayStr();
+  // Off the critical path deliberately: this is one attendance read per
+  // employee, so the dashboard paints first and the figure lands after.
+  const ms = BACKEND_BUDGET_MS + 1000;
+  const read = p => Promise.race([
+    Promise.resolve(p).catch(() => null),
+    new Promise(r => setTimeout(() => r(null), ms))
+  ]);
+  const atts = await Promise.all(onRoll.map(e => read(getAttendance(e.id))));
+  if(token !== dashAbsentRender) return;
+
+  let absent = 0, unread = 0;
+  onRoll.forEach((e, i) => {
+    const att = atts[i];
+    // A failed read is unknown, not absent; a day nobody has marked yet is not
+    // an absence either. Either one counted as absent would put people who are
+    // at work on the count.
+    if(!att){ unread++; return; }
+    const entry = att[today];
+    if(entry && ABSENT_TODAY_CODES[entry.code]) absent++;
+  });
+  if(countEl){
+    countEl.textContent = absent;
+    if(unread) countEl.title = unread + ' employee(s) could not be checked — attendance did not load.';
+  }
 }
 
 // ---- increment reminder widget ----
