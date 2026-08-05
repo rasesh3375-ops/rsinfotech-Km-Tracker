@@ -3942,6 +3942,47 @@ const CONSULTANT_REPORT_HEADINGS = ['managerial','senior','junior'];
 // PT is the one deduction whose amount is decided by a rule rather than typed
 // in per employee. Named so the Salary Sheet and the heading explainer below
 // read the same numbers — the calculation is unchanged.
+// ---- provident fund ----
+// Statutory rates, kept as config so a change in the law is an edit here.
+// The wage PF is charged on is Basic + DA. This payroll has no DA component,
+// so Basic is the base; add a DA heading and include it in pfWageOf below.
+const PF_RULES = {
+  employeePct: 0.12,        // employee share, all of it to EPF
+  employerPct: 0.12,        // employer share, split between EPS and EPF
+  epsPct: 0.0833,           // pension scheme portion of the employer share
+  epsWageCeiling: 15000,    // EPS is charged on wages only up to this
+  epsMonthlyCap: 1250       // and therefore never exceeds this
+};
+
+function pfWageOf(components){
+  const get = k => { const c = components.find(x => x.key === k); return c ? c.value : 0; };
+  return get('basic') + get('da');   // 'da' is absent today and reads as 0
+}
+
+// Both sides of the contribution from one wage figure.
+function computePf(wage){
+  const w = Number(wage) || 0;
+  const employee = w * PF_RULES.employeePct;
+  const employerTotal = w * PF_RULES.employerPct;
+  // At or above the ceiling EPS is the stated cap, not 8.33% of the ceiling.
+  // The two differ: 8.33% of 15,000 is 1,249.50, while EPFO deducts a flat
+  // 1,250. Taking the percentage literally would under-deduct 50 paise every
+  // month for every member and leave the challan short.
+  const epsCapped = w >= PF_RULES.epsWageCeiling
+    ? PF_RULES.epsMonthlyCap
+    : w * PF_RULES.epsPct;
+  // Whatever the employer share is not paying into EPS goes to EPF. Above the
+  // ceiling that is more than 3.67%, because EPS stops growing and the
+  // employer's 12% does not.
+  const employerEpf = employerTotal - epsCapped;
+  return {
+    wage: w, employee, employerTotal,
+    employerEps: epsCapped, employerEpf,
+    capApplied: w >= PF_RULES.epsWageCeiling,
+    total: employee + employerTotal
+  };
+}
+
 const PT_GROSS_THRESHOLD = 12000;   // nil at or below this gross
 const PT_AMOUNT = 200;              // flat, per month, above it
 const PT_ANNUAL_CAP = 2500;         // statutory ceiling for the year
@@ -5197,13 +5238,19 @@ const PAYROLL_MASTER = [
   { key:'hra',   label:'HRA',        group:'earning',   source:'split', part:'hra'   },
   { key:'lta',   label:'LTA',        group:'earning',   source:'split', part:'lta'   },
   { key:'gross', label:'Gross Salary', group:'total',   source:'sum',   of:['basic','hra','lta'] },
-  { key:'pf',    label:'PF (employee)',  group:'deduction', source:'manual', flag:'pf',
-    note:'No PF rate is configured in the payroll master, so this is entered per employee.' },
+  { key:'pf',    label:'PF — employee (12%)', group:'deduction', source:'pfEmployee', flag:'pf' },
+  { key:'pfEmployerEps', label:'PF — employer to EPS (8.33%)', group:'employer', source:'pfEps', flag:'pf' },
+  { key:'pfEmployerEpf', label:'PF — employer to EPF (3.67%)', group:'employer', source:'pfEpf', flag:'pf' },
   { key:'esi',   label:'ESI (employee)', group:'deduction', source:'manual', flag:'esi',
     note:'No ESI rate is configured in the payroll master, so this is entered per employee.' },
   { key:'pt',    label:'Professional Tax (PT)', group:'deduction', source:'ptRule', flag:'pt' },
   { key:'totalDeduction', label:'Total Deductions', group:'total', source:'sum', of:['pf','esi','pt'] },
-  { key:'net',   label:'Net Salary', group:'total', source:'diff', from:'gross', minus:['totalDeduction'] }
+  { key:'net',   label:'Net Salary', group:'total', source:'diff', from:'gross', minus:['totalDeduction'] },
+  // The employer side is a cost, never a deduction from pay — kept out of
+  // Total Deductions and Net so neither is understated.
+  { key:'employerTotal', label:'Employer Contribution', group:'total', source:'sum',
+    of:['pfEmployerEps','pfEmployerEpf'] },
+  { key:'ctc', label:'Cost to Company', group:'total', source:'sum', of:['gross','employerTotal'] }
 ];
 
 // Runs the master against one Rate of Pay and one heading. Returns every
@@ -5235,6 +5282,20 @@ function computePayrollComponents(rate, headingKey, manual){
       const base = def.of === 'rate' ? r : val(def.of);
       if(typeof def.pct !== 'number'){ missing = true; formula = 'No rate configured'; }
       else { value = base * def.pct; formula = (def.of === 'rate' ? 'Rate of Pay' : def.of) + ' × ' + headingPct(def.pct); }
+    } else if(def.source === 'pfEmployee' || def.source === 'pfEps' || def.source === 'pfEpf'){
+      const pf = computePf(pfWageOf(out));
+      value = def.source === 'pfEmployee' ? pf.employee
+            : def.source === 'pfEps'      ? pf.employerEps : pf.employerEpf;
+      const base = 'Basic' + (out.find(x => x.key === 'da') ? ' + DA' : '') +
+                   ' (₹' + fmtMoney(pf.wage) + ')';
+      formula = def.source === 'pfEmployee'
+        ? headingPct(PF_RULES.employeePct) + ' of ' + base
+        : def.source === 'pfEps'
+          ? headingPct(PF_RULES.epsPct) + ' of ' + base +
+            (pf.capApplied ? ', capped at ₹' + fmtMoney(PF_RULES.epsMonthlyCap) +
+              ' because the wage is above ₹' + fmtMoney(PF_RULES.epsWageCeiling) : '')
+          : headingPct(PF_RULES.employerPct) + ' of ' + base + ' less the EPS share' +
+            (pf.capApplied ? ' — more than ' + headingPct(0.0367) + ' here, since EPS is capped' : '');
     } else if(def.source === 'ptRule'){
       const gross = val('gross');
       value = monthlyPtFor(gross, 0);
@@ -6730,7 +6791,10 @@ function employeeModalHtml(emp){
         <input type="number" id="f_stdDeductions" placeholder="0" value="${emp.stdDeductions||''}">
         <div style="height:12px"></div>
         <label class="field" id="f_pf_label">PF (provident fund)</label>
-        <input type="number" id="f_pf" placeholder="0" value="${emp.pf||''}" oninput="renderPayrollBreakdown()">
+        <input type="number" id="f_pf" value="${emp.pf||''}" readonly
+               title="Calculated automatically from the configured payroll formula."
+               style="background:#F1F4FA;cursor:not-allowed;">
+        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;" id="pfRuleNote"></p>
         <div style="height:12px"></div>
         <label class="field" id="f_esiDeduction_label">ESI</label>
         <input type="number" id="f_esiDeduction" placeholder="0" value="${emp.esiDeduction||''}" oninput="renderPayrollBreakdown()">
@@ -6876,15 +6940,37 @@ function toggleStatutoryFieldsForHeading(){
     const applies = heading[flag];
     // PT stays read-only whether or not it applies: it is derived from gross,
     // never entered. PF and ESI have no configured rate, so they are typed.
-    input.disabled = (id === 'f_pt') ? false : !applies;
-    if(id === 'f_pt') input.readOnly = true;
+    // PF and PT are both derived; only ESI is genuinely typed.
+    const derived = (id === 'f_pt' || id === 'f_pf');
+    input.disabled = derived ? false : !applies;
+    if(derived) input.readOnly = true;
     if(!applies){ input.value = ''; input.placeholder = 'Not applicable'; }
-    else if(id !== 'f_pt'){ input.placeholder = '0'; }
+    else if(!derived){ input.placeholder = '0'; }
     if(!applies) notes.push(label);
   });
   // PT is never typed: it follows gross and the heading. Filling it here means
   // the figure on the form is the one the Salary Sheet will use, rather than
   // whatever somebody keyed in.
+  // PF follows Basic like PT follows gross — a rate, not a typed figure.
+  const pfEl = document.getElementById('f_pf');
+  const pfNote = document.getElementById('pfRuleNote');
+  if(pfEl){
+    const hd0 = SALARY_HEADINGS[document.getElementById('f_salaryHeading').value] || SALARY_HEADINGS.managerial;
+    if(!hd0.pf){
+      pfEl.value = ''; pfEl.placeholder = 'Not applicable';
+      if(pfNote) pfNote.textContent = 'Provident Fund does not apply to ' + hd0.label + '.';
+    } else {
+      const rate = Number((document.getElementById('f_ratePay') || {}).value) || 0;
+      const comps = computePayrollComponents(rate, document.getElementById('f_salaryHeading').value, {});
+      const pf = computePf(pfWageOf(comps));
+      pfEl.value = Math.round(pf.employee * 100) / 100;
+      if(pfNote) pfNote.textContent =
+        headingPct(PF_RULES.employeePct) + ' of Basic ₹' + fmtMoney(pf.wage) + '. Employer adds ₹' +
+        fmtMoney(pf.employerTotal) + ' — ₹' + fmtMoney(pf.employerEps) + ' to pension' +
+        (pf.capApplied ? ' (capped)' : '') + ' and ₹' + fmtMoney(pf.employerEpf) + ' to EPF.';
+    }
+  }
+
   const ptEl = document.getElementById('f_pt');
   const ptNote = document.getElementById('ptRuleNote');
   if(ptEl){
@@ -7302,7 +7388,9 @@ async function saveEmployeeForm(){
     mobileExpense: Number(document.getElementById('f_mobileExpense').value)||0,
     stdDeductions: Number(document.getElementById('f_stdDeductions').value)||0,
     pt: payrollValue('pt'),
-    pf: Number(document.getElementById('f_pf').value)||0,
+    pfEmployerEps: payrollValue('pfEmployerEps'),
+    pfEmployerEpf: payrollValue('pfEmployerEpf'),
+    pf: payrollValue('pf'),
     esiDeduction: Number(document.getElementById('f_esiDeduction').value)||0,
     pt: Number(document.getElementById('f_pt').value)||0,
     loanAmount: Number(document.getElementById('f_loanAmount').value)||0,
