@@ -4707,12 +4707,36 @@ async function renderStatutoryReport(key, label){
   // reconciled against the challan.
   const esiRows = [];
   const esiTot = { gross:0, employee:0, employer:0, total:0 };
+  const pfRows = [];
+  const pfTot = { wage:0, employee:0, epf:0, eps:0, admin:0, edli:0, total:0 };
   for(const emp of employees){
     const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
     const amount = s[cfg.field];
     if(amount > 0){
       rows.push([emp.name, amount]);
       grandTotal += amount;
+    }
+    if(key === 'pf'){
+      const heading = SALARY_HEADINGS[emp.salaryHeading] || SALARY_HEADINGS.managerial;
+      if(heading.pf){
+        const wage = PF_RULES.wageComponents.reduce((t, k) => t + (s[k] || 0), 0);
+        const ex = pfExclusionStatus(emp, wage);
+        const c = ex.excluded ? { employee:0, employerEpf:0, employerEps:0 } : computePf(wage);
+        const admin = ex.excluded ? 0 : wage * PF_RULES.adminPct;
+        const edli  = ex.excluded ? 0 : wage * PF_RULES.edliPct;
+        const total = c.employee + c.employerEpf + c.employerEps + admin + edli;
+        pfRows.push({ emp, wage, excluded: ex.excluded, employee: c.employee,
+          epf: c.employerEpf, eps: c.employerEps, admin, edli, total,
+          reason: ex.excluded
+            ? 'Excluded employee — no prior UAN, Form 11 submitted, wage above ₹' + fmtMoney(PF_RULES.exclusion.wageAbove)
+            : (wage >= PF_RULES.epsWageCeiling
+                ? 'EPS capped at ₹' + fmtMoney(PF_RULES.epsMonthlyCap) + '; the balance of the employer 12% goes to EPF'
+                : 'Standard rates on a wage of ₹' + fmtMoney(wage)) });
+        if(!ex.excluded){
+          pfTot.wage += wage; pfTot.employee += c.employee; pfTot.epf += c.employerEpf;
+          pfTot.eps += c.employerEps; pfTot.admin += admin; pfTot.edli += edli; pfTot.total += total;
+        }
+      }
     }
     if(key === 'esi'){
       const heading = SALARY_HEADINGS[emp.salaryHeading] || SALARY_HEADINGS.managerial;
@@ -4728,6 +4752,55 @@ async function renderStatutoryReport(key, label){
         esiTot.employer += r.employer; esiTot.total += r.total;
       }
     }
+  }
+
+  if(key === 'pf' && pfRows.length){
+    const money = v => '₹' + fmtMoney(v);
+    const body = pfRows.map((x, i) => `
+      <tr class="${x.excluded ? 'inc-overdue' : ''}">
+        <td>${i + 1}</td><td>${escapeHtml(x.emp.name)}</td>
+        <td>${escapeHtml(x.emp.uan || '—')}</td>
+        <td class="num">${money(x.wage)}</td>
+        <td class="num">${x.excluded ? '—' : money(x.employee)}</td>
+        <td class="num">${x.excluded ? '—' : money(x.epf)}</td>
+        <td class="num">${x.excluded ? '—' : money(x.eps)}</td>
+        <td class="num">${x.excluded ? '—' : money(x.admin)}</td>
+        <td class="num">${x.excluded ? '—' : money(x.edli)}</td>
+        <td class="num"><strong>${x.excluded ? '—' : money(x.total)}</strong></td>
+        <td>${x.excluded ? 'Excluded' : 'Member'}<span class="inc-sub">${escapeHtml(x.reason)}</span></td>
+      </tr>`).join('');
+    const csv = toCsv(
+      ['SR NO','Name','UAN','PF Wage (Basic+DA)','Employee 12%','Employer EPF 3.67%','Employer EPS 8.33%',
+       'Admin 0.5%','EDLI 0.5%','Total Remittance','Status','Rule Applied'],
+      pfRows.map((x, i) => [i + 1, x.emp.name, x.emp.uan || '', x.wage,
+        x.excluded ? 0 : x.employee, x.excluded ? 0 : x.epf, x.excluded ? 0 : x.eps,
+        x.excluded ? 0 : x.admin, x.excluded ? 0 : x.edli, x.excluded ? 0 : x.total,
+        x.excluded ? 'Excluded' : 'Member', x.reason])
+        .concat([['', 'GRAND TOTAL', '', pfTot.wage, pfTot.employee, pfTot.epf, pfTot.eps,
+                  pfTot.admin, pfTot.edli, pfTot.total, '', '']]));
+    saveFileToDrive(['HR Management','Reports','PF'], `PF Return - ${monthVal}.csv`, csv, 'text/csv');
+    box.innerHTML = `${reportLogoHeader('Provident Fund Return — ' + monthVal)}
+      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Charged on ${
+        PF_RULES.wageComponents.map(k => k === 'basic' ? 'Basic' : 'HRA (DA)').join(' + ')} ·
+        employee ${headingPct(PF_RULES.employeePct)} · employer ${headingPct(0.0367)} EPF and ${headingPct(PF_RULES.epsPct)} EPS,
+        EPS capped at ₹${fmtMoney(PF_RULES.epsMonthlyCap)} above a ₹${fmtMoney(PF_RULES.epsWageCeiling)} wage ·
+        admin ${headingPct(PF_RULES.adminPct)} · EDLI ${headingPct(PF_RULES.edliPct)}.
+        Covers the R.S. Infotech payroll headings only.</p>
+      <div class="inc-scroll"><table class="inc-table">
+        <thead><tr><th>#</th><th>Name</th><th>UAN</th><th class="num">PF Wage</th>
+          <th class="num">Employee</th><th class="num">Empr EPF</th><th class="num">Empr EPS</th>
+          <th class="num">Admin</th><th class="num">EDLI</th><th class="num">Total</th><th>Status</th></tr></thead>
+        <tbody>${body}
+          <tr class="pay-total"><td></td><td><strong>Grand Total</strong></td><td></td>
+            <td class="num">${money(pfTot.wage)}</td><td class="num">${money(pfTot.employee)}</td>
+            <td class="num">${money(pfTot.epf)}</td><td class="num">${money(pfTot.eps)}</td>
+            <td class="num">${money(pfTot.admin)}</td><td class="num">${money(pfTot.edli)}</td>
+            <td class="num">${money(pfTot.total)}</td><td></td></tr>
+        </tbody></table></div>
+      <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Employee share ${money(pfTot.employee)} ·
+        employer share ${money(pfTot.epf + pfTot.eps + pfTot.admin + pfTot.edli)} ·
+        total remittance <strong>${money(pfTot.total)}</strong>. Saved to Drive under HR Management &gt; Reports &gt; PF.</p>`;
+    return;
   }
 
   if(key === 'esi' && esiRows.length){
