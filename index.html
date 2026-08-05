@@ -3472,6 +3472,202 @@ function renderLiveStatus(infos){
 }
 
 // ---- attendance sheet ----
+// ===== R.S. Infotech Leave & Attendance Policy — configuration =====
+// Every number, threshold and window the engine uses lives here, transcribed
+// from the policy document. Nothing below reads a literal: change a value here
+// and every calculation, warning and deduction follows it. Where the document
+// is silent the value is null and the engine says so rather than inventing one.
+const LEAVE_POLICY = {
+  version: 'R.S. Infotech Leave Policy',
+  shift: {
+    // "up to 15 minutes late (by 9:45 AM)" fixes the start at 09:30.
+    startMin: 9 * 60 + 30,
+    // The document does not state an end time or a daily hour requirement.
+    endMin: null,
+    workingMinutes: null
+  },
+  lateComing: {
+    graceMinutes: 15,                 // permissible up to 09:45
+    shortLeaveAfterMinutes: 30,       // "beyond 30 minutes ... considered as short leave"
+    freeInstancesPerMonth: 3,         // "more than three instances"
+    halfDayPerExtraInstances: 2       // "half-day deductions for every two additional"
+  },
+  shortLeave: {
+    durationHours: 2,
+    perMonth: 2,                      // more than 2 -> half day
+    compOffThreshold: 3,              // more than 3 -> compensatory off
+    carryForward: false,
+    eligibleEmployeeTypes: ['full', 'regular'],   // not part-time
+    minServiceMonths: 3,
+    windows: [
+      { label: 'Morning', fromMin: 9 * 60 + 30, toMin: 11 * 60 + 30 },
+      { label: 'Evening', fromMin: 17 * 60,     toMin: 19 * 60 }
+    ]
+  },
+  sickLeave: {
+    perYear: { full: 7, part: 4 },
+    medicalCertificateRequired: true,
+    carryForward: false,
+    encashable: false
+  },
+  privilegeLeave: {
+    earnedPerAttendanceDays: 25,      // 1 PL per 25 days of attendance
+    maxPerMonth: 2,                   // beyond this deducts salary
+    carryForward: false,
+    encashable: true,
+    usableInFirstYear: false,         // earned in year 1, usable from year 2
+    salaryBasis: { label: 'Basic + DA', grossPct: 0.70 }
+  },
+  leaveApplication: {
+    formRequired: true,
+    hodApprovalRequired: true,
+    maxConcurrentPerDepartment: 2,
+    mondayIsPaidLeave: false,         // "Monday leave is not considered as paid leave"
+    sandwichRule: true                // leave either side of a Sunday/holiday counts
+  },
+  partTime: { shortLeaveAllowed: false },
+  holidays: ['Uttarayan (14–15 January)', 'Dhuleti', 'Rakshabandhan',
+             'Diwali (Diwali to Chhath)', 'Labh Pacham (office open)']
+};
+
+const minToHHMM = m => (m===null||m===undefined) ? '—'
+  : String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+
+// ---- one day ----
+function evaluateAttendanceDay(inp, P){
+  P = P || LEAVE_POLICY;
+  const r = { facts: [], warnings: [], rules: [], status: inp.status || 'P', lateMinutes: 0 };
+  const L = P.lateComing;
+
+  if(inp.inMin !== null && inp.inMin !== undefined && P.shift.startMin !== null){
+    r.lateMinutes = Math.max(0, inp.inMin - P.shift.startMin);
+    r.facts.push({ k:'Shift start', v:minToHHMM(P.shift.startMin) });
+    r.facts.push({ k:'In time', v:minToHHMM(inp.inMin) });
+    if(r.lateMinutes > 0) r.facts.push({ k:'Late minutes', v:r.lateMinutes });
+  }
+  if(inp.outMin !== null && inp.outMin !== undefined){
+    r.facts.push({ k:'Out time', v:minToHHMM(inp.outMin) });
+    if(inp.inMin !== null && inp.inMin !== undefined){
+      const w = inp.outMin - inp.inMin;
+      r.facts.push({ k:'Working hours', v:Math.floor(w/60)+'h '+(w%60)+'m' });
+    }
+  }
+
+  if(r.lateMinutes > 0){
+    if(r.lateMinutes <= L.graceMinutes){
+      r.rules.push('Grace time used (up to '+L.graceMinutes+' minutes)');
+    } else if(r.lateMinutes <= L.shortLeaveAfterMinutes){
+      r.warnings.push('Late by '+r.lateMinutes+' minutes — grace period of '+L.graceMinutes+' minutes exceeded');
+      r.countsAsLateInstance = true;
+    } else {
+      r.warnings.push('Late by '+r.lateMinutes+' minutes — beyond '+L.shortLeaveAfterMinutes+' minutes');
+      r.warnings.push('Converted to Short Leave as per policy');
+      r.rules.push('Late beyond '+L.shortLeaveAfterMinutes+' minutes becomes short leave');
+      r.countsAsLateInstance = true;
+      r.becomesShortLeave = true;
+    }
+  }
+  return r;
+}
+
+// ---- short leave eligibility ----
+function checkShortLeave(emp, atMin, usedThisMonth, P){
+  P = P || LEAVE_POLICY;
+  const S = P.shortLeave, out = { allowed:true, reasons:[], effect:null };
+  if(emp.employeeType === 'part' && !P.partTime.shortLeaveAllowed){
+    out.allowed = false; out.reasons.push('Short Leave is not applicable for Part-Time employees');
+    return out;
+  }
+  if(S.eligibleEmployeeTypes.indexOf(emp.employeeType) === -1){
+    out.allowed = false; out.reasons.push('Short Leave applies to full-time or regular employees only');
+  }
+  if((emp.serviceMonths || 0) < S.minServiceMonths){
+    out.allowed = false;
+    out.reasons.push('Available after '+S.minServiceMonths+' months of service (currently '+(emp.serviceMonths||0)+')');
+  }
+  if(atMin !== null && atMin !== undefined){
+    const inWindow = S.windows.some(w => atMin >= w.fromMin && atMin <= w.toMin);
+    if(!inWindow){
+      out.allowed = false;
+      out.reasons.push('Outside permitted windows: ' +
+        S.windows.map(w => w.label+' '+minToHHMM(w.fromMin)+'–'+minToHHMM(w.toMin)).join(', '));
+    }
+  }
+  const willBe = (usedThisMonth || 0) + 1;
+  if(willBe > S.compOffThreshold){
+    out.effect = 'compOff';
+    out.reasons.push('More than '+S.compOffThreshold+' short leaves — converted to compensatory off');
+  } else if(willBe > S.perMonth){
+    out.effect = 'halfDay';
+    out.reasons.push('Short Leave limit of '+S.perMonth+' per month exceeded — treated as Half Day');
+  }
+  return out;
+}
+
+// ---- monthly roll-up ----
+function evaluateMonth(emp, days, balances, P){
+  P = P || LEAVE_POLICY;
+  const L = P.lateComing, out = { lateCount:0, halfDaysFromLate:0, shortLeaves:0, warnings:[], rules:[] };
+  days.forEach(d => {
+    const e = evaluateAttendanceDay(d, P);
+    if(e.countsAsLateInstance) out.lateCount++;
+    if(e.becomesShortLeave) out.shortLeaves++;
+  });
+  out.shortLeaves += (balances && balances.shortLeavesTaken) || 0;
+
+  if(out.lateCount > L.freeInstancesPerMonth){
+    out.warnings.push('Employee has exhausted the '+L.freeInstancesPerMonth+' permissible late entries');
+    const extra = out.lateCount - L.freeInstancesPerMonth;
+    out.halfDaysFromLate = Math.floor(extra / L.halfDayPerExtraInstances);
+    if(out.halfDaysFromLate > 0){
+      out.warnings.push(out.halfDaysFromLate+' half-day deduction(s) applicable — one per '+
+        L.halfDayPerExtraInstances+' late arrivals beyond the first '+L.freeInstancesPerMonth);
+      out.rules.push('Half-day deduction for every '+L.halfDayPerExtraInstances+' additional late instances');
+    }
+  }
+  return out;
+}
+
+// ---- leave balances ----
+function leaveBalances(emp, used, P){
+  P = P || LEAVE_POLICY;
+  const type = emp.employeeType === 'part' ? 'part' : 'full';
+  const sickTotal = P.sickLeave.perYear[type];
+  const sickLeft = Math.max(0, sickTotal - (used.sick || 0));
+  const plEarned = Math.floor((used.attendanceDays || 0) / P.privilegeLeave.earnedPerAttendanceDays);
+  const plUsable = P.privilegeLeave.usableInFirstYear || !emp.isFirstFinancialYear;
+  return {
+    sickTotal, sickLeft, sickExhausted: sickLeft === 0,
+    plEarned, plUsed: used.pl || 0, plLeft: Math.max(0, plEarned - (used.pl || 0)),
+    plUsable,
+    notes: [].concat(
+      sickLeft === 0 ? ['No Sick Leave balance available — further sick leave becomes Leave Without Pay'] : [],
+      !plUsable ? ['PL earned this year is usable from the next financial year'] : [],
+      (used.plThisMonth || 0) > P.privilegeLeave.maxPerMonth
+        ? ['More than '+P.privilegeLeave.maxPerMonth+' PL this month — the excess is deducted from salary'] : []
+    )
+  };
+}
+
+// ---- leave application ----
+function validateLeaveApplication(req, ctx, P){
+  P = P || LEAVE_POLICY;
+  const A = P.leaveApplication, out = { ok:true, blockers:[], notes:[] };
+  if(A.formRequired && !req.formSubmitted){ out.ok = false; out.blockers.push('Leave Form Missing'); }
+  if(A.hodApprovalRequired && !req.hodApproved){ out.ok = false; out.blockers.push('HOD Approval Pending'); }
+  if((ctx.onLeaveSameDeptSameDay || 0) >= A.maxConcurrentPerDepartment){
+    out.ok = false;
+    out.blockers.push('Department Leave Limit Reached — a maximum of '+A.maxConcurrentPerDepartment+' at a time');
+  }
+  if(!A.mondayIsPaidLeave && req.weekday === 1) out.notes.push('Monday leave is not paid leave');
+  if(A.sandwichRule && (ctx.adjacentToHolidayOrSunday))
+    out.notes.push('Sandwich Leave applied — the intervening Sunday or holiday is also counted as leave');
+  if(req.leaveType === 'sick' && P.sickLeave.medicalCertificateRequired && !req.medicalCertificate){
+    out.ok = false; out.blockers.push('Medical Certificate Pending');
+  }
+  return out;
+}
+
 const ATT_CODES = ['P','A','H','EL','SL','LP','HEL','HSL','HLP','SHORT'];
 const ATT_CODE_LABELS = { P:'Present', A:'Absent', H:'Holiday', EL:'EL', SL:'SL', LP:'LP (unpaid)', HEL:'Half EL', HSL:'Half SL', HLP:'Half LP', SHORT:'Short leave' };
 
