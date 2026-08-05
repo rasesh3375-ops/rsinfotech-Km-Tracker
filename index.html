@@ -3693,15 +3693,19 @@ async function saveAttendanceChanges(){
   const btn = document.getElementById('attSaveBtn');
   if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
   let saved = 0, failed = 0;
+  // One read per employee, not one per edited cell. Marking a week for one
+  // person used to re-read that person's whole attendance record five times.
+  const attCache = {};
   for(const it of items){
     try{
-      const entry = (await getAttendance(it.employeeId))[it.dateStr] || {};
+      if(!attCache[it.employeeId]) attCache[it.employeeId] = await getAttendance(it.employeeId);
+      const entry = attCache[it.employeeId][it.dateStr] || {};
       await setAttendanceDay(it.employeeId, it.dateStr, it.code,
         { lateFlag: entry.lateFlag, checkinTime: entry.checkinTime });
       saved++;
     }catch(e){ failed++; }
   }
-  await addActivityLog('Attendance saved: ' + saved + ' change(s)' + (failed ? ', ' + failed + ' failed' : ''));
+  addActivityLog('Attendance saved: ' + saved + ' change(s)' + (failed ? ', ' + failed + ' failed' : '')).catch(() => {});
   // Only clear what actually went in, so a failed write is not silently lost.
   if(!failed) pendingAttendance = {};
   if(btn){ btn.disabled = false; btn.textContent = 'Save attendance'; }
@@ -6449,27 +6453,29 @@ async function saveEmployeeForm(){
     || document.querySelector('[onclick="saveEmployeeForm()"]');
   if(saveBtn){ saveBtn.disabled = true; saveBtn.dataset.label = saveBtn.textContent; saveBtn.textContent = 'Saving…'; }
   try{
-    if(editingEmployeeId){
-      const idx = employees.findIndex(e => e.id === editingEmployeeId);
-      employees[idx] = draft;
-      await addActivityLog('Updated employee record for ' + name);
-      await saveEmployees(employees);
-      clearEmployeeDraft();
-      closeEmployeeModal();
-      await renderEmployeeList();
-      await refreshDashboard();
-      await renderUserList();
-    } else {
-      employees.push(draft);
-      await addActivityLog('Added employee ' + name + ' (' + id + ')');
-      await saveEmployees(employees);
-      clearEmployeeDraft();
-      closeEmployeeModal();
-      await renderEmployeeList();
-      await refreshDashboard();
-      await renderUserList();
-      await jumpToGeneratorForNewEmployee(id);
-    }
+    // Only the write is worth waiting for. Everything that used to follow it —
+    // the activity log round trip, the attendance sheet with its one read per
+    // employee, the reminder email, the increment list, the user list — was
+    // rebuilding screens the user cannot see while they watched a spinner. With
+    // twenty staff that was around thirty sequential calls to Apps Script for a
+    // single save. Those screens rebuild when they are next opened instead.
+    const isNew = !editingEmployeeId;
+    if(isNew) employees.push(draft);
+    else employees[employees.findIndex(e => e.id === editingEmployeeId)] = draft;
+
+    await saveEmployees(employees);
+    clearEmployeeDraft();
+    closeEmployeeModal();
+
+    // The log is a record, not something the user is waiting on.
+    addActivityLog(isNew ? ('Added employee ' + name + ' (' + id + ')')
+                         : ('Updated employee record for ' + name)).catch(() => {});
+    // Anything cached that mentions employees is now out of date.
+    invalidateSharedRead('employees');
+    invalidateDashboardSnapshot();
+
+    await renderEmployeeList();
+    if(isNew) await jumpToGeneratorForNewEmployee(id);
   }catch(err){
     msg.textContent = 'Could not save: ' + (err && err.message ? err.message : 'the server did not respond') + '. Nothing was lost — press Save again.';
     msg.classList.add('error');
