@@ -557,6 +557,18 @@
     background:#E7ECFA;color:#3B5BA9;}
   .calc-empty{font-size:12.5px;color:var(--muted);margin:12px 0 0;}
 
+  /* Every dynamic description folds. Closed they are one line, so a long form
+     is readable; open they explain themselves. <details> gives keyboard and
+     screen-reader behaviour without any of it being written by hand. */
+  .fold-card > summary{cursor:pointer;list-style:none;display:flex;align-items:center;
+    justify-content:space-between;gap:8px;}
+  .fold-card > summary::-webkit-details-marker{display:none;}
+  .fold-card > summary::after{content:'▾';font-size:11px;color:var(--muted);
+    transition:transform .18s ease;flex-shrink:0;}
+  .fold-card[open] > summary::after{transform:rotate(180deg);}
+  .fold-card > summary:hover{opacity:.82;}
+  .fold-card > summary:focus-visible{outline:2px solid var(--navy);outline-offset:2px;border-radius:6px;}
+
   /* Live salary breakdown under Rate of Pay. */
   .pay-box{margin-top:12px;border:1px solid var(--line);border-left:3px solid var(--green);
     border-radius:10px;background:#FAFBFD;padding:12px 13px;}
@@ -3800,8 +3812,9 @@ function buildPolicySummary(employees, attByEmp, dateList){
     </tr>`).join('');
 
   const S = LEAVE_POLICY.shortLeave, L = LEAVE_POLICY.lateComing;
-  return `<div class="dash-card" style="margin-top:16px;">
-    <div class="card-head"><h3>Policy check — ${escapeHtml(LEAVE_POLICY.version)}</h3></div>
+  return `<details class="dash-card dash-fold" style="margin-top:16px;" open>
+    <summary><span class="fold-t">Policy check — ${escapeHtml(LEAVE_POLICY.version)}</span><span class="fold-x">▾</span></summary>
+    <div class="fold-body">
     <p class="card-sub" style="margin:0 0 10px;">Shift ${minToHHMM(LEAVE_POLICY.shift.startMin)}–${minToHHMM(LEAVE_POLICY.shift.endMin)} ·
       overtime from ${minToHHMM(LEAVE_POLICY.shift.overtimeFromMin)} ·
       grace to ${minToHHMM(LEAVE_POLICY.shift.startMin + L.graceMinutes)} ·
@@ -3812,7 +3825,8 @@ function buildPolicySummary(employees, attByEmp, dateList){
       <thead><tr><th>Employee</th><th class="num">Late</th><th class="num">Short</th><th class="num">Half</th>
         <th class="num">Sick</th><th class="num">PL</th><th class="num">LWP</th><th class="num">OT</th><th>Policy</th></tr></thead>
       <tbody>${body}</tbody></table></div>
-  </div>`;
+    </div>
+  </details>`;
 }
 
 
@@ -4021,8 +4035,8 @@ function buildHeadingExplainer(key){
     `<div class="calc-line"><strong>Net = ₹${fmtMoney(ex.net)}</strong> <span class="calc-note">(PF, ESI, advances and retention taken as 0 here — those come from the employee's own figures)</span></div>`;
 
   return `
-    <div class="calc-card">
-      <div class="calc-head">${h.label} — how this is calculated</div>
+    <details class="calc-card fold-card">
+      <summary class="calc-head">${h.label} — how this is calculated</summary>
 
       <div class="calc-sec"><div class="calc-label">Formula Used</div>${formulaRows}</div>
 
@@ -4039,7 +4053,7 @@ function buildHeadingExplainer(key){
       <div class="calc-sec"><div class="calc-label">Example</div>
         <p class="calc-note">Rate of Pay ₹${fmtMoney(ex.rate)}, a ${ex.monthDays}-day month, ${ex.leaveDays} leave days:</p>
         ${exRows}</div>
-    </div>`;
+    </details>`;
 }
 
 function renderHeadingExplainer(){
@@ -4290,8 +4304,9 @@ async function renderPolicyOverrideLog(){
   if(!box) return;
   const log = await getPolicyOverrides();
   if(!log.length){ box.innerHTML = ''; return; }
-  box.innerHTML = `<div class="dash-card" style="margin-bottom:14px;">
-    <div class="card-head"><h3>Policy overrides</h3></div>
+  box.innerHTML = `<details class="dash-card dash-fold" style="margin-bottom:14px;">
+    <summary><span class="fold-t">Policy overrides</span><span class="fold-x">▾</span></summary>
+    <div class="fold-body">
     <p class="card-sub" style="margin:0 0 10px;">Attendance saved despite a policy breach. ${log.length} recorded.</p>
     <div class="inc-scroll"><table class="inc-table">
       <thead><tr><th>When</th><th>Account</th><th>Employees</th><th>Reason</th></tr></thead>
@@ -4301,7 +4316,8 @@ async function renderPolicyOverrideLog(){
           <td>${escapeHtml((e.violations || []).map(v => v.employee).join(', '))}
             <span class="inc-sub">${escapeHtml((e.violations || []).flatMap(v => v.rules || []).join('; '))}</span></td>
           <td>${escapeHtml(e.reason)}</td></tr>`).join('')}</tbody></table></div>
-  </div>`;
+    </div>
+  </details>`;
 }
 
 function discardAttendanceChanges(){
@@ -6937,13 +6953,13 @@ function renderPayrollBreakdown(){
     </tr>`).join('');
   const na = comps.filter(c => !c.applies).map(c => c.label);
 
-  box.innerHTML = `<div class="pay-box">
-    <div class="pay-head">Calculated from Rate of Pay — full month, before leave deduction</div>
+  box.innerHTML = `<details class="pay-box fold-card" open>
+    <summary class="pay-head">Calculated from Rate of Pay — full month, before leave deduction</summary>
     <table class="pay-table"><tbody>${rows}</tbody></table>
     ${na.length ? `<p class="calc-note">Not applicable to this heading: ${escapeHtml(na.join(', '))}.</p>` : ''}
     ${missing.length ? `<p class="pay-warn">No formula configured for: <strong>${escapeHtml(missing.join(', '))}</strong>. Fix the payroll master before saving.</p>` : ''}
     <p class="calc-note">Leave days reduce each earning in proportion on the Salary Sheet; this shows a full month.</p>
-  </div>`;
+  </details>`;
 }
 
 function updateBonusPreview(){
