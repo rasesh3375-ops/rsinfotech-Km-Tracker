@@ -3960,6 +3960,30 @@ const PF_RULES = {
 // changed without touching the calculation.
 PF_RULES.wageComponents = ['basic', 'hra'];
 
+// EPF Scheme "excluded employee". All three conditions must hold — any one of
+// them missing and PF is mandatory. The threshold is strictly greater than the
+// ceiling, not equal to it, and it is tested at the wage on joining.
+PF_RULES.exclusion = {
+  wageAbove: 15000,
+  conditions: ['No prior UAN or EPF account', 'Basic + DA strictly above ₹15,000', 'Form 11 declaration submitted']
+};
+
+// Returns why PF is or is not being deducted, so the form can say so rather
+// than silently showing zero — a zero with no reason looks like a bug, and an
+// employee wrongly excluded is a compliance failure nobody notices for months.
+function pfExclusionStatus(emp, wage){
+  const X = PF_RULES.exclusion;
+  const noUan  = emp.hasPriorUan === 'no';
+  const form11 = emp.form11Submitted === 'yes';
+  const aboveThreshold = wage > X.wageAbove;
+  const excluded = noUan && form11 && aboveThreshold;
+  const missing = [];
+  if(!noUan)  missing.push('a prior UAN or EPF account exists');
+  if(!aboveThreshold) missing.push('Basic + DA of ₹' + fmtMoney(wage) + ' is not above ₹' + fmtMoney(X.wageAbove));
+  if(!form11) missing.push('Form 11 declaration not recorded');
+  return { excluded, missing, noUan, form11, aboveThreshold };
+}
+
 function pfWageOf(components){
   const get = k => { const c = components.find(x => x.key === k); return c ? c.value : 0; };
   return PF_RULES.wageComponents.reduce((sum, k) => sum + get(k), 0);
@@ -5289,12 +5313,25 @@ function computePayrollComponents(rate, headingKey, manual){
       if(typeof def.pct !== 'number'){ missing = true; formula = 'No rate configured'; }
       else { value = base * def.pct; formula = (def.of === 'rate' ? 'Rate of Pay' : def.of) + ' × ' + headingPct(def.pct); }
     } else if(def.source === 'pfEmployee' || def.source === 'pfEps' || def.source === 'pfEpf'){
-      const pf = computePf(pfWageOf(out));
+      const pfWage = pfWageOf(out);
+      const excl = pfExclusionStatus(payrollExclusionInputs(), pfWage);
+      const pf = excl.excluded
+        ? { employee:0, employerEps:0, employerEpf:0, employerTotal:0, wage:pfWage, capApplied:false }
+        : computePf(pfWage);
+      if(excl.excluded){
+        out.push = out.push;   // no-op, keeps the shape below unchanged
+      }
       value = def.source === 'pfEmployee' ? pf.employee
             : def.source === 'pfEps'      ? pf.employerEps : pf.employerEpf;
       const base = PF_RULES.wageComponents
         .map(k => (PAYROLL_MASTER.find(x => x.key === k) || {}).label || k)
         .join(' + ') + ' (₹' + fmtMoney(pf.wage) + ')';
+      if(excl.excluded){
+        formula = 'Excluded employee — no prior UAN, Form 11 submitted, and Basic + DA above ₹' +
+                  fmtMoney(PF_RULES.exclusion.wageAbove) + '. No PF is deducted.';
+        out.push({ ...def, applies:true, auto:true, value, formula, missing:false });
+        return;
+      }
       formula = def.source === 'pfEmployee'
         ? headingPct(PF_RULES.employeePct) + ' of ' + base
         : def.source === 'pfEps'
@@ -6797,6 +6834,18 @@ function employeeModalHtml(emp){
         <label class="field">Standard deductions</label>
         <input type="number" id="f_stdDeductions" placeholder="0" value="${emp.stdDeductions||''}">
         <div style="height:12px"></div>
+        <label class="field">Had a UAN or EPF account before?</label>
+        <select class="field-input" id="f_hasPriorUan" onchange="toggleStatutoryFieldsForHeading()">
+          <option value="yes" ${emp.hasPriorUan!=='no'?'selected':''}>Yes — has a prior UAN</option>
+          <option value="no" ${emp.hasPriorUan==='no'?'selected':''}>No — first-time member</option>
+        </select>
+        <div style="height:10px"></div>
+        <label class="field">Form 11 declaration submitted?</label>
+        <select class="field-input" id="f_form11" onchange="toggleStatutoryFieldsForHeading()">
+          <option value="no" ${emp.form11Submitted!=='yes'?'selected':''}>No</option>
+          <option value="yes" ${emp.form11Submitted==='yes'?'selected':''}>Yes — opted out of PF</option>
+        </select>
+        <div style="height:10px"></div>
         <label class="field" id="f_pf_label">PF (provident fund)</label>
         <input type="number" id="f_pf" value="${emp.pf||''}" readonly
                title="Calculated automatically from the configured payroll formula."
@@ -6969,12 +7018,24 @@ function toggleStatutoryFieldsForHeading(){
     } else {
       const rate = Number((document.getElementById('f_ratePay') || {}).value) || 0;
       const comps = computePayrollComponents(rate, document.getElementById('f_salaryHeading').value, {});
-      const pf = computePf(pfWageOf(comps));
-      pfEl.value = Math.round(pf.employee * 100) / 100;
-      if(pfNote) pfNote.textContent =
-        headingPct(PF_RULES.employeePct) + ' of Basic + HRA ₹' + fmtMoney(pf.wage) + '. Employer adds ₹' +
-        fmtMoney(pf.employerTotal) + ' — ₹' + fmtMoney(pf.employerEps) + ' to pension' +
-        (pf.capApplied ? ' (capped)' : '') + ' and ₹' + fmtMoney(pf.employerEpf) + ' to EPF.';
+      const wage = pfWageOf(comps);
+      const excl = pfExclusionStatus(payrollExclusionInputs(), wage);
+      if(excl.excluded){
+        pfEl.value = 0;
+        if(pfNote) pfNote.innerHTML = '<span class="pol-ok">✓ Excluded employee — no PF deducted.</span> ' +
+          'No prior UAN, Form 11 submitted, and Basic + DA of ₹' + fmtMoney(wage) +
+          ' is above ₹' + fmtMoney(PF_RULES.exclusion.wageAbove) + '.';
+      } else {
+        const pf = computePf(wage);
+        pfEl.value = Math.round(pf.employee * 100) / 100;
+        const why = excl.missing.length
+          ? ' PF is mandatory because ' + excl.missing.join(', and ') + '.'
+          : '';
+        if(pfNote) pfNote.textContent =
+          headingPct(PF_RULES.employeePct) + ' of Basic + HRA ₹' + fmtMoney(wage) + '. Employer adds ₹' +
+          fmtMoney(pf.employerTotal) + ' — ₹' + fmtMoney(pf.employerEps) + ' to pension' +
+          (pf.capApplied ? ' (capped)' : '') + ' and ₹' + fmtMoney(pf.employerEpf) + ' to EPF.' + why;
+      }
     }
   }
 
@@ -7012,6 +7073,15 @@ let editingEmployeeDraft = null;
 // master marks manual stay editable.
 // One derived heading, straight from the master, for the save path and the
 // bonus preview. Reads the form as it stands right now.
+// The two declarations the exclusion depends on, read from the form as it
+// stands so the breakdown reacts the moment either is answered.
+function payrollExclusionInputs(){
+  return {
+    hasPriorUan: (document.getElementById('f_hasPriorUan') || {}).value || '',
+    form11Submitted: (document.getElementById('f_form11') || {}).value || ''
+  };
+}
+
 function payrollValue(key){
   const rate = Number((document.getElementById('f_ratePay') || {}).value) || 0;
   const headingKey = (document.getElementById('f_salaryHeading') || {}).value || 'managerial';
@@ -7395,6 +7465,8 @@ async function saveEmployeeForm(){
     mobileExpense: Number(document.getElementById('f_mobileExpense').value)||0,
     stdDeductions: Number(document.getElementById('f_stdDeductions').value)||0,
     pt: payrollValue('pt'),
+    hasPriorUan: document.getElementById('f_hasPriorUan').value,
+    form11Submitted: document.getElementById('f_form11').value,
     pfEmployerEps: payrollValue('pfEmployerEps'),
     pfEmployerEpf: payrollValue('pfEmployerEpf'),
     pf: payrollValue('pf'),
