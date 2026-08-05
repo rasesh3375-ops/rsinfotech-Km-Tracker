@@ -350,6 +350,8 @@
     #hrContent select,#hrContent input,#hrContent textarea{font-size:16px;}
   }
 
+  .draft-note{display:block;font-size:11px;color:var(--muted);margin-top:8px;text-align:center;}
+
   /* ---- loading skeletons ---- */
   .sk{background:linear-gradient(90deg,#EEF1F7 25%,#F7F9FC 37%,#EEF1F7 63%);
     background-size:400% 100%;animation:skPulse 1.3s ease-in-out infinite;border-radius:8px;}
@@ -5975,6 +5977,7 @@ function employeeModalHtml(emp){
       <div class="modal-actions">
         <button class="btn ghost" onclick="closeEmployeeModal()">Cancel</button>
         <button class="btn" onclick="saveEmployeeForm()">Save employee</button>
+        <span id="empDraftNote" class="draft-note"></span>
       </div>
       <div class="msg" id="empSaveMsg"></div>
     </div>
@@ -6117,6 +6120,71 @@ async function handleOtherDocUpload(event, idx){
   editingEmployeeDraft.otherDocs[idx].dataUrl = dataUrl;
 }
 
+// ---- employee form draft ----
+// The Add Employee form is long — identity, salary, policy, documents, job
+// profile. Losing it to a crash, a reload or a flat battery means typing all of
+// it again, so what is on screen is written to this device every few seconds
+// and offered back next time the form is opened. Drafts stay local: they are
+// unsaved work, not company records, and must not reach the shared sheet.
+const EMP_DRAFT_KEY = 'kmt_emp_draft';
+let empDraftTimer = null;
+
+function employeeDraftFields(){
+  const root = document.getElementById('employeeModalRoot');
+  if(!root) return null;
+  const out = {};
+  root.querySelectorAll('input, select, textarea').forEach(el => {
+    if(!el.id || el.type === 'file' || el.type === 'password') return;
+    out[el.id] = el.type === 'checkbox' ? el.checked : el.value;
+  });
+  return out;
+}
+
+function scheduleEmployeeDraftSave(){
+  clearTimeout(empDraftTimer);
+  // Debounced: this runs on keystrokes, and localStorage writes are synchronous.
+  empDraftTimer = setTimeout(() => {
+    const fields = employeeDraftFields();
+    if(!fields) return;
+    try{
+      localStorage.setItem(EMP_DRAFT_KEY, JSON.stringify({
+        forId: editingEmployeeId || '', at: Date.now(), fields
+      }));
+      const note = document.getElementById('empDraftNote');
+      if(note) note.textContent = 'Draft saved on this device · ' + new Date().toLocaleTimeString();
+    }catch(e){}
+  }, 1200);
+}
+
+function clearEmployeeDraft(){
+  clearTimeout(empDraftTimer);
+  try{ localStorage.removeItem(EMP_DRAFT_KEY); }catch(e){}
+}
+
+function readEmployeeDraft(){
+  try{
+    const raw = localStorage.getItem(EMP_DRAFT_KEY);
+    if(!raw) return null;
+    const d = JSON.parse(raw);
+    // A draft older than a day is more likely to confuse than help.
+    if(!d || !d.fields || Date.now() - d.at > 86400000) return null;
+    return d;
+  }catch(e){ return null; }
+}
+
+function applyEmployeeDraft(fields){
+  const root = document.getElementById('employeeModalRoot');
+  if(!root) return;
+  Object.keys(fields).forEach(id => {
+    const el = document.getElementById(id);
+    if(!el) return;
+    if(el.type === 'checkbox') el.checked = !!fields[id]; else el.value = fields[id];
+  });
+  toggleStatutoryFieldsForHeading();
+  renderPayrollBreakdown();
+  updateBonusPreview();
+}
+
 async function openAddEmployeeModal(id){
   editingEmployeeId = id || null;
   if(id){
@@ -6127,6 +6195,23 @@ async function openAddEmployeeModal(id){
   }
   document.getElementById('employeeModalRoot').innerHTML = employeeModalHtml(editingEmployeeDraft);
   toggleStatutoryFieldsForHeading();
+
+  // Offer the draft back only when it belongs to this form — a half-finished
+  // new employee must never be poured into someone else's record.
+  const draft = readEmployeeDraft();
+  if(draft && draft.forId === (editingEmployeeId || '')){
+    const when = new Date(draft.at).toLocaleString();
+    if(confirm('An unsaved draft of this form from ' + when + ' was found on this device.\n\nRestore it?')){
+      applyEmployeeDraft(draft.fields);
+    } else {
+      clearEmployeeDraft();
+    }
+  }
+  const root = document.getElementById('employeeModalRoot');
+  if(root){
+    root.addEventListener('input', scheduleEmployeeDraftSave);
+    root.addEventListener('change', scheduleEmployeeDraftSave);
+  }
 }
 function closeEmployeeModal(){
   document.getElementById('employeeModalRoot').innerHTML = '';
@@ -6255,6 +6340,7 @@ async function saveEmployeeForm(){
       employees[idx] = draft;
       await addActivityLog('Updated employee record for ' + name);
       await saveEmployees(employees);
+      clearEmployeeDraft();
       closeEmployeeModal();
       await renderEmployeeList();
       await refreshDashboard();
@@ -6263,6 +6349,7 @@ async function saveEmployeeForm(){
       employees.push(draft);
       await addActivityLog('Added employee ' + name + ' (' + id + ')');
       await saveEmployees(employees);
+      clearEmployeeDraft();
       closeEmployeeModal();
       await renderEmployeeList();
       await refreshDashboard();
