@@ -4699,8 +4699,14 @@ async function renderStatutoryReport(key, label){
   }
   const holidayMap = await getHolidayMap_local();
 
+  await getAttendanceMany(employees.map(e => e.id));
   const rows = [];
   let grandTotal = 0;
+  // ESI is filed with both shares and the wage they were charged on, so the
+  // return can be checked line by line — an employee-share-only list cannot be
+  // reconciled against the challan.
+  const esiRows = [];
+  const esiTot = { gross:0, employee:0, employer:0, total:0 };
   for(const emp of employees){
     const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
     const amount = s[cfg.field];
@@ -4708,6 +4714,57 @@ async function renderStatutoryReport(key, label){
       rows.push([emp.name, amount]);
       grandTotal += amount;
     }
+    if(key === 'esi'){
+      const heading = SALARY_HEADINGS[emp.salaryHeading] || SALARY_HEADINGS.managerial;
+      if(!heading.esi) continue;                    // not an ESI establishment heading
+      const r = computeEsi(s.gross, {
+        isDisabled: emp.esiDisabled === 'yes',
+        coveredAtPeriodStart: emp.esiCoveredAtPeriodStart === 'yes',
+        asOf: dateList[0]
+      });
+      esiRows.push({ emp, s, r });
+      if(r.covered){
+        esiTot.gross += s.gross; esiTot.employee += r.employee;
+        esiTot.employer += r.employer; esiTot.total += r.total;
+      }
+    }
+  }
+
+  if(key === 'esi' && esiRows.length){
+    const period = esiContributionPeriod(dateList[0]);
+    const money = v => '₹' + fmtMoney(v);
+    const body = esiRows.map((x, i) => `
+      <tr class="${x.r.covered ? '' : 'inc-overdue'}">
+        <td>${i + 1}</td><td>${escapeHtml(x.emp.name)}</td>
+        <td>${escapeHtml(x.emp.esiNumber || '—')}</td>
+        <td class="num">${money(x.s.gross)}</td>
+        <td class="num">${x.r.covered ? money(x.r.employee) : '—'}</td>
+        <td class="num">${x.r.covered ? money(x.r.employer) : '—'}</td>
+        <td class="num">${x.r.covered ? money(x.r.total) : '—'}</td>
+        <td>${x.r.covered ? 'Covered' : 'Exempt'}<span class="inc-sub">${escapeHtml(x.r.reason)}</span></td>
+      </tr>`).join('');
+    const csv = toCsv(
+      ['SR NO','Name','ESI Number','Gross Wages','Employee 0.75%','Employer 3.25%','Total','Status','Rule Applied'],
+      esiRows.map((x, i) => [i + 1, x.emp.name, x.emp.esiNumber || '', x.s.gross,
+        x.r.covered ? x.r.employee : 0, x.r.covered ? x.r.employer : 0, x.r.covered ? x.r.total : 0,
+        x.r.covered ? 'Covered' : 'Exempt', x.r.reason])
+        .concat([['', 'TOTAL', '', esiTot.gross, esiTot.employee, esiTot.employer, esiTot.total, '', '']]));
+    saveFileToDrive(['HR Management','Reports','ESI'], `ESI Return - ${monthVal}.csv`, csv, 'text/csv');
+    box.innerHTML = `${reportLogoHeader('ESI Contribution Return — ' + monthVal)}
+      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Contribution period ${escapeHtml(period.label)} ·
+        employee ${headingPct(ESI_RULES.employeePct)} · employer ${headingPct(ESI_RULES.employerPct)} ·
+        ceiling ₹${fmtMoney(ESI_RULES.wageCeiling)} (₹${fmtMoney(ESI_RULES.disabledCeiling)} for persons with disability).
+        Covers the R.S. Infotech payroll headings only.</p>
+      <div class="inc-scroll"><table class="inc-table">
+        <thead><tr><th>#</th><th>Name</th><th>ESI No.</th><th class="num">Gross</th>
+          <th class="num">Employee</th><th class="num">Employer</th><th class="num">Total</th><th>Status</th></tr></thead>
+        <tbody>${body}
+          <tr class="pay-total"><td></td><td><strong>Total</strong></td><td></td>
+            <td class="num">${money(esiTot.gross)}</td><td class="num">${money(esiTot.employee)}</td>
+            <td class="num">${money(esiTot.employer)}</td><td class="num">${money(esiTot.total)}</td><td></td></tr>
+        </tbody></table></div>
+      <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; Reports &gt; ESI.</p>`;
+    return;
   }
 
   if(!rows.length){
