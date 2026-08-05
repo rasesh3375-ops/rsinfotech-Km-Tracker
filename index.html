@@ -1095,6 +1095,7 @@
             </div>
             <button class="btn full" onclick="renderAttendanceSheet()">Load attendance sheet</button>
             <div style="height:14px"></div>
+            <div id="policyOverrideLog"></div>
             <div id="attSaveBar" class="att-save-bar hidden">
               <span id="attSaveCount">0 unsaved changes</span>
               <span class="att-save-actions">
@@ -4013,6 +4014,7 @@ async function renderAttendanceSheet(){
     <button class="btn ghost full" style="margin-top:12px;" onclick="openFullscreenView('Attendance Sheet','attendanceSheetBox')">⛶ Full screen</button>`
     // Policy position for the same month, from the same records already read.
     + buildPolicySummary(employees, attByEmp, dateList);
+  renderPolicyOverrideLog();
 
   // Same computation again for the export, so a downloaded sheet and the panel
   // on screen can never disagree about who breached what.
@@ -4058,6 +4060,21 @@ function handleAttendanceCellChange(employeeId, dateStr, selectEl){
 async function saveAttendanceChanges(){
   const items = Object.values(pendingAttendance);
   if(!items.length) return;
+
+  // Policy gate. The edits are applied to a copy of the affected employees'
+  // records and judged before anything is written, so a breach is refused with
+  // its reasons rather than saved quietly and discovered in payroll later.
+  const gate = await checkAttendanceAgainstPolicy(items);
+  if(gate.violations.length){
+    const reasons = gate.violations.map(v => '• ' + v.name + ': ' + v.warn.join('; ')).join('\n');
+    const reason = prompt(
+      'This attendance violates company policy.\n\n' + reasons +
+      '\n\nOnly an administrator may override this. Type the reason to override, or Cancel to go back and correct it.');
+    if(reason === null) return;                       // cancelled — nothing saved
+    if(!reason.trim()){ alert('An override needs a reason. Nothing was saved.'); return; }
+    await logPolicyOverride(gate.violations, reason.trim());
+  }
+
   const btn = document.getElementById('attSaveBtn');
   if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
   let saved = 0, failed = 0;
@@ -4080,6 +4097,83 @@ async function saveAttendanceChanges(){
   updateAttendanceSaveBar();
   await renderAttendanceSheet();
   if(failed) alert(failed + ' change(s) could not be saved — they are still marked unsaved. Check the connection and press Save again.');
+}
+
+// Judges the pending edits without writing them: each affected employee's
+// stored record is copied, the edits applied to the copy, and the result run
+// through the same policyRowsFor every other surface uses.
+async function checkAttendanceAgainstPolicy(items){
+  const out = { violations: [] };
+  try{
+    const ids = [...new Set(items.map(i => i.employeeId))];
+    const employees = (await getEmployees()).filter(e => ids.indexOf(e.id) !== -1);
+    if(!employees.length) return out;
+    const attByEmp = await getAttendanceMany(ids);
+    const projected = {};
+    ids.forEach(id => { projected[id] = Object.assign({}, attByEmp[id] || {}); });
+    items.forEach(it => {
+      const prev = projected[it.employeeId][it.dateStr] || {};
+      projected[it.employeeId][it.dateStr] = Object.assign({}, prev, { code: it.code });
+    });
+    // Judge the month each edit falls in.
+    const months = [...new Set(items.map(i => i.dateStr.slice(0, 7)))];
+    months.forEach(ym => {
+      const [y, m] = ym.split('-').map(Number);
+      const dl = [];
+      for(let d = 1; d <= new Date(y, m, 0).getDate(); d++) dl.push(ym + '-' + String(d).padStart(2,'0'));
+      policyRowsFor(employees, projected, dl).forEach(r => {
+        if(r.warn.length) out.violations.push({ id:r.emp.id, name:r.emp.name || r.emp.id, month:ym, warn:r.warn });
+      });
+    });
+  }catch(e){}   // never block a save because the check itself failed
+  return out;
+}
+
+async function getPolicyOverrides(){
+  const v = await safeGet('policy_overrides', true);
+  return v ? JSON.parse(v) : [];
+}
+
+// The account is the shared HR login, so that is what is recorded — the log
+// says who was signed in, not which person was at the keyboard. A typed reason
+// is what makes each entry attributable.
+async function logPolicyOverride(violations, reason){
+  const now = new Date();
+  const entry = {
+    ts: now.toISOString(),
+    date: now.toLocaleDateString('en-IN'),
+    time: now.toLocaleTimeString('en-IN'),
+    account: 'HR administrator (shared login)',
+    reason,
+    violations: violations.map(v => ({ employee: v.name, month: v.month, rules: v.warn }))
+  };
+  try{
+    const log = await getPolicyOverrides();
+    log.unshift(entry);
+    await safeSet('policy_overrides', JSON.stringify(log.slice(0, 300)), true);
+  }catch(e){}
+  addActivityLog('Policy override — ' + violations.map(v => v.name).join(', ') + ' — reason: ' + reason).catch(() => {});
+}
+
+// The override trail, shown with the sheet it belongs to. An override that
+// nobody can see afterwards is not an audit log.
+async function renderPolicyOverrideLog(){
+  const box = document.getElementById('policyOverrideLog');
+  if(!box) return;
+  const log = await getPolicyOverrides();
+  if(!log.length){ box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="dash-card" style="margin-bottom:14px;">
+    <div class="card-head"><h3>Policy overrides</h3></div>
+    <p class="card-sub" style="margin:0 0 10px;">Attendance saved despite a policy breach. ${log.length} recorded.</p>
+    <div class="inc-scroll"><table class="inc-table">
+      <thead><tr><th>When</th><th>Account</th><th>Employees</th><th>Reason</th></tr></thead>
+      <tbody>${log.slice(0, 20).map(e => `
+        <tr><td>${escapeHtml(e.date)}<span class="inc-sub">${escapeHtml(e.time)}</span></td>
+          <td>${escapeHtml(e.account)}</td>
+          <td>${escapeHtml((e.violations || []).map(v => v.employee).join(', '))}
+            <span class="inc-sub">${escapeHtml((e.violations || []).flatMap(v => v.rules || []).join('; '))}</span></td>
+          <td>${escapeHtml(e.reason)}</td></tr>`).join('')}</tbody></table></div>
+  </div>`;
 }
 
 function discardAttendanceChanges(){
