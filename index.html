@@ -294,6 +294,52 @@
     .kpi{transition:none;}
   }
 
+  /* KPI cards that are shortcuts. Fluent-style: quiet by default, lifting on
+     hover, with a visible focus ring so they work from the keyboard too. */
+  .kpi-link{cursor:pointer;}
+  .kpi-link:hover{box-shadow:0 8px 22px rgba(22,33,62,.14);}
+  .kpi-link:focus-visible{outline:2px solid var(--tone,#3B5BA9);outline-offset:2px;}
+
+  /* ---- header user menu ---- */
+  .user-menu{position:relative;}
+  .user-btn{display:flex;align-items:center;gap:8px;background:none;border:1px solid transparent;
+    border-radius:8px;padding:5px 8px;cursor:pointer;font-size:13px;color:var(--navy);font-weight:600;}
+  .user-btn:hover{background:#EEF1F7;border-color:var(--line);}
+  .user-btn .avatar{width:26px;height:26px;border-radius:50%;background:var(--navy);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;}
+  .user-btn .caret{font-size:10px;color:var(--muted);}
+  .user-drop{position:absolute;right:0;top:calc(100% + 6px);min-width:196px;z-index:60;
+    background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:5px;
+    box-shadow:0 10px 28px rgba(22,33,62,.18);}
+  .user-drop button{display:block;width:100%;text-align:left;background:none;border:none;
+    padding:9px 11px;border-radius:7px;font-size:13px;color:var(--navy);cursor:pointer;}
+  .user-drop button:hover{background:#EEF1F7;}
+  .user-drop button.danger{color:var(--red);}
+  .user-drop button.danger:hover{background:#FBE3E0;}
+  .user-drop-sep{height:1px;background:var(--line);margin:4px 6px;}
+
+  /* ---- increment reminder widget ---- */
+  .inc-controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;}
+  .inc-controls .field-input{flex:1;min-width:130px;font-size:12.5px;padding:7px 9px;}
+  .inc-controls .inc-search{flex:2;min-width:160px;}
+  .inc-scroll{overflow-x:auto;max-height:290px;overflow-y:auto;}
+  .inc-table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  .inc-table th{position:sticky;top:0;background:#F1F4FA;text-align:left;padding:7px 8px;
+    font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);z-index:1;}
+  .inc-table td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top;}
+  .inc-table td.num,.inc-table th.num{text-align:right;white-space:nowrap;}
+  .inc-table tbody tr{cursor:pointer;}
+  .inc-table tbody tr:hover{background:#F5F7FB;}
+  .inc-sub{display:block;font-size:11px;color:var(--muted);margin-top:2px;}
+  /* Band colour carried on a left rule rather than a full wash, so several
+     rows can sit together without the card turning into a block of colour. */
+  .inc-table tr.inc-overdue td:first-child{box-shadow:inset 3px 0 0 var(--red);}
+  .inc-table tr.inc-overdue td.num:last-child{color:var(--red);font-weight:700;}
+  .inc-table tr.inc-this td:first-child{box-shadow:inset 3px 0 0 #B96E0A;}
+  .inc-table tr.inc-this td.num:last-child{color:#B96E0A;font-weight:700;}
+  .inc-table tr.inc-next td:first-child{box-shadow:inset 3px 0 0 #3B5BA9;}
+  .inc-table tr.inc-next td.num:last-child{color:#3B5BA9;font-weight:700;}
+
   /* Placeholder / empty-state line inside a dashboard card. */
   .dash-muted{font-size:13px;color:var(--muted);margin:0;padding:6px 2px;}
 
@@ -755,7 +801,6 @@
         <div class="side-foot">
           <div class="who">Admin</div>
           <div class="sub">HR administrator</div>
-          <button class="btn ghost full" onclick="logoutHr()">Log out</button>
         </div>
       </aside>
       <div id="hrShellBody">
@@ -766,7 +811,18 @@
           </div>
           <div class="tb-right">
             <span class="hide-sm" id="hrTopDate"></span>
-            <span>Admin</span>
+            <div class="user-menu">
+              <button class="user-btn" id="hrUserBtn" onclick="toggleUserMenu(event)"
+                      aria-haspopup="true" aria-expanded="false">
+                <span class="avatar">A</span><span class="hide-sm">Admin</span><span class="caret">▾</span>
+              </button>
+              <div class="user-drop hidden" id="hrUserDrop" role="menu">
+                <button role="menuitem" onclick="openMyProfile()">👤 My Profile</button>
+                <button role="menuitem" onclick="openChangePassword()">🔑 Change Password</button>
+                <div class="user-drop-sep"></div>
+                <button role="menuitem" class="danger" onclick="logoutHr()">⏻ Logout</button>
+              </div>
+            </div>
           </div>
         </header>
         <main id="hrContent">
@@ -5022,8 +5078,13 @@ async function buildHrDashboardHome(box){
 
   // `id` is optional and only used by figures that arrive after the first
   // paint, so they can be filled in without redrawing the whole screen.
-  const kpi = (icon, cap, n, sub, tone, id) => `
-    <div class="kpi" data-tone="${tone || 'indigo'}">
+  // `route` turns the card into a shortcut into that module — it goes through
+  // hrNavigate, the same call the sidebar makes, so there is one page per
+  // module and whatever governs access there governs it here too.
+  const kpi = (icon, cap, n, sub, tone, id, route) => `
+    <div class="kpi${route ? ' kpi-link' : ''}" data-tone="${tone || 'indigo'}"${
+      route ? ` onclick="hrNavigate('${route}')" role="button" tabindex="0"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();hrNavigate('${route}');}"` : ''}>
       <div class="top"><div class="ic">${icon}</div><div class="cap">${cap}</div></div>
       <div class="n"${id ? ` id="${id}"` : ''}>${n}</div><div class="sub">${sub}</div>
     </div>`;
@@ -5053,8 +5114,10 @@ async function buildHrDashboardHome(box){
     </div>`).join('') : '<div class="empty">Nothing expiring in the next 30 days.</div>';
 
   const quick = [
-    ['attendance','🗓️','Attendance'], ['salary','₹','Salary Sheet'], ['reminders','📈','Increments'],
-    ['expiry','📄','Doc Expiry'], ['reports','📊','Reports'], ['generator','✉️','Generator'], ['team','👤','Team']
+    // Attendance and Doc Expiry are not here: Attendance has its own card on
+    // the dashboard now, and Doc Expiry has its own section further down.
+    ['salary','₹','Salary Sheet'], ['reminders','📈','Increments'],
+    ['reports','📊','Reports'], ['generator','✉️','Generator'], ['team','👤','Team']
   ].map(([r, i, l]) => `<div class="qa" onclick="hrNavigate('${r}')"><span class="ic">${i}</span>${l}</div>`).join('');
 
   // Drawn with whatever arrived. Say so plainly rather than presenting partial
@@ -5071,18 +5134,33 @@ async function buildHrDashboardHome(box){
 
   box.innerHTML = degradedBanner + `
     <div class="kpi-row">
-      ${kpi('👷','Active Engineers', moving, 'Currently on duty', 'green')}
-      ${kpi('🚫','Absent Today', '—', 'Marked absent or LP', 'red', 'dashAbsentCount')}
-      ${kpi('👥','Total Engineers', onRoll.length, 'All registered', 'indigo')}
+      ${kpi('👥','Employee Master', onRoll.length, 'Open employee records', 'indigo', null, 'employees')}
+      ${kpi('🗓️','Attendance Sheet', 'Open', 'Mark and review attendance', 'green', null, 'attendance')}
+      ${kpi('👷','Total Engineers', users.length, 'Tracking logins', 'indigo')}
       ${kpi('📄','Documents Expiring', expiring.length, 'Within 30 days', 'amber')}
     </div>
 
     <div class="dash-2col">
       <div class="dash-card">
-        <div class="card-head"><h3>Absent Today</h3>
-          <button class="linkbtn" style="padding:0" onclick="hrNavigate('attendance')">Attendance sheet</button></div>
-        <p class="card-sub" style="margin:0 0 10px;">${todayStr()} — anyone marked A, LP or half-day LP.</p>
-        <div id="dashAbsentBox"><p class="dash-muted">Checking attendance…</p></div>
+        <div class="card-head"><h3>Increment Reminder</h3>
+          <button class="linkbtn" style="padding:0" onclick="hrNavigate('reminders')">Open increments</button></div>
+        <div class="inc-controls">
+          <input class="field-input inc-search" id="incSearch" type="search" placeholder="Search name, ID, department…" oninput="renderIncrementWidget()">
+          <select class="field-input" id="incRange" onchange="renderIncrementWidget()">
+            <option value="90">Next 90 days</option>
+            <option value="this">This month</option>
+            <option value="next">Next month</option>
+            <option value="overdue">Overdue</option>
+            <option value="all">All upcoming</option>
+          </select>
+          <select class="field-input" id="incSort" onchange="renderIncrementWidget()">
+            <option value="due">Sort: due date</option>
+            <option value="name">Sort: name</option>
+            <option value="salary">Sort: current salary</option>
+            <option value="dept">Sort: department</option>
+          </select>
+        </div>
+        <div id="dashIncrementBox"><p class="dash-muted">Loading increments…</p></div>
       </div>
 
       <div class="dash-card">
@@ -5145,57 +5223,105 @@ async function buildHrDashboardHome(box){
   // was taken off this screen's critical path — leaving it there would put the
   // whole dashboard behind however many people are on roll. The card and its
   // KPI fill themselves in when the reads land.
-  loadDashboardAbsentToday(onRoll);
+  dashIncrementRows = buildIncrementRows(onRoll);
+  renderIncrementWidget();
 }
 
-// Anyone marked absent for today. Read straight from the Attendance Sheet's own
-// codes, so the dashboard and the sheet can never disagree.
-const ABSENT_TODAY_CODES = { A: 'Absent', LP: 'Leave without pay', HLP: 'Half day (LP)' };
+// ---- increment reminder widget ----
+// Built from the employees the dashboard already read, so it costs no extra
+// backend call. Rows are computed once; search, sort and filter work on the
+// computed list without going back to the network.
+let dashIncrementRows = [];
 
-// Bumped on every dashboard render so a slow fan-out from a previous visit
-// can't overwrite the card belonging to a newer one.
-let dashAbsentRender = 0;
+function buildIncrementRows(onRoll){
+  const today = new Date(); today.setHours(0,0,0,0);
+  const thisM = today.getMonth(), thisY = today.getFullYear();
+  const nextM = (thisM + 1) % 12, nextY = thisM === 11 ? thisY + 1 : thisY;
+  return onRoll.filter(e => e.nextIncrement).map(e => {
+    const due = new Date(e.nextIncrement);
+    if(isNaN(due)) return null;
+    due.setHours(0,0,0,0);
+    const days = Math.round((due - today) / 86400000);
+    // Overdue wins over everything: a date that has passed is the urgent case
+    // whatever month it happens to sit in.
+    const band = days < 0 ? 'overdue'
+      : (due.getMonth() === thisM && due.getFullYear() === thisY) ? 'this'
+      : (due.getMonth() === nextM && due.getFullYear() === nextY) ? 'next' : 'later';
+    return { id:e.id, name:e.name || '—', dept:e.department || '—', desig:e.designation || '—',
+             salary:Number(e.ratePay) || 0, due:e.nextIncrement, dueTs:due.getTime(), days, band };
+  }).filter(Boolean);
+}
 
-async function loadDashboardAbsentToday(onRoll){
-  const token = ++dashAbsentRender;
-  const box = document.getElementById('dashAbsentBox');
-  const countEl = document.getElementById('dashAbsentCount');
+function renderIncrementWidget(){
+  const box = document.getElementById('dashIncrementBox');
   if(!box) return;
+  const q = ((document.getElementById('incSearch') || {}).value || '').trim().toLowerCase();
+  const range = (document.getElementById('incRange') || {}).value || '90';
+  const sort = (document.getElementById('incSort') || {}).value || 'due';
 
-  const today = todayStr();
-  // Its own timeout per read, and its own fallback — this must not flip the
-  // "Some figures couldn't be loaded" banner, which describes the first paint.
-  const ms = BACKEND_BUDGET_MS + 1000;
-  const read = p => Promise.race([
-    Promise.resolve(p).catch(() => null),
-    new Promise(r => setTimeout(() => r(null), ms))
-  ]);
-  const atts = await Promise.all(onRoll.map(e => read(getAttendance(e.id))));
-  if(token !== dashAbsentRender) return;
-
-  const absent = [];
-  let unread = 0;
-  onRoll.forEach((e, i) => {
-    const att = atts[i];
-    // A read that failed is unknown, not absent. And a day nobody has marked
-    // yet is not an absence either — the day isn't over. Counting either as
-    // absent would put people on this list who are at work.
-    if(!att){ unread++; return; }
-    const entry = att[today];
-    const label = entry && ABSENT_TODAY_CODES[entry.code];
-    if(label) absent.push({ name: e.name || '—', label });
+  let rows = dashIncrementRows.filter(r => {
+    if(range === 'overdue') return r.band === 'overdue';
+    if(range === 'this')    return r.band === 'this';
+    if(range === 'next')    return r.band === 'next';
+    if(range === '90')      return r.days >= 0 && r.days <= 90;
+    return true;
   });
+  if(q) rows = rows.filter(r => (r.name + ' ' + r.id + ' ' + r.dept + ' ' + r.desig).toLowerCase().includes(q));
+  rows.sort((a, b) =>
+    sort === 'name'   ? a.name.localeCompare(b.name) :
+    sort === 'salary' ? b.salary - a.salary :
+    sort === 'dept'   ? a.dept.localeCompare(b.dept) || a.dueTs - b.dueTs :
+                        a.dueTs - b.dueTs);
 
-  if(countEl) countEl.textContent = absent.length;
-  const note = unread
-    ? `<p class="dash-muted" style="margin-top:10px;">${unread} employee${unread === 1 ? '' : 's'} couldn't be checked — attendance didn't load.</p>`
-    : '';
-  box.innerHTML = absent.length
-    ? absent.sort((a, b) => a.name.localeCompare(b.name)).map(a => `
-        <div class="legend-row"><span>${a.name}</span>
-          <span class="feed-tag" style="background:#FBE3E0;color:#B23A32;">${a.label}</span></div>`).join('') + note
-    : `<p class="dash-muted">Nobody is marked absent today.</p>${note}`;
+  if(!rows.length){
+    box.innerHTML = '<p class="dash-muted">No increments match this filter.</p>';
+    return;
+  }
+  const label = { overdue:'Overdue', this:'This month', next:'Next month', later:'Upcoming' };
+  box.innerHTML = `<div class="inc-scroll"><table class="inc-table">
+    <thead><tr><th>Employee</th><th>Department</th><th class="num">Salary</th><th>Due</th><th class="num">Days</th></tr></thead>
+    <tbody>${rows.map(r => `
+      <tr class="inc-${r.band}" onclick="openEmployeeFromDashboard('${escapeHtml(r.id)}')" title="Open ${escapeHtml(r.name)} in Employee Master">
+        <td><strong>${escapeHtml(r.name)}</strong><span class="inc-sub">${escapeHtml(r.id)} · ${escapeHtml(r.desig)}</span></td>
+        <td>${escapeHtml(r.dept)}</td>
+        <td class="num">${r.salary ? '₹' + fmtMoney(r.salary) : '—'}</td>
+        <td>${escapeHtml(r.due)}<span class="inc-sub">${label[r.band]}</span></td>
+        <td class="num">${r.days < 0 ? Math.abs(r.days) + ' late' : r.days}</td>
+      </tr>`).join('')}</tbody></table></div>`;
 }
+
+// Same module the sidebar opens — no second employee page.
+function openEmployeeFromDashboard(id){
+  hrNavigate('employees');
+  // Let the panel swap land before opening the record on top of it.
+  setTimeout(() => openAddEmployeeModal(id), 60);
+}
+
+// ---- header user menu ----
+function toggleUserMenu(ev){
+  if(ev) ev.stopPropagation();
+  const drop = document.getElementById('hrUserDrop');
+  const btn = document.getElementById('hrUserBtn');
+  if(!drop) return;
+  const open = drop.classList.toggle('hidden') === false;
+  if(btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+document.addEventListener('click', () => {
+  const drop = document.getElementById('hrUserDrop');
+  if(drop && !drop.classList.contains('hidden')){
+    drop.classList.add('hidden');
+    document.getElementById('hrUserBtn')?.setAttribute('aria-expanded', 'false');
+  }
+});
+function openMyProfile(){
+  alert('Signed in as the HR administrator account.\n\nHR account details are managed from the HR login itself — there is no separate profile record for this account yet.');
+}
+function openChangePassword(){
+  // Reuses the existing recovery flow rather than adding a second password
+  // path, so the same server-side rules and hashing apply.
+  alert('To change the HR password, log out and use "Forgot password?" on the HR login screen — it verifies the security question and sets a new password through the same server checks.');
+}
+
 
 // ---- dashboard ----
 async function refreshDashboard(){
