@@ -1925,6 +1925,36 @@ async function recordCheckin(name){
 // Codes: P (present), A (absent), H (holiday), EL (earned/privilege leave),
 // SL (sick leave), LP (leave without pay), HEL/HSL/HLP (half-day variants),
 // SHORT (short leave, non-resident only).
+// Attendance for many employees in ONE request. Falls back to reading them one
+// at a time when the deployed backend does not answer with `batch`, so this is
+// safe before the Apps Script is redeployed. Results are seeded into the shared
+// read cache, so anything asking for a single employee afterwards is free.
+async function getAttendanceMany(ids){
+  const out = {};
+  if(!ids.length) return out;
+  const keys = ids.map(id => 'attendance:' + id);
+  try{
+    const res = await apiFetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action:'getBatch', keys, token: sessionToken })
+    });
+    const data = await res.json();
+    if(data && data.batch && data.values){
+      ids.forEach(id => {
+        const raw = data.values['attendance:' + id];
+        if(raw !== null && raw !== undefined) primeSharedRead('attendance:' + id, raw);
+        try{ out[id] = raw ? JSON.parse(raw) : {}; }catch(e){ out[id] = {}; }
+      });
+      return out;
+    }
+  }catch(e){}
+  // Older backend, or the batch call failed — one at a time, as before.
+  const each = await Promise.all(ids.map(id => getAttendance(id).catch(() => ({}))));
+  ids.forEach((id, i) => { out[id] = each[i] || {}; });
+  return out;
+}
+
 async function getAttendance(employeeId){
   const v = await safeGet('attendance:' + employeeId, true);
   return v ? JSON.parse(v) : {};
@@ -3639,6 +3669,9 @@ async function renderAttendanceSheet(){
   const csvRows = [];
 
   let bodyRows = '';
+  // One request for everyone's attendance before the loop; each read below
+  // then comes from the primed cache instead of its own round trip.
+  await getAttendanceMany(employees.map(e => e.id));
   for(let i=0; i<employees.length; i++){
     const emp = employees[i];
     const att = await getAttendance(emp.id);
@@ -4082,6 +4115,9 @@ async function renderConsultantReport(){
 
   const rows = [];
   let sr = 0;
+  // One request for everyone's attendance before the loop; each read below
+  // then comes from the primed cache instead of its own round trip.
+  await getAttendanceMany(employees.map(e => e.id));
   for(const emp of employees){
     const att = await getAttendance(emp.id);
     const c = consultantDayCounts(att, dateList, holidayMap);
@@ -5543,7 +5579,11 @@ async function loadDashboardAbsentToday(onRoll){
     Promise.resolve(p).catch(() => null),
     new Promise(r => setTimeout(() => r(null), ms))
   ]);
-  const atts = await Promise.all(onRoll.map(e => read(getAttendance(e.id))));
+  const byId = await Promise.race([
+    getAttendanceMany(onRoll.map(e => e.id)),
+    new Promise(r => setTimeout(() => r({}), ms))
+  ]);
+  const atts = onRoll.map(e => byId[e.id] || null);
   if(token !== dashAbsentRender) return;
 
   let absent = 0, unread = 0;
@@ -6928,6 +6968,9 @@ async function renderElCalculationSheet(){
   }
 
   const rows = [];
+  // One request for everyone's attendance before the loop; each read below
+  // then comes from the primed cache instead of its own round trip.
+  await getAttendanceMany(employees.map(e => e.id));
   for(const emp of employees){
     const att = await getAttendance(emp.id);
     let presentDays = 0, elUsed = 0;
@@ -6994,6 +7037,9 @@ async function renderMonthlyLeaveReport(){
   }
 
   const rows = [];
+  // One request for everyone's attendance before the loop; each read below
+  // then comes from the primed cache instead of its own round trip.
+  await getAttendanceMany(employees.map(e => e.id));
   for(const emp of employees){
     const att = await getAttendance(emp.id);
     const monthTotals = fyMonths.map(({year, month}) => {

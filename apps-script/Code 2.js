@@ -282,6 +282,22 @@ function doPost(e) {
   const auth = validateSession_(body.token);
   if (!auth) return jsonOut_({ error: 'unauthorized' });
 
+  if (body.action === 'getBatch') {
+    // Many keys, one request. The client used to fetch attendance one employee
+    // at a time, so a twenty-person report meant twenty round trips; the sheet
+    // is read once here and every requested key answered from it.
+    var sheetB = getSheet_();
+    var rows = sheetB.getDataRange().getValues();
+    var map = {};
+    for (var i = 0; i < rows.length; i++) map[rows[i][0]] = rows[i][1];
+    var keys = body.keys || [];
+    var values = {};
+    for (var j = 0; j < keys.length; j++) {
+      values[keys[j]] = map[keys[j]] !== undefined ? map[keys[j]] : null;
+    }
+    return jsonOut_({ ok: true, batch: true, values: values });
+  }
+
   if (body.action === 'uploadDocument') {
     return jsonOut_(doUploadDocument_(body));
   }
