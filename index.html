@@ -1823,6 +1823,10 @@ async function safeSet(key, value, shared){
       return;
     }
     localStorage.setItem('kmt_shared_' + key, value);
+    // Any shared write can change what the dashboard shows, so its cached
+    // screen goes too — a stale headcount after adding an employee would be a
+    // worse bug than a slow dashboard.
+    invalidateDashboardSnapshot();
     // Write first, then drop the cached copy so the next read sees the change.
     invalidateSharedRead(key);
     await remoteSet(key, value);
@@ -2327,12 +2331,12 @@ async function renderUserList(){
     <div class="userrow">
       <div class="who">
         ${u.displayName || u.username}
-        <span class="u">@${u.username}</span>
+        <span class="u">@${escapeHtml(u.username)}</span>
       </div>
       <div class="actions">
         <span class="pill ${u.enabled === false ? 'disabled' : 'live'}">${u.enabled === false ? 'disabled' : 'active'}</span>
-        <button class="btn ghost" onclick="resetPassword('${u.username}')">Reset password</button>
-        <button class="btn ghost" onclick="toggleUserEnabled('${u.username}')">${u.enabled === false ? 'Enable' : 'Disable'}</button>
+        <button class="btn ghost" onclick="resetPassword('${escapeHtml(u.username)}')">Reset password</button>
+        <button class="btn ghost" onclick="toggleUserEnabled('${escapeHtml(u.username)}')">${u.enabled === false ? 'Enable' : 'Disable'}</button>
       </div>
     </div>`).join('');
 }
@@ -3296,7 +3300,7 @@ function updateLiveMap(activeOnes, opts){
       iconAnchor: [15, 15]
     });
 
-    const popupHtml = `<strong>${i.name}</strong><br>${i.status.label}${isMoving ? ' · driving' : ' · stopped'}<br>${i.status.detail}`;
+    const popupHtml = `<strong>${escapeHtml(i.name)}</strong><br>${i.status.label}${isMoving ? ' · driving' : ' · stopped'}<br>${i.status.detail}`;
 
     if(liveMapMarkers[i.name]){
       liveMapMarkers[i.name].setLatLng(latlng);
@@ -3360,7 +3364,7 @@ function renderLiveStatus(infos){
       : '';
     return `<div class="status-card ${s.level === 'warn' ? 'warn' : ''}">
       <div class="head">
-        <strong>${i.name}</strong>
+        <strong>${escapeHtml(i.name)}</strong>
         <span class="pill ${s.level === 'warn' ? 'warn' : 'live'}">${s.level === 'warn' ? s.label : '🚗 ' + s.label}</span>
       </div>
       <div class="detail ${s.level === 'warn' ? 'warn' : ''}">${s.detail}</div>
@@ -3458,7 +3462,7 @@ function buildHeadingExplainer(key){
   const ded = stat.map(s => s.name).concat(['Advance (temporary)', 'Advance', 'Retention']);
 
   const formulaRows = comps.map(c =>
-    `<div class="calc-line"><code>${c.name}</code> = ${headingComponentFormula(c)}</div>`).join('') +
+    `<div class="calc-line"><code>${escapeHtml(c.name)}</code> = ${headingComponentFormula(c)}</div>`).join('') +
     `<div class="calc-line"><code>Gross</code> = ${comps.map(c => c.name).join(' + ')}</div>` +
     stat.filter(s => s.name === 'PT').map(() =>
       `<div class="calc-line"><code>PT</code> = ₹${fmtMoney(PT_AMOUNT)} if Gross &gt; ₹${fmtMoney(PT_GROSS_THRESHOLD)}, else ₹0</div>`).join('') +
@@ -3484,7 +3488,7 @@ function buildHeadingExplainer(key){
 
   const ex = headingExample(h);
   const exRows = ex.lines.map(l =>
-    `<div class="calc-line">${l.name} = ₹${fmtMoney(l.amount)}</div>`).join('') +
+    `<div class="calc-line">${escapeHtml(l.name)} = ₹${fmtMoney(l.amount)}</div>`).join('') +
     `<div class="calc-line"><strong>Gross = ₹${fmtMoney(ex.gross)}</strong></div>` +
     (h.pt ? `<div class="calc-line">PT = ₹${fmtMoney(ex.pt)}</div>` : '') +
     `<div class="calc-line"><strong>Net = ₹${fmtMoney(ex.net)}</strong> <span class="calc-note">(PF, ESI, advances and retention taken as 0 here — those come from the employee's own figures)</span></div>`;
@@ -3585,7 +3589,7 @@ async function renderAttendanceSheet(){
       const lateMark = entry && entry.lateFlag ? '<br><span class="att-late">late</span>' : '';
       return `<td><select class="att-code code-${defaultCode||''}" onchange="handleAttendanceCellChange('${emp.id}','${dateStr}',this)">${blankOpt}${options}</select>${lateMark}</td>`;
     }).join('');
-    bodyRows += `<tr><td>${i+1}</td><td class="att-name">${emp.name}${isResident?' <span style="color:var(--muted);font-size:10px;">(Resident)</span>':''}</td>${dayCells}` +
+    bodyRows += `<tr><td>${i+1}</td><td class="att-name">${escapeHtml(emp.name)}${isResident?' <span style="color:var(--muted);font-size:10px;">(Resident)</span>':''}</td>${dayCells}` +
       `<td>${summary.present}</td><td>${summary.absent}</td><td>${summary.elUsed}</td><td>${summary.slUsed}</td><td>${summary.lpDays}</td><td>${summary.halfDays}</td><td>${summary.shortCount}</td><td>${summary.lateCount}</td></tr>`;
     csvRows.push([i+1, emp.name, ...dayCodes, summary.present, summary.absent, summary.elUsed, summary.slUsed, summary.lpDays, summary.halfDays, summary.shortCount, summary.lateCount]);
   }
@@ -3783,7 +3787,7 @@ async function renderSalarySheet(){
     const sub = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netSalary:0 };
     for(const emp of group){
       const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
-      bodyRows += `<tr><td>${srNo++}</td><td class="sal-name">${emp.name}</td><td>${fmtMoney(s.rate)}</td><td>${s.leaveDays}</td><td>${fmtMoney(s.leaveAmount)}</td>` +
+      bodyRows += `<tr><td>${srNo++}</td><td class="sal-name">${escapeHtml(emp.name)}</td><td>${fmtMoney(s.rate)}</td><td>${s.leaveDays}</td><td>${fmtMoney(s.leaveAmount)}</td>` +
         `<td>${fmtMoney(s.basic)}</td><td>${fmtMoney(s.hra)}</td><td>${fmtMoney(s.lta)}</td><td>${fmtMoney(s.gross)}</td>` +
         `<td>${fmtMoney(s.pf)}</td><td>${fmtMoney(s.esi)}</td><td>${fmtMoney(s.pt)}</td><td>${fmtMoney(s.advanceTemp)}</td><td>${fmtMoney(s.advance)}</td><td>${fmtMoney(s.retention)}</td>` +
         `<td>${fmtMoney(s.totalDeduction)}</td><td>${fmtMoney(s.netSalary)}</td></tr>`;
@@ -3901,7 +3905,7 @@ async function renderApprenticeSalaryReport(){
   let bodyRows = '';
   for(const emp of employees){
     const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
-    bodyRows += `<tr><td>${emp.name}</td><td class="num">${fmtMoney(s.rate)}</td><td class="num">${s.leaveDays}</td><td class="num">${fmtMoney(s.leaveAmount)}</td>` +
+    bodyRows += `<tr><td>${escapeHtml(emp.name)}</td><td class="num">${fmtMoney(s.rate)}</td><td class="num">${s.leaveDays}</td><td class="num">${fmtMoney(s.leaveAmount)}</td>` +
       `<td class="num">${fmtMoney(s.basic)}</td><td class="num">${fmtMoney(s.hra)}</td><td class="num">${fmtMoney(s.lta)}</td><td class="num">${fmtMoney(s.gross)}</td>` +
       `<td class="num">${fmtMoney(s.advanceTemp)}</td><td class="num">${fmtMoney(s.advance)}</td><td class="num">${fmtMoney(s.retention)}</td><td class="num">${fmtMoney(s.totalDeduction)}</td><td class="num">${fmtMoney(s.netSalary)}</td></tr>`;
     csvRows.push([emp.name, s.rate, s.leaveDays, s.leaveAmount, s.basic, s.hra, s.lta, s.gross, s.advanceTemp, s.advance, s.retention, s.totalDeduction, s.netSalary]);
@@ -4147,7 +4151,7 @@ async function renderSalaryComparisonReport(){
     rowsHtml += `<tr class="sal-heading"><td colspan="3">${title}</td></tr>`;
     csvRows.push([title, '', '']);
     items.forEach(i => {
-      rowsHtml += `<tr><td class="sal-name">${i.emp.name}</td><td>${detailFor(i)}</td><td class="num">${fmtSigned_(i.amount)}</td></tr>`;
+      rowsHtml += `<tr><td class="sal-name">${escapeHtml(i.emp.name)}</td><td>${detailFor(i)}</td><td class="num">${fmtSigned_(i.amount)}</td></tr>`;
       csvRows.push([i.emp.name, detailFor(i), Math.round(i.amount * 100) / 100]);
     });
     rowsHtml += `<tr class="sal-subtotal"><td></td><td>Subtotal</td><td class="num">${fmtSigned_(sub)}</td></tr>`;
@@ -4216,7 +4220,7 @@ async function renderGeofenceZones(){
   }
   box.innerHTML = zones.map(z => `
     <div class="emp-row">
-      <div class="head"><strong>${z.name}</strong><span class="id">${z.radiusKm} km radius</span></div>
+      <div class="head"><strong>${escapeHtml(z.name)}</strong><span class="id">${z.radiusKm} km radius</span></div>
       <div class="sub">${z.lat.toFixed(5)}, ${z.lon.toFixed(5)}</div>
       <div class="actions"><button class="btn ghost" onclick="deleteGeofenceZone('${z.id}')">Delete</button></div>
     </div>`).join('');
@@ -4405,7 +4409,7 @@ async function generateDailySummary(){
     if(r.status !== 'live' && r.status !== 'idle'){
       flagged.push(r.name + ' (' + r.status + ')');
     }
-    return `${r.name}: ${fmtKm(r.kmToday)} km · ₹${todayExpense.toFixed(0)} · ${r.status}`;
+    return `${escapeHtml(r.name)}: ${fmtKm(r.kmToday)} km · ₹${todayExpense.toFixed(0)} · ${r.status}`;
   });
   const text = `R.S. Infotech — Daily Summary (${today})\n\n${lines.join('\n')}\n\nTotal distance: ${fmtKm(totalKm)} km\nTotal expense: ₹${totalExpense.toFixed(0)}${flagged.length ? ('\n\nFlagged: ' + flagged.join(', ')) : ''}`;
   lastDailySummaryText = text;
@@ -4713,7 +4717,7 @@ function roleReportContent(emp, typeKey){
   // Written from this employee's own record. The wording changes with the
   // domain, the designation and whether the profile has been filled in.
   const summary = [
-    `${emp.name || 'This employee'} works as ${role} in ${dept}, which places the role in ${domainNames}.`,
+    `${escapeHtml(emp.name || 'This employee')} works as ${role} in ${dept}, which places the role in ${domainNames}.`,
     emp.jobProfile ? `The recorded job profile is: ${emp.jobProfile}` : '',
     resp.length ? `${resp.length} key ${resp.length === 1 ? 'responsibility has' : 'responsibilities have'} been recorded against this role, and the measures and checks in this report are drawn from them.`
                 : `No key responsibilities have been recorded against this role yet, so this report is built from designation and department alone and is necessarily general. Filling in Job profile and Key responsibilities in Employee Master will make it specific.`,
@@ -4734,8 +4738,8 @@ function roleReportContent(emp, typeKey){
   if(!resp.length) recommendations.unshift('Agree and record key responsibilities so future reviews measure against a stated expectation.');
 
   const conclusion = thin
-    ? `On the record available, ${emp.name || 'this employee'} is engaged as ${role} in ${dept}. A fuller assessment is not possible until the job profile and key responsibilities are recorded; the recommendations above are the first step.`
-    : `${emp.name || 'This employee'}'s role as ${role} in ${dept} is documented and falls within ${domainNames.toLowerCase()}. The measures listed above are the appropriate basis for reviewing this role, and the recommendations should be taken up with the reporting manager for the coming period.`;
+    ? `On the record available, ${escapeHtml(emp.name || 'this employee')} is engaged as ${role} in ${dept}. A fuller assessment is not possible until the job profile and key responsibilities are recorded; the recommendations above are the first step.`
+    : `${escapeHtml(emp.name || 'This employee')}'s role as ${role} in ${dept} is documented and falls within ${domainNames.toLowerCase()}. The measures listed above are the appropriate basis for reviewing this role, and the recommendations should be taken up with the reporting manager for the coming period.`;
 
   return {
     type, domains, thin,
@@ -5107,9 +5111,48 @@ function daysUntilDate_(iso){
   return Math.round((d - today) / 86400000);
 }
 
-async function renderHrDashboardHome(){
+// The rendered dashboard, kept so returning to it is instant. Coming back from
+// Attendance or Reports used to re-run the whole gather — several seconds of
+// spinner to redraw figures that had not changed. The cached screen goes up
+// immediately and a refresh runs behind it, so the numbers still catch up.
+let dashboardSnapshot = { html:'', at:0 };
+let dashLastMapInfos = [];
+const DASHBOARD_FRESH_MS = 60000;
+
+function invalidateDashboardSnapshot(){ dashboardSnapshot = { html:'', at:0 }; }
+
+function captureDashboard(box){
+  if(box) dashboardSnapshot = { html: box.innerHTML, at: Date.now() };
+}
+
+// A restored snapshot is just markup — the map instance and the increment
+// widget's in-memory rows do not come back with it, so both are rebuilt against
+// the nodes that are now on screen.
+function reviveDashboard(){
+  try{ updateLiveMap(dashLastMapInfos || [], { mapId:'dashLiveMap', emptyId:'dashLiveMapEmpty' }); }catch(e){}
+  setTimeout(invalidateLiveMaps, 60);
+  try{ renderIncrementWidget(); }catch(e){}
+}
+
+async function renderHrDashboardHome(force){
   const box = document.getElementById('hrPageDashboard');
   if(!box) return;
+
+  const age = Date.now() - dashboardSnapshot.at;
+  if(!force && dashboardSnapshot.html && age < DASHBOARD_FRESH_MS){
+    // Straight back on screen, no network at all.
+    box.innerHTML = dashboardSnapshot.html;
+    reviveDashboard();
+    return;
+  }
+  if(!force && dashboardSnapshot.html){
+    // Stale but usable: show it now and quietly rebuild underneath, so the
+    // screen is never blank and never more than a minute out of date.
+    box.innerHTML = dashboardSnapshot.html;
+    reviveDashboard();
+    buildHrDashboardHome(box).then(() => captureDashboard(box)).catch(() => {});
+    return;
+  }
   box.innerHTML = '<div class="empty">Loading dashboard…</div>';
   try{
     // A hard deadline as well as the per-request timeouts: whatever goes wrong
@@ -5123,7 +5166,7 @@ async function renderHrDashboardHome(){
     box.innerHTML = `<div class="dash-card">
       <h3>Dashboard unavailable</h3>
       <p class="card-sub">Couldn't load the figures — the backend didn't respond. Everything else in the sidebar still works.</p>
-      <button class="btn ghost full" onclick="renderHrDashboardHome()">Try again</button>
+      <button class="btn ghost full" onclick="renderHrDashboardHome(true)">Try again</button>
     </div>`;
   }
 }
@@ -5241,14 +5284,14 @@ async function buildHrDashboardHome(box){
   const bdayList = birthdays.length ? birthdays.slice(0, 5).map(b => `
     <div class="feed-row">
       <div class="ic">🎂</div>
-      <div class="body"><div class="t"><strong>${b.who}</strong></div><div class="when">${consultantDate(b.dob)}</div></div>
+      <div class="body"><div class="t"><strong>${escapeHtml(b.who)}</strong></div><div class="when">${consultantDate(b.dob)}</div></div>
       <span class="feed-tag" style="background:#EEF0FB;color:#3B4A7A;">${b.days === 0 ? 'today' : b.days + (b.days === 1 ? ' day' : ' days')}</span>
     </div>`).join('') : '<div class="empty">No birthdays in the next 30 days.</div>';
 
   const expList = expiring.length ? expiring.slice(0, 6).map(x => `
     <div class="feed-row">
       <div class="ic">📄</div>
-      <div class="body"><div class="t"><strong>${x.kind}</strong> — ${x.who}</div>
+      <div class="body"><div class="t"><strong>${escapeHtml(x.kind)}</strong> — ${escapeHtml(x.who)}</div>
       <div class="when">Expiring on <span style="color:var(--red);font-weight:600;">${consultantDate(x.when)}</span></div></div>
       <span class="feed-tag" style="background:#FBE3E0;color:#B23A32;">${x.days}d</span>
     </div>`).join('') : '<div class="empty">Nothing expiring in the next 30 days.</div>';
@@ -5265,7 +5308,7 @@ async function buildHrDashboardHome(box){
   const degradedBanner = softly.degraded ? `
     <div class="dash-card" style="background:#FFF6F5;border-color:#F1D7D4;">
       <div class="card-head"><h3 style="color:var(--red);">Some figures couldn't be loaded</h3>
-        <button class="linkbtn" style="padding:0" onclick="renderHrDashboardHome()">Retry</button></div>
+        <button class="linkbtn" style="padding:0" onclick="renderHrDashboardHome(true)">Retry</button></div>
       <p class="card-sub" style="margin:0;">${softly.failed.length
         ? 'Didn\'t answer in time: <strong>' + softly.failed.join('</strong>, <strong>') + '</strong>. Those figures show as 0 below; the rest are accurate.'
         : 'The backend didn\'t answer in time, so the numbers below may be incomplete.'} Everything in the sidebar still works.</p>
@@ -5351,8 +5394,10 @@ async function buildHrDashboardHome(box){
   // Only reachable now that innerHTML has written the container. ensureLiveMap
   // detects the fresh node and rebuilds, so this survives every re-render;
   // invalidateSize covers the case where the panel was hidden while laying out.
+  dashLastMapInfos = mapInfos;
   updateLiveMap(mapInfos, { mapId: 'dashLiveMap', emptyId: 'dashLiveMapEmpty' });
   setTimeout(invalidateLiveMaps, 60);
+  captureDashboard(box);
 
   // Deliberately after the paint and deliberately not awaited. Today's absences
   // need one attendance read per employee, which is exactly the fan-out that
@@ -5555,8 +5600,8 @@ async function renderIncrementReminders(){
     const body = encodeURIComponent('Reminder: ' + e.name + ' (' + (e.designation||'') + ') has an increment due on ' + e.nextIncrement + '.');
     const mailLink = email ? `mailto:${email}?subject=${subject}&body=${body}` : `mailto:?subject=${subject}&body=${body}`;
     return `<div class="emp-row">
-      <div class="head"><strong>${e.name}</strong><span class="id">in ${days} day${days===1?'':'s'}</span></div>
-      <div class="sub">${e.designation || ''} · increment due ${e.nextIncrement}</div>
+      <div class="head"><strong>${escapeHtml(e.name)}</strong><span class="id">in ${days} day${days===1?'':'s'}</span></div>
+      <div class="sub">${escapeHtml(e.designation || '')} · increment due ${e.nextIncrement}</div>
       <div class="actions"><a class="btn ghost" href="${mailLink}">Send reminder email</a></div>
     </div>`;
   }).join('');
@@ -5590,8 +5635,8 @@ async function renderDocExpiryList(){
     const body = encodeURIComponent('Reminder: ' + it.name + '\'s ' + it.docLabel.toLowerCase() + ' is on ' + it.date + '.');
     const mailLink = email ? `mailto:${email}?subject=${subject}&body=${body}` : `mailto:?subject=${subject}&body=${body}`;
     return `<div class="emp-row">
-      <div class="head"><strong>${it.name}</strong><span class="id">in ${it.days} day${it.days===1?'':'s'}</span></div>
-      <div class="sub">${it.docLabel} expires ${it.date}${it.designation ? (' · ' + it.designation) : ''}</div>
+      <div class="head"><strong>${escapeHtml(it.name)}</strong><span class="id">in ${it.days} day${it.days===1?'':'s'}</span></div>
+      <div class="sub">${escapeHtml(it.docLabel)} expires ${it.date}${it.designation ? (' · ' + it.designation) : ''}</div>
       <div class="actions"><a class="btn ghost" href="${mailLink}">Send reminder email</a></div>
     </div>`;
   }).join('');
@@ -5605,7 +5650,7 @@ async function renderActivityLogList(){
     box.innerHTML = '<div class="empty">No activity recorded yet.</div>';
     return;
   }
-  box.innerHTML = log.map(l => `<div class="emp-row"><div class="sub" style="margin-top:0;">${new Date(l.ts).toLocaleString()}</div><div style="font-size:13.5px;margin-top:2px;">${l.text}</div></div>`).join('');
+  box.innerHTML = log.map(l => `<div class="emp-row"><div class="sub" style="margin-top:0;">${new Date(l.ts).toLocaleString()}</div><div style="font-size:13.5px;margin-top:2px;">${escapeHtml(l.text)}</div></div>`).join('');
 }
 
 // ---- employee master ----
@@ -5724,7 +5769,7 @@ function employeeModalHtml(emp){
         <input type="text" id="f_id" placeholder="EMP-1001" value="${emp.id}">
         <div style="height:12px"></div>
         <label class="field">Full name</label>
-        <input type="text" id="f_name" placeholder="Employee full name" value="${emp.name}">
+        <input type="text" id="f_name" placeholder="Employee full name" value="${escapeHtml(emp.name)}">
         <div style="height:12px"></div>
         <label class="field">Salutation</label>
         <select class="field-input" id="f_salutation">
@@ -5736,10 +5781,10 @@ function employeeModalHtml(emp){
         <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Used to get the pronouns right in generated letters (e.g. Experience Letter). Leave as "Not set" to use gender-neutral wording instead.</p>
         <div style="height:12px"></div>
         <label class="field">Designation</label>
-        <input type="text" id="f_designation" placeholder="e.g. Senior Executive" value="${emp.designation}">
+        <input type="text" id="f_designation" placeholder="e.g. Senior Executive" value="${escapeHtml(emp.designation)}">
         <div style="height:12px"></div>
         <label class="field">Department</label>
-        <input type="text" id="f_department" placeholder="e.g. Operations" value="${emp.department}">
+        <input type="text" id="f_department" placeholder="e.g. Operations" value="${escapeHtml(emp.department)}">
         <div style="height:12px"></div>
         <label class="field">Job profile</label>
         <textarea class="field-input" id="f_jobProfile" rows="3" placeholder="What this person is actually responsible for day to day">${emp.jobProfile || ''}</textarea>
@@ -5788,13 +5833,13 @@ function employeeModalHtml(emp){
       <div class="field-group">
         <div class="sec-title">Contact</div>
         <label class="field">Phone</label>
-        <input type="text" id="f_phone" placeholder="10-digit mobile number" value="${emp.phone}">
+        <input type="text" id="f_phone" placeholder="10-digit mobile number" value="${escapeHtml(emp.phone)}">
         <div style="height:12px"></div>
         <label class="field">Email</label>
-        <input type="text" id="f_email" placeholder="name@company.com" value="${emp.email}">
+        <input type="text" id="f_email" placeholder="name@company.com" value="${escapeHtml(emp.email)}">
         <div style="height:12px"></div>
         <label class="field">Address</label>
-        <input type="text" id="f_address" placeholder="Residential address" value="${emp.address}">
+        <input type="text" id="f_address" placeholder="Residential address" value="${escapeHtml(emp.address)}">
       </div>
 
       <div class="field-group">
@@ -5868,10 +5913,10 @@ function employeeModalHtml(emp){
         </select>
         <div id="trackingLoginFields" class="${emp.trackingEnabled==='yes'?'':'hidden'}" style="margin-top:12px;">
           ${emp.trackingUsername ? `
-            <p style="font-size:12.5px;color:var(--muted);margin:0;">Tracking login already created: <strong style="color:var(--navy);">@${emp.trackingUsername}</strong>. Use "Reset password" in the Tracking tab if they need a new one.</p>
+            <p style="font-size:12.5px;color:var(--muted);margin:0;">Tracking login already created: <strong style="color:var(--navy);">@${escapeHtml(emp.trackingUsername)}</strong>. Use "Reset password" in the Tracking tab if they need a new one.</p>
           ` : `
             <label class="field">Username for their tracking login</label>
-            <input type="text" id="f_trackingUsername" placeholder="e.g. ramesh.patil" autocapitalize="none" autocorrect="off" value="${emp.trackingUsername||''}">
+            <input type="text" id="f_trackingUsername" placeholder="e.g. ramesh.patil" autocapitalize="none" autocorrect="off" value="${escapeHtml(emp.trackingUsername||'')}">
             <div style="height:12px"></div>
             <label class="field">Temporary password</label>
             <input type="text" id="f_trackingPassword" placeholder="e.g. field2026">
@@ -6263,8 +6308,8 @@ async function renderEmployeeList(){
   } else {
     box.innerHTML = employees.map(e => `
       <div class="emp-row">
-        <div class="head"><strong>${e.name}</strong><span class="id">${e.id}</span></div>
-        <div class="sub">${e.designation || '—'} · ${e.department || '—'}</div>
+        <div class="head"><strong>${escapeHtml(e.name)}</strong><span class="id">${e.id}</span></div>
+        <div class="sub">${escapeHtml(e.designation || '—')} · ${escapeHtml(e.department || '—')}</div>
         <div class="actions">
           <button class="btn ghost" onclick="openAddEmployeeModal('${e.id}')">Edit</button>
           <button class="btn ghost" onclick="markEmployeeLeft('${e.id}')">Mark as left</button>
@@ -6289,8 +6334,8 @@ function openLeftEmployeesModal(){
         <h2>Left employees</h2>
         <p class="hint">Their full record is kept on file — view details, or reactivate if they rejoin.</p>
         ${left.map(e => `<div class="emp-row">
-          <div class="head"><strong>${e.name}</strong><span class="id">${e.id}</span></div>
-          <div class="sub">${e.designation || '—'} · left ${e.leftDate || 'date not recorded'}</div>
+          <div class="head"><strong>${escapeHtml(e.name)}</strong><span class="id">${e.id}</span></div>
+          <div class="sub">${escapeHtml(e.designation || '—')} · left ${e.leftDate || 'date not recorded'}</div>
           <div class="actions">
             <button class="btn ghost" onclick="closeLeftEmployeesModal();openAddEmployeeModal('${e.id}')">View details</button>
             <button class="btn ghost" onclick="reactivateEmployee('${e.id}')">Reactivate</button>
@@ -6402,7 +6447,7 @@ async function populateAttendanceUserSelect(){
     sel.innerHTML = '<option value="">No engineer logins yet</option>';
     return;
   }
-  sel.innerHTML = users.map(u => `<option value="${u.username}">${u.displayName || u.username}</option>`).join('');
+  sel.innerHTML = users.map(u => `<option value="${escapeHtml(u.username)}">${u.displayName || u.username}</option>`).join('');
   if(prev && users.some(u => u.username === prev)) sel.value = prev;
   populateMonthYearSelects('attendanceMonthSel', 'attendanceYearSel');
 }
@@ -6504,7 +6549,7 @@ async function renderHolidayList(){
   }
   box.innerHTML = holidays.map(h => `
     <div class="emp-row">
-      <div class="head"><strong>${h.name}</strong><span class="id">${h.date}</span></div>
+      <div class="head"><strong>${escapeHtml(h.name)}</strong><span class="id">${h.date}</span></div>
       <div class="actions"><button class="btn ghost" onclick="deleteHoliday('${h.date}')">Delete</button></div>
     </div>`).join('');
   const yearInput = document.getElementById('holidayListYear');
@@ -6550,7 +6595,7 @@ async function renderElCalculationSheet(){
   box.innerHTML = `
     <div style="overflow-x:auto;"><table>
       <tr><th>Name</th><th class="num">Opening EL</th><th class="num">Present days (FY)</th><th class="num">EL earned</th><th class="num">EL used</th><th class="num">Closing EL</th></tr>
-      ${rows.map(r => `<tr><td>${r.name}</td><td class="num">${r.opening}</td><td class="num">${r.presentDays}</td><td class="num">${r.earned}</td><td class="num">${r.elUsed}</td><td class="num">${r.closing}</td></tr>`).join('')}
+      ${rows.map(r => `<tr><td>${escapeHtml(r.name)}</td><td class="num">${r.opening}</td><td class="num">${r.presentDays}</td><td class="num">${r.earned}</td><td class="num">${r.elUsed}</td><td class="num">${r.closing}</td></tr>`).join('')}
     </table></div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0;">FY ${startYear}-${String(startYear+1).slice(2)}: ${fyStart} to ${fyEnd}. EL earned = 1 day per 25 days present (present includes EL/SL days and half-day equivalents), floored. Closing = Opening + Earned − Used.</p>
     <button class="btn full" onclick='applyElClosingAsNextOpening(${JSON.stringify(rows.map(r=>({id:r.id,closing:r.closing})))})'>Apply closing balances as next year's EL opening balance</button>
@@ -6612,7 +6657,7 @@ async function renderMonthlyLeaveReport(){
   }
 
   const header = ['Name'].concat(FY_MONTH_LABELS).concat(['Total']);
-  const tableRows = rows.map(r => `<tr><td class="sal-name">${r.name}</td>${r.monthTotals.map(v => `<td class="num">${v || ''}</td>`).join('')}<td class="num"><strong>${r.yearTotal}</strong></td></tr>`).join('');
+  const tableRows = rows.map(r => `<tr><td class="sal-name">${escapeHtml(r.name)}</td>${r.monthTotals.map(v => `<td class="num">${v || ''}</td>`).join('')}<td class="num"><strong>${r.yearTotal}</strong></td></tr>`).join('');
 
   box.innerHTML = `${reportLogoHeader('Monthly Leave Report — FY ' + startYear + '-' + String(startYear+1).slice(2))}
     <div class="sal-sheet-wrap print-isolate" id="leaveReportPrintArea">
@@ -6638,7 +6683,7 @@ async function populateOvertimeEmployeeSelect(){
     sel.innerHTML = '<option value="">No field engineers on file</option>';
     return;
   }
-  sel.innerHTML = employees.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+  sel.innerHTML = employees.map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('');
   populateMonthYearSelects('otViewMonthSel', 'otViewYearSel');
 }
 
@@ -6691,7 +6736,7 @@ async function renderOvertimeReport(){
     toCsv(['Name','Date','Hours','Note'], log.map(o => [o.name, o.date, o.hours, o.note||''])), 'text/csv');
   box.innerHTML = `<div style="overflow-x:auto;"><table>
       <tr><th>Name</th><th>Date</th><th class="num">Hours</th><th>Note</th><th></th></tr>
-      ${log.map(o => `<tr><td>${o.name}</td><td>${o.date}</td><td class="num">${o.hours}</td><td>${o.note||''}</td><td><button class="btn ghost" style="font-size:11px;padding:5px 8px;" onclick="deleteOvertimeEntry('${o.id}')">Delete</button></td></tr>`).join('')}
+      ${log.map(o => `<tr><td>${escapeHtml(o.name)}</td><td>${o.date}</td><td class="num">${o.hours}</td><td>${o.note||''}</td><td><button class="btn ghost" style="font-size:11px;padding:5px 8px;" onclick="deleteOvertimeEntry('${o.id}')">Delete</button></td></tr>`).join('')}
     </table></div>
     <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Total overtime hours for ${monthStr}: <strong>${totalHours}</strong></p>`;
 }
@@ -6713,7 +6758,7 @@ async function generateHolidayListDoc(){
         const d = new Date(h.date);
         const dayName = d.toLocaleDateString(undefined, { weekday: 'long' });
         const niceDate = d.toLocaleDateString(undefined, { day: '2-digit', month: 'long', year: 'numeric' });
-        return `<tr><td>${niceDate}</td><td>${dayName}</td><td>${h.name}</td></tr>`;
+        return `<tr><td>${niceDate}</td><td>${dayName}</td><td>${escapeHtml(h.name)}</td></tr>`;
       }).join('')
     : `<tr><td colspan="3" class="empty">No holidays added for ${fyLabel} yet — add them in the Holidays section above.</td></tr>`;
 
@@ -6765,12 +6810,12 @@ async function viewReport(key, label){
   if(key === 'contact'){
     csvHeader = ['Name','Designation','Phone','Email'];
     csvRows = employees.map(e => [e.name, e.designation||'', e.phone||'', e.email||'']);
-    rows = employees.map(e => `<tr><td>${e.name}</td><td>${e.designation||''}</td><td>${e.phone||''}</td><td>${e.email||''}</td></tr>`).join('');
+    rows = employees.map(e => `<tr><td>${escapeHtml(e.name)}</td><td>${escapeHtml(e.designation||'')}</td><td>${escapeHtml(e.phone||'')}</td><td>${escapeHtml(e.email||'')}</td></tr>`).join('');
     box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Designation</th><th>Phone</th><th>Email</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'birthday'){
     csvHeader = ['Name','Date of birth'];
     csvRows = employees.filter(e=>e.dob).map(e => [e.name, e.dob]);
-    rows = employees.filter(e=>e.dob).map(e => `<tr><td>${e.name}</td><td>${e.dob}</td></tr>`).join('');
+    rows = employees.filter(e=>e.dob).map(e => `<tr><td>${escapeHtml(e.name)}</td><td>${e.dob}</td></tr>`).join('');
     box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Date of birth</th></tr>${rows || '<tr><td colspan="2" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'increment'){
     csvHeader = ['Name','Increment month','Increment date','Last salary (gross)'];
@@ -6779,13 +6824,13 @@ async function viewReport(key, label){
       const monthName = d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
       const lastSalary = (Number(e.basic)||0)+(Number(e.hra)||0)+(Number(e.otherAllowances)||0);
       csvRows.push([e.name, monthName, e.nextIncrement, lastSalary]);
-      return `<tr><td>${e.name}</td><td>${monthName}</td><td>${e.nextIncrement}</td><td class="num">₹${lastSalary.toFixed(0)}</td></tr>`;
+      return `<tr><td>${escapeHtml(e.name)}</td><td>${monthName}</td><td>${e.nextIncrement}</td><td class="num">₹${lastSalary.toFixed(0)}</td></tr>`;
     }).join('');
     box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Increment month</th><th>Increment date</th><th class="num">Last salary (gross)</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'diwali'){
     csvHeader = ['Name','Eligible','Bonus'];
     csvRows = employees.map(e => [e.name, e.diwaliEligible==='yes'?'Yes':'No', diwaliBonusFor(e)]);
-    rows = employees.map(e => `<tr><td>${e.name}</td><td>${e.diwaliEligible==='yes'?'Yes':'No'}</td><td class="num">₹${diwaliBonusFor(e)}</td></tr>`).join('');
+    rows = employees.map(e => `<tr><td>${escapeHtml(e.name)}</td><td>${e.diwaliEligible==='yes'?'Yes':'No'}</td><td class="num">₹${diwaliBonusFor(e)}</td></tr>`).join('');
     box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Eligible</th><th class="num">Bonus</th></tr>${rows || '<tr><td colspan="3" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'salary'){
     csvHeader = ['Name','Gross','Deductions','Net'];
@@ -6795,7 +6840,7 @@ async function viewReport(key, label){
       const deductions = (Number(e.stdDeductions)||0)+(Number(e.pf)||0)+(Number(e.esiDeduction)||0)+(Number(e.pt)||0)+emi;
       const net = gross - deductions;
       csvRows.push([e.name, gross, deductions, net]);
-      return `<tr><td>${e.name}</td><td class="num">₹${gross.toFixed(0)}</td><td class="num">₹${deductions.toFixed(0)}</td><td class="num">₹${net.toFixed(0)}</td></tr>`;
+      return `<tr><td>${escapeHtml(e.name)}</td><td class="num">₹${gross.toFixed(0)}</td><td class="num">₹${deductions.toFixed(0)}</td><td class="num">₹${net.toFixed(0)}</td></tr>`;
     }).join('');
     box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th class="num">Gross</th><th class="num">Deductions</th><th class="num">Net</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'ctc'){
@@ -6806,13 +6851,13 @@ async function viewReport(key, label){
       const bonus = diwaliBonusFor(e);
       const annualCtc = annualGross + bonus;
       csvRows.push([e.name, monthlyGross, annualGross, bonus, annualCtc]);
-      return `<tr><td>${e.name}</td><td class="num">₹${monthlyGross.toFixed(0)}</td><td class="num">₹${annualGross.toFixed(0)}</td><td class="num">₹${bonus.toFixed(0)}</td><td class="num">₹${annualCtc.toFixed(0)}</td></tr>`;
+      return `<tr><td>${escapeHtml(e.name)}</td><td class="num">₹${monthlyGross.toFixed(0)}</td><td class="num">₹${annualGross.toFixed(0)}</td><td class="num">₹${bonus.toFixed(0)}</td><td class="num">₹${annualCtc.toFixed(0)}</td></tr>`;
     }).join('');
     box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}<table><tr><th>Name</th><th class="num">Monthly gross</th><th class="num">Annual gross</th><th class="num">Diwali bonus</th><th class="num">Annual CTC</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table><p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Annual CTC = (Basic + HRA + Other allowances + Dress allowance + Mobile expense) × 12 + Diwali bonus. PF, ESI and PT are employee-side deductions, not added here.</p>${fsBtn}</div>`;
   } else if(key === 'loan'){
     csvHeader = ['Name','Loan amount','EMI','Status'];
     csvRows = employees.filter(e=>(Number(e.loanAmount)||0)>0).map(e => [e.name, e.loanAmount, e.emiPerMonth, e.loanStatus]);
-    rows = employees.filter(e=>(Number(e.loanAmount)||0)>0).map(e => `<tr><td>${e.name}</td><td class="num">₹${e.loanAmount}</td><td class="num">₹${e.emiPerMonth}</td><td>${e.loanStatus}</td></tr>`).join('');
+    rows = employees.filter(e=>(Number(e.loanAmount)||0)>0).map(e => `<tr><td>${escapeHtml(e.name)}</td><td class="num">₹${e.loanAmount}</td><td class="num">₹${e.emiPerMonth}</td><td>${e.loanStatus}</td></tr>`).join('');
     box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th class="num">Loan amount</th><th class="num">EMI</th><th>Status</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'retention'){
     const now = new Date();
@@ -6828,7 +6873,7 @@ async function viewReport(key, label){
       const deductedSoFar = Math.round(monthly * monthsElapsed * 100)/100;
       const balance = Math.round((money - deductedSoFar)*100)/100;
       csvRows.push([e.name, e.bondStart||'', e.bondEnd||'', money, months, monthly, monthsElapsed, deductedSoFar, balance]);
-      return `<tr><td>${e.name}</td><td>${e.bondStart||''}</td><td>${e.bondEnd||''}</td><td class="num">₹${fmtMoney(money)}</td><td class="num">${months}</td><td class="num">₹${fmtMoney(monthly)}</td><td class="num">${monthsElapsed}</td><td class="num">₹${fmtMoney(deductedSoFar)}</td><td class="num">₹${fmtMoney(balance)}</td></tr>`;
+      return `<tr><td>${escapeHtml(e.name)}</td><td>${e.bondStart||''}</td><td>${e.bondEnd||''}</td><td class="num">₹${fmtMoney(money)}</td><td class="num">${months}</td><td class="num">₹${fmtMoney(monthly)}</td><td class="num">${monthsElapsed}</td><td class="num">₹${fmtMoney(deductedSoFar)}</td><td class="num">₹${fmtMoney(balance)}</td></tr>`;
     }).join('');
     box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Bond start</th><th>Bond end</th><th class="num">Retention money</th><th class="num">Months</th><th class="num">Monthly deduction</th><th class="num">Months elapsed</th><th class="num">Deducted so far</th><th class="num">Balance</th></tr>${rows || '<tr><td colspan="9" class="empty">No employees with retention money configured</td></tr>'}</table>${fsBtn}</div>`;
   }
@@ -6849,7 +6894,7 @@ function openChecklistPicker(type){
       <div class="modal-box">
         <h2>${type==='joining'?'Joining':'Exit'} checklist</h2>
         <p class="hint">Choose an employee to view or update their checklist.</p>
-        ${employees.map(e => `<div class="emp-row" style="cursor:pointer;" onclick="openChecklistFor('${e.id}')"><div class="head"><strong>${e.name}</strong><span class="id">${e.id}</span></div></div>`).join('')}
+        ${employees.map(e => `<div class="emp-row" style="cursor:pointer;" onclick="openChecklistFor('${e.id}')"><div class="head"><strong>${escapeHtml(e.name)}</strong><span class="id">${e.id}</span></div></div>`).join('')}
         <div class="modal-actions"><button class="btn ghost full" onclick="closeChecklistModal()">Close</button></div>
       </div>
     </div>`;
@@ -6862,7 +6907,7 @@ async function openChecklistFor(empId){
   const state = (emp.checklists && emp.checklists[currentChecklistType]) || {};
   document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeChecklistModal()">
     <div class="modal-box">
-      <h2>${emp.name} — ${currentChecklistType === 'joining' ? 'Joining' : 'Exit'} checklist</h2>
+      <h2>${escapeHtml(emp.name)} — ${currentChecklistType === 'joining' ? 'Joining' : 'Exit'} checklist</h2>
       ${items.map((label,i) => `<div class="checklist-row"><input type="checkbox" id="chk_${i}" ${state[label] ? 'checked' : ''} onchange="toggleChecklistItem('${empId}','${label.replace(/'/g,"\\'")}',this.checked)"><label for="chk_${i}">${label}</label></div>`).join('')}
       <div class="modal-actions"><button class="btn full" onclick="closeChecklistModal()">Done</button></div>
     </div>
@@ -6910,7 +6955,7 @@ async function renderGeneratorTab(){
   const sel = document.getElementById('genEmpSelect');
   const prevSelected = sel.value;
   sel.innerHTML = '<option value="">— Select employee —</option>' +
-    activeEmployees.map(e => `<option value="${e.id}">${e.name} (${e.id})</option>`).join('');
+    activeEmployees.map(e => `<option value="${e.id}">${escapeHtml(e.name)} (${e.id})</option>`).join('');
   if(prevSelected && activeEmployees.some(e => e.id === prevSelected)) sel.value = prevSelected;
 
   document.getElementById('genIssueDate').value = document.getElementById('genIssueDate').value || todayStr();
@@ -6930,7 +6975,7 @@ async function renderOfficeDocumentsTab(){
   const apprentices = employees.filter(e => (e.salaryHeading||'') === 'apprentice');
   const apprenticeSel = document.getElementById('apprenticeDocEmpSelect');
   apprenticeSel.innerHTML = '<option value="">— Not linked to a specific apprentice —</option>' +
-    apprentices.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+    apprentices.map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('');
 
   await renderPayrollDocList();
   await renderApprenticeDocList();
@@ -7155,7 +7200,7 @@ async function renderCompanyDocList(category){
   }
   box.innerHTML = list.map(d => `
     <div class="emp-row">
-      <div class="head"><strong>${d.name}</strong></div>
+      <div class="head"><strong>${escapeHtml(d.name)}</strong></div>
       <div class="sub">${d.fileName}</div>
       <div class="actions">
         <a class="btn ghost" href="${d.url}" target="_blank">Open</a>
@@ -7178,7 +7223,7 @@ async function populateWorkmanEmployeeSelect(employees){
   const coveredIds = new Set(covered.map(c => c.employeeId));
   const available = employees.filter(e => !coveredIds.has(e.id));
   sel.innerHTML = '<option value="">— Select employee —</option>' +
-    available.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+    available.map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('');
 }
 async function addToWorkmanCompensation(){
   const msg = document.getElementById('workmanMsg');
@@ -7221,7 +7266,7 @@ async function uploadWorkmanDoc(employeeId, event){
   const entry = list.find(w => w.employeeId === employeeId);
   if(!entry) return;
   const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
-  const fileName = `${entry.name} - Insurance Policy${ext}`;
+  const fileName = `${escapeHtml(entry.name)} - Insurance Policy${ext}`;
   const url = await uploadDocumentToDrive(['HR Management','Office Documents','Workman Compensation', entry.name], fileName, file);
   if(!url){ alert('Upload failed — check your connection and try again.'); return; }
   entry.docUrl = url;
@@ -7238,7 +7283,7 @@ async function renderWorkmanList(){
   }
   box.innerHTML = list.map(w => `
     <div class="emp-row">
-      <div class="head"><strong>${w.name}</strong><button class="btn ghost" style="font-size:11px;padding:5px 8px;" onclick="removeFromWorkmanCompensation('${w.employeeId}')">Remove</button></div>
+      <div class="head"><strong>${escapeHtml(w.name)}</strong><button class="btn ghost" style="font-size:11px;padding:5px 8px;" onclick="removeFromWorkmanCompensation('${w.employeeId}')">Remove</button></div>
       <div style="height:10px"></div>
       <label class="field">Policy number</label>
       <input type="text" value="${w.policyNumber||''}" onchange="updateWorkmanField('${w.employeeId}','policyNumber',this.value)">
@@ -7274,7 +7319,7 @@ async function renderUniformIdList(employees){
   box.innerHTML = employees.map(e => {
     const u = byId[e.id] || { employeeId: e.id, name: e.name, uniformIssued:false, uniformDate:'', uniformSize:'', idIssued:false, idNumber:'', idDate:'', docUrl:'', docName:'' };
     return `<div class="emp-row">
-      <div class="head"><strong>${e.name}</strong></div>
+      <div class="head"><strong>${escapeHtml(e.name)}</strong></div>
       <div style="height:10px"></div>
       <label class="checklist-row"><input type="checkbox" ${u.uniformIssued?'checked':''} onchange="updateUniformField('${e.id}','${e.name.replace(/'/g,"\\'")}','uniformIssued',this.checked)"> Uniform issued</label>
       <label class="field">Uniform size</label>
@@ -7453,9 +7498,16 @@ async function generateLetter(){
   saveFileToDrive(['HR Management','Generator',safeType], `${name} - ${f.issueDate}.txt`, text, 'text/plain');
 }
 
+// Everything user-entered goes through this before it reaches innerHTML.
+// Employee names, designations, activity text and the rest are typed by people
+// and stored verbatim, so an employee called <img src=x onerror=...> would
+// otherwise run script in the HR session — the one holding the backend token.
+// null and undefined return empty rather than the words "null"/"undefined",
+// which is what textContent would have rendered for a field nobody filled in.
 function escapeHtml(str){
+  if(str === null || str === undefined) return '';
   const div = document.createElement('div');
-  div.textContent = str;
+  div.textContent = String(str);
   return div.innerHTML;
 }
 
