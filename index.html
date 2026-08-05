@@ -54,8 +54,16 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
   *{box-sizing:border-box;}
+  /* Kills the browser's pull-to-refresh. Dragging down past the top of a
+     screen used to reload the page, and a reload re-checks the session against
+     the backend before it can restore it — so a stray thumb swipe dropped
+     people back at the login screen mid-task. Scrolling inside the page is
+     unaffected; only the overscroll gesture is swallowed. */
+  html{overscroll-behavior-y:contain;}
+
   body{
     margin:0;
+    overscroll-behavior-y:contain;
     background:var(--cream);
     color:var(--navy);
     min-height:100vh;
@@ -2170,6 +2178,7 @@ async function selectRole(role){
         engineerName = user.username;
         engineerDisplayName = user.displayName || user.username;
         await enterEngineerMain();
+        armExitGuard();
         return;
       }
       // saved session is no longer valid (disabled or removed) — clear it and ask them to log in again
@@ -2362,6 +2371,7 @@ async function enterHrMain(){
   if(dateEl) dateEl.textContent = 'Today, ' + new Date().toLocaleDateString('en-IN', { day:'numeric', month:'long', year:'numeric' });
   renderHrSideNav();
   hrNavigate('dashboard');
+  armExitGuard();
 
   // Warm-up, each guarded on its own: a flaky backend may degrade a panel but
   // must never take the whole app down with it.
@@ -2411,6 +2421,7 @@ async function loginEngineer(){
   msg.classList.remove('error');
   document.getElementById('loginPassword').value = '';
   await enterEngineerMain();
+  armExitGuard();
 }
 
 async function renderEmployeeHandbookForEngineer(){
@@ -6515,13 +6526,59 @@ function whatsappLetter(){
   window.open('https://wa.me/?text=' + encodeURIComponent(lastGeneratedLetter.text), '_blank');
 }
 
+// ---- don't let the app be left by accident ----
+// This is one page holding a signed-in session, and three different gestures
+// used to throw it away without asking: the browser/Android back button, a
+// pull-to-refresh (handled by overscroll-behavior in the stylesheet), and
+// closing or reloading the tab. Someone mid-way through adding an employee
+// lost the form to a stray back-swipe. Each route off the page is guarded
+// separately below, and only while somebody is actually signed in — the login
+// screen itself has nothing worth protecting and must not nag.
+function isSignedIn(){
+  if(currentRole === 'hr') return !!(sessionToken && sessionRole === 'hr');
+  if(currentRole === 'engineer') return !!engineerName;
+  return false;
+}
+
+// Back button. There is no in-app history to go back through — the sidebar
+// swaps panels without touching the URL — so the first back press leaves the
+// site entirely. A spare history entry is parked on top while signed in: back
+// consumes that instead, which gives us a chance to ask. Cancelling parks a
+// fresh entry so the guard survives any number of presses.
+let exitConfirmed = false;
+
+function armExitGuard(){
+  if(!isSignedIn() || exitConfirmed) return;
+  history.pushState({ kmtExitGuard: true }, '');
+}
+
+window.addEventListener('popstate', () => {
+  if(exitConfirmed || !isSignedIn()) return;   // let the navigation happen
+  const leave = confirm('Are you sure you want to exit?\n\nYou will be signed out, and anything you have typed on this screen but not saved will be lost.');
+  if(leave){
+    exitConfirmed = true;
+    // We are already one entry back, so this is the press that actually
+    // leaves. If this page is the first entry in the tab's history there is
+    // nowhere to go and the user simply stays — no worse than before.
+    history.back();
+  } else {
+    history.pushState({ kmtExitGuard: true }, '');
+  }
+});
+
 window.addEventListener('beforeunload', (e) => {
   if(tracking && engineerName){
     setActive(engineerName, { startTime, accumulatedKm, selfie: pendingSelfie, lastCoord, lastFixTime: lastCoord ? Date.now() : null, lastHeartbeat: Date.now(), gpsError: 'Tab closed or app exited while tracking', trail: tripTrail });
-    // Browsers show their own generic wording here, not this text — but setting
-    // returnValue is what triggers the "leave site?" confirmation at all.
+  }
+  // Browsers show their own generic wording here, not this text — but setting
+  // returnValue is what triggers the "leave site?" confirmation at all. It only
+  // fires if the user has interacted with the page, so it cannot nag on load.
+  if(tracking && engineerName){
     e.preventDefault();
     e.returnValue = 'You are still checked in and being tracked. Leaving will stop your km from being recorded.';
+  } else if(isSignedIn() && !exitConfirmed){
+    e.preventDefault();
+    e.returnValue = 'You are signed in. Leaving or reloading will return you to the login screen.';
   }
 });
 </script>
