@@ -334,6 +334,31 @@
   /* An edited cell stays visibly unsaved until Save is pressed. */
   .att-code.att-dirty{outline:2px solid var(--amber);outline-offset:-2px;}
 
+  /* No screen may scroll sideways as a whole. Wide content — tables above all
+     — scrolls inside its own box instead, so the page itself stays put and the
+     header and sidebar never slide off. The sheets that already had wrappers
+     keep them; this catches the rest, which were pushing the whole layout wide
+     on a phone. */
+  #hrContent{max-width:100%;overflow-x:hidden;}
+  @media (max-width: 760px){
+    #hrContent table:not(.rpt-table):not(.rpt-meta):not(.rpt-sign-tbl){
+      display:block;width:max-content;max-width:100%;overflow-x:auto;
+      -webkit-overflow-scrolling:touch;}
+    /* Touch targets: 44px is the smallest comfortable tap area. */
+    #hrContent .btn,#hrContent .linkbtn,#hrContent select,#hrContent input,
+    #hrContent .qa,#hrContent .icon-btn{min-height:44px;}
+    #hrContent select,#hrContent input,#hrContent textarea{font-size:16px;}
+  }
+
+  /* ---- loading skeletons ---- */
+  .sk{background:linear-gradient(90deg,#EEF1F7 25%,#F7F9FC 37%,#EEF1F7 63%);
+    background-size:400% 100%;animation:skPulse 1.3s ease-in-out infinite;border-radius:8px;}
+  @keyframes skPulse{0%{background-position:100% 50%;}100%{background-position:0 50%;}}
+  @media (prefers-reduced-motion: reduce){ .sk{animation:none;} }
+  .sk-kpi{height:96px;}
+  .sk-card{height:190px;margin-bottom:16px;}
+  .sk-line{height:13px;margin:9px 0;}
+
   .icon-btn{background:none;border:1px solid transparent;border-radius:8px;padding:5px 8px;
     font-size:16px;cursor:pointer;line-height:1;}
   .icon-btn:hover{background:#EEF1F7;border-color:var(--line);}
@@ -5153,7 +5178,13 @@ async function renderHrDashboardHome(force){
     buildHrDashboardHome(box).then(() => captureDashboard(box)).catch(() => {});
     return;
   }
-  box.innerHTML = '<div class="empty">Loading dashboard…</div>';
+  // A skeleton in the shape of the real screen, rather than a line of text —
+  // the layout does not jump when the figures land, and the wait reads as
+  // progress instead of a stall.
+  box.innerHTML = `
+    <div class="kpi-row">${'<div class="sk sk-kpi"></div>'.repeat(4)}</div>
+    <div class="dash-2col"><div class="sk sk-card"></div><div class="sk sk-card"></div></div>
+    <div class="sk sk-card" style="height:120px"></div>`;
   try{
     // A hard deadline as well as the per-request timeouts: whatever goes wrong
     // underneath, the user gets an answer instead of an endless spinner.
@@ -6103,8 +6134,15 @@ function closeEmployeeModal(){
   editingEmployeeId = null;
 }
 
+// A save is several seconds against Apps Script. Two taps on a slow connection
+// used to start two saves: both read the employee list before either wrote, so
+// both passed the duplicate-ID check and the second overwrote the first — or
+// created a second record. One at a time, with the button showing it.
+let employeeSaveInFlight = false;
+
 async function saveEmployeeForm(){
   const msg = document.getElementById('empSaveMsg');
+  if(employeeSaveInFlight) return;
   const id = document.getElementById('f_id').value.trim();
   const name = document.getElementById('f_name').value.trim();
   if(!id || !name){
@@ -6206,24 +6244,39 @@ async function saveEmployeeForm(){
     advanceTemp: Number(document.getElementById('f_advanceTemp').value)||0,
     advance: Number(document.getElementById('f_advance').value)||0
   });
-  if(editingEmployeeId){
-    const idx = employees.findIndex(e => e.id === editingEmployeeId);
-    employees[idx] = draft;
-    await addActivityLog('Updated employee record for ' + name);
-    await saveEmployees(employees);
-    closeEmployeeModal();
-    await renderEmployeeList();
-    await refreshDashboard();
-    await renderUserList();
-  } else {
-    employees.push(draft);
-    await addActivityLog('Added employee ' + name + ' (' + id + ')');
-    await saveEmployees(employees);
-    closeEmployeeModal();
-    await renderEmployeeList();
-    await refreshDashboard();
-    await renderUserList();
-    await jumpToGeneratorForNewEmployee(id);
+  // Validation is done; from here on the write must not be entered twice.
+  employeeSaveInFlight = true;
+  const saveBtn = document.querySelector('#employeeModal .btn[onclick="saveEmployeeForm()"]')
+    || document.querySelector('[onclick="saveEmployeeForm()"]');
+  if(saveBtn){ saveBtn.disabled = true; saveBtn.dataset.label = saveBtn.textContent; saveBtn.textContent = 'Saving…'; }
+  try{
+    if(editingEmployeeId){
+      const idx = employees.findIndex(e => e.id === editingEmployeeId);
+      employees[idx] = draft;
+      await addActivityLog('Updated employee record for ' + name);
+      await saveEmployees(employees);
+      closeEmployeeModal();
+      await renderEmployeeList();
+      await refreshDashboard();
+      await renderUserList();
+    } else {
+      employees.push(draft);
+      await addActivityLog('Added employee ' + name + ' (' + id + ')');
+      await saveEmployees(employees);
+      closeEmployeeModal();
+      await renderEmployeeList();
+      await refreshDashboard();
+      await renderUserList();
+      await jumpToGeneratorForNewEmployee(id);
+    }
+  }catch(err){
+    msg.textContent = 'Could not save: ' + (err && err.message ? err.message : 'the server did not respond') + '. Nothing was lost — press Save again.';
+    msg.classList.add('error');
+  }finally{
+    // Always released, so a failed save never leaves the form permanently
+    // locked with no way to retry.
+    employeeSaveInFlight = false;
+    if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = saveBtn.dataset.label || 'Save employee'; }
   }
 }
 
