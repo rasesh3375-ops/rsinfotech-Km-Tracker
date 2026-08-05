@@ -376,6 +376,24 @@
   .modal-box .hint{font-size:12.5px;color:var(--muted);margin:0 0 18px;}
   .field-group{margin-bottom:16px;}
   .field-group .sec-title{font-size:11.5px;font-weight:700;color:var(--amber-dark);text-transform:uppercase;letter-spacing:.5px;margin:18px 0 12px;padding-top:14px;border-top:1px dashed var(--line);}
+
+  /* Calculation card under the Heading dropdown — guidance only, so it reads
+     as a note rather than another set of inputs. */
+  .calc-card{margin-top:12px;border:1px solid var(--line);border-left:3px solid var(--amber);
+    border-radius:10px;background:#FAFBFD;padding:14px 15px;}
+  .calc-head{font-size:13px;font-weight:700;color:var(--navy);margin-bottom:12px;}
+  .calc-sec{margin-bottom:13px;}
+  .calc-sec:last-child{margin-bottom:0;}
+  .calc-label{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+    color:var(--amber-dark);margin-bottom:5px;}
+  .calc-line{font-size:12px;color:var(--navy);line-height:1.65;overflow-x:auto;white-space:nowrap;}
+  .calc-line code{background:#EEF1F7;border-radius:4px;padding:1px 5px;font-size:11.5px;font-weight:700;}
+  .calc-text{font-size:12.5px;color:var(--navy);line-height:1.55;margin:0;}
+  .calc-note{font-size:11.5px;color:var(--muted);line-height:1.5;margin:4px 0 0;white-space:normal;}
+  .calc-tags{display:flex;flex-wrap:wrap;gap:6px;}
+  .calc-tag{font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;
+    background:#E7ECFA;color:#3B5BA9;}
+  .calc-empty{font-size:12.5px;color:var(--muted);margin:12px 0 0;}
   .field-group .sec-title:first-child{border-top:none;padding-top:0;margin-top:0;}
   select.field-input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;font-size:14.5px;background:var(--paper);color:var(--navy);}
   input[type=date]{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;background:var(--paper);color:var(--navy);}
@@ -3124,6 +3142,130 @@ const SALARY_HEADINGS = {
   contractor:  { label: 'Contractors',       basicPct: 0.50, hraPct: 0.40, ltaPct: 0.10, flat: false, pf: false, esi: false, pt: false }
 };
 const SALARY_HEADING_ORDER = ['managerial','senior','junior','apprentice','rsit','contractor'];
+// PT is the one deduction whose amount is decided by a rule rather than typed
+// in per employee. Named so the Salary Sheet and the heading explainer below
+// read the same numbers — the calculation is unchanged.
+const PT_GROSS_THRESHOLD = 12000;
+const PT_AMOUNT = 200;
+
+// ---- what the selected heading actually does, in words ----
+// Read only. Every line the card shows — the formula, the field list, the
+// worked example — is derived from that heading's entry in SALARY_HEADINGS and
+// from the same constants computeSalaryForEmployee uses, so editing the master
+// configuration changes the explanation with it and no wording has to be
+// maintained per heading. Nothing here feeds payroll; it exists so whoever is
+// filling in the form can see which split they are choosing.
+
+function headingPct(p){ return (Math.round(p * 10000) / 100) + '%'; }
+
+// The earnings lines this heading actually pays. A flat heading puts the whole
+// rate into Basic; otherwise each component with a non-zero share appears.
+function headingComponents(h){
+  if(h.flat) return [{ name: 'Basic', pct: 1, flat: true }];
+  return [
+    { name: 'Basic', pct: h.basicPct },
+    { name: 'HRA',   pct: h.hraPct },
+    { name: 'LTA',   pct: h.ltaPct }
+  ].filter(c => c.pct > 0);
+}
+
+// Statutory deductions this heading is subject to at all, per its own flags.
+function headingStatutory(h){
+  const d = [];
+  if(h.pf)  d.push({ name: 'PF',  rule: 'the PF amount entered for this employee' });
+  if(h.esi) d.push({ name: 'ESI', rule: 'the ESI amount entered for this employee' });
+  if(h.pt)  d.push({ name: 'PT',  rule: '₹' + fmtMoney(PT_AMOUNT) + ' when Gross is above ₹' + fmtMoney(PT_GROSS_THRESHOLD) + ', otherwise ₹0' });
+  return d;
+}
+
+// One earnings line, written the way computeSalaryForEmployee computes it.
+function headingComponentFormula(c){
+  if(c.flat) return 'Rate of Pay − (Rate of Pay ÷ Days in month × Leave Days)';
+  const share = '(Rate of Pay × ' + headingPct(c.pct) + ')';
+  return share + ' − ' + share + ' ÷ Days in month × Leave Days';
+}
+
+// A worked example on the heading's own percentages. Same arithmetic as the
+// Salary Sheet, run on a sample month so the numbers can be checked by hand.
+function headingExample(h){
+  const rate = 30000, monthDays = 30, leaveDays = 2;
+  const lines = headingComponents(h).map(c => {
+    const full = c.flat ? rate : rate * c.pct;
+    return { name: c.name, amount: full - (full / monthDays * leaveDays) };
+  });
+  const gross = lines.reduce((s, l) => s + l.amount, 0);
+  const pt = h.pt ? (gross > PT_GROSS_THRESHOLD ? PT_AMOUNT : 0) : 0;
+  return { rate, monthDays, leaveDays, lines, gross, pt, net: gross - pt };
+}
+
+function buildHeadingExplainer(key){
+  const h = SALARY_HEADINGS[key];
+  if(!h) return '<p class="calc-empty">Please select a Heading to view its calculation details.</p>';
+
+  const comps = headingComponents(h);
+  const stat = headingStatutory(h);
+  const ded = stat.map(s => s.name).concat(['Advance (temporary)', 'Advance', 'Retention']);
+
+  const formulaRows = comps.map(c =>
+    `<div class="calc-line"><code>${c.name}</code> = ${headingComponentFormula(c)}</div>`).join('') +
+    `<div class="calc-line"><code>Gross</code> = ${comps.map(c => c.name).join(' + ')}</div>` +
+    stat.filter(s => s.name === 'PT').map(() =>
+      `<div class="calc-line"><code>PT</code> = ₹${fmtMoney(PT_AMOUNT)} if Gross &gt; ₹${fmtMoney(PT_GROSS_THRESHOLD)}, else ₹0</div>`).join('') +
+    `<div class="calc-line"><code>Total Deduction</code> = ${ded.join(' + ')}</div>` +
+    `<div class="calc-line"><code>Net Salary</code> = Gross − Total Deduction</div>`;
+
+  const logic = h.flat
+    ? `The whole Rate of Pay is paid as Basic — this heading has no HRA or LTA split. Any Absent or LP day reduces it by one day's pay (Rate ÷ days in the month).`
+    : `The Rate of Pay is split into ${comps.map(c => c.name + ' at ' + headingPct(c.pct)).join(', ')}. Each part is reduced in proportion to Absent and LP days, so a leave day costs one day of that part rather than a flat amount.`;
+
+  const statLogic = stat.length
+    ? ` ${stat.map(s => s.name + ' is ' + s.rule).join('; ')}.`
+    : ` No PF, ESI or PT applies to this heading — those fields stay greyed out and are excluded from the Salary Sheet.`;
+
+  const fields = ['Rate of pay (monthly)', 'Attendance — Absent and LP days for the month']
+    .concat(h.pf ? ['PF'] : []).concat(h.esi ? ['ESI deduction'] : [])
+    .concat(['Advance for temporary', 'Advance', 'Retention (if a bond is configured)']);
+
+  const tags = ['Auto Calculated'].concat(h.flat ? ['Full Rate — no split'] : ['Percentage Based'])
+    .concat(['Attendance Based'])
+    .concat(stat.length ? ['Statutory Calculation'] : [])
+    .concat((h.pf || h.esi) ? ['Manual Entry (PF / ESI amounts)'] : []);
+
+  const ex = headingExample(h);
+  const exRows = ex.lines.map(l =>
+    `<div class="calc-line">${l.name} = ₹${fmtMoney(l.amount)}</div>`).join('') +
+    `<div class="calc-line"><strong>Gross = ₹${fmtMoney(ex.gross)}</strong></div>` +
+    (h.pt ? `<div class="calc-line">PT = ₹${fmtMoney(ex.pt)}</div>` : '') +
+    `<div class="calc-line"><strong>Net = ₹${fmtMoney(ex.net)}</strong> <span class="calc-note">(PF, ESI, advances and retention taken as 0 here — those come from the employee's own figures)</span></div>`;
+
+  return `
+    <div class="calc-card">
+      <div class="calc-head">${h.label} — how this is calculated</div>
+
+      <div class="calc-sec"><div class="calc-label">Formula Used</div>${formulaRows}</div>
+
+      <div class="calc-sec"><div class="calc-label">Calculation Logic</div>
+        <p class="calc-text">${logic}${statLogic}</p></div>
+
+      <div class="calc-sec"><div class="calc-label">Fields Used</div>
+        <p class="calc-text">${fields.join(' · ')}</p>
+        <p class="calc-note">Entered on the Add Employee Details tab.</p></div>
+
+      <div class="calc-sec"><div class="calc-label">Automatic Calculation</div>
+        <div class="calc-tags">${tags.map(t => `<span class="calc-tag">${t}</span>`).join('')}</div></div>
+
+      <div class="calc-sec"><div class="calc-label">Example</div>
+        <p class="calc-note">Rate of Pay ₹${fmtMoney(ex.rate)}, a ${ex.monthDays}-day month, ${ex.leaveDays} leave days:</p>
+        ${exRows}</div>
+    </div>`;
+}
+
+function renderHeadingExplainer(){
+  const box = document.getElementById('headingCalcBox');
+  if(!box) return;
+  const sel = document.getElementById('f_salaryHeading');
+  box.innerHTML = buildHeadingExplainer(sel ? sel.value : '');
+}
 
 function computeAttendanceSummary(att, employee, dateList, holidayMap){
   let present=0, absent=0, elUsed=0, slUsed=0, lpDays=0, halfDays=0, shortCount=0, lateCount=0, holidays=0;
@@ -3304,7 +3446,7 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   const gross = basic + hra + lta;
   const pf = heading.pf ? (Number(emp.pf) || 0) : 0;
   const esi = heading.esi ? (Number(emp.esiDeduction) || 0) : 0;
-  const pt = heading.pt ? (gross > 12000 ? 200 : 0) : 0;
+  const pt = heading.pt ? (gross > PT_GROSS_THRESHOLD ? PT_AMOUNT : 0) : 0;
   const advanceTemp = Number(emp.advanceTemp) || 0;
   const advance = Number(emp.advance) || 0;
   const [dYear, dMonth] = dateList[0].split('-').map(Number);
@@ -4652,6 +4794,7 @@ function employeeModalHtml(emp){
           ${Object.keys(SALARY_HEADINGS).map(k => `<option value="${k}" ${(emp.salaryHeading===k || (!emp.salaryHeading && k==='managerial'))?'selected':''}>${SALARY_HEADINGS[k].label}</option>`).join('')}
         </select>
         <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Picks which Basic/HRA/LTA split formula applies to this employee on the Salary Sheet, and which of PF/ESI/PT apply at all — set once here, applied automatically every month.</p>
+        <div id="headingCalcBox"></div>
         <div style="height:14px"></div>
         <label class="field">Rate of pay (monthly)</label>
         <input type="number" id="f_ratePay" placeholder="0" value="${emp.ratePay||''}">
@@ -4905,6 +5048,9 @@ function toggleStatutoryFieldsForHeading(){
   });
   const hint = document.getElementById('statutoryHint');
   if(hint) hint.textContent = notes.length ? (notes.join(', ') + ' not applicable for ' + SALARY_HEADINGS[document.getElementById('f_salaryHeading').value].label + ' — greyed out and excluded from the Salary Sheet automatically.') : '';
+  // Same handler the dropdown already fired, so the card follows the heading
+  // the moment it changes.
+  renderHeadingExplainer();
 }
 
 let editingEmployeeDraft = null;
