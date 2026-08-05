@@ -4988,6 +4988,23 @@ async function getEmployees(){
 // scans can push the record past what the backend can physically write — and
 // it fails at the sheet, after the upload, where nothing tells the user. This
 // says so plainly instead, before the write is attempted.
+// Asks the backend to merge one record into the stored array itself. Returns
+// false when the deployed backend does not understand setItem, so the caller
+// falls back to sending the whole array and an app running against an older
+// deployment keeps working unchanged.
+async function remoteSetItem(key, item, idField){
+  try{
+    const res = await apiFetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action:'setItem', key, item, idField: idField || 'id', token: sessionToken })
+    });
+    const data = await res.json();
+    if(data && data.error === 'unauthorized'){ onSessionExpired(); return false; }
+    return !!(data && data.merged);
+  }catch(e){ return false; }
+}
+
 const SHEET_CELL_LIMIT = 50000;
 async function saveEmployees(list){
   const payload = JSON.stringify(list);
@@ -6481,7 +6498,13 @@ async function saveEmployeeForm(){
     if(isNew) employees.push(draft);
     else employees[employees.findIndex(e => e.id === editingEmployeeId)] = draft;
 
-    await saveEmployees(employees);
+    // One record over the wire when the backend can merge it, the whole array
+    // when it cannot. The merge path also removes the lost-update window: two
+    // people editing different employees no longer overwrite each other.
+    invalidateSharedRead('employees');
+    const merged = await remoteSetItem('employees', draft, 'id');
+    if(!merged) await saveEmployees(employees);
+    else localStorage.setItem('kmt_shared_employees', JSON.stringify(employees));
     clearEmployeeDraft();
     closeEmployeeModal();
 

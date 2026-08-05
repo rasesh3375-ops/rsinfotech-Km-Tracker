@@ -298,6 +298,34 @@ function doPost(e) {
       const sheet = getSheet_();
       const row = findRow_(sheet, body.key);
       if (row !== -1) sheet.deleteRow(row);
+    } else if (body.action === 'setItem') {
+      // Merge ONE record into a JSON array, server side, inside the script lock.
+      // The client used to send the whole array: two people editing different
+      // employees both read it, both wrote it back, and whoever saved second
+      // erased the other's change. Merging here means each save touches only
+      // its own record, and the read-modify-write cannot interleave.
+      // Also far smaller on the wire than resending every employee.
+      var sheetI = getSheet_();
+      var rowI = findRow_(sheetI, body.key);
+      var list = [];
+      if (rowI !== -1) {
+        try { list = JSON.parse(sheetI.getRange(rowI, 2).getValue() || '[]'); } catch (e) { list = []; }
+      }
+      if (!(list instanceof Array)) list = [];
+      var idField = body.idField || 'id';
+      var item = body.item;
+      var found = -1;
+      for (var i = 0; i < list.length; i++) {
+        if (list[i] && list[i][idField] === item[idField]) { found = i; break; }
+      }
+      if (found === -1) list.push(item); else list[found] = item;
+      var outJson = JSON.stringify(list);
+      if (rowI === -1) sheetI.appendRow([body.key, outJson]);
+      else sheetI.getRange(rowI, 2).setValue(outJson);
+      // `merged` tells the client this backend understands setItem. Without it
+      // the client falls back to sending the whole array, so an app running
+      // against an older deployment keeps working.
+      return jsonOut_({ ok: true, merged: true, count: list.length });
     } else if (body.action === 'saveFile') {
       saveFile_(body.folderPath, body.fileName, body.content, body.mimeType);
     }
