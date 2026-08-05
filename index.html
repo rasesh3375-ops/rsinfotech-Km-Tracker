@@ -1858,6 +1858,9 @@ async function testBackendConnection(){
 // Short enough that nothing looks stale, and any write clears the key outright.
 const SHARED_READ_TTL_MS = 8000;
 const sharedReadCache = new Map();
+function primeSharedRead(key, value){
+  sharedReadCache.set(key, { value, until: Date.now() + SHARED_READ_TTL_MS });
+}
 function invalidateSharedRead(key){
   if(key === undefined) sharedReadCache.clear(); else sharedReadCache.delete(key);
 }
@@ -6544,10 +6547,14 @@ async function saveEmployeeForm(){
     // One record over the wire when the backend can merge it, the whole array
     // when it cannot. The merge path also removes the lost-update window: two
     // people editing different employees no longer overwrite each other.
-    invalidateSharedRead('employees');
     const merged = await remoteSetItem('employees', draft, 'id');
     if(!merged) await saveEmployees(employees);
-    else localStorage.setItem('kmt_shared_employees', JSON.stringify(employees));
+    // The saved array IS the current state, so prime the cache with it rather
+    // than dropping it — otherwise the very next screen re-reads from the
+    // backend to learn what we just sent.
+    const savedJson = JSON.stringify(employees);
+    localStorage.setItem('kmt_shared_employees', savedJson);
+    primeSharedRead('employees', savedJson);
     clearEmployeeDraft();
     closeEmployeeModal();
 
@@ -6716,10 +6723,15 @@ async function renderReportsTab(){
       <div id="reportBox_${r.key}"></div>
     </section>`;
   }).join('');
-  await populateRoleReportPickers();
-  await populateAttendanceUserSelect();
-  await renderHolidayList();
-  await populateOvertimeEmployeeSelect();
+  // These four touch different keys and do not depend on each other. Awaited
+  // one at a time they added up to four full round trips before the tab drew;
+  // together they cost one.
+  await Promise.all([
+    populateRoleReportPickers(),
+    populateAttendanceUserSelect(),
+    renderHolidayList(),
+    populateOvertimeEmployeeSelect()
+  ]);
   // Show the current month straight away rather than an empty dropdown
   populateMonthYearSelects('consultantReportMonthSel', 'consultantReportYearSel');
   populateMonthYearSelects('salCompareMonthSel', 'salCompareYearSel');
