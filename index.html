@@ -418,6 +418,53 @@
   .fullscreen-header .btn.ghost{color:#fff;border:1px solid rgba(255,255,255,.4);}
   .fullscreen-body{flex:1;overflow:auto;padding:16px;-webkit-overflow-scrolling:touch;}
 
+  /* ===== Role reports: real A4 sheets, branded on every page ===== */
+  .rpt-page-probe{position:absolute;left:-10000px;top:0;width:718px;visibility:hidden;}
+  .rpt-wrap{background:#E9E9E4;padding:16px;overflow-x:auto;}
+  .rpt-page{width:210mm;min-height:297mm;box-sizing:border-box;padding:14mm 16mm;margin:0 auto 16px;
+    background:#fff;color:#16213E;font-family:Georgia,'Times New Roman',serif;font-size:11pt;line-height:1.5;
+    box-shadow:0 2px 10px rgba(22,33,62,.16);display:flex;flex-direction:column;}
+  .rpt-body{flex:1;}
+  .rpt-head{border-bottom:2.5px solid var(--navy);padding-bottom:9px;margin-bottom:14px;}
+  .rpt-head-top{display:flex;align-items:flex-start;gap:14px;}
+  .rpt-logo{width:52px;height:52px;object-fit:contain;flex-shrink:0;}
+  .rpt-head-mid{flex:1;text-align:center;}
+  .rpt-company{font-size:17pt;font-weight:700;color:var(--navy);letter-spacing:.3px;}
+  .rpt-addr{font-size:8.5pt;color:#5A6270;margin-top:2px;}
+  .rpt-head-right{text-align:right;min-width:130px;}
+  .rpt-title{font-size:11pt;font-weight:700;color:var(--amber-dark);text-transform:uppercase;letter-spacing:.5px;}
+  .rpt-when{font-size:8pt;color:#5A6270;margin-top:3px;}
+  .rpt-meta{width:100%;border-collapse:collapse;margin-top:10px;font-size:9pt;}
+  .rpt-meta th,.rpt-meta td{border:1px solid #C9CEDA;padding:4px 7px;text-align:left;}
+  .rpt-meta th{background:#F1F4FA;font-weight:700;width:88px;color:var(--navy);}
+  .rpt-sec{margin-bottom:14px;break-inside:avoid;}
+  .rpt-sec h2{font-size:11pt;color:var(--navy);margin:0 0 7px;padding-bottom:4px;
+    border-bottom:1px solid var(--amber);text-transform:uppercase;letter-spacing:.4px;}
+  .rpt-sec p{margin:0 0 7px;text-align:justify;}
+  .rpt-sec ul{margin:0;padding-left:18px;}
+  .rpt-sec li{margin-bottom:4px;}
+  .rpt-table{width:100%;border-collapse:collapse;font-size:9.5pt;}
+  .rpt-table th,.rpt-table td{border:1px solid #C9CEDA;padding:5px 7px;text-align:left;vertical-align:top;}
+  .rpt-table th{background:#F1F4FA;color:var(--navy);font-weight:700;}
+  .rpt-sign-tbl{width:100%;border-collapse:collapse;margin-top:24px;font-size:9pt;}
+  .rpt-sign-tbl td{width:33.3%;padding:0 10px;text-align:center;color:#5A6270;vertical-align:bottom;}
+  .rpt-sign-line{border-bottom:1px solid var(--navy);height:34px;margin-bottom:5px;}
+  .rpt-foot{border-top:1.5px solid var(--navy);margin-top:12px;padding-top:6px;
+    display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:7.5pt;color:#5A6270;}
+  .rpt-foot-l,.rpt-foot-r{display:flex;align-items:center;gap:9px;}
+  .rpt-foot-logo{width:15px;height:15px;object-fit:contain;}
+  .rpt-conf{font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.3px;}
+  .rpt-page-num{font-weight:700;color:var(--navy);}
+
+  @media print{
+    body *{visibility:hidden;}
+    .rpt-wrap,.rpt-wrap *{visibility:visible;}
+    .rpt-wrap{position:absolute;inset:0;background:#fff;padding:0;overflow:visible;}
+    .rpt-page{margin:0;box-shadow:none;break-after:page;page-break-after:always;}
+    .rpt-page:last-child{break-after:auto;page-break-after:auto;}
+    @page{size:A4 portrait;margin:0;}
+  }
+
   /* ===== Shared logo + date header for reports & documents ===== */
   .report-logo-header{display:flex;align-items:center;gap:12px;border-bottom:2px solid var(--navy);padding-bottom:12px;margin-bottom:14px;}
   .report-logo-header img{width:42px;height:42px;object-fit:contain;border-radius:6px;}
@@ -938,6 +985,43 @@
 
       <!-- ===== Reports ===== -->
       <div id="hrSubReports" class="hidden">
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">Employee Role Reports</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A branded A4 report built from one employee's job profile, responsibilities, designation and department — the measures, risks and recommendations change with the role. Fill in Job profile and Key responsibilities in Employee Master first; without them the report falls back to designation and department and says so.</p>
+          <div class="row-inline">
+            <div>
+              <label class="field">Employee</label>
+              <select class="field-input" id="roleRptEmp"></select>
+            </div>
+            <div>
+              <label class="field">Report</label>
+              <select class="field-input" id="roleRptType"></select>
+            </div>
+          </div>
+          <div style="height:12px"></div>
+          <button class="btn full" onclick="generateRoleReport()">Generate report</button>
+          <div id="roleRptBox"></div>
+        </section>
+
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">Company letterhead</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Printed in the header and footer of every generated report. Anything left blank is left off the report rather than filled with a placeholder.</p>
+          <label class="field">Registered address</label>
+          <textarea class="field-input" id="coAddress" rows="2" placeholder="Street, city, state, PIN"></textarea>
+          <div style="height:10px"></div>
+          <label class="field">Contact number</label>
+          <input class="field-input" type="text" id="coPhone" placeholder="+91 ...">
+          <div style="height:10px"></div>
+          <label class="field">Email address</label>
+          <input class="field-input" type="email" id="coEmail" placeholder="info@example.com">
+          <div style="height:10px"></div>
+          <label class="field">Website</label>
+          <input class="field-input" type="text" id="coWebsite" placeholder="www.example.com">
+          <div style="height:12px"></div>
+          <button class="btn full" onclick="saveCompanyProfileFromForm()">Save letterhead</button>
+          <div class="msg" id="coMsg"></div>
+        </section>
+
         <div id="reportCardsBox"></div>
 
         <section class="block">
@@ -4203,6 +4287,323 @@ let lastGeneratedLetter = null;
 let editingEmployeeId = null;
 let currentChecklistType = null;
 
+// ---- role knowledge engine ----
+// Turns an employee's own words — job profile, listed responsibilities,
+// designation, department — into the KPIs, risks, compliance points and
+// recommendations that belong to THAT person's work. Two employees only get
+// the same report if their role data is the same.
+//
+// Everything is matched on what the record actually says. Nothing is invented
+// about seniority or duties that aren't there: a blank job profile produces a
+// thinner report that says it is thin, not a padded one that reads as if the
+// system knows more than it does.
+
+// Each domain lists the words that put an employee in it, and what that work
+// is measured, risked and audited on. Add a domain here and every report type
+// picks it up.
+const ROLE_DOMAINS = [
+  { key:'field', label:'Field Service & Maintenance',
+    match:['field','engineer','technician','service','maintenance','installation','amc','site','repair','commissioning'],
+    kpis:['Calls closed within the agreed SLA','First-visit resolution rate','Preventive maintenance visits completed on schedule','Travel and site time per call','Accuracy of daily check-in and trip records'],
+    risks:['Unattended breakdowns at client sites damaging the service contract','Travel claims that do not reconcile against tracked trips','Skipped preventive visits surfacing later as emergency failures','Working at a client site without current safety or insurance cover'],
+    compliance:['Driving licence and vehicle insurance valid for the whole period','Site safety briefing acknowledged before attending','Client site access and gate-pass records complete','Attendance supported by check-in selfie and trip log'],
+    actions:['Review open calls older than the SLA window with the reporting manager','Confirm the preventive maintenance calendar for the coming quarter','Reconcile this period’s trip log against submitted expense claims'] },
+
+  { key:'sales', label:'Sales & Business Development',
+    // "account" alone is deliberately absent — it collides with Accounts &
+    // Finance, which is a different department entirely.
+    match:['sales','business development','key account','account management','client','marketing','relationship','tender','quotation'],
+    kpis:['Revenue booked against target for the period','New accounts opened','Renewal and retention rate on existing contracts','Quotation-to-order conversion','Collection against invoices raised'],
+    risks:['Concentration of revenue in too few accounts','Commitments made to clients outside approved pricing','Renewals approached too late to defend against competitors','Receivables ageing past agreed credit terms'],
+    compliance:['Quotations issued only within the approved discount band','Client contracts signed by an authorised signatory','Customer data handled per the company confidentiality policy','Expense and entertainment claims supported by bills'],
+    actions:['Review the pipeline for accounts with no activity this period','List contracts due for renewal in the next quarter','Escalate invoices ageing beyond the agreed credit period'] },
+
+  { key:'accounts', label:'Accounts & Finance',
+    match:['account','finance','audit','tax','payroll','billing','invoice','cashier','gst','tally'],
+    kpis:['Books closed within the monthly timetable','Statutory returns filed before due date','Invoice accuracy and dispute rate','Ageing of receivables and payables','Audit observations closed'],
+    risks:['Statutory due date missed, attracting interest or penalty','Reconciliation differences carried forward unresolved','Single person holding both recording and approval rights','Supporting documents not retained for the statutory period'],
+    compliance:['PF, ESI, PT and TDS deposited and returned on time','GST returns reconciled with books before filing','Maker and checker kept as separate people','Statutory registers and vouchers retained as required'],
+    actions:['Confirm the statutory calendar for the coming quarter is diarised','Clear reconciliation items outstanding beyond one cycle','Close open audit observations with documented evidence'] },
+
+  { key:'hr', label:'Human Resources & Administration',
+    match:['hr','human resource','admin','personnel','recruit','training','welfare','office'],
+    kpis:['Positions closed against plan and time to fill','Attendance and leave records accurate and current','Statutory registers maintained without gaps','Induction completed within the first week of joining','Employee documents current and on file'],
+    risks:['Employee records incomplete at the time of an inspection','Statutory registers not maintained up to date','Exit formalities left unfinished after the last working day','Personal data held without adequate access control'],
+    compliance:['Appointment letters issued and acknowledged','Attendance and wage registers maintained as required','Personal data restricted to those who need it','Full and final settlements closed within policy timelines'],
+    actions:['Review employee files for missing or expired documents','Confirm every joiner this period has completed induction','Close pending exit formalities for employees who have left'] },
+
+  { key:'stores', label:'Stores & Inventory',
+    match:['store','inventory','warehouse','stock','logistic','dispatch','purchase','procurement','supply'],
+    kpis:['Stock accuracy against physical count','Issue and receipt entries posted same day','Ageing and non-moving stock as a share of value','Dispatches made on committed dates','Purchase orders closed against receipts'],
+    risks:['Book stock diverging from physical stock','Material issued without an authorised requisition','Non-moving inventory tying up working capital','Goods received without inspection against the order'],
+    compliance:['Every issue backed by an approved requisition','Physical verification carried out at the required frequency','Inward material inspected and recorded before acceptance','Scrap and write-offs approved before disposal'],
+    actions:['Schedule physical verification for high-value items','List non-moving stock for management review','Close purchase orders open beyond their delivery date'] },
+
+  { key:'it', label:'IT & Technical Support',
+    match:['it','software','developer','network','system','support','technical','helpdesk','server','security'],
+    kpis:['Tickets resolved within the agreed response time','System uptime across the period','Backup jobs completed and verified','Patches and updates applied on schedule','Repeat incidents on the same root cause'],
+    risks:['Backups running but never test-restored','Administrative access retained after a role change','Unpatched systems exposed to known vulnerabilities','Single point of failure with no documented recovery route'],
+    compliance:['Access rights reviewed and revoked on exit','Backups verified by periodic restore testing','Licensed software only, with licences on record','Incident log maintained for security events'],
+    actions:['Test-restore a backup and record the result','Review administrative accounts against current staff','Close incidents that have recurred more than once this period'] }
+];
+
+const ROLE_GENERAL = {
+  key:'general', label:'General Operations',
+  kpis:['Assigned work completed within agreed timelines','Attendance and punctuality against policy','Quality and accuracy of output','Responsiveness to instructions from the reporting manager'],
+  risks:['Responsibilities not documented, so handover depends on one person','Work priorities set informally rather than against a plan','Performance discussed without an agreed measure'],
+  compliance:['Attendance recorded as required by policy','Company property and information handled per policy','Leave taken with prior approval'],
+  actions:['Agree written objectives with the reporting manager for the coming period','Record the job profile and key responsibilities in Employee Master']
+};
+
+// Whole words only, allowing ordinary plurals. A plain substring test is not
+// good enough here: "it" appears inside "site" and "recruitment", "hr" inside
+// "through", so a field engineer and an HR executive were both being filed
+// under IT & Technical Support on the strength of a letter pair.
+function roleWordIn(hay, word){
+  const w = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp('(^|[^a-z])' + w + '(s|es|ing|ed)?([^a-z]|$)').test(hay);
+}
+
+// An employee can genuinely sit across two domains (a service engineer who also
+// runs the stores). The second is only carried when it is really there — one
+// incidental word is not a second job.
+function employeeRoleDomains(emp){
+  const hay = [emp.designation, emp.department, emp.jobProfile, emp.responsibilities]
+    .filter(Boolean).join(' ').toLowerCase();
+  if(!hay.trim()) return [ROLE_GENERAL];
+  const scored = ROLE_DOMAINS.map(d => ({
+    d, score: d.match.reduce((n, w) => n + (roleWordIn(hay, w) ? 1 : 0), 0)
+  })).filter(x => x.score > 0).sort((a, b) => b.score - a.score);
+  if(!scored.length) return [ROLE_GENERAL];
+  const out = [scored[0].d];
+  if(scored[1] && scored[1].score >= 2 && scored[1].score >= scored[0].score - 1) out.push(scored[1].d);
+  return out;
+}
+
+// Responsibilities are entered one per line; fall back to sentences so a
+// paragraph still yields usable points.
+function employeeResponsibilityList(emp){
+  const raw = (emp.responsibilities || '').trim();
+  if(!raw) return [];
+  const lines = raw.split(/\r?\n/).map(s => s.replace(/^[-*•\d.)\s]+/, '').trim()).filter(Boolean);
+  if(lines.length > 1) return lines;
+  return raw.split(/(?<=\.)\s+/).map(s => s.trim()).filter(Boolean);
+}
+
+// Merge the matched domains, keeping order and dropping duplicates.
+function mergeRoleField(domains, field, limit){
+  const out = [];
+  domains.forEach(d => (d[field] || []).forEach(v => { if(out.indexOf(v) === -1) out.push(v); }));
+  return limit ? out.slice(0, limit) : out;
+}
+
+// Each report type decides which of the role sections it needs. "Do not
+// include irrelevant sections" is enforced here: a section with nothing to say
+// for this employee is not rendered at all.
+const ROLE_REPORT_TYPES = [
+  { key:'profile',    label:'Role & Responsibility Profile', sections:['summary','responsibilities','kpis','observations','recommendations','conclusion','signature'] },
+  { key:'performance',label:'Performance Review Report',     sections:['summary','responsibilities','kpis','observations','recommendations','conclusion','signature'] },
+  { key:'compliance', label:'Compliance & Risk Report',      sections:['summary','risks','compliance','checklist','observations','recommendations','conclusion','signature'] },
+  { key:'induction',  label:'Induction & Onboarding Report', sections:['summary','responsibilities','checklist','compliance','recommendations','conclusion','signature'] }
+];
+
+function roleReportContent(emp, typeKey){
+  const type = ROLE_REPORT_TYPES.find(t => t.key === typeKey) || ROLE_REPORT_TYPES[0];
+  const domains = employeeRoleDomains(emp);
+  const resp = employeeResponsibilityList(emp);
+  const role = emp.designation || 'Role not recorded';
+  const dept = emp.department || 'Department not recorded';
+  const domainNames = domains.map(d => d.label).join(' and ');
+  const thin = !emp.jobProfile && !resp.length;
+
+  // Written from this employee's own record. The wording changes with the
+  // domain, the designation and whether the profile has been filled in.
+  const summary = [
+    `${emp.name || 'This employee'} works as ${role} in ${dept}, which places the role in ${domainNames}.`,
+    emp.jobProfile ? `The recorded job profile is: ${emp.jobProfile}` : '',
+    resp.length ? `${resp.length} key ${resp.length === 1 ? 'responsibility has' : 'responsibilities have'} been recorded against this role, and the measures and checks in this report are drawn from them.`
+                : `No key responsibilities have been recorded against this role yet, so this report is built from designation and department alone and is necessarily general. Filling in Job profile and Key responsibilities in Employee Master will make it specific.`,
+    `This ${type.label.toLowerCase()} covers ${domainNames.toLowerCase()} and is limited to matters arising from this role.`
+  ].filter(Boolean);
+
+  const observations = [];
+  if(resp.length) observations.push(`The role carries ${resp.length} recorded ${resp.length === 1 ? 'responsibility' : 'responsibilities'}, all within ${domainNames.toLowerCase()}.`);
+  if(!emp.jobProfile) observations.push('No written job profile is on record for this employee, so expectations rest on the designation alone.');
+  if(!resp.length) observations.push('Key responsibilities are not recorded, which leaves performance discussions without an agreed measure.');
+  if(domains.length > 1) observations.push(`The role spans ${domains.length} areas — ${domainNames} — so workload and priorities need to be balanced between them explicitly.`);
+  if(!emp.doj) observations.push('Date of joining is not recorded, so length of service cannot be stated.');
+  if(emp.employmentStatus === 'left') observations.push('This employee is marked as left; the report reflects the role as last recorded.');
+  if(!observations.length) observations.push('The role record is complete and consistent with the assigned department and designation.');
+
+  const recommendations = mergeRoleField(domains, 'actions', 5).slice();
+  if(!emp.jobProfile) recommendations.unshift('Record a written job profile in Employee Master so responsibilities are documented rather than assumed.');
+  if(!resp.length) recommendations.unshift('Agree and record key responsibilities so future reviews measure against a stated expectation.');
+
+  const conclusion = thin
+    ? `On the record available, ${emp.name || 'this employee'} is engaged as ${role} in ${dept}. A fuller assessment is not possible until the job profile and key responsibilities are recorded; the recommendations above are the first step.`
+    : `${emp.name || 'This employee'}'s role as ${role} in ${dept} is documented and falls within ${domainNames.toLowerCase()}. The measures listed above are the appropriate basis for reviewing this role, and the recommendations should be taken up with the reporting manager for the coming period.`;
+
+  return {
+    type, domains, thin,
+    summary,
+    responsibilities: resp,
+    kpis: mergeRoleField(domains, 'kpis', 7),
+    risks: mergeRoleField(domains, 'risks', 6),
+    compliance: mergeRoleField(domains, 'compliance', 6),
+    checklist: mergeRoleField(domains, 'compliance', 6),
+    observations,
+    recommendations: recommendations.slice(0, 6),
+    conclusion
+  };
+}
+
+// ---- company profile ----
+// The letterhead details every generated report has to carry. Kept as data
+// rather than baked into the report code so nobody has to edit HTML to change
+// a phone number, and so nothing here is invented — a field left blank is
+// simply left off the page instead of being filled with a plausible guess.
+const COMPANY_NAME = 'R.S. Infotech';
+async function getCompanyProfile(){
+  const v = await safeGet('company_profile', true);
+  const saved = v ? JSON.parse(v) : {};
+  return Object.assign({ name: COMPANY_NAME, address:'', phone:'', email:'', website:'' }, saved);
+}
+async function saveCompanyProfile(p){
+  await safeSet('company_profile', JSON.stringify(p), true);
+}
+
+// ---- role report renderer ----
+// Content is laid into real A4 pages rather than left to flow, because the
+// branding rules are per-page: logo and company name must appear on every
+// sheet and pages must be numbered "n of m". Neither is reliable with a single
+// long document — browsers do not repeat ordinary elements across printed
+// pages, and CSS page counters are not supported well enough to depend on.
+// So blocks are measured and packed into fixed-height pages, and each page is
+// built with its own header and footer.
+const A4_CONTENT_PX = 940;   // usable height inside one page at 96dpi, less margins
+
+function roleReportHeader(company, emp, meta){
+  const logo = (document.querySelector('header.top .brand img') || {}).src || '';
+  const contact = [
+    company.phone ? 'Tel: ' + escapeHtml(company.phone) : '',
+    company.email ? escapeHtml(company.email) : '',
+    company.website ? escapeHtml(company.website) : ''
+  ].filter(Boolean).join(' · ');
+  return `<div class="rpt-head">
+    <div class="rpt-head-top">
+      ${logo ? `<img class="rpt-logo" src="${logo}" alt="${escapeHtml(company.name)} logo">` : '<div></div>'}
+      <div class="rpt-head-mid">
+        <div class="rpt-company">${escapeHtml(company.name)}</div>
+        ${company.address ? `<div class="rpt-addr">${escapeHtml(company.address)}</div>` : ''}
+        ${contact ? `<div class="rpt-addr">${contact}</div>` : ''}
+      </div>
+      <div class="rpt-head-right">
+        <div class="rpt-title">${escapeHtml(meta.title)}</div>
+        <div class="rpt-when">${escapeHtml(meta.generatedAt)}</div>
+      </div>
+    </div>
+    <table class="rpt-meta"><tbody>
+      <tr><th>Employee</th><td>${escapeHtml(emp.name || '—')}</td>
+          <th>Employee ID</th><td>${escapeHtml(emp.id || '—')}</td></tr>
+      <tr><th>Department</th><td>${escapeHtml(emp.department || '—')}</td>
+          <th>Designation</th><td>${escapeHtml(emp.designation || '—')}</td></tr>
+      <tr><th>Generated by</th><td>${escapeHtml(meta.generatedBy)}</td>
+          <th>Report date</th><td>${escapeHtml(meta.generatedAt)}</td></tr>
+    </tbody></table>
+  </div>`;
+}
+
+function roleReportFooter(company, page, total){
+  const logo = (document.querySelector('header.top .brand img') || {}).src || '';
+  return `<div class="rpt-foot">
+    <div class="rpt-foot-l">
+      ${logo ? `<img class="rpt-foot-logo" src="${logo}" alt="">` : ''}
+      <span>${escapeHtml(company.name)}</span>
+      <span class="rpt-conf">Confidential Document</span>
+    </div>
+    <div class="rpt-foot-r">
+      <span>System Generated</span>
+      <span>© ${new Date().getFullYear()} ${escapeHtml(company.name)}</span>
+      <span class="rpt-page">Page ${page} of ${total}</span>
+    </div>
+  </div>`;
+}
+
+// Section blocks, in the order the chosen report type asks for. Anything with
+// no content for this employee returns '' and never reaches the page.
+function roleReportBlocks(c, emp){
+  const list = (title, items, cls) => items && items.length
+    ? `<section class="rpt-sec ${cls || ''}"><h2>${title}</h2><ul>${items.map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul></section>` : '';
+  const table = (title, items, head) => items && items.length
+    ? `<section class="rpt-sec"><h2>${title}</h2><table class="rpt-table"><thead><tr><th style="width:38px">#</th><th>${head}</th></tr></thead><tbody>${
+        items.map((i, n) => `<tr><td>${n + 1}</td><td>${escapeHtml(i)}</td></tr>`).join('')}</tbody></table></section>` : '';
+
+  const map = {
+    summary: `<section class="rpt-sec"><h2>Executive Summary</h2>${c.summary.map(p => `<p>${escapeHtml(p)}</p>`).join('')}</section>`,
+    responsibilities: table('Key Responsibilities', c.responsibilities, 'Responsibility as recorded'),
+    kpis: table('Key Performance Indicators', c.kpis, 'Measure'),
+    risks: list('Risk Areas', c.risks),
+    compliance: list('Compliance Points', c.compliance),
+    checklist: c.checklist && c.checklist.length
+      ? `<section class="rpt-sec"><h2>Verification Checklist</h2><table class="rpt-table"><thead><tr><th>Item</th><th style="width:70px">Yes</th><th style="width:70px">No</th><th style="width:110px">Remarks</th></tr></thead><tbody>${
+          c.checklist.map(i => `<tr><td>${escapeHtml(i)}</td><td></td><td></td><td></td></tr>`).join('')}</tbody></table></section>` : '',
+    observations: list('Observations', c.observations),
+    recommendations: table('Recommendations & Action Items', c.recommendations, 'Recommended action'),
+    conclusion: `<section class="rpt-sec"><h2>Conclusion</h2><p>${escapeHtml(c.conclusion)}</p></section>`,
+    signature: `<section class="rpt-sec rpt-sign"><h2>Authorisation</h2>
+      <table class="rpt-sign-tbl"><tbody><tr>
+        <td><div class="rpt-sign-line"></div>Reviewed by (Reporting Manager)</td>
+        <td><div class="rpt-sign-line"></div>Acknowledged by (${escapeHtml(emp.name || 'Employee')})</td>
+        <td><div class="rpt-sign-line"></div>Approved by (HR)</td>
+      </tr></tbody></table></section>`
+  };
+  return c.type.sections.map(s => map[s]).filter(Boolean);
+}
+
+// Measure each block off-screen, then pack them into pages. A block taller
+// than a page gets a page to itself rather than being silently clipped.
+function paginateRoleReport(blocks, headHtml, footProbe){
+  const probe = document.createElement('div');
+  probe.className = 'rpt-page-probe';
+  probe.innerHTML = headHtml;
+  document.body.appendChild(probe);
+  const headH = probe.offsetHeight;
+  probe.innerHTML = footProbe;
+  const footH = probe.offsetHeight;
+
+  const avail = A4_CONTENT_PX - footH;
+  const pages = [];
+  let cur = [], curH = headH;   // first page carries the header
+  blocks.forEach(html => {
+    probe.innerHTML = html;
+    const h = probe.offsetHeight;
+    if(cur.length && curH + h > avail){ pages.push(cur); cur = []; curH = headH; }
+    cur.push(html); curH += h;
+  });
+  if(cur.length) pages.push(cur);
+  probe.remove();
+  return pages.length ? pages : [[]];
+}
+
+async function buildRoleReportHtml(emp, typeKey){
+  const company = await getCompanyProfile();
+  const c = roleReportContent(emp, typeKey);
+  const now = new Date();
+  const meta = {
+    title: c.type.label,
+    generatedAt: now.toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }),
+    generatedBy: 'HR — ' + COMPANY_NAME
+  };
+  const headHtml = roleReportHeader(company, emp, meta);
+  const blocks = roleReportBlocks(c, emp);
+  const pages = paginateRoleReport(blocks, headHtml, roleReportFooter(company, 1, 1));
+  return pages.map((blks, i) => `<div class="rpt-page">
+      ${headHtml}
+      <div class="rpt-body">${blks.join('')}</div>
+      ${roleReportFooter(company, i + 1, pages.length)}
+    </div>`).join('');
+}
+
 const LETTER_TYPES = [
   'Offer Letter',
   'Appointment Letter',
@@ -4817,7 +5218,8 @@ async function compressDocumentFile(file){
 
 function emptyEmployee(){
   return {
-    id:'', name:'', designation:'', department:'', doj:'', nextIncrement:'', dob:'',
+    id:'', name:'', designation:'', department:'', jobProfile:'', responsibilities:'',
+    doj:'', nextIncrement:'', dob:'',
     pan:'', aadhaar:'', uan:'', esiNumber:'', bankName:'', ifsc:'', accountNumber:'',
     phone:'', email:'', address:'',
     basic:0, hra:0, otherAllowances:0, dressAllowance:0, mobileExpense:0, stdDeductions:0, pf:0, esiDeduction:0, pt:0,
@@ -4922,6 +5324,13 @@ function employeeModalHtml(emp){
         <div style="height:12px"></div>
         <label class="field">Department</label>
         <input type="text" id="f_department" placeholder="e.g. Operations" value="${emp.department}">
+        <div style="height:12px"></div>
+        <label class="field">Job profile</label>
+        <textarea class="field-input" id="f_jobProfile" rows="3" placeholder="What this person is actually responsible for day to day">${emp.jobProfile || ''}</textarea>
+        <div style="height:12px"></div>
+        <label class="field">Key responsibilities</label>
+        <textarea class="field-input" id="f_responsibilities" rows="4" placeholder="One per line — e.g.&#10;Preventive maintenance of client UPS systems&#10;Closing service tickets within SLA&#10;Monthly site reports to the client">${emp.responsibilities || ''}</textarea>
+        <p style="font-size:11.5px;color:var(--muted);margin:8px 0 0;">Used to build this employee's role reports. The more specific these are, the more specific the report is — leave them blank and the report falls back to designation and department only, and says so.</p>
       </div>
 
       <div class="field-group">
@@ -5221,6 +5630,8 @@ async function saveEmployeeForm(){
     salutation: document.getElementById('f_salutation').value,
     designation: document.getElementById('f_designation').value.trim(),
     department: document.getElementById('f_department').value.trim(),
+    jobProfile: document.getElementById('f_jobProfile').value.trim(),
+    responsibilities: document.getElementById('f_responsibilities').value.trim(),
     doj: document.getElementById('f_doj').value,
     nextIncrement: document.getElementById('f_nextIncrement').value,
     dob: document.getElementById('f_dob').value,
@@ -5428,12 +5839,57 @@ async function renderReportsTab(){
       <div id="reportBox_${r.key}"></div>
     </section>`;
   }).join('');
+  await populateRoleReportPickers();
   await populateAttendanceUserSelect();
   await renderHolidayList();
   await populateOvertimeEmployeeSelect();
   // Show the current month straight away rather than an empty dropdown
   populateMonthYearSelects('consultantReportMonthSel', 'consultantReportYearSel');
   populateMonthYearSelects('salCompareMonthSel', 'salCompareYearSel');
+}
+
+// ---- role report UI ----
+async function populateRoleReportPickers(){
+  const empSel = document.getElementById('roleRptEmp');
+  const typeSel = document.getElementById('roleRptType');
+  if(!empSel || !typeSel) return;
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
+  empSel.innerHTML = employees.length
+    ? employees.map(e => `<option value="${escapeHtml(e.id)}">${escapeHtml(e.name || '(unnamed)')}${e.designation ? ' — ' + escapeHtml(e.designation) : ''}</option>`).join('')
+    : '<option value="">No employees on roll</option>';
+  typeSel.innerHTML = ROLE_REPORT_TYPES.map(t => `<option value="${t.key}">${t.label}</option>`).join('');
+  const co = await getCompanyProfile();
+  ['Address','Phone','Email','Website'].forEach(k => {
+    const el = document.getElementById('co' + k);
+    if(el) el.value = co[k.toLowerCase()] || '';
+  });
+}
+
+async function saveCompanyProfileFromForm(){
+  const msg = document.getElementById('coMsg');
+  const co = await getCompanyProfile();
+  co.address = document.getElementById('coAddress').value.trim();
+  co.phone   = document.getElementById('coPhone').value.trim();
+  co.email   = document.getElementById('coEmail').value.trim();
+  co.website = document.getElementById('coWebsite').value.trim();
+  await saveCompanyProfile(co);
+  msg.textContent = 'Letterhead saved — it will appear on every report from now on.';
+  msg.classList.remove('error');
+}
+
+async function generateRoleReport(){
+  const box = document.getElementById('roleRptBox');
+  const empId = document.getElementById('roleRptEmp').value;
+  const typeKey = document.getElementById('roleRptType').value;
+  if(!empId){ box.innerHTML = '<p class="dash-muted">Add an employee in Employee Master first.</p>'; return; }
+  box.innerHTML = '<p class="dash-muted">Building report…</p>';
+  const emp = (await getEmployees()).find(e => e.id === empId);
+  if(!emp){ box.innerHTML = '<p class="dash-muted">That employee could not be found.</p>'; return; }
+  const html = await buildRoleReportHtml(emp, typeKey);
+  box.innerHTML = `<div style="margin:14px 0 10px;display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="btn ghost" onclick="window.print()">Print / Save as PDF</button>
+    </div><div class="rpt-wrap">${html}</div>`;
+  await addActivityLog('Role report generated: ' + (emp.name || empId));
 }
 
 function reportHasData(key, e){
