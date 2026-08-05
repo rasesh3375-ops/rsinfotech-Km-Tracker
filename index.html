@@ -323,6 +323,17 @@
   .dash-fold[open] > summary{border-bottom:1px solid var(--line);border-radius:14px 14px 0 0;}
   .dash-fold .fold-body{padding:14px 18px 18px;}
 
+  /* Sticks to the top of the sheet so Save is reachable without scrolling back
+     up from the bottom of a 31-column table. */
+  .att-save-bar{position:sticky;top:0;z-index:20;display:flex;align-items:center;
+    justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;
+    padding:10px 13px;border-radius:10px;background:#FEF7EB;border:1px solid #F0DFC0;
+    font-size:13px;font-weight:700;color:var(--amber-dark);}
+  .att-save-actions{display:flex;align-items:center;gap:12px;}
+  .att-save-bar .btn{width:auto;padding:8px 16px;font-size:13px;}
+  /* An edited cell stays visibly unsaved until Save is pressed. */
+  .att-code.att-dirty{outline:2px solid var(--amber);outline-offset:-2px;}
+
   .icon-btn{background:none;border:1px solid transparent;border-radius:8px;padding:5px 8px;
     font-size:16px;cursor:pointer;line-height:1;}
   .icon-btn:hover{background:#EEF1F7;border-color:var(--line);}
@@ -840,6 +851,7 @@
         <header id="hrTopbar">
           <div class="tb-left">
             <button id="hrBurger" onclick="toggleHrNav()" aria-label="Menu">☰</button>
+            <button class="icon-btn" onclick="hrNavigate('dashboard')" title="Back to Dashboard" aria-label="Back to Dashboard">🏠</button>
             <button class="icon-btn hide-sm" id="hrRail" onclick="toggleHrSidebar()"
                     title="Hide or show the menu" aria-label="Hide or show the menu">⯇</button>
             <strong id="hrPageTitle" style="font-size:15px;color:var(--navy);">Dashboard</strong>
@@ -1015,6 +1027,13 @@
             </div>
             <button class="btn full" onclick="renderAttendanceSheet()">Load attendance sheet</button>
             <div style="height:14px"></div>
+            <div id="attSaveBar" class="att-save-bar hidden">
+              <span id="attSaveCount">0 unsaved changes</span>
+              <span class="att-save-actions">
+                <button class="linkbtn" onclick="discardAttendanceChanges()">Discard</button>
+                <button class="btn" id="attSaveBtn" onclick="saveAttendanceChanges()">Save attendance</button>
+              </span>
+            </div>
             <div id="attendanceSheetBox"></div>
           </section>
         </div>
@@ -1768,14 +1787,31 @@ async function testBackendConnection(){
 // the backend is briefly unreachable (network blip, quota hit, etc.) — the
 // real Apps Script backend is configured above and is the source of truth
 // whenever it's reachable.
+// A render often asks for the same shared key several times — the reports tab
+// alone reads the employee list from three different builders — and each ask
+// was a separate round trip to Apps Script, which is where the wait came from.
+// Reads are held very briefly so one screen's repeated asks cost one call.
+// Short enough that nothing looks stale, and any write clears the key outright.
+const SHARED_READ_TTL_MS = 8000;
+const sharedReadCache = new Map();
+function invalidateSharedRead(key){
+  if(key === undefined) sharedReadCache.clear(); else sharedReadCache.delete(key);
+}
+
 async function safeGet(key, shared){
   try{
     if(!shared){
       const v = localStorage.getItem('kmt_' + key);
       return v !== null ? v : null;
     }
+    const hit = sharedReadCache.get(key);
+    if(hit && Date.now() < hit.until) return hit.value;
     const r = await remoteGet(key);
-    if(r && r.value !== undefined && r.value !== null) return r.value;
+    if(r && r.value !== undefined && r.value !== null){
+      sharedReadCache.set(key, { value: r.value, until: Date.now() + SHARED_READ_TTL_MS });
+      return r.value;
+    }
+    // A failed read is never cached — the next attempt must reach the backend.
     const local = localStorage.getItem('kmt_shared_' + key);
     return local !== null ? local : null;
   }catch(e){ return null; }
@@ -1787,7 +1823,10 @@ async function safeSet(key, value, shared){
       return;
     }
     localStorage.setItem('kmt_shared_' + key, value);
+    // Write first, then drop the cached copy so the next read sees the change.
+    invalidateSharedRead(key);
     await remoteSet(key, value);
+    invalidateSharedRead(key);
   }catch(e){}
 }
 
@@ -3563,16 +3602,60 @@ async function renderAttendanceSheet(){
     <button class="btn ghost full" style="margin-top:12px;" onclick="openFullscreenView('Attendance Sheet','attendanceSheetBox')">⛶ Full screen</button>`;
 }
 
-async function handleAttendanceCellChange(employeeId, dateStr, selectEl){
+// Edits are collected here and written when Save is pressed. Every change used
+// to write to the backend and then re-render the whole sheet — re-reading every
+// employee, all their attendance and the holiday list — so marking a class of
+// absences meant one full round trip per cell and the sheet locked up between
+// them. Now a change costs nothing until you save.
+let pendingAttendance = {};
+
+function attendanceDirtyCount(){ return Object.keys(pendingAttendance).length; }
+
+function updateAttendanceSaveBar(){
+  const bar = document.getElementById('attSaveBar');
+  const n = attendanceDirtyCount();
+  if(!bar) return;
+  bar.classList.toggle('hidden', n === 0);
+  const label = document.getElementById('attSaveCount');
+  if(label) label.textContent = n === 1 ? '1 unsaved change' : n + ' unsaved changes';
+}
+
+function handleAttendanceCellChange(employeeId, dateStr, selectEl){
   const code = selectEl.value;
-  const entry = (await getAttendance(employeeId))[dateStr] || {};
-  await setAttendanceDay(employeeId, dateStr, code, { lateFlag: entry.lateFlag, checkinTime: entry.checkinTime });
-  selectEl.className = 'att-code code-' + code;
-  // Refresh just to keep summary columns accurate without losing scroll position too badly
+  pendingAttendance[employeeId + '|' + dateStr] = { employeeId, dateStr, code };
+  selectEl.className = 'att-code code-' + code + ' att-dirty';
+  updateAttendanceSaveBar();
+}
+
+async function saveAttendanceChanges(){
+  const items = Object.values(pendingAttendance);
+  if(!items.length) return;
+  const btn = document.getElementById('attSaveBtn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
+  let saved = 0, failed = 0;
+  for(const it of items){
+    try{
+      const entry = (await getAttendance(it.employeeId))[it.dateStr] || {};
+      await setAttendanceDay(it.employeeId, it.dateStr, it.code,
+        { lateFlag: entry.lateFlag, checkinTime: entry.checkinTime });
+      saved++;
+    }catch(e){ failed++; }
+  }
+  await addActivityLog('Attendance saved: ' + saved + ' change(s)' + (failed ? ', ' + failed + ' failed' : ''));
+  // Only clear what actually went in, so a failed write is not silently lost.
+  if(!failed) pendingAttendance = {};
+  if(btn){ btn.disabled = false; btn.textContent = 'Save attendance'; }
+  updateAttendanceSaveBar();
   await renderAttendanceSheet();
-  const employees = await getEmployees();
-  const emp = employees.find(e => e.id === employeeId);
-  await addActivityLog('Attendance edited: ' + (emp ? emp.name : employeeId) + ' on ' + dateStr + ' set to ' + (code || '(blank)'));
+  if(failed) alert(failed + ' change(s) could not be saved — they are still marked unsaved. Check the connection and press Save again.');
+}
+
+function discardAttendanceChanges(){
+  if(!attendanceDirtyCount()) return;
+  if(!confirm('Discard ' + attendanceDirtyCount() + ' unsaved attendance change(s)?')) return;
+  pendingAttendance = {};
+  updateAttendanceSaveBar();
+  renderAttendanceSheet();
 }
 
 // ---- salary sheet ----
@@ -4937,6 +5020,11 @@ function toggleHrNav(force){
 function hrNavigate(route){
   const cfg = HR_ROUTES[route];
   if(!cfg) return;
+  if(typeof attendanceDirtyCount === 'function' && attendanceDirtyCount() && route !== 'attendance'){
+    if(!confirm(attendanceDirtyCount() + ' attendance change(s) have not been saved. Leave without saving?')) return;
+    pendingAttendance = {};
+    updateAttendanceSaveBar();
+  }
   hrRoute = route;
   HR_PANELS.forEach(id => {
     const el = document.getElementById(id);
@@ -7410,6 +7498,14 @@ function armExitGuard(){
 
 window.addEventListener('popstate', () => {
   if(exitConfirmed || !isSignedIn()) return;   // let the navigation happen
+  // Back means "up a level" first. Anywhere other than the Dashboard it goes
+  // there, which is what people actually want from a screen like the
+  // Attendance Sheet; only from the Dashboard itself does it mean leaving.
+  if(currentRole === 'hr' && typeof hrRoute !== 'undefined' && hrRoute && hrRoute !== 'dashboard'){
+    history.pushState({ kmtExitGuard: true }, '');
+    hrNavigate('dashboard');
+    return;
+  }
   const leave = confirm('Are you sure you want to exit?\n\nYou will be signed out, and anything you have typed on this screen but not saved will be lost.');
   if(leave){
     exitConfirmed = true;
