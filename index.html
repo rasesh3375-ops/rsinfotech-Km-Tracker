@@ -350,6 +350,14 @@
     #hrContent select,#hrContent input,#hrContent textarea{font-size:16px;}
   }
 
+  /* ---- breadcrumb ---- */
+  #hrPageTitle{display:flex;align-items:center;gap:7px;font-size:15px;font-weight:700;}
+  .crumb-up{background:none;border:none;padding:0;font:inherit;font-weight:600;
+    color:var(--muted);cursor:pointer;}
+  .crumb-up:hover{color:var(--navy);text-decoration:underline;}
+  .crumb-sep{color:var(--muted);font-weight:400;}
+  .crumb-here{color:var(--navy);}
+
   /* ---- global search ---- */
   .gs-overlay{position:fixed;inset:0;z-index:90;background:rgba(22,33,62,.34);
     display:flex;align-items:flex-start;justify-content:center;padding:12vh 16px 16px;}
@@ -5130,7 +5138,16 @@ function hrNavigate(route){
     if(el) el.classList.remove('hidden');
   });
   const title = document.getElementById('hrPageTitle');
-  if(title) title.textContent = cfg.label;
+  if(title){
+    // A breadcrumb rather than a bare heading: the Dashboard is always one tap
+    // away and visibly the level above, which is what people were missing when
+    // the sidebar is collapsed.
+    title.innerHTML = route === 'dashboard'
+      ? '<span class="crumb-here">Dashboard</span>'
+      : '<button class="crumb-up" onclick="hrNavigate(\'dashboard\')">Dashboard</button>' +
+        '<span class="crumb-sep">›</span><span class="crumb-here">' + escapeHtml(cfg.label) + '</span>';
+  }
+  noteRecentRoute(route);
   renderHrSideNav();
   toggleHrNav(false);
   const content = document.getElementById('hrContent');
@@ -5612,6 +5629,23 @@ function openEmployeeFromDashboard(id){
   setTimeout(() => openAddEmployeeModal(id), 60);
 }
 
+// ---- recently visited ----
+// The five screens most recently opened, kept on the device. Global search
+// shows them before anything is typed, so the common case — going back to
+// something opened a minute ago — is one tap rather than a search.
+const RECENT_KEY = 'kmt_recent_routes';
+function readRecentRoutes(){
+  try{ return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); }catch(e){ return []; }
+}
+function noteRecentRoute(route){
+  if(route === 'dashboard') return;   // the home screen is not a "recent"
+  try{
+    const list = readRecentRoutes().filter(r => r !== route);
+    list.unshift(route);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, 5)));
+  }catch(e){}
+}
+
 // ---- global search ----
 // One box for the whole app: every screen in the sidebar and every employee on
 // roll. Employees come from the cached read, so opening it costs no network
@@ -5649,10 +5683,19 @@ function runGlobalSearch(){
   const box = document.getElementById('gsResults');
   const q = (document.getElementById('gsInput')?.value || '').trim().toLowerCase();
   if(!box) return;
-  // No query: show the screens, so the box is useful before typing anything.
-  const pool = q
-    ? gsItems.filter(i => (i.title + ' ' + i.sub).toLowerCase().includes(q))
-    : gsItems.filter(i => i.kind === 'Screen');
+  // No query: recently visited first, then the rest of the screens, so the box
+  // is a navigator before it is a search.
+  let pool;
+  if(q){
+    pool = gsItems.filter(i => (i.title + ' ' + i.sub).toLowerCase().includes(q));
+  } else {
+    const recent = readRecentRoutes()
+      .map(r => HR_ROUTES[r] && ({ kind:'Recent', icon:HR_ROUTES[r].icon || '📄',
+        title:HR_ROUTES[r].label, sub:'Recently opened', go:() => hrNavigate(r) }))
+      .filter(Boolean);
+    const seen = recent.map(r => r.title);
+    pool = recent.concat(gsItems.filter(i => i.kind === 'Screen' && seen.indexOf(i.title) === -1));
+  }
   const rows = pool.slice(0, 40);
   gsSel = 0;
   box.innerHTML = rows.length ? rows.map((i, n) => `
