@@ -377,6 +377,10 @@
   .gs-hint{padding:9px 18px;border-top:1px solid var(--line);font-size:11px;color:var(--muted);}
   .gs-empty{padding:20px 18px;font-size:13px;color:var(--muted);}
 
+  .pol-warn{font-size:11.5px;color:var(--red);line-height:1.5;}
+  .pol-ok{font-size:11.5px;color:var(--green);font-weight:700;}
+  .pol-warn-row td:first-child{box-shadow:inset 3px 0 0 var(--red);}
+
   .draft-note{display:block;font-size:11px;color:var(--muted);margin-top:8px;text-align:center;}
 
   /* ---- loading skeletons ---- */
@@ -3668,6 +3672,80 @@ function validateLeaveApplication(req, ctx, P){
   return out;
 }
 
+
+// ---- policy summary for the rendered month ----
+// Reads the attendance codes the sheet already stores and reports each
+// employee's position against LEAVE_POLICY: late instances and the half-days
+// they trigger, short leaves and what the next one becomes, sick and PL usage
+// against balance. Every threshold quoted comes from the policy config, so this
+// panel changes with the policy and never disagrees with the engine.
+function buildPolicySummary(employees, attByEmp, dateList){
+  const P = LEAVE_POLICY;
+  const rows = employees.map(emp => {
+    const att = attByEmp[emp.id] || {};
+    let lateCount = 0, shortLeaves = 0, sickUsed = 0, plUsed = 0, lwp = 0, halfDays = 0, attendanceDays = 0;
+    dateList.forEach(d => {
+      const e = att[d];
+      if(!e) return;
+      const c = e.code;
+      if(c === 'SHORT') shortLeaves++;
+      if(c === 'SL' || c === 'HSL') sickUsed += (c === 'HSL' ? 0.5 : 1);
+      if(c === 'EL' || c === 'HEL') plUsed += (c === 'HEL' ? 0.5 : 1);
+      if(c === 'LP' || c === 'HLP') lwp += (c === 'HLP' ? 0.5 : 1);
+      if(c === 'HEL' || c === 'HSL' || c === 'HLP') halfDays++;
+      if(c === 'P' || c === 'SHORT' || c === 'EL' || c === 'SL') attendanceDays++;
+      if(e.lateFlag) lateCount++;
+    });
+    const type = emp.employeeType === 'part' ? 'part' : 'full';
+    const bal = leaveBalances({ employeeType: type, isFirstFinancialYear: !!emp.isFirstFinancialYear },
+                              { sick: sickUsed, pl: plUsed, plThisMonth: plUsed, attendanceDays });
+    const L = P.lateComing, S = P.shortLeave;
+    const warn = [];
+    if(lateCount > L.freeInstancesPerMonth){
+      const hd = Math.floor((lateCount - L.freeInstancesPerMonth) / L.halfDayPerExtraInstances);
+      warn.push('Exhausted the ' + L.freeInstancesPerMonth + ' permissible late entries');
+      if(hd > 0) warn.push(hd + ' half-day deduction(s) applicable');
+    }
+    if(shortLeaves > S.compOffThreshold) warn.push('More than ' + S.compOffThreshold + ' short leaves — compensatory off applies');
+    else if(shortLeaves > S.perMonth) warn.push('Short Leave limit of ' + S.perMonth + ' exceeded — treated as Half Day');
+    if(emp.employeeType === 'part' && shortLeaves > 0 && !P.partTime.shortLeaveAllowed)
+      warn.push('Short Leave is not applicable for Part-Time employees');
+    if(bal.sickExhausted) warn.push('Sick Leave exhausted — further sick leave becomes Leave Without Pay');
+    if(plUsed > P.privilegeLeave.maxPerMonth)
+      warn.push('More than ' + P.privilegeLeave.maxPerMonth + ' PL this month — excess deducted from salary');
+    if(!bal.plUsable && bal.plEarned > 0) warn.push('PL earned this year is usable from the next financial year');
+    return { emp, lateCount, shortLeaves, sickUsed, plUsed, lwp, halfDays, attendanceDays, bal, warn };
+  });
+
+  const body = rows.map(r => `
+    <tr class="${r.warn.length ? 'pol-warn-row' : ''}">
+      <td><strong>${escapeHtml(r.emp.name)}</strong>
+        <span class="inc-sub">${escapeHtml(r.emp.employeeType === 'part' ? 'Part-time' : 'Full-time')}</span></td>
+      <td class="num">${r.lateCount}</td>
+      <td class="num">${r.shortLeaves}</td>
+      <td class="num">${r.halfDays}</td>
+      <td class="num">${r.sickUsed} / ${r.bal.sickTotal}</td>
+      <td class="num">${r.plUsed} used · ${r.bal.plEarned} earned</td>
+      <td class="num">${r.lwp || '—'}</td>
+      <td>${r.warn.length
+        ? r.warn.map(w => '<div class="pol-warn">⚠ ' + escapeHtml(w) + '</div>').join('')
+        : '<span class="pol-ok">✓ Within policy</span>'}</td>
+    </tr>`).join('');
+
+  const S = LEAVE_POLICY.shortLeave, L = LEAVE_POLICY.lateComing;
+  return `<div class="dash-card" style="margin-top:16px;">
+    <div class="card-head"><h3>Policy check — ${escapeHtml(LEAVE_POLICY.version)}</h3></div>
+    <p class="card-sub" style="margin:0 0 10px;">Grace to ${minToHHMM(LEAVE_POLICY.shift.startMin + L.graceMinutes)} ·
+      late beyond ${L.shortLeaveAfterMinutes} min becomes Short Leave ·
+      ${L.freeInstancesPerMonth} late entries allowed, then a half day per ${L.halfDayPerExtraInstances} ·
+      ${S.perMonth} Short Leaves a month, over ${S.compOffThreshold} becomes compensatory off.</p>
+    <div class="inc-scroll"><table class="inc-table">
+      <thead><tr><th>Employee</th><th class="num">Late</th><th class="num">Short</th><th class="num">Half</th>
+        <th class="num">Sick</th><th class="num">PL</th><th class="num">LWP</th><th>Policy</th></tr></thead>
+      <tbody>${body}</tbody></table></div>
+  </div>`;
+}
+
 const ATT_CODES = ['P','A','H','EL','SL','LP','HEL','HSL','HLP','SHORT'];
 const ATT_CODE_LABELS = { P:'Present', A:'Absent', H:'Holiday', EL:'EL', SL:'SL', LP:'LP (unpaid)', HEL:'Half EL', HSL:'Half SL', HLP:'Half LP', SHORT:'Short leave' };
 
@@ -3867,7 +3945,7 @@ async function renderAttendanceSheet(){
   let bodyRows = '';
   // One request for everyone's attendance before the loop; each read below
   // then comes from the primed cache instead of its own round trip.
-  await getAttendanceMany(employees.map(e => e.id));
+  const attByEmp = await getAttendanceMany(employees.map(e => e.id));
   for(let i=0; i<employees.length; i++){
     const emp = employees[i];
     const att = await getAttendance(emp.id);
@@ -3899,7 +3977,9 @@ async function renderAttendanceSheet(){
       <span><strong>EL</strong> Earned leave</span><span><strong>SL</strong> Sick leave</span><span><strong>LP</strong> Leave without pay</span>
       <span><strong>HEL/HSL/HLP</strong> Half-day variants</span><span><strong>SHORT</strong> Short leave</span>
     </div>
-    <button class="btn ghost full" style="margin-top:12px;" onclick="openFullscreenView('Attendance Sheet','attendanceSheetBox')">⛶ Full screen</button>`;
+    <button class="btn ghost full" style="margin-top:12px;" onclick="openFullscreenView('Attendance Sheet','attendanceSheetBox')">⛶ Full screen</button>`
+    // Policy position for the same month, from the same records already read.
+    + buildPolicySummary(employees, attByEmp, dateList);
 }
 
 // Edits are collected here and written when Save is pressed. Every change used
