@@ -4983,8 +4983,22 @@ async function getEmployees(){
   const v = await safeGet('employees', true);
   return v ? JSON.parse(v) : [];
 }
+// One Google Sheets cell holds this whole record, and a cell tops out at
+// 50,000 characters. Attached documents are stored base64 inside it, so a few
+// scans can push the record past what the backend can physically write — and
+// it fails at the sheet, after the upload, where nothing tells the user. This
+// says so plainly instead, before the write is attempted.
+const SHEET_CELL_LIMIT = 50000;
 async function saveEmployees(list){
-  await safeSet('employees', JSON.stringify(list), true);
+  const payload = JSON.stringify(list);
+  if(payload.length > SHEET_CELL_LIMIT){
+    const mb = (payload.length / 1024).toFixed(0);
+    throw new Error('Employee records are ' + mb + ' KB, over the ' +
+      (SHEET_CELL_LIMIT / 1024).toFixed(0) + ' KB the backend can store in one cell. ' +
+      'This is caused by attached document images. Remove some attachments, or ask for ' +
+      'documents to be moved to their own storage, before saving again.');
+  }
+  await safeSet('employees', payload, true);
 }
 async function getLettersLog(){
   const v = await safeGet('letters_log', true);
@@ -5805,8 +5819,12 @@ async function renderActivityLogList(){
 }
 
 // ---- employee master ----
+// Scanned ID documents only need to be legible, not archival. Every document
+// is stored base64 inside the employees record, so its size is paid again on
+// every single save of any employee — 900px at quality 0.7 was roughly four
+// times bigger than it needed to be for reading an Aadhaar or PAN number.
 async function compressDocumentFile(file){
-  const maxDim = 900;
+  const maxDim = 640;
   return new Promise((resolve, reject) => {
     const img = new Image();
     const reader = new FileReader();
@@ -5817,7 +5835,7 @@ async function compressDocumentFile(file){
         const canvas = document.createElement('canvas');
         canvas.width = w; canvas.height = h;
         canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
+        resolve(canvas.toDataURL('image/jpeg', 0.55));
       };
       img.onerror = reject;
       img.src = reader.result;
