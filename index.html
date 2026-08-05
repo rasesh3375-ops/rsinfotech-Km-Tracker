@@ -3254,6 +3254,11 @@ const SALARY_HEADINGS = {
   contractor:  { label: 'Contractors',       basicPct: 0.50, hraPct: 0.40, ltaPct: 0.10, flat: false, pf: false, esi: false, pt: false }
 };
 const SALARY_HEADING_ORDER = ['managerial','senior','junior','apprentice','rsit','contractor'];
+// Which headings are R.S. Infotech's own payroll. The Consultant Report covers
+// these and nothing else — Apprentices, Contractors and R.S.IT Solution are
+// separate books and are not the consultant's to process. Kept here beside the
+// headings so the two are changed together.
+const CONSULTANT_REPORT_HEADINGS = ['managerial','senior','junior'];
 // PT is the one deduction whose amount is decided by a rule rather than typed
 // in per employee. Named so the Salary Sheet and the heading explainer below
 // read the same numbers — the calculation is unchanged.
@@ -3798,9 +3803,16 @@ async function renderConsultantReport(){
   const dateList = [];
   for(let d=1; d<=monthDays; d++) dateList.push(year + '-' + String(month).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
 
-  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
+  // The consultant works R.S. Infotech's own payroll only. Apprentices,
+  // Contractors and R.S.IT Solution are separate books that were being folded
+  // into this sheet, overstating every column and the headcount with it.
+  const employees = (await getEmployees()).filter(e =>
+    e.employmentStatus !== 'left' &&
+    CONSULTANT_REPORT_HEADINGS.indexOf(e.salaryHeading || 'managerial') !== -1);
   if(!employees.length){
-    box.innerHTML = '<div class="empty">Add employees in Employee Master first.</div>';
+    box.innerHTML = '<div class="empty">Nobody is on the R.S. Infotech payroll headings (' +
+      CONSULTANT_REPORT_HEADINGS.map(k => SALARY_HEADINGS[k].label).join(', ') +
+      '). Apprentices, Contractors and R.S.IT Solution are excluded from this report.</div>';
     return;
   }
   const holidayMap = await getHolidayMap_local();
