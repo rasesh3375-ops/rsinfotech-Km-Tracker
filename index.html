@@ -3963,6 +3963,11 @@ PF_RULES.wageComponents = ['basic', 'hra'];
 // EPF Scheme "excluded employee". All three conditions must hold — any one of
 // them missing and PF is mandatory. The threshold is strictly greater than the
 // ceiling, not equal to it, and it is tested at the wage on joining.
+// Employer-only charges on the PF wage, over and above the 12% share.
+// Confirmed by HR at 0.5% each.
+PF_RULES.adminPct = 0.005;
+PF_RULES.edliPct  = 0.005;
+
 PF_RULES.exclusion = {
   wageAbove: 15000,
   conditions: ['No prior UAN or EPF account', 'Basic + DA strictly above ₹15,000', 'Form 11 declaration submitted']
@@ -4499,7 +4504,20 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   const retention = computeRetentionForMonth(emp, dYear, dMonth);
   const totalDeduction = pf + esi + pt + advanceTemp + advance + retention;
   const netSalary = gross - totalDeduction;
-  return { rate, leaveDays, leaveAmount, basic, hra, lta, gross, pf, esi, pt, advanceTemp, advance, retention, totalDeduction, netSalary };
+  // Employer side. Charged on the same wage as the employee share and skipped
+  // entirely for an excluded employee, since there is no membership to fund.
+  const pfWage = PF_RULES.wageComponents.reduce((t, k) => t + ({ basic, hra, lta }[k] || 0), 0);
+  const excluded = pfExclusionStatus(emp, pfWage).excluded;
+  const e = (heading.pf && !excluded) ? computePf(pfWage)
+          : { employee:0, employerEps:0, employerEpf:0, employerTotal:0 };
+  const pen = e.employerEps;
+  const employerPf = e.employerEpf;
+  const pfAdmin = (heading.pf && !excluded) ? pfWage * PF_RULES.adminPct : 0;
+  const edli    = (heading.pf && !excluded) ? pfWage * PF_RULES.edliPct  : 0;
+  const employerCont = pen + employerPf + pfAdmin + edli;
+  const ctc = gross + employerCont;
+  return { rate, leaveDays, leaveAmount, basic, hra, lta, gross, pf, esi, pt, advanceTemp, advance,
+           retention, totalDeduction, netSalary, pen, employerPf, pfAdmin, edli, employerCont, ctc };
 }
 
 async function renderSalarySheet(){
@@ -4520,39 +4538,51 @@ async function renderSalarySheet(){
   const holidayMap = {};
   holidays.forEach(h => { holidayMap[h.date] = h.name; });
 
-  const cols = ['SR NO','Name','Rate of Pay','Leave Days','Leave Amount','Basic','HRA','LTA','Gross','PF','ESI','PT','Advance Temp','Advance','Retention','Total Deduction','Net Salary'];
+  // Employer columns follow Net Salary, never inside Total Deduction — they are
+  // company cost, not money withheld from the employee.
+  const cols = ['SR NO','Name','Rate of Pay','Leave Days','Leave Amount','Basic','HRA','LTA','Gross',
+    'PF','ESI','PT','Advance Temp','Advance','Retention','Total Deduction','Net Salary',
+    'PEN','Employer PF','PF Admin','EDLI','Employer Cont.','CTC'];
   let bodyRows = '';
   let srNo = 1;
-  const grand = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netSalary:0 };
+  const grand = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, employerCont:0, ctc:0 };
   const csvRows = [];
 
   for(const headingKey of SALARY_HEADING_ORDER){
     const group = employees.filter(e => (e.salaryHeading||'managerial') === headingKey);
     if(!group.length) continue;
-    bodyRows += `<tr class="sal-heading"><td colspan="17">${SALARY_HEADINGS[headingKey].label}</td></tr>`;
+    bodyRows += `<tr class="sal-heading"><td colspan="23">${SALARY_HEADINGS[headingKey].label}</td></tr>`;
     csvRows.push([SALARY_HEADINGS[headingKey].label]);
-    const sub = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netSalary:0 };
+    const sub = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, employerCont:0, ctc:0 };
     for(const emp of group){
       const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
       bodyRows += `<tr><td>${srNo++}</td><td class="sal-name">${escapeHtml(emp.name)}</td><td>${fmtMoney(s.rate)}</td><td>${s.leaveDays}</td><td>${fmtMoney(s.leaveAmount)}</td>` +
         `<td>${fmtMoney(s.basic)}</td><td>${fmtMoney(s.hra)}</td><td>${fmtMoney(s.lta)}</td><td>${fmtMoney(s.gross)}</td>` +
         `<td>${fmtMoney(s.pf)}</td><td>${fmtMoney(s.esi)}</td><td>${fmtMoney(s.pt)}</td><td>${fmtMoney(s.advanceTemp)}</td><td>${fmtMoney(s.advance)}</td><td>${fmtMoney(s.retention)}</td>` +
-        `<td>${fmtMoney(s.totalDeduction)}</td><td>${fmtMoney(s.netSalary)}</td></tr>`;
-      csvRows.push([srNo-1, emp.name, s.rate, s.leaveDays, s.leaveAmount, s.basic, s.hra, s.lta, s.gross, s.pf, s.esi, s.pt, s.advanceTemp, s.advance, s.retention, s.totalDeduction, s.netSalary]);
-      ['rate','leaveAmount','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','retention','totalDeduction','netSalary'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; });
+        `<td>${fmtMoney(s.totalDeduction)}</td><td>${fmtMoney(s.netSalary)}</td>` +
+        `<td>${fmtMoney(s.pen)}</td><td>${fmtMoney(s.employerPf)}</td><td>${fmtMoney(s.pfAdmin)}</td>` +
+        `<td>${fmtMoney(s.edli)}</td><td>${fmtMoney(s.employerCont)}</td><td>${fmtMoney(s.ctc)}</td></tr>`;
+      csvRows.push([srNo-1, emp.name, s.rate, s.leaveDays, s.leaveAmount, s.basic, s.hra, s.lta, s.gross, s.pf, s.esi, s.pt, s.advanceTemp, s.advance, s.retention, s.totalDeduction, s.netSalary,
+        s.pen, s.employerPf, s.pfAdmin, s.edli, s.employerCont, s.ctc]);
+      ['rate','leaveAmount','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','retention','totalDeduction','netSalary','pen','employerPf','pfAdmin','edli','employerCont','ctc'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; });
     }
     bodyRows += `<tr class="sal-subtotal"><td></td><td>Subtotal</td><td>${fmtMoney(sub.rate)}</td><td></td><td>${fmtMoney(sub.leaveAmount)}</td>` +
       `<td>${fmtMoney(sub.basic)}</td><td>${fmtMoney(sub.hra)}</td><td>${fmtMoney(sub.lta)}</td><td>${fmtMoney(sub.gross)}</td>` +
       `<td>${fmtMoney(sub.pf)}</td><td>${fmtMoney(sub.esi)}</td><td>${fmtMoney(sub.pt)}</td><td>${fmtMoney(sub.advanceTemp)}</td><td>${fmtMoney(sub.advance)}</td><td>${fmtMoney(sub.retention)}</td>` +
-      `<td>${fmtMoney(sub.totalDeduction)}</td><td>${fmtMoney(sub.netSalary)}</td></tr>`;
+      `<td>${fmtMoney(sub.totalDeduction)}</td><td>${fmtMoney(sub.netSalary)}</td>` +
+      `<td>${fmtMoney(sub.pen)}</td><td>${fmtMoney(sub.employerPf)}</td><td>${fmtMoney(sub.pfAdmin)}</td>` +
+      `<td>${fmtMoney(sub.edli)}</td><td>${fmtMoney(sub.employerCont)}</td><td>${fmtMoney(sub.ctc)}</td></tr>`;
     csvRows.push(['', 'Subtotal', sub.rate, '', sub.leaveAmount, sub.basic, sub.hra, sub.lta, sub.gross, sub.pf, sub.esi, sub.pt, sub.advanceTemp, sub.advance, sub.retention, sub.totalDeduction, sub.netSalary]);
   }
 
   bodyRows += `<tr class="sal-grandtotal"><td></td><td>Grand Total</td><td>${fmtMoney(grand.rate)}</td><td></td><td>${fmtMoney(grand.leaveAmount)}</td>` +
     `<td>${fmtMoney(grand.basic)}</td><td>${fmtMoney(grand.hra)}</td><td>${fmtMoney(grand.lta)}</td><td>${fmtMoney(grand.gross)}</td>` +
     `<td>${fmtMoney(grand.pf)}</td><td>${fmtMoney(grand.esi)}</td><td>${fmtMoney(grand.pt)}</td><td>${fmtMoney(grand.advanceTemp)}</td><td>${fmtMoney(grand.advance)}</td><td>${fmtMoney(grand.retention)}</td>` +
-    `<td>${fmtMoney(grand.totalDeduction)}</td><td>${fmtMoney(grand.netSalary)}</td></tr>`;
-  csvRows.push(['', 'Grand Total', grand.rate, '', grand.leaveAmount, grand.basic, grand.hra, grand.lta, grand.gross, grand.pf, grand.esi, grand.pt, grand.advanceTemp, grand.advance, grand.retention, grand.totalDeduction, grand.netSalary]);
+    `<td>${fmtMoney(grand.totalDeduction)}</td><td>${fmtMoney(grand.netSalary)}</td>` +
+    `<td>${fmtMoney(grand.pen)}</td><td>${fmtMoney(grand.employerPf)}</td><td>${fmtMoney(grand.pfAdmin)}</td>` +
+    `<td>${fmtMoney(grand.edli)}</td><td>${fmtMoney(grand.employerCont)}</td><td>${fmtMoney(grand.ctc)}</td></tr>`;
+  csvRows.push(['', 'Grand Total', grand.rate, '', grand.leaveAmount, grand.basic, grand.hra, grand.lta, grand.gross, grand.pf, grand.esi, grand.pt, grand.advanceTemp, grand.advance, grand.retention, grand.totalDeduction, grand.netSalary,
+    grand.pen, grand.employerPf, grand.pfAdmin, grand.edli, grand.employerCont, grand.ctc]);
 
   saveFileToDrive(['HR Management','Dashboard','Salary Sheet'], `Salary Sheet - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
 
