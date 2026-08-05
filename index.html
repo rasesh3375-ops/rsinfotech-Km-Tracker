@@ -3954,9 +3954,15 @@ const PF_RULES = {
   epsMonthlyCap: 1250       // and therefore never exceeds this
 };
 
+// Which earnings PF is charged on. HR has confirmed that the component this
+// payroll calls HRA is its dearness allowance, so it is part of the PF wage
+// here. Listed as config rather than written into the sum, so the base can be
+// changed without touching the calculation.
+PF_RULES.wageComponents = ['basic', 'hra'];
+
 function pfWageOf(components){
   const get = k => { const c = components.find(x => x.key === k); return c ? c.value : 0; };
-  return get('basic') + get('da');   // 'da' is absent today and reads as 0
+  return PF_RULES.wageComponents.reduce((sum, k) => sum + get(k), 0);
 }
 
 // Both sides of the contribution from one wage figure.
@@ -5286,8 +5292,9 @@ function computePayrollComponents(rate, headingKey, manual){
       const pf = computePf(pfWageOf(out));
       value = def.source === 'pfEmployee' ? pf.employee
             : def.source === 'pfEps'      ? pf.employerEps : pf.employerEpf;
-      const base = 'Basic' + (out.find(x => x.key === 'da') ? ' + DA' : '') +
-                   ' (₹' + fmtMoney(pf.wage) + ')';
+      const base = PF_RULES.wageComponents
+        .map(k => (PAYROLL_MASTER.find(x => x.key === k) || {}).label || k)
+        .join(' + ') + ' (₹' + fmtMoney(pf.wage) + ')';
       formula = def.source === 'pfEmployee'
         ? headingPct(PF_RULES.employeePct) + ' of ' + base
         : def.source === 'pfEps'
@@ -6965,7 +6972,7 @@ function toggleStatutoryFieldsForHeading(){
       const pf = computePf(pfWageOf(comps));
       pfEl.value = Math.round(pf.employee * 100) / 100;
       if(pfNote) pfNote.textContent =
-        headingPct(PF_RULES.employeePct) + ' of Basic ₹' + fmtMoney(pf.wage) + '. Employer adds ₹' +
+        headingPct(PF_RULES.employeePct) + ' of Basic + HRA ₹' + fmtMoney(pf.wage) + '. Employer adds ₹' +
         fmtMoney(pf.employerTotal) + ' — ₹' + fmtMoney(pf.employerEps) + ' to pension' +
         (pf.capApplied ? ' (capped)' : '') + ' and ₹' + fmtMoney(pf.employerEpf) + ' to EPF.';
     }
