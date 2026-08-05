@@ -1221,6 +1221,13 @@
           <div class="msg" id="coMsg"></div>
         </section>
 
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">Document storage</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">New documents go straight to Google Drive, filed per employee, and the record keeps only the link. Records saved earlier still hold their images inside the sheet — which shares one cell with a 50,000 character limit. Move them out here.</p>
+          <button class="btn full" onclick="migrateDocumentsToDrive()">Move stored documents to Drive</button>
+          <div id="docMigrateBox" style="margin-top:10px;"></div>
+        </section>
+
         <div id="reportCardsBox"></div>
 
         <section class="block">
@@ -6701,7 +6708,10 @@ function employeeModalHtml(emp){
         <div class="sec-title">Statutory &amp; bank details</div>
         <label class="field">Cancelled cheque</label>
         <input type="file" accept="image/*" id="f_chequeFile" onchange="handleChequeUpload(event)">
-        <div id="chequePreview">${emp.chequeImg ? `<img class="cheque-img" src="${emp.chequeImg}" alt="Cancelled cheque">` : ''}</div>
+        <div id="chequePreview">${!emp.chequeImg ? '' :
+          (/^https?:/.test(emp.chequeImg)
+            ? docCardHtml(emp.chequeImg)
+            : `<img class="cheque-img" src="${emp.chequeImg}" alt="Cancelled cheque">`)}</div>
         <p style="font-size:11.5px;color:var(--muted);margin:6px 0 12px;">The cheque stays on screen while you fill in the fields below, so the account number and IFSC are copied from the document rather than from memory. The IFSC is checked against the bank name as you type.</p>
         <label class="field">PAN number</label>
         <input type="text" id="f_pan" placeholder="ABCDE1234F" value="${emp.pan}">
@@ -6773,23 +6783,23 @@ function employeeModalHtml(emp){
         <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Tap to scan with your camera or choose a file from your gallery. Documents are saved as soon as you upload them.</p>
         <label class="field">Aadhaar card</label>
         <input type="file" accept="image/*" id="f_aadhaarFile" onchange="handleDocUpload(event,'aadhaarCardImg')">
-        ${emp.aadhaarCardImg ? '<div class="doc-card">✓ Saved</div>' : ''}
+        ${docCardHtml(emp.aadhaarCardImg)}
         <div style="height:12px"></div>
         <label class="field">PAN card</label>
         <input type="file" accept="image/*" id="f_panFile" onchange="handleDocUpload(event,'panCardImg')">
-        ${emp.panCardImg ? '<div class="doc-card">✓ Saved</div>' : ''}
+        ${docCardHtml(emp.panCardImg)}
         <div style="height:12px"></div>
         <label class="field">Passport photo</label>
         <input type="file" accept="image/*" id="f_photoFile" onchange="handleDocUpload(event,'photoImg')">
-        ${emp.photoImg ? '<div class="doc-card">✓ Saved</div>' : ''}
+        ${docCardHtml(emp.photoImg)}
         <div style="height:12px"></div>
         <label class="field">Residence proof</label>
         <input type="file" accept="image/*" id="f_residenceFile" onchange="handleDocUpload(event,'residenceProofImg')">
-        ${emp.residenceProofImg ? '<div class="doc-card">✓ Saved</div>' : ''}
+        ${docCardHtml(emp.residenceProofImg)}
         <div style="height:12px"></div>
         <label class="field">Last salary slip</label>
         <input type="file" accept="image/*" id="f_lastSlipFile" onchange="handleDocUpload(event,'lastSalarySlipImg')">
-        ${emp.lastSalarySlipImg ? '<div class="doc-card">✓ Saved</div>' : ''}
+        ${docCardHtml(emp.lastSalarySlipImg)}
         <div style="height:12px"></div>
         <label class="field">Other documents</label>
         <a href="#" onclick="addOtherDocSlot();return false;" style="font-size:13px;color:var(--amber-dark);font-weight:600;">+ Add another document</a>
@@ -6919,8 +6929,13 @@ async function handleChequeUpload(event){
   const box = document.getElementById('chequePreview');
   if(box) box.innerHTML = '<p class="dash-muted">Reading cheque…</p>';
   const dataUrl = await compressDocumentFile(file, 1400, 0.72);
-  editingEmployeeDraft.chequeImg = dataUrl;
-  if(box) box.innerHTML = '<img class="cheque-img" src="' + dataUrl + '" alt="Cancelled cheque">';
+  let stored = null;
+  try{ stored = await uploadEmployeeDocToDrive('cancelled-cheque', dataUrl); }catch(e){}
+  editingEmployeeDraft.chequeImg = stored || dataUrl;
+  // The freshly captured image is previewed either way — a Drive link needs
+  // sign-in to render inline, and the point is reading it while typing.
+  if(box) box.innerHTML = '<img class="cheque-img" src="' + dataUrl + '" alt="Cancelled cheque">'
+    + (stored ? '<p class="calc-note">Saved to Drive.</p>' : '');
   scheduleEmployeeDraftSave();
   checkBankFieldsLive();
 }
@@ -6938,11 +6953,50 @@ function checkBankFieldsLive(){
     : (ifsc.trim() ? '<span class="pol-ok">✓ IFSC format valid and consistent with the bank name</span>' : '');
 }
 
+// Documents go to Drive and the record keeps only the link. Everything used to
+// be stored base64 inside the employees record, which is one Google Sheets cell
+// with a 50,000 character ceiling — a handful of scans filled it and the write
+// failed. The backend already had the Drive upload; this uses it.
+// Each employee gets their own folder, so the files are browsable in Drive as
+// well as reachable from here.
+async function uploadEmployeeDocToDrive(label, dataUrl){
+  const emp = editingEmployeeDraft || {};
+  const id = (document.getElementById('f_id') || {}).value || emp.id || 'unfiled';
+  const name = (document.getElementById('f_name') || {}).value || emp.name || '';
+  const folderPath = ['HR Management', 'Employee Documents', (name ? name + ' ' : '') + '(' + id + ')'];
+  const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl || '');
+  if(!m) return null;
+  const ext = m[1].indexOf('png') !== -1 ? 'png' : 'jpg';
+  const res = await apiFetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({
+      action: 'uploadDocument', token: sessionToken,
+      folderPath, fileName: label + '.' + ext, mimeType: m[1], base64Data: m[2]
+    })
+  });
+  const data = await res.json();
+  return (data && data.ok && data.fileUrl) ? data.fileUrl : null;
+}
+
+// A stored document is either a Drive link (new) or an inline image (older
+// records). Both are shown; neither is broken by the change.
+function docCardHtml(v, label){
+  if(!v) return '';
+  return /^https?:/.test(v)
+    ? '<a class="doc-card" href="' + escapeHtml(v) + '" target="_blank" rel="noopener">✓ Saved in Drive — view</a>'
+    : '<div class="doc-card">✓ Saved (stored in the record)</div>';
+}
+
 async function handleDocUpload(event, field){
   const file = event.target.files[0];
   if(!file) return;
   const dataUrl = await compressDocumentFile(file);
-  editingEmployeeDraft[field] = dataUrl;
+  // Drive first; only if that fails does the image go into the record, so a
+  // backend blip costs storage headroom rather than the document itself.
+  let stored = null;
+  try{ stored = await uploadEmployeeDocToDrive(field, dataUrl); }catch(e){}
+  editingEmployeeDraft[field] = stored || dataUrl;
   event.target.parentElement.querySelector('.doc-card')?.remove();
   const card = document.createElement('div');
   card.className = 'doc-card';
@@ -7426,6 +7480,54 @@ async function populateRoleReportPickers(){
     const el = document.getElementById('co' + k);
     if(el) el.value = co[k.toLowerCase()] || '';
   });
+}
+
+// Moves documents already embedded in the employees record out to Drive and
+// replaces each with its link. Existing records were saved before documents
+// went to Drive, so without this they keep occupying the one cell everything
+// shares — and that cell is what fails at 50,000 characters.
+async function migrateDocumentsToDrive(){
+  const box = document.getElementById('docMigrateBox');
+  const FIELDS = ['aadhaarCardImg','panCardImg','photoImg','residenceProofImg',
+                  'lastSalarySlipImg','chequeImg'];
+  const employees = await getEmployees();
+  const pending = employees.filter(e => FIELDS.some(f => e[f] && !/^https?:/.test(e[f])));
+  if(!pending.length){
+    box.innerHTML = '<p class="dash-muted">✓ Nothing to move — every stored document is already a Drive link.</p>';
+    return;
+  }
+  if(!confirm(pending.length + ' employee record(s) still hold documents inside the sheet.\n\n' +
+    'Move them to Drive now? Each becomes a link, which is what frees the space. Nothing is deleted.')) return;
+
+  let moved = 0, failed = 0;
+  for(const e of pending){
+    for(const f of FIELDS){
+      const v = e[f];
+      if(!v || /^https?:/.test(v)) continue;
+      box.innerHTML = '<p class="dash-muted">Moving ' + escapeHtml(e.name || e.id) + ' — ' + f + '…</p>';
+      try{
+        const m = /^data:([^;]+);base64,(.*)$/.exec(v);
+        if(!m){ failed++; continue; }
+        const res = await apiFetch(API_URL, {
+          method:'POST', headers:{ 'Content-Type':'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action:'uploadDocument', token: sessionToken,
+            folderPath:['HR Management','Employee Documents',(e.name ? e.name + ' ' : '') + '(' + e.id + ')'],
+            fileName: f + (m[1].indexOf('png') !== -1 ? '.png' : '.jpg'),
+            mimeType: m[1], base64Data: m[2] })
+        });
+        const data = await res.json();
+        if(data && data.ok && data.fileUrl){ e[f] = data.fileUrl; moved++; }
+        else failed++;
+      }catch(err){ failed++; }
+    }
+  }
+  // Written once at the end: a save per document would multiply the very
+  // oversized write this exists to prevent.
+  if(moved) await saveEmployees(employees);
+  invalidateSharedRead('employees');
+  const size = JSON.stringify(employees).length;
+  box.innerHTML = `<p class="dash-muted">Moved ${moved} document(s)${failed ? ', ' + failed + ' could not be moved' : ''}.
+    Employee record is now ${(size/1024).toFixed(0)} KB of the 49 KB the sheet can hold.</p>`;
 }
 
 async function saveCompanyProfileFromForm(){
