@@ -4346,6 +4346,11 @@ function closeFullscreenView(){
 
 
 function computeRetentionForMonth(emp, year, month){
+  // Saving with the bond switched off already clears these fields, but a record
+  // could still carry old values from an import or a partial write. Honouring
+  // the flag here means the Salary Sheet never deducts against a bond the form
+  // says does not exist.
+  if(retentionApplicableFor(emp) === 'no') return 0;
   const money = Number(emp.retentionMoney) || 0;
   const months = Number(emp.retentionMonths) || 0;
   if(!money || !months || !emp.bondStart) return 0;
@@ -6526,7 +6531,7 @@ function emptyEmployee(){
     employmentStatus:'active', leftDate:'',
     employeeType:'field', slOpening:0, elOpening:0,
     salaryHeading:'managerial', ratePay:0, advanceTemp:0, advance:0,
-    bondStart:'', bondEnd:'', retentionMoney:0, retentionMonths:0,
+    retentionApplicable:'no', bondStart:'', bondEnd:'', retentionMoney:0, retentionMonths:0,
     aadhaarCardImg:'', panCardImg:'', otherDocs:[],
     checklists:{ joining:{}, exit:{} }
   };
@@ -6558,6 +6563,28 @@ function diwaliBonusFor(emp){
   // Deductions are typed per employee, so a bad entry could otherwise produce a
   // negative bonus. Floor it at zero rather than pay a negative amount.
   return Math.max(0, Math.round(gross - pf - esi - pt));
+}
+
+// Records saved before the "Retention bond applicable?" question existed carry
+// no flag at all. Reading a missing flag as "no" would hide a live bond and,
+// on the next save, wipe it — so an employee who already has bond details is
+// treated as yes. Only genuinely empty records default to no.
+function retentionApplicableFor(emp){
+  if(emp.retentionApplicable === 'yes' || emp.retentionApplicable === 'no') return emp.retentionApplicable;
+  const hasBondData = !!emp.bondStart || !!emp.bondEnd ||
+    (Number(emp.retentionMoney) || 0) > 0 || (Number(emp.retentionMonths) || 0) > 0;
+  return hasBondData ? 'yes' : 'no';
+}
+
+// Shows the bond fields only when a bond applies. The values are left in the
+// inputs rather than cleared, so flipping to No and back by accident does not
+// destroy what was typed; clearing happens on save instead.
+function toggleRetentionFields(){
+  const applies = (document.getElementById('f_retentionApplicable') || {}).value === 'yes';
+  const box = document.getElementById('retentionFieldsBox');
+  const hint = document.getElementById('retentionNotApplicableHint');
+  if(box) box.style.display = applies ? '' : 'none';
+  if(hint) hint.style.display = applies ? 'none' : '';
 }
 
 function employeeModalHtml(emp){
@@ -6608,18 +6635,27 @@ function employeeModalHtml(emp){
 
       <div class="field-group">
         <div class="sec-title">Bond &amp; retention money</div>
-        <label class="field">Bond start date</label>
-        <input type="date" id="f_bondStart" value="${emp.bondStart||''}">
-        <div style="height:12px"></div>
-        <label class="field">Bond end date</label>
-        <input type="date" id="f_bondEnd" value="${emp.bondEnd||''}">
-        <div style="height:12px"></div>
-        <label class="field">Retention money (total)</label>
-        <input type="number" id="f_retentionMoney" placeholder="0" value="${emp.retentionMoney||''}">
-        <div style="height:12px"></div>
-        <label class="field">Number of months to deduct over</label>
-        <input type="number" id="f_retentionMonths" placeholder="e.g. 12" value="${emp.retentionMonths||''}">
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">If retention money is set, it's split evenly across these months starting from the bond start date, and deducted from the Salary Sheet automatically each month — shown as its own line item, and tracked in the Retention Money Detail report.</p>
+        <label class="field">Retention bond applicable?</label>
+        <select class="field-input" id="f_retentionApplicable" onchange="toggleRetentionFields()">
+          <option value="no" ${retentionApplicableFor(emp)==='no'?'selected':''}>No</option>
+          <option value="yes" ${retentionApplicableFor(emp)==='yes'?'selected':''}>Yes</option>
+        </select>
+        <div id="retentionFieldsBox">
+          <div style="height:12px"></div>
+          <label class="field">Bond start date</label>
+          <input type="date" id="f_bondStart" value="${emp.bondStart||''}">
+          <div style="height:12px"></div>
+          <label class="field">Bond end date</label>
+          <input type="date" id="f_bondEnd" value="${emp.bondEnd||''}">
+          <div style="height:12px"></div>
+          <label class="field">Retention money (total)</label>
+          <input type="number" id="f_retentionMoney" placeholder="0" value="${emp.retentionMoney||''}">
+          <div style="height:12px"></div>
+          <label class="field">Number of months to deduct over</label>
+          <input type="number" id="f_retentionMonths" placeholder="e.g. 12" value="${emp.retentionMonths||''}">
+          <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">If retention money is set, it's split evenly across these months starting from the bond start date, and deducted from the Salary Sheet automatically each month — shown as its own line item, and tracked in the Retention Money Detail report.</p>
+        </div>
+        <p id="retentionNotApplicableHint" class="hint" style="margin:8px 0 0;">No bond for this employee — no retention is deducted on the Salary Sheet.</p>
       </div>
 
       <div class="field-group">
@@ -7013,6 +7049,7 @@ function applyEmployeeDraft(fields){
     if(el.type === 'checkbox') el.checked = !!fields[id]; else el.value = fields[id];
   });
   toggleStatutoryFieldsForHeading();
+  toggleRetentionFields();
   renderPayrollBreakdown();
   updateBonusPreview();
 }
@@ -7027,6 +7064,7 @@ async function openAddEmployeeModal(id){
   }
   document.getElementById('employeeModalRoot').innerHTML = employeeModalHtml(editingEmployeeDraft);
   toggleStatutoryFieldsForHeading();
+  toggleRetentionFields();
 
   // Offer the draft back only when it belongs to this form — a half-finished
   // new employee must never be poured into someone else's record.
@@ -7137,6 +7175,8 @@ async function saveEmployeeForm(){
     draft.trackingUsername = draft.trackingUsername || '';
   }
 
+  const retentionApplies = (document.getElementById('f_retentionApplicable') || {}).value === 'yes';
+
   Object.assign(draft, {
     id, name,
     salutation: document.getElementById('f_salutation').value,
@@ -7173,10 +7213,15 @@ async function saveEmployeeForm(){
     emergencyName: document.getElementById('f_emergencyName').value.trim(),
     emergencyNumber: document.getElementById('f_emergencyNumber').value.trim(),
     trackingEnabled: needsTracking,
-    bondStart: document.getElementById('f_bondStart').value,
-    bondEnd: document.getElementById('f_bondEnd').value,
-    retentionMoney: Number(document.getElementById('f_retentionMoney').value)||0,
-    retentionMonths: Number(document.getElementById('f_retentionMonths').value)||0,
+    // When no bond applies the four fields are cleared rather than merely
+    // hidden. A hidden Retention money value would still be deducted from the
+    // Salary Sheet every month, which is real money moving on a field nobody
+    // can see.
+    retentionApplicable: retentionApplies ? 'yes' : 'no',
+    bondStart: retentionApplies ? document.getElementById('f_bondStart').value : '',
+    bondEnd: retentionApplies ? document.getElementById('f_bondEnd').value : '',
+    retentionMoney: retentionApplies ? (Number(document.getElementById('f_retentionMoney').value)||0) : 0,
+    retentionMonths: retentionApplies ? (Number(document.getElementById('f_retentionMonths').value)||0) : 0,
     employeeType: document.getElementById('f_employeeType').value,
     slOpening: Number(document.getElementById('f_slOpening').value)||0,
     elOpening: Number(document.getElementById('f_elOpening').value)||0,
