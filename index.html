@@ -6532,9 +6532,32 @@ function emptyEmployee(){
   };
 }
 
+// Diwali bonus is one month's NET salary: the Salary Sheet's Gross less the
+// statutory deductions only.
+//
+// Leave, advances and retention are deliberately left out even though the
+// Salary Sheet's Net Salary column subtracts them. Those are month-specific,
+// and a bonus that shrank because someone took leave in October or still had an
+// advance outstanding is not what "one month's salary" means. So this mirrors
+// computeSalaryForEmployee with leaveDays = 0 and no advance or retention.
+//
+// Other Allowances are not included: they form no part of Gross or Net on the
+// Salary Sheet, so counting them would make the bonus disagree with the Net
+// Salary column it is meant to match.
 function diwaliBonusFor(emp){
   if(emp.diwaliEligible !== 'yes') return 0;
-  return (Number(emp.basic)||0) + (Number(emp.hra)||0) + (Number(emp.otherAllowances)||0);
+  const heading = SALARY_HEADINGS[emp.salaryHeading] || SALARY_HEADINGS.managerial;
+  const rate = Number(emp.ratePay) || 0;
+  const basic = heading.flat ? rate : rate * heading.basicPct;
+  const hra   = heading.flat ? 0    : rate * heading.hraPct;
+  const lta   = heading.flat ? 0    : rate * heading.ltaPct;
+  const gross = basic + hra + lta;
+  const pf  = heading.pf  ? (Number(emp.pf) || 0) : 0;
+  const esi = heading.esi ? (Number(emp.esiDeduction) || 0) : 0;
+  const pt  = heading.pt  ? (gross > PT_GROSS_THRESHOLD ? PT_AMOUNT : 0) : 0;
+  // Deductions are typed per employee, so a bad entry could otherwise produce a
+  // negative bonus. Floor it at zero rather than pay a negative amount.
+  return Math.max(0, Math.round(gross - pf - esi - pt));
 }
 
 function employeeModalHtml(emp){
@@ -6682,7 +6705,7 @@ function employeeModalHtml(emp){
         <div class="sec-title">Salary structure (for salary slip)</div>
         <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Basic and HRA are worked out from Rate of Pay and the salary heading — they are shown in the breakdown above and are no longer typed here, because the Salary Sheet has always derived them and ignored anything entered by hand.</p>
         <label class="field">Other allowances</label>
-        <input type="number" id="f_otherAllowances" placeholder="0" value="${emp.otherAllowances||''}" oninput="updateBonusPreview()">
+        <input type="number" id="f_otherAllowances" placeholder="0" value="${emp.otherAllowances||''}">
         <div style="height:12px"></div>
         <label class="field">Dress / uniform allowance (monthly)</label>
         <input type="number" id="f_dressAllowance" placeholder="0" value="${emp.dressAllowance||''}">
@@ -6727,7 +6750,7 @@ function employeeModalHtml(emp){
           <option value="yes" ${emp.diwaliEligible==='yes'?'selected':''}>Yes</option>
           <option value="no" ${emp.diwaliEligible==='no'?'selected':''}>No</option>
         </select>
-        <div class="bonus-callout" id="bonusPreview" style="margin-top:12px;">Calculated Diwali bonus: Rs. ${diwaliBonusFor(emp)}</div>
+        <div class="bonus-callout" id="bonusPreview" style="margin-top:12px;">Calculated Diwali bonus (one month’s net salary): Rs. ${fmtMoney(diwaliBonusFor(emp))}</div>
         <p style="font-size:12px;color:var(--muted);margin:0;">Bonus amount is calculated automatically as Basic + HRA + Other allowances (PF, ESI, and PT are not included) - no need to enter it manually.</p>
       </div>
 
@@ -6874,22 +6897,28 @@ function renderPayrollBreakdown(){
     ${missing.length ? `<p class="pay-warn">No formula configured for: <strong>${escapeHtml(missing.join(', '))}</strong>. Fix the payroll master before saving.</p>` : ''}
     <p class="calc-note">Leave days reduce each earning in proportion on the Salary Sheet; this shows a full month.</p>
   </div>`;
+
+  // Rate of Pay, PF and ESI all feed the Diwali bonus now that it is based on
+  // net salary, and all three land here on input. Refreshing the preview from
+  // this one place keeps it correct without wiring each field separately.
+  updateBonusPreview();
 }
 
 function updateBonusPreview(){
-  // Basic and HRA come from the payroll master now, not from typed boxes — the
-  // bonus used to be worked out from figures the Salary Sheet ignored, so the
-  // two could disagree for the same employee.
-  const rate = Number((document.getElementById('f_ratePay') || {}).value) || 0;
-  const headingKey = (document.getElementById('f_salaryHeading') || {}).value || 'managerial';
-  const comps = computePayrollComponents(rate, headingKey, {});
-  const pick = k => (comps.find(c => c.key === k) || {}).value || 0;
-  const basic = pick('basic');
-  const hra = pick('hra');
-  const other = Number(document.getElementById('f_otherAllowances').value)||0;
-  const eligible = document.getElementById('f_diwaliEligible').value;
-  const bonus = eligible === 'yes' ? (basic+hra+other) : 0;
-  document.getElementById('bonusPreview').textContent = 'Calculated Diwali bonus: Rs. ' + bonus;
+  // Assemble what diwaliBonusFor expects from the live form values and let it do
+  // the sum. The preview used to repeat the formula itself, which is how it and
+  // the Diwali Bonus Report were able to disagree about the same employee —
+  // there is now one implementation and no way for them to drift.
+  const val = id => (document.getElementById(id) || {}).value;
+  const bonus = diwaliBonusFor({
+    diwaliEligible: val('f_diwaliEligible'),
+    salaryHeading:  val('f_salaryHeading'),
+    ratePay:        val('f_ratePay'),
+    pf:             val('f_pf'),
+    esiDeduction:   val('f_esiDeduction')
+  });
+  const box = document.getElementById('bonusPreview');
+  if(box) box.textContent = 'Calculated Diwali bonus (one month’s net salary): Rs. ' + fmtMoney(bonus);
 }
 
 async function handleDocUpload(event, field){
@@ -7820,8 +7849,8 @@ async function viewReport(key, label){
   } else if(key === 'diwali'){
     csvHeader = ['Name','Eligible','Bonus'];
     csvRows = employees.map(e => [e.name, e.diwaliEligible==='yes'?'Yes':'No', diwaliBonusFor(e)]);
-    rows = employees.map(e => `<tr><td>${escapeHtml(e.name)}</td><td>${e.diwaliEligible==='yes'?'Yes':'No'}</td><td class="num">₹${diwaliBonusFor(e)}</td></tr>`).join('');
-    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Eligible</th><th class="num">Bonus</th></tr>${rows || '<tr><td colspan="3" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
+    rows = employees.map(e => `<tr><td>${escapeHtml(e.name)}</td><td>${e.diwaliEligible==='yes'?'Yes':'No'}</td><td class="num">₹${fmtMoney(diwaliBonusFor(e))}</td></tr>`).join('');
+    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Eligible</th><th class="num">Bonus</th></tr>${rows || '<tr><td colspan="3" class="empty">No data yet</td></tr>'}</table><p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Bonus = one month’s net salary: Gross (Basic + HRA + LTA at the employee’s heading) less PF, ESI and PT. A full month is assumed — leave, advances and retention do not reduce the bonus, and Other Allowances are not part of it.</p>${fsBtn}</div>`;
   } else if(key === 'salary'){
     csvHeader = ['Name','Gross','Deductions','Net'];
     rows = employees.map(e => {
