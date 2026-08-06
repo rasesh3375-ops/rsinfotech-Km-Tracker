@@ -178,9 +178,9 @@
   <div class="dlg-in">
     <h2>CONFIGURATION</h2>
 
-    <label for="fUrl">n8n webhook URL</label>
-    <input id="fUrl" placeholder="https://your-n8n-host/webhook/jarvis">
-    <div class="hint">From the Voice In node of workflow 1. Use the Production URL once the workflow is active — the Test URL only accepts one call after you press Execute.</div>
+    <label for="fUrl">Backend endpoint</label>
+    <input id="fUrl" placeholder="/api/agent">
+    <div class="hint">Leave as <code>/api/agent</code> to use the serverless function in this repo — same origin, nothing to configure. To use n8n instead, paste the Production webhook URL from its Voice In node and set Allowed Origins on that node.</div>
 
     <label for="fVoice">Voice</label>
     <select id="fVoice"></select>
@@ -212,8 +212,11 @@
 
   // ---------- config ----------
   const CFG_KEY = 'jarvis.cfg.v1';
+  // Same-origin default: the serverless function ships in this repo, so there is
+  // nothing to configure and no CORS to get wrong. Override it under CONFIG to
+  // point at n8n or a separately hosted backend instead.
   const cfg = Object.assign(
-    { url:'', voiceURI:'', rate:1.05, autoListen:false, speak:true },
+    { url:'/api/agent', voiceURI:'', rate:1.05, autoListen:false, speak:true },
     JSON.parse(localStorage.getItem(CFG_KEY) || '{}')
   );
   const saveCfg = () => localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
@@ -520,10 +523,10 @@
   syncToggles();
   setState('idle');
   if (!cfg.url) {
-    sys('Welcome. Set your n8n webhook URL under CONFIG to begin, then press the microphone or type below.');
+    sys('Welcome. Set a backend endpoint under CONFIG to begin, then press the microphone or type below.');
     setTimeout(openCfg, 700);
   } else {
-    sys('Ready. Press the microphone, or type.');
+    sys(`Ready — talking to ${cfg.url}. Press the microphone, or type.`);
   }
   if (location.protocol === 'http:' && location.hostname !== 'localhost') {
     sys('This page is being served over http. Browsers only allow microphone access on https, so voice input will fail until you serve it securely.');
