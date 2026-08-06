@@ -69,6 +69,22 @@ export LLM_PROVIDER=ollama                                  # local, no key, no 
 export LLM_PROVIDER=openrouter && export OPENROUTER_API_KEY=...
 ```
 
+On **Windows PowerShell**, `export` does not exist — use `$env:`:
+
+```powershell
+$env:LLM_PROVIDER = "omniroute"
+$env:GROQ_API_KEY = "your-key"
+npm run ask
+```
+
+Those last for the current window only. To persist across terminals:
+
+```powershell
+[Environment]::SetEnvironmentVariable("GROQ_API_KEY", "your-key", "User")
+```
+
+The `npm run` commands are identical on every platform.
+
 All five speak the OpenAI chat-completions format, so there is exactly one code
 path in `lib/llm.js`. Adding a provider is four lines in the `PROVIDERS` map.
 
@@ -85,10 +101,28 @@ provider entry — no adapter, no SDK.
 
 ```bash
 npm install -g omniroute
-omniroute                       # dashboard and API on port 20128
-export LLM_PROVIDER=omniroute
+omniroute                       # dashboard and API on port 20128 — leave it running
+```
+
+Then in a **second** terminal, since the first is now a running server:
+
+```bash
+export LLM_PROVIDER=omniroute   # PowerShell: $env:LLM_PROVIDER = "omniroute"
 npm run ask                     # model "auto" routes to keyless free providers
 ```
+
+**PowerShell script-execution error?** A global npm install creates a `.ps1`
+shim, and Windows blocks unsigned scripts by default:
+
+> omniroute.ps1 cannot be loaded because running scripts is disabled on this system
+
+Either allow local scripts once:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+or skip the shim entirely by calling `omniroute.cmd` instead.
 
 It's the only option here needing **no account, no key, and no signup** — the
 `auto` model ships pre-wired to keyless providers. Set `OMNIROUTE_API_KEY` only
