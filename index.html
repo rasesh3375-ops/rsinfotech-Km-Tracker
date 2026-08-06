@@ -1237,6 +1237,16 @@
         </section>
 
         <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">Add employees from a file</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Download the template, fill one row per employee, upload it back. Every row is checked before anything is saved — duplicate IDs, Aadhaar or bank details already on another employee, unknown salary headings and IFSC codes that disagree with the bank name are all reported by line number, and only the clean rows are imported.</p>
+          <button class="btn ghost full" onclick="downloadEmployeeTemplate()">⬇ Download template</button>
+          <div style="height:10px"></div>
+          <label class="field">Upload filled template</label>
+          <input type="file" accept=".csv,text/csv" id="empImportFile" onchange="handleEmployeeImport(event)">
+          <div id="importBox" style="margin-top:10px;"></div>
+        </section>
+
+        <section class="block">
           <h2 style="margin:0 0 4px;font-size:17px;">Open a new leave year</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Sets each employee's opening EL from what they earned last year — one day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} attendance days — and their SL to the yearly allowance. Resident Engineers and Work From Home staff are skipped, their policies being different, as are non-R.S. Infotech headings. Run once, in April.</p>
           <label class="field">Year starts</label>
@@ -8155,6 +8165,143 @@ async function rollOverLeaveYear(){
   box.innerHTML = '<p class="dash-muted">✓ Leave year ' + escapeHtml(label) + ' opened for ' + rows.length +
     ' employee(s). ' + skipped.length + ' skipped (Resident, Work From Home, other headings). ' +
     'Reports from April onward file to Drive under HR Management &gt; ' + escapeHtml(label) + '.</p>';
+}
+
+// ---- bulk employee import ----
+// Column order is the template's contract: the header row is written from this
+// list and read back from it, so adding a field here changes both ends at once
+// and an old template still imports because columns are matched by name.
+const IMPORT_COLUMNS = [
+  { key:'id',            label:'Employee ID',            required:true },
+  { key:'name',          label:'Full Name',              required:true },
+  { key:'designation',   label:'Designation' },
+  { key:'department',    label:'Department' },
+  { key:'employeeType',  label:'Employee Type (field/wfh/resident)' },
+  { key:'salaryHeading', label:'Salary Heading (managerial/senior/junior/apprentice/rsit/contractor)' },
+  { key:'ratePay',       label:'Rate of Pay', num:true },
+  { key:'doj',           label:'Date of Joining (YYYY-MM-DD)' },
+  { key:'dob',           label:'Date of Birth (YYYY-MM-DD)' },
+  { key:'phone',         label:'Mobile' },
+  { key:'email',         label:'Email' },
+  { key:'address',       label:'Address' },
+  { key:'aadhaar',       label:'Aadhaar' },
+  { key:'pan',           label:'PAN' },
+  { key:'uan',           label:'UAN' },
+  { key:'esiNumber',     label:'ESI Number' },
+  { key:'bankName',      label:'Bank Name' },
+  { key:'accountNumber', label:'Account Number' },
+  { key:'ifsc',          label:'IFSC' },
+  { key:'elOpening',     label:'EL Opening', num:true },
+  { key:'slOpening',     label:'SL Opening', num:true },
+  { key:'advanceOpening',label:'Advance Balance', num:true },
+  { key:'hasPriorUan',   label:'Had PF before? (yes/no)' },
+  { key:'form11Submitted', label:'Form 11 Submitted? (yes/no)' },
+  { key:'esiDisabled',   label:'Person with disability? (yes/no)' },
+  { key:'esiCoveredAtPeriodStart', label:'ESI covered at period start? (yes/no)' }
+];
+
+function downloadEmployeeTemplate(){
+  const example = {
+    id:'E101', name:'Example Employee', designation:'Service Engineer', department:'Service',
+    employeeType:'field', salaryHeading:'junior', ratePay:'25000', doj:'2026-04-01', dob:'1995-06-15',
+    phone:'9876543210', email:'name@example.com', address:'Ahmedabad', aadhaar:'123456789012',
+    pan:'ABCDE1234F', uan:'', esiNumber:'', bankName:'Axis Bank', accountNumber:'123456789',
+    ifsc:'UTIB0001234', elOpening:'0', slOpening:'7', advanceOpening:'0',
+    hasPriorUan:'no', form11Submitted:'no', esiDisabled:'no', esiCoveredAtPeriodStart:'no'
+  };
+  const csv = toCsv(IMPORT_COLUMNS.map(c => c.label), [IMPORT_COLUMNS.map(c => example[c.key] || '')]);
+  const blob = new Blob([csv], { type:'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'Employee Import Template.csv';
+  a.click();
+}
+
+// Handles quoted fields and embedded commas, which any spreadsheet will produce
+// the moment an address contains one.
+function parseCsv(text){
+  const rows = []; let row = [], cell = '', q = false;
+  for(let i = 0; i < text.length; i++){
+    const ch = text[i];
+    if(q){
+      if(ch === '"' && text[i+1] === '"'){ cell += '"'; i++; }
+      else if(ch === '"') q = false;
+      else cell += ch;
+    } else if(ch === '"') q = true;
+    else if(ch === ','){ row.push(cell); cell = ''; }
+    else if(ch === '\n'){ row.push(cell); rows.push(row); row = []; cell = ''; }
+    else if(ch !== '\r') cell += ch;
+  }
+  if(cell || row.length){ row.push(cell); rows.push(row); }
+  return rows.filter(r => r.some(c => String(c).trim()));
+}
+
+async function handleEmployeeImport(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const box = document.getElementById('importBox');
+  box.innerHTML = '<p class="dash-muted">Reading file…</p>';
+  const rows = parseCsv(await file.text());
+  event.target.value = '';
+  if(rows.length < 2){ box.innerHTML = '<p class="pol-warn">The file has no rows below the header.</p>'; return; }
+
+  // Match columns by header name, so a re-ordered or partial sheet still works.
+  const header = rows[0].map(h => String(h).trim().toLowerCase());
+  const idx = {};
+  IMPORT_COLUMNS.forEach(c => { idx[c.key] = header.indexOf(c.label.toLowerCase()); });
+
+  const existing = await getEmployees();
+  const seen = {};
+  const parsed = rows.slice(1).map((r, n) => {
+    const rec = {}, problems = [];
+    IMPORT_COLUMNS.forEach(c => {
+      const v = idx[c.key] >= 0 ? String(r[idx[c.key]] ?? '').trim() : '';
+      rec[c.key] = c.num ? (Number(v) || 0) : v;
+      if(c.required && !v) problems.push(c.label + ' is missing');
+    });
+    if(rec.salaryHeading && !SALARY_HEADINGS[rec.salaryHeading])
+      problems.push('Unknown salary heading "' + rec.salaryHeading + '"');
+    if(rec.id && existing.some(e => e.id === rec.id)) problems.push('Employee ID already exists');
+    if(rec.id && seen[rec.id]) problems.push('Employee ID repeated in this file');
+    if(rec.id) seen[rec.id] = true;
+    // Same checks the form applies, so an import cannot bypass them.
+    findEmployeeDuplicates(existing, rec, null).forEach(d =>
+      problems.push(d.field + ' already used by ' + d.employee));
+    validateIfsc(rec.ifsc, rec.bankName).warnings.forEach(w => problems.push(w));
+    return { line: n + 2, rec, problems };
+  });
+
+  const bad = parsed.filter(p => p.problems.length);
+  const good = parsed.filter(p => !p.problems.length);
+  window.__pendingImport = good.map(p => p.rec);
+
+  box.innerHTML = `
+    <p class="dash-muted">${parsed.length} row(s) read — <strong>${good.length} ready</strong>${
+      bad.length ? `, <span style="color:var(--red)">${bad.length} with problems</span>` : ''}.</p>
+    ${bad.length ? `<div class="inc-scroll" style="max-height:220px"><table class="inc-table">
+      <thead><tr><th>Line</th><th>Name</th><th>Problem</th></tr></thead><tbody>${
+      bad.map(b => `<tr class="inc-overdue"><td>${b.line}</td><td>${escapeHtml(b.rec.name || '—')}</td>
+        <td>${b.problems.map(x => '<div class="pol-warn">⚠ ' + escapeHtml(x) + '</div>').join('')}</td></tr>`).join('')
+      }</tbody></table></div>
+      <p class="calc-note">Rows with problems are not imported. Fix them in the file and upload again — the rows that are fine can be imported now.</p>` : ''}
+    ${good.length ? `<button class="btn full" style="margin-top:12px" onclick="confirmEmployeeImport()">Import ${good.length} employee(s)</button>` : ''}`;
+}
+
+async function confirmEmployeeImport(){
+  const box = document.getElementById('importBox');
+  const list = window.__pendingImport || [];
+  if(!list.length) return;
+  if(!confirm('Add ' + list.length + ' employee(s)? Existing records are not touched.')) return;
+  box.innerHTML = '<p class="dash-muted">Importing…</p>';
+  const employees = await getEmployees();
+  list.forEach(r => employees.push(Object.assign(emptyEmployee(), r)));
+  await saveEmployees(employees);          // one write, not one per employee
+  invalidateSharedRead('employees');
+  invalidateDashboardSnapshot();
+  addActivityLog('Imported ' + list.length + ' employee(s) from file').catch(() => {});
+  window.__pendingImport = [];
+  box.innerHTML = '<p class="dash-muted">✓ ' + list.length + ' employee(s) added. Open Employee Master to review them.</p>';
+  await renderEmployeeList();
 }
 
 async function saveCompanyProfileFromForm(){
