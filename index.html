@@ -1238,7 +1238,7 @@
 
         <section class="block">
           <h2 style="margin:0 0 4px;font-size:17px;">Add employees from a file</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Download the template, fill one row per employee, upload it back. Every row is checked before anything is saved — duplicate IDs, Aadhaar or bank details already on another employee, unknown salary headings and IFSC codes that disagree with the bank name are all reported by line number, and only the clean rows are imported.</p>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Download the template, fill one row per employee, upload it back. Everything with an Employee ID and a name is imported in one go. Duplicates, unknown salary headings and IFSC codes that disagree with the bank name are listed by line number as warnings so you know what to look at, but they do not stop the upload.</p>
           <button class="btn ghost full" onclick="downloadEmployeeTemplate()">⬇ Download template</button>
           <div style="height:10px"></div>
           <label class="field">Upload filled template</label>
@@ -8271,27 +8271,37 @@ async function handleEmployeeImport(event){
     return { line: n + 2, rec, problems };
   });
 
-  const bad = parsed.filter(p => p.problems.length);
-  const good = parsed.filter(p => !p.problems.length);
+  // Everything imports. Duplicates and mismatches are reported but do not
+  // block, because HR reconciles those against their own records. The only
+  // hard stop is a row with no Employee ID or no name — that cannot become a
+  // usable record, and importing it would create a blank the app then has to
+  // work around everywhere.
+  const unusable = parsed.filter(p => !p.rec.id || !p.rec.name);
+  const good = parsed.filter(p => p.rec.id && p.rec.name);
+  const warned = good.filter(p => p.problems.length);
   window.__pendingImport = good.map(p => p.rec);
 
+  const flagged = warned.concat(unusable);
   box.innerHTML = `
-    <p class="dash-muted">${parsed.length} row(s) read — <strong>${good.length} ready</strong>${
-      bad.length ? `, <span style="color:var(--red)">${bad.length} with problems</span>` : ''}.</p>
-    ${bad.length ? `<div class="inc-scroll" style="max-height:220px"><table class="inc-table">
-      <thead><tr><th>Line</th><th>Name</th><th>Problem</th></tr></thead><tbody>${
-      bad.map(b => `<tr class="inc-overdue"><td>${b.line}</td><td>${escapeHtml(b.rec.name || '—')}</td>
-        <td>${b.problems.map(x => '<div class="pol-warn">⚠ ' + escapeHtml(x) + '</div>').join('')}</td></tr>`).join('')
+    <p class="dash-muted">${parsed.length} row(s) read — <strong>${good.length} will be imported</strong>${
+      warned.length ? `, ${warned.length} with warnings` : ''}${
+      unusable.length ? `, <span style="color:var(--red)">${unusable.length} skipped (no ID or name)</span>` : ''}.</p>
+    ${flagged.length ? `<div class="inc-scroll" style="max-height:220px"><table class="inc-table">
+      <thead><tr><th>Line</th><th>Name</th><th>Note</th></tr></thead><tbody>${
+      flagged.map(b => `<tr class="${b.rec.id && b.rec.name ? '' : 'inc-overdue'}"><td>${b.line}</td>
+        <td>${escapeHtml(b.rec.name || '—')}</td>
+        <td>${(b.rec.id && b.rec.name ? b.problems : ['No Employee ID or name — cannot be imported'])
+          .map(x => '<div class="pol-warn">⚠ ' + escapeHtml(x) + '</div>').join('')}</td></tr>`).join('')
       }</tbody></table></div>
-      <p class="calc-note">Rows with problems are not imported. Fix them in the file and upload again — the rows that are fine can be imported now.</p>` : ''}
-    ${good.length ? `<button class="btn full" style="margin-top:12px" onclick="confirmEmployeeImport()">Import ${good.length} employee(s)</button>` : ''}`;
+      <p class="calc-note">Warnings do not stop the import — everything with an ID and a name goes in, and you can correct these afterwards in Employee Master.</p>` : ''}
+    ${good.length ? `<button class="btn full" style="margin-top:12px" onclick="confirmEmployeeImport()">Import all ${good.length} employee(s)</button>` : ''}`;
 }
 
 async function confirmEmployeeImport(){
   const box = document.getElementById('importBox');
   const list = window.__pendingImport || [];
   if(!list.length) return;
-  if(!confirm('Add ' + list.length + ' employee(s)? Existing records are not touched.')) return;
+  if(!confirm('Add ' + list.length + ' employee(s)? Existing records are not touched, and any warnings shown are carried in as-is.')) return;
   box.innerHTML = '<p class="dash-muted">Importing…</p>';
   const employees = await getEmployees();
   list.forEach(r => employees.push(Object.assign(emptyEmployee(), r)));
