@@ -4577,8 +4577,14 @@ function financialYearStart(dateStr){
 // Leave used from 1 April up to and including the month being paid. Half days
 // count as half, matching how the attendance summary treats them, so a balance
 // cannot be run down twice as fast by marking half days.
-function leaveUsedThisFinancialYear(att, upToDate){
-  const from = financialYearStart(upToDate);
+// `openingFrom` is the month the opening balance was stated as at, in YYYY-MM.
+// Balances entered part-way through the year are current as at that month, so
+// counting from 1 April would deduct leave already reflected in the figure —
+// an employee opened at 8 in August, having taken 3 in June, would show 5.
+function leaveUsedThisFinancialYear(att, upToDate, openingFrom){
+  const from = openingFrom
+    ? (openingFrom.length === 7 ? openingFrom + '-01' : openingFrom)
+    : financialYearStart(upToDate);
   let el = 0, sl = 0;
   Object.keys(att || {}).forEach(d => {
     if(d < from || d > upToDate) return;
@@ -4643,7 +4649,7 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   // Leave balance is the opening figure less everything used since the
   // financial year began, not just this month. Taking only the current month
   // would show the same balance every month and never run down.
-  const ytd = leaveUsedThisFinancialYear(att, dateList[dateList.length - 1]);
+  const ytd = leaveUsedThisFinancialYear(att, dateList[dateList.length - 1], emp.leaveOpeningFrom);
   const fullDayLeaveBal = Math.max(0, (Number(emp.elOpening) || 0) - ytd.el);
   const halfDayLeaveBal = Math.max(0, (Number(emp.slOpening) || 0) - ytd.sl);
   return { rate, leaveDays, leaveAmount, basic, hra, lta, gross, pf, esi, pt, advanceTemp, advance,
@@ -7079,6 +7085,10 @@ function employeeModalHtml(emp){
           <div style="height:12px"></div>
           <label class="field">EL opening balance (this year)</label>
           <input type="number" id="f_elOpening" placeholder="0" value="${emp.elOpening??''}">
+          <div style="height:10px"></div>
+          <label class="field">These balances are as at (month)</label>
+          <input type="month" class="field-input" id="f_leaveOpeningFrom" value="${emp.leaveOpeningFrom || ''}">
+          <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Leave taken from this month onward is deducted from the balances above. Leave it blank and the financial year start is used.</p>
           <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Enter manually for this year only. From next year onward, the EL Calculation Sheet report carries the closing balance forward automatically.</p>
         </div>
       </div>
@@ -7809,6 +7819,7 @@ async function saveEmployeeForm(){
     stdDeductions: Number(document.getElementById('f_stdDeductions').value)||0,
     pt: payrollValue('pt'),
     advanceOpening: Number(document.getElementById('f_advanceOpening').value)||0,
+    leaveOpeningFrom: (document.getElementById('f_leaveOpeningFrom') || {}).value || '',
     esiDisabled: document.getElementById('f_esiDisabled').value,
     esiCoveredAtPeriodStart: document.getElementById('f_esiCovered').value,
     esiEmployer: payrollValue('esiEmployer'),
@@ -8159,7 +8170,7 @@ async function rollOverLeaveYear(){
     '\n\nThis replaces their opening EL and SL. ' + skipped.length +
     ' employee(s) are skipped — Resident Engineers, Work From Home and non-R.S. Infotech headings.')) return;
 
-  rows.forEach(r => { r.e.elOpening = r.el; r.e.slOpening = r.sl; });
+  rows.forEach(r => { r.e.elOpening = r.el; r.e.slOpening = r.sl; r.e.leaveOpeningFrom = fyStart.slice(0, 7); });
   await saveEmployees(employees);
   invalidateSharedRead('employees');
   box.innerHTML = '<p class="dash-muted">✓ Leave year ' + escapeHtml(label) + ' opened for ' + rows.length +
@@ -8194,6 +8205,7 @@ const IMPORT_COLUMNS = [
   { key:'elOpening',     label:'EL Opening', num:true },
   { key:'slOpening',     label:'SL Opening', num:true },
   { key:'advanceOpening',label:'Advance Balance', num:true },
+  { key:'leaveOpeningFrom', label:'EL/SL Balance as at (YYYY-MM)' },
   { key:'hasPriorUan',   label:'Had PF before? (yes/no)' },
   { key:'form11Submitted', label:'Form 11 Submitted? (yes/no)' },
   { key:'esiDisabled',   label:'Person with disability? (yes/no)' },
