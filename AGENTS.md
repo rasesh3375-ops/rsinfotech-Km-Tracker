@@ -18,6 +18,7 @@ Nothing. Not a trial, not a credit — actually nothing.
 
 | Piece | Free tier |
 |---|---|
+| **OmniRoute** (local gateway) | 290+ providers, 90+ free, **no signup at all** |
 | **Groq** (default LLM) | 30 req/min, 14,400 req/day, every model, **no card** |
 | **Gemini** (alternative) | generous daily quota, **no card** |
 | **Ollama** (alternative) | unlimited, fully local and private |
@@ -62,17 +63,50 @@ Sweep output lands in the run summary and as a 30-day artifact.
 One environment variable.
 
 ```bash
+export LLM_PROVIDER=omniroute                               # no signup at all
 export LLM_PROVIDER=gemini   && export GEMINI_API_KEY=...   # aistudio.google.com/apikey
 export LLM_PROVIDER=ollama                                  # local, no key, no limits
 export LLM_PROVIDER=openrouter && export OPENROUTER_API_KEY=...
 ```
 
-All four speak the OpenAI chat-completions format, so there is exactly one code
+All five speak the OpenAI chat-completions format, so there is exactly one code
 path in `lib/llm.js`. Adding a provider is four lines in the `PROVIDERS` map.
 
 For Ollama, use a model with real tool-calling support — `qwen2.5:14b` or
 `llama3.1:8b`. Smaller models call tools incoherently and the agents misbehave in
 ways that look like prompt bugs.
+
+### OmniRoute
+
+[OmniRoute](https://github.com/diegosouzapw/OmniRoute) is an MIT-licensed local
+gateway that fans one OpenAI-compatible endpoint out to 290+ providers, 90+ of
+them free. Because `lib/llm.js` already speaks that format, it slotted in as a
+provider entry — no adapter, no SDK.
+
+```bash
+npm install -g omniroute
+omniroute                       # dashboard and API on port 20128
+export LLM_PROVIDER=omniroute
+npm run ask                     # model "auto" routes to keyless free providers
+```
+
+It's the only option here needing **no account, no key, and no signup** — the
+`auto` model ships pre-wired to keyless providers. Set `OMNIROUTE_API_KEY` only
+if you generate a key in its dashboard; without one, `auto` still works. Point
+`OMNIROUTE_URL` elsewhere if it isn't on the default port.
+
+**It only works where it's running.** OmniRoute is a local process, so it covers
+the terminal path and a locally-run function. A deployed Vercel function cannot
+reach your laptop — keep Groq or Gemini configured for the hosted path. The
+watchdog checks the gateway is actually up when this provider is selected, since
+"configured but not started" is the failure you'd otherwise only discover
+mid-conversation.
+
+One thing worth knowing: routing through any gateway means whichever upstream
+provider it picks sees your prompts. OmniRoute runs locally with no telemetry by
+default, so the gateway itself isn't the concern — the free upstream providers
+behind it are. Fine for building agents; think twice before piping anything
+confidential through the free tier.
 
 ## Files
 
