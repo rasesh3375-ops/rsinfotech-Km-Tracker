@@ -108,6 +108,44 @@ default, so the gateway itself isn't the concern — the free upstream providers
 behind it are. Fine for building agents; think twice before piping anything
 confidential through the free tier.
 
+### Pointing Claude Code itself at OmniRoute
+
+Separate from the agent org: OmniRoute also exposes an **Anthropic-compatible**
+`/v1/messages`, so Claude Code can run against it instead of Anthropic.
+
+```bash
+npm run claude:status      # what is Claude Code using right now?
+npm run claude:omniroute   # switch this project to the gateway
+npm run claude:anthropic   # switch back
+```
+
+Then restart Claude Code — it reads env vars once at startup.
+
+Pass a model to pin one: `node scripts/claude-omniroute.js on glm/glm-5.2`.
+Default is `auto`. Set `OMNIROUTE_API_KEY` first if you generated a key in the
+dashboard; otherwise a placeholder token is written, which is fine locally.
+
+OmniRoute's own `omniroute launch` does the same thing for a single session. The
+script here differs by persisting the choice for this project and giving you a
+clean way to undo it.
+
+**Why a toggle rather than committed settings.** These env vars point Claude Code
+at `localhost:20128`. Written into `.claude/settings.json`, which is committed,
+they would break Claude Code for every clone of this repo and in every
+environment where the gateway isn't running — including cloud sessions, which
+have no localhost to reach. So the script writes `.claude/settings.local.json`
+instead: gitignored, machine-local, reversible.
+
+It merges rather than overwrites, so unrelated settings in that file survive both
+directions. It refuses to touch the file if it isn't valid JSON, because a
+malformed settings file silently disables every setting in it. And it warns when
+you switch on while the gateway is down, since that combination leaves Claude
+Code unable to make any request at all.
+
+Worth being clear about the tradeoff: this makes Claude Code run on whatever
+model the gateway routes to, not on Claude. That's the point of doing it, but it
+does change what you're talking to.
+
 ## Files
 
 | Path | What |

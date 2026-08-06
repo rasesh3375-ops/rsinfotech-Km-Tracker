@@ -9,6 +9,9 @@
   },
   "scripts": {
     "check": "node scripts/selftest.js",
-    "ask": "node scripts/ask.js"
+    "ask": "node scripts/ask.js",
+    "claude:status": "node scripts/claude-omniroute.js status",
+    "claude:omniroute": "node scripts/claude-omniroute.js on",
+    "claude:anthropic": "node scripts/claude-omniroute.js off"
   }
 }
