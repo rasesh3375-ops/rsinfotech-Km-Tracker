@@ -3569,7 +3569,11 @@ const LEAVE_POLICY = {
     perMonth: 2,                      // more than 2 -> half day
     compOffThreshold: 3,              // more than 3 -> compensatory off
     carryForward: false,
-    eligibleEmployeeTypes: ['full', 'regular'],   // not part-time
+    // These are the employee types the form actually stores. They previously
+    // read 'full' and 'regular', which no record has ever carried, so short
+    // leave was being refused for everybody. Work From Home is excluded by the
+    // policy and Resident Engineers are outside these rules entirely.
+    eligibleEmployeeTypes: ['field', 'office'],
     minServiceMonths: 3,
     windows: [
       { label: 'Morning', fromMin: 9 * 60 + 30, toMin: 11 * 60 + 30 },
@@ -3577,7 +3581,9 @@ const LEAVE_POLICY = {
     ]
   },
   sickLeave: {
-    perYear: { full: 7, part: 4 },
+    // Keyed by employee type. Work From Home gets 4 per the policy; Field and
+    // Office Staff get the full 7.
+    perYear: { full: 7, part: 4, field: 7, office: 7, wfh: 4 },
     medicalCertificateRequired: true,
     carryForward: false,
     encashable: false
@@ -3720,7 +3726,9 @@ function evaluateMonth(emp, days, balances, P){
 // ---- leave balances ----
 function leaveBalances(emp, used, P){
   P = P || LEAVE_POLICY;
-  const type = emp.employeeType === 'part' ? 'part' : 'full';
+  const type = P.sickLeave.perYear[emp.employeeType] !== undefined
+    ? emp.employeeType
+    : (emp.employeeType === 'part' ? 'part' : 'full');
   const sickTotal = P.sickLeave.perYear[type];
   const sickLeft = Math.max(0, sickTotal - (used.sick || 0));
   const plEarned = Math.floor((used.attendanceDays || 0) / P.privilegeLeave.earnedPerAttendanceDays);
@@ -7075,10 +7083,11 @@ function employeeModalHtml(emp){
         <label class="field">Employee type</label>
         <select class="field-input" id="f_employeeType" onchange="toggleLeaveFieldsForType()">
           <option value="field" ${(!emp.employeeType || emp.employeeType==='field')?'selected':''}>Field Engineer</option>
+          <option value="office" ${emp.employeeType==='office'?'selected':''}>Office Staff</option>
           <option value="wfh" ${emp.employeeType==='wfh'?'selected':''}>Work From Home</option>
           <option value="resident" ${emp.employeeType==='resident'?'selected':''}>Resident Engineer</option>
         </select>
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">This decides which leave rules apply. Resident Engineers are excluded entirely from SL/EL balances, overtime, short leave, late-coming and sandwich-leave rules. Field Engineers get the full policy including overtime; Work From Home gets 4 sick leaves/year (instead of 7) and no short leave.</p>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">This decides which leave rules apply. Field Engineers and Office Staff get the full policy — 7 sick leaves a year, short leave, late-coming and sandwich-leave rules — with overtime for those who record trips. Work From Home gets 4 sick leaves a year and no short leave. Resident Engineers are excluded entirely from SL/EL balances, overtime, short leave, late-coming and sandwich-leave rules.</p>
         <div id="leaveOpeningFields" class="${emp.employeeType==='resident'?'hidden':''}" style="margin-top:14px;">
           <label class="field">SL opening balance (this year)</label>
           <input type="number" id="f_slOpening" placeholder="0" value="${emp.slOpening??''}">
@@ -8187,7 +8196,7 @@ const IMPORT_COLUMNS = [
   { key:'name',          label:'Full Name',              required:true },
   { key:'designation',   label:'Designation' },
   { key:'department',    label:'Department' },
-  { key:'employeeType',  label:'Employee Type (field/wfh/resident)' },
+  { key:'employeeType',  label:'Employee Type (field/office/wfh/resident)' },
   { key:'salaryHeading', label:'Salary Heading (managerial/senior/junior/apprentice/rsit/contractor)' },
   { key:'ratePay',       label:'Rate of Pay', num:true },
   { key:'doj',           label:'Date of Joining (YYYY-MM-DD)' },
