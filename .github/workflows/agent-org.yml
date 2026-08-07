@@ -1,0 +1,128 @@
+# Free scheduling for the agent org.
+#
+# GitHub Actions replaces the n8n schedule triggers. It costs nothing on public
+# repos and comes out of a generous monthly allowance on private ones — these
+# jobs use a couple of minutes a day.
+#
+# Alerting is free too: when a job fails, GitHub emails the repo owner. There is
+# no notification service to configure.
+#
+# Setup — Settings → Secrets and variables → Actions → New repository secret:
+#   GROQ_API_KEY   your free key from https://console.groq.com/keys
+#   AGENT_URL      optional; your deployed https://<domain>/api/agent
+#                  omit it and the jobs run the agents locally on the runner
+
+name: agent org
+
+on:
+  schedule:
+    # Health check every 30 minutes. GitHub's scheduler drifts under load, so
+    # treat these as "about every half hour" rather than exact.
+    - cron: '17,47 * * * *'
+    # Research sweep, weekday mornings (06:23 UTC).
+    - cron: '23 6 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      job:
+        description: Which job to run
+        type: choice
+        options: [watchdog, research]
+        default: watchdog
+
+permissions:
+  contents: read
+
+jobs:
+  watchdog:
+    # Runs on the half-hourly schedule, and on manual dispatch when chosen.
+    if: >-
+      github.event.schedule == '17,47 * * * *' ||
+      (github.event_name == 'workflow_dispatch' && inputs.job == 'watchdog')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Probe the deployment
+        if: env.AGENT_URL != ''
+        env:
+          AGENT_URL: ${{ secrets.AGENT_URL }}
+        run: |
+          echo "### Deployment probe" >> "$GITHUB_STEP_SUMMARY"
+
+          # ping first — no model, no quota, so a failure here is real downtime
+          code=$(curl -s -o /tmp/ping.json -w '%{http_code}' --max-time 20 \
+                 "$AGENT_URL?team=ping" || echo 000)
+          echo "- ping: HTTP $code" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" != "200" ]; then
+            echo "::error::Deployment is not answering (ping returned $code)"
+            exit 1
+          fi
+
+          # watchdog returns 503 when something is wrong, so the status code is the verdict
+          code=$(curl -s -o /tmp/wd.json -w '%{http_code}' --max-time 30 \
+                 "$AGENT_URL?team=watchdog" || echo 000)
+          echo "- watchdog: HTTP $code" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/wd.json >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" != "200" ]; then
+            echo "::error::Watchdog reports the system unhealthy"
+            exit 1
+          fi
+
+      - name: Check locally
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          echo "### Local self-test" >> "$GITHUB_STEP_SUMMARY"
+          npm run check 2>&1 | tee /tmp/check.log
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/check.log >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  research:
+    if: >-
+      github.event.schedule == '23 6 * * 1-5' ||
+      (github.event_name == 'workflow_dispatch' && inputs.job == 'research')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run the sweep
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'groq' }}
+        run: |
+          if [ -z "$GROQ_API_KEY" ]; then
+            echo "::warning::No GROQ_API_KEY secret set — skipping the sweep"
+            exit 0
+          fi
+          npm run ask -- --team researchers --topic sweep 2>&1 | tee /tmp/research.md
+
+      - name: Publish to the run summary
+        if: always()
+        run: |
+          {
+            echo "# Research sweep — $(date -u '+%Y-%m-%d')"
+            echo ''
+            # strip terminal colour codes so the summary renders cleanly
+            sed -e 's/\x1b\[[0-9;]*m//g' /tmp/research.md 2>/dev/null || echo '(no output)'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the report as an artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-${{ github.run_number }}
+          path: /tmp/research.md
+          retention-days: 30
+          if-no-files-found: ignore

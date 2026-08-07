@@ -1,0 +1,248 @@
+{
+  "name": "3 — Researchers (Scout + Analyst)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Researchers\n\nTwo agents: scout gathers, analyst decides what is worth building.\n\nRuns two ways — on a schedule every morning, and on demand from the Jarvis hub. The IF node at the end is what keeps the scheduled run from trying to answer a webhook that isn't there.\n\n**Search sources are free and keyless** — Hacker News Algolia and Reddit JSON. No search API key needed. If you have a Tavily or Brave key, add another HTTP tool node and the scout will use it automatically.\n\n`POST /webhook/researchers`  body: `{ \"topic\": \"...\" }`",
+        "height": 460,
+        "width": 420,
+        "color": 5
+      },
+      "id": "note-res",
+      "name": "README",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-640, 0]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "37 7 * * 1-5" }]
+        }
+      },
+      "id": "sched-res",
+      "name": "Every Weekday 07:37",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-160, 140]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "researchers",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "wh-res",
+      "name": "On Demand",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-160, 340],
+      "webhookId": "researchers-entry"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Both triggers land here. Remember which one fired so the tail of the\n// workflow knows whether a webhook is waiting for a response.\nconst item = $input.first().json;\nconst fromWebhook = item.body !== undefined;\nconst topic = fromWebhook ? (item.body.topic || 'sweep') : 'sweep';\n\nreturn [{ json: { topic, fromWebhook, startedAt: new Date().toISOString() } }];"
+      },
+      "id": "code-norm",
+      "name": "Normalise Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [120, 240]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Run a research sweep. Topic: {{ $json.topic }}\n\nToday is {{ $now.toFormat('yyyy-MM-dd') }}. Look for things from the last seven days.",
+        "agent": "toolsAgent",
+        "options": {
+          "systemMessage": "You are the scout. You gather what is new in the AI agent space. You collect and verify — you do not decide what should be built. That is the analyst's job. Hand over raw, sourced material.\n\nWhat to look for, in priority order:\n\nAgent frameworks and runtimes — releases, breaking changes, capability shifts.\n\nTechniques that change what agents can do — memory architectures, orchestration patterns, tool-use strategies, evaluation methods.\n\nModel releases relevant to agents, including pricing changes that shift what is economical to run.\n\nReal systems people have shipped and written up, with enough detail to learn from. Prefer these over announcements.\n\nFailure reports and postmortems. These are more useful than success stories and almost nobody collects them.\n\nHow to work: run several searches with different phrasings, because one query gives you one slice. Then fetch the primary source rather than trusting a summary of it.\n\nFilter hard. This space produces enormous volumes of noise. Something is worth reporting if it has a primary source, concrete detail like version numbers or benchmarks, and evidence somebody actually ran it. It is not worth reporting if the only source is another aggregator, if it is superlatives with no numbers, or if it is a product page for something in waitlist with no users.\n\nSponsored content is the specific trap here. A post whose framing is driven by an affiliate link or a sponsor disclosure is marketing, not research. Say so and move on.\n\nSay when you are unsure. A finding you could not verify is still worth reporting, labelled unverified. Presenting it as confirmed is the failure.\n\nFor each finding report: the category, a title, the source URL, two or three concrete sentences on what changed, and whether it is confirmed or unverified.\n\nThen list the categories you searched and found nothing in. That tells the analyst the gap is real rather than unsearched.\n\nIf the whole sweep turns up nothing new, say exactly that. A quiet week is a real result. Padding it is worse than reporting it."
+        }
+      },
+      "id": "agent-scout",
+      "name": "Scout",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [400, 240]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": { "temperature": 0.3, "timeout": 180000 }
+      },
+      "id": "lm-scout",
+      "name": "Scout Brain",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [280, 480],
+      "credentials": {
+        "openAiApi": { "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID", "name": "OpenAI account" }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Searches Hacker News for stories and discussion. Free, no API key. Best source for framework releases, technical writeups, and postmortems. Returns titles, URLs, points and comment counts.",
+        "method": "GET",
+        "url": "=https://hn.algolia.com/api/v1/search",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={\n  \"query\": \"{query}\",\n  \"tags\": \"story\",\n  \"hitsPerPage\": \"20\"\n}",
+        "placeholderDefinitions": {
+          "values": [
+            { "name": "query", "description": "Search terms, e.g. 'AI agents' or 'LangGraph'", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "tool-hn",
+      "name": "Hacker News",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [440, 480]
+    },
+    {
+      "parameters": {
+        "toolDescription": "Searches Reddit across all subreddits. Free, no API key. Good for practitioner reports and complaints about tools that do not work as advertised. Returns post titles, subreddits, scores and URLs.",
+        "method": "GET",
+        "url": "=https://www.reddit.com/search.json",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={\n  \"q\": \"{query}\",\n  \"sort\": \"top\",\n  \"t\": \"week\",\n  \"limit\": \"20\"\n}",
+        "placeholderDefinitions": {
+          "values": [
+            { "name": "query", "description": "Search terms", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "tool-reddit",
+      "name": "Reddit",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [600, 480]
+    },
+    {
+      "parameters": {
+        "toolDescription": "Fetches the full contents of a web page by URL. Use this to read the primary source after a search turns up a promising link, instead of trusting the search snippet.",
+        "method": "GET",
+        "url": "={url}",
+        "placeholderDefinitions": {
+          "values": [
+            { "name": "url", "description": "The full URL to fetch", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "tool-fetch",
+      "name": "Fetch Page",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [760, 480]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Convert these findings into decisions.\n\n{{ $json.output }}",
+        "agent": "toolsAgent",
+        "options": {
+          "systemMessage": "You are the analyst. You convert research into decisions. The scout tells you what exists; you say what to do about it. Every output of yours should be something a person could act on today, or you have not finished the job.\n\nYou do not build agents. You propose them.\n\nProduce two ranked lists, both short.\n\nFIRST — agents worth building. For each: a name, one line on what it does, what in the research makes it newly worth building, the specific recurring job it removes from the user's day, roughly what it would take to build, and anything blocking it.\n\nPropose at most three. A list of twenty is a list nobody reads, and the discipline of cutting is the actual work. Each one must remove real repeated effort — if you cannot name the recurring task it eliminates, cut it. If it needs an integration the user does not have, say so under blockers rather than proposing it as ready to go.\n\nSECOND — upgrades to what already exists. For each: which part of the system, the concrete change, what motivates it, and what could get worse.\n\nPrefer sharpening an existing agent over adding a new one. A better prompt on something that already runs usually beats a new workflow at a tenth of the effort.\n\nJudgment rules:\n\nNovelty is not value. A new framework matters only if it does something the current setup cannot. Most do not. Say so.\n\nPrefer the boring version. If a simpler agent gets most of the value, propose that and mention the ambitious one underneath.\n\nIf the research contains nothing that justifies a new agent or a change, say 'nothing actionable this cycle' and name what you ruled out and why. That is a valid result. Manufacturing proposals to look productive is how a system like this becomes noise the user learns to ignore.\n\nEnd with a two-sentence spoken summary, plain prose with no markdown, that the assistant can read aloud."
+        }
+      },
+      "id": "agent-analyst",
+      "name": "Analyst",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [820, 240]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": { "temperature": 0.4, "timeout": 180000 }
+      },
+      "id": "lm-analyst",
+      "name": "Analyst Brain",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [920, 480],
+      "credentials": {
+        "openAiApi": { "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID", "name": "OpenAI account" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const findings = $('Scout').first().json.output;\nconst analysis = $('Analyst').first().json.output;\nconst meta = $('Normalise Input').first().json;\n\nreturn [{ json: {\n  topic: meta.topic,\n  fromWebhook: meta.fromWebhook,\n  startedAt: meta.startedAt,\n  finishedAt: new Date().toISOString(),\n  findings,\n  analysis\n} }];"
+      },
+      "id": "code-pack-res",
+      "name": "Package Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 240]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.fromWebhook }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-res",
+      "name": "Someone Waiting?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1360, 240]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "resp-res",
+      "name": "Return to Hub",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1600, 140]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Scheduled run — nobody is waiting on a response. The result sits in the\n// execution log for the hub to read back when asked.\n// To get it pushed somewhere instead, wire a Gmail or Slack node here.\nconsole.log('Scheduled sweep complete:', $json.topic);\nreturn $input.all();"
+      },
+      "id": "code-store",
+      "name": "Log for Later",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1600, 340]
+    }
+  ],
+  "connections": {
+    "Every Weekday 07:37": { "main": [[{ "node": "Normalise Input", "type": "main", "index": 0 }]] },
+    "On Demand": { "main": [[{ "node": "Normalise Input", "type": "main", "index": 0 }]] },
+    "Normalise Input": { "main": [[{ "node": "Scout", "type": "main", "index": 0 }]] },
+    "Scout": { "main": [[{ "node": "Analyst", "type": "main", "index": 0 }]] },
+    "Analyst": { "main": [[{ "node": "Package Result", "type": "main", "index": 0 }]] },
+    "Package Result": { "main": [[{ "node": "Someone Waiting?", "type": "main", "index": 0 }]] },
+    "Someone Waiting?": {
+      "main": [
+        [{ "node": "Return to Hub", "type": "main", "index": 0 }],
+        [{ "node": "Log for Later", "type": "main", "index": 0 }]
+      ]
+    },
+    "Scout Brain": { "ai_languageModel": [[{ "node": "Scout", "type": "ai_languageModel", "index": 0 }]] },
+    "Hacker News": { "ai_tool": [[{ "node": "Scout", "type": "ai_tool", "index": 0 }]] },
+    "Reddit": { "ai_tool": [[{ "node": "Scout", "type": "ai_tool", "index": 0 }]] },
+    "Fetch Page": { "ai_tool": [[{ "node": "Scout", "type": "ai_tool", "index": 0 }]] },
+    "Analyst Brain": { "ai_languageModel": [[{ "node": "Analyst", "type": "ai_languageModel", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {},
+  "tags": [{ "name": "agent-org" }]
+}

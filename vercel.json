@@ -1,0 +1,6 @@
+{
+  "rewrites": [
+    { "source": "/", "destination": "/jarvis/index.html" },
+    { "source": "/dashboard", "destination": "/jarvis/index.html" }
+  ]
+}

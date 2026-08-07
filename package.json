@@ -1,0 +1,17 @@
+{
+  "name": "jarvis-agent-org",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Voice dashboard and multi-agent org running on free-tier LLM APIs \u2014 no subscription, no orchestration platform",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "check": "node scripts/selftest.js",
+    "ask": "node scripts/ask.js",
+    "claude:status": "node scripts/claude-omniroute.js status",
+    "claude:omniroute": "node scripts/claude-omniroute.js on",
+    "claude:anthropic": "node scripts/claude-omniroute.js off"
+  }
+}
