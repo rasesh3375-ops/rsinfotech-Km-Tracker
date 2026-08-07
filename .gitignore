@@ -1,9 +1,0 @@
-node_modules/
-.env
-.env.local
-.vercel
-
-# Machine-local Claude Code settings. The OmniRoute toggle writes here on
-# purpose — it points Claude Code at a localhost gateway, which must never
-# reach anyone else's checkout.
-.claude/settings.local.json
