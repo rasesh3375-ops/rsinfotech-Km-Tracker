@@ -78,6 +78,21 @@ export LLM_PROVIDER=ollama                                  # local, no key, no 
 export LLM_PROVIDER=openrouter && export OPENROUTER_API_KEY=...
 ```
 
+Or switch it from the dashboard. The header carries a **brain picker** — a
+provider dropdown and a model dropdown. Providers without a key are listed but
+greyed out, so you can see what's available without hunting through docs.
+
+The model list is fetched live from the provider rather than hard-coded, because
+model names age badly: Google alone shipped `2.0-flash`, `2.5-flash` and
+`3.x-flash` inside a year. Pin one with `GEMINI_MODEL` (or `GROQ_MODEL`, etc.) if
+you want a specific one.
+
+Whatever you pick applies to the teams too, not just the chat — producers,
+researchers and every agent inside them run on the selected brain.
+
+**The picker only offers what the server already has keys for.** The page sends
+a provider *name*; it can never supply an endpoint or a credential of its own.
+
 On **Windows PowerShell**, `export` does not exist — use `$env:`:
 
 ```powershell

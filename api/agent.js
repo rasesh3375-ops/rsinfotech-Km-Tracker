@@ -11,7 +11,7 @@
  */
 
 import { runHub, runProducers, runResearchers, runWatchdog } from '../lib/teams.js';
-import { PROVIDER } from '../lib/llm.js';
+import { PROVIDER, providerCatalogue, listModels } from '../lib/llm.js';
 
 // Hobby plan allows up to 60s. The producers chain is three sequential model
 // calls, which is why this needs the full budget rather than the 10s default.
@@ -37,7 +37,21 @@ export default async function handler(req, res) {
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
 
+    // Which brain to use for this request. Validated inside providerConfig
+    // against the providers the server has keys for — the client picks from
+    // what exists, it never supplies an endpoint or a credential.
+    const provider = body.provider || req.query?.provider || undefined;
+
     switch (team) {
+      // Brains the dashboard can offer. Reports whether each is usable, never
+      // the key itself.
+      case 'providers':
+        return res.status(200).json({ providers: providerCatalogue(), active: PROVIDER });
+
+      // Live model list from the provider, so the picker never goes stale.
+      case 'models':
+        return res.status(200).json(await listModels(provider));
+
       case 'watchdog': {
         const out = await runWatchdog({});
         // Non-200 when unhealthy so a monitor can act on the status code alone.
@@ -46,17 +60,20 @@ export default async function handler(req, res) {
 
       case 'producers': {
         if (!body.request) return res.status(400).json({ error: 'Body needs { request }' });
-        return res.status(200).json(await runProducers({ request: body.request }));
+        return res.status(200).json(await runProducers({ request: body.request, provider }));
       }
 
       case 'researchers': {
-        return res.status(200).json(await runResearchers({ topic: body.topic || 'sweep' }));
+        return res.status(200).json(await runResearchers({ topic: body.topic || 'sweep', provider }));
       }
 
       case 'hub': {
         if (!body.message) return res.status(400).json({ error: 'Body needs { message }' });
-        const out = await runHub({ message: body.message, sessionId: body.sessionId });
-        return res.status(200).json({ reply: out.reply, toolsUsed: out.toolsUsed, ts: new Date().toISOString() });
+        const out = await runHub({ message: body.message, sessionId: body.sessionId, provider });
+        return res.status(200).json({
+          reply: out.reply, toolsUsed: out.toolsUsed,
+          provider: out.provider, model: out.model, ts: new Date().toISOString()
+        });
       }
 
       default:

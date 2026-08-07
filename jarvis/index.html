@@ -34,6 +34,13 @@
     border-radius:999px;padding:5px 12px;font-size:11.5px;color:var(--muted);
   }
   .pill b{font-weight:600}
+  .pill.brain{gap:6px;padding:4px 10px}
+  .pill.brain select{
+    background:transparent;border:none;color:var(--cyan);font:inherit;font-size:11.5px;
+    cursor:pointer;outline:none;max-width:150px;
+  }
+  .pill.brain select option{background:var(--panel);color:var(--txt)}
+  .pill.brain select:disabled{color:var(--muted);cursor:not-allowed}
   .btn-sm{
     background:transparent;border:1px solid var(--line);color:var(--muted);
     padding:6px 12px;border-radius:6px;cursor:pointer;font:inherit;font-size:11.5px;
@@ -152,6 +159,11 @@
 <header>
   <div class="brand"><span class="dot"></span>J A R V I S</div>
   <div class="hdr-right">
+    <div class="pill brain" id="brainPill" title="Which model answers">
+      <span class="sdot" id="brainDot"></span>
+      <select id="brainSel" title="Brain"></select>
+      <select id="modelSel" title="Model"></select>
+    </div>
     <div class="pill" id="healthPill"><span class="sdot" id="healthDot"></span><b id="healthTxt">checking…</b></div>
     <button class="btn-sm" id="btnRunAll">RUN ALL</button>
     <button class="btn-sm" id="btnCfg">CONFIG</button>
@@ -221,12 +233,84 @@
   /* ---------------- config ---------------- */
   const KEY = 'jarvis.cfg.v2';
   const cfg = Object.assign(
-    { url:'/api/agent', voiceURI:'', rate:1.05, autoListen:false, speak:true, poll:60 },
+    { url:'/api/agent', voiceURI:'', rate:1.05, autoListen:false, speak:true, poll:60, provider:'', model:'' },
     JSON.parse(localStorage.getItem(KEY) || '{}')
   );
   const saveCfg = () => localStorage.setItem(KEY, JSON.stringify(cfg));
   const sessionId = sessionStorage.getItem('jarvis.sid')
     || (v => (sessionStorage.setItem('jarvis.sid', v), v))('sid-' + Math.random().toString(36).slice(2,11));
+
+  /* ---------------- the brain ---------------- */
+  // Which model answers. Chosen here, but only ever from what the server says
+  // it has keys for — the page never holds a credential or an endpoint.
+  const brain = { provider: cfg.provider || '', model: cfg.model || '', catalogue: [] };
+
+  async function loadBrains(){
+    try{
+      const r = await fetch(url('providers'));
+      const d = await r.json();
+      brain.catalogue = d.providers || [];
+      if(!brain.provider) brain.provider = (brain.catalogue.find(p=>p.active) || {}).id || d.active;
+
+      const usable = brain.catalogue.filter(p => p.configured);
+      $('brainSel').innerHTML = brain.catalogue.map(p =>
+        `<option value="${p.id}" ${p.id===brain.provider?'selected':''} ${p.configured?'':'disabled'}>`
+        + `${escapeHtml(p.label)}${p.configured?'':' — no key'}</option>`).join('');
+      $('brainSel').disabled = usable.length < 2;
+      paintBrainDot();
+
+      const chosen = brain.catalogue.find(p => p.id === brain.provider);
+      if(chosen && !chosen.configured){
+        feed('err','BRAIN', `${chosen.label} has no key — set ${chosen.needs} and redeploy`);
+        sys(`${chosen.label} is selected but ${chosen.needs} is not set. Get a free key at ${chosen.signup}, add it as an environment variable, then redeploy.`);
+      }
+      loadModels();
+    }catch{
+      $('brainSel').innerHTML = '<option>unavailable</option>';
+      $('brainSel').disabled = true;
+    }
+  }
+
+  async function loadModels(){
+    const sel = $('modelSel');
+    sel.innerHTML = '<option>loading…</option>'; sel.disabled = true;
+    try{
+      const r = await fetch(url('models') + '&provider=' + encodeURIComponent(brain.provider));
+      const d = await r.json();
+      if(!d.models?.length) throw new Error('none');
+      // Asked live rather than hard-coded, so a renamed model never strands the picker.
+      if(!brain.model || !d.models.includes(brain.model)) brain.model = d.current || d.models[0];
+      sel.innerHTML = d.models.map(m =>
+        `<option value="${escapeHtml(m)}" ${m===brain.model?'selected':''}>${escapeHtml(m)}</option>`).join('');
+      sel.disabled = false;
+      feed('inf','BRAIN', `${brain.provider} · ${d.models.length} models available`);
+    }catch{
+      const fb = brain.model || (brain.catalogue.find(p=>p.id===brain.provider)||{}).defaultModel || 'default';
+      sel.innerHTML = `<option value="${escapeHtml(fb)}">${escapeHtml(fb)}</option>`;
+      sel.disabled = true;   // provider will not list models; the default still works
+    }
+    saveBrain();
+  }
+
+  function paintBrainDot(){
+    const p = brain.catalogue.find(x => x.id === brain.provider);
+    $('brainDot').style.background = !p ? 'var(--muted)' : p.configured ? 'var(--cyan)' : 'var(--red)';
+  }
+  function saveBrain(){ cfg.provider = brain.provider; cfg.model = brain.model; saveCfg(); }
+
+  $('brainSel').addEventListener('change', () => {
+    brain.provider = $('brainSel').value; brain.model = '';
+    paintBrainDot(); saveBrain(); loadModels();
+    feed('inf','BRAIN','switched to ' + brain.provider);
+  });
+  $('modelSel').addEventListener('change', () => {
+    brain.model = $('modelSel').value; saveBrain();
+    feed('inf','BRAIN','model ' + brain.model);
+  });
+
+  // Every call carries the chosen brain, so switching applies to teams too.
+  const url = t => cfg.url + (cfg.url.includes('?') ? '&' : '?') + 'team=' + t;
+  const withBrain = o => Object.assign({}, o, brain.provider ? { provider: brain.provider } : {});
 
   /* ---------------- team registry ---------------- */
   // Each team knows how to call itself and how to summarise what came back, so
@@ -327,12 +411,12 @@
     // Deliberately not awaited by the caller — teams run independently, which is
     // what makes several of them visibly work at once.
     try{
-      const url = cfg.url + (cfg.url.includes('?') ? '&' : '?') + 'team=' + spec.team;
+      const endpoint = url(spec.team);
       const opts = spec.method === 'GET'
         ? { method:'GET', signal:s.ctl.signal }
         : { method:'POST', headers:{'Content-Type':'application/json'},
-            body:JSON.stringify(spec.payload || {}), signal:s.ctl.signal };
-      const res = await fetch(url, opts);
+            body:JSON.stringify(withBrain(spec.payload || {})), signal:s.ctl.signal };
+      const res = await fetch(endpoint, opts);
       const raw = await res.text();
       let data; try{ data = JSON.parse(raw); }catch{ data = { spoken: raw }; }
 
@@ -432,7 +516,7 @@
     const timer = setTimeout(() => ctl.abort(), 180000);
     try{
       const res = await fetch(cfg.url, { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ message, sessionId }), signal: ctl.signal });
+        body: JSON.stringify(withBrain({ message, sessionId })), signal: ctl.signal });
       clearTimeout(timer);
       const raw = await res.text();
       if(!res.ok) throw new Error(`HTTP ${res.status}. ${raw.slice(0,200)}`);
@@ -448,7 +532,8 @@
       });
 
       a.st='ok'; a.last=Date.now(); a.sum=reply.slice(0,400); a.full=reply;
-      chat('jarvis', reply); feed('ok','ASSISTANT','replied');
+      chat('jarvis', reply);
+      feed('ok','ASSISTANT', 'replied' + (data.model ? ` · ${data.provider}/${data.model}` : ''));
       speak(reply);
     }catch(err){
       clearTimeout(timer); setState('error');
@@ -583,7 +668,7 @@
   }
 
   /* ---------------- boot ---------------- */
-  syncToggles(); renderTeams(); setState('idle'); startPoll();
+  syncToggles(); renderTeams(); setState('idle'); startPoll(); loadBrains();
   feed('inf','ORG','dashboard ready');
   sys(`Ready — backend ${cfg.url}. Ask something, or run a team from the right.`);
   runTeam(TEAMS.find(t=>t.id==='watchdog'));   // free, and tells you at a glance whether the backend is up
