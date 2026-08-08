@@ -7002,9 +7002,21 @@ function emptyEmployee(){
   };
 }
 
+// Bonus is a full month's gross — Basic plus HRA plus LTA on the employee's
+// salary heading — before PT, ESI, PF, retention, advances or any reduction for
+// leave. Those all reduce what is paid in a given month; none of them change
+// what a month is worth, which is what the bonus is a month of.
+//
+// Derived from Rate of Pay and the heading rather than from the stored basic
+// and hra fields, so it is right for every employee already on file without
+// anything being recalculated or re-saved, and it cannot drift from the Gross
+// column on the Salary Sheet.
 function diwaliBonusFor(emp){
   if(emp.diwaliEligible !== 'yes') return 0;
-  return (Number(emp.basic)||0) + (Number(emp.hra)||0) + (Number(emp.otherAllowances)||0);
+  const h = SALARY_HEADINGS[emp.salaryHeading] || SALARY_HEADINGS.managerial;
+  const rate = Number(emp.ratePay) || 0;
+  const gross = h.flat ? rate : rate * (h.basicPct + h.hraPct + h.ltaPct);
+  return Math.round(gross * 100) / 100;
 }
 
 function employeeModalHtml(emp){
@@ -7151,7 +7163,7 @@ function employeeModalHtml(emp){
         <div class="sec-title">Salary structure (for salary slip)</div>
         <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Basic and HRA are worked out from Rate of Pay and the salary heading — they are shown in the breakdown above and are no longer typed here, because the Salary Sheet has always derived them and ignored anything entered by hand.</p>
         <label class="field">Other allowances</label>
-        <input type="number" id="f_otherAllowances" placeholder="0" value="${emp.otherAllowances||''}" oninput="updateBonusPreview()">
+        <input type="number" id="f_otherAllowances" placeholder="0" value="${emp.otherAllowances||''}">
         <div style="height:12px"></div>
         <label class="field">Dress / uniform allowance (monthly)</label>
         <input type="number" id="f_dressAllowance" placeholder="0" value="${emp.dressAllowance||''}">
@@ -7510,6 +7522,8 @@ function renderPayrollBreakdown(){
   const comps = computePayrollComponents(rate, headingKey, manual);
   const missing = validatePayrollComponents(comps);
 
+  // The bonus is a month of this gross, so it moves with the same inputs.
+  try{ updateBonusPreview(); }catch(e){}
   if(!rate){
     box.innerHTML = '<p class="calc-empty">Enter a Rate of Pay to see the full salary breakdown.</p>';
     return;
@@ -7533,19 +7547,15 @@ function renderPayrollBreakdown(){
 }
 
 function updateBonusPreview(){
-  // Basic and HRA come from the payroll master now, not from typed boxes — the
-  // bonus used to be worked out from figures the Salary Sheet ignored, so the
-  // two could disagree for the same employee.
-  const rate = Number((document.getElementById('f_ratePay') || {}).value) || 0;
-  const headingKey = (document.getElementById('f_salaryHeading') || {}).value || 'managerial';
-  const comps = computePayrollComponents(rate, headingKey, {});
-  const pick = k => (comps.find(c => c.key === k) || {}).value || 0;
-  const basic = pick('basic');
-  const hra = pick('hra');
-  const other = Number(document.getElementById('f_otherAllowances').value)||0;
-  const eligible = document.getElementById('f_diwaliEligible').value;
-  const bonus = eligible === 'yes' ? (basic+hra+other) : 0;
-  document.getElementById('bonusPreview').textContent = 'Calculated Diwali bonus: Rs. ' + bonus;
+  // Same rule as diwaliBonusFor, read off the form so it follows Rate of Pay
+  // and the heading as they are typed.
+  const el = document.getElementById('bonusPreview');
+  if(!el) return;
+  const eligible = (document.getElementById('f_diwaliEligible') || {}).value === 'yes';
+  const gross = payrollValue('gross');
+  el.textContent = eligible
+    ? 'Calculated Diwali bonus: Rs. ' + fmtMoney(gross) + '  (one month\u2019s gross, before any deduction)'
+    : 'Not eligible for Diwali bonus.';
 }
 
 // The cheque is kept at a higher resolution than an ID scan, because the whole
