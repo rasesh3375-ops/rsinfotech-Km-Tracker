@@ -329,6 +329,20 @@ function doPost(e) {
   const auth = validateSession_(body.token);
   if (!auth) return jsonOut_({ error: 'unauthorized' });
 
+  if (body.action === 'moveEmployeeFolder') {
+    // Files a leaver's document folder under Employee Documents > Left
+    // Employees. The folder is moved, not copied and not deleted: documents may
+    // still be wanted for a statutory return or a reference years later.
+    var docsRoot = getOrCreateFolderPath_(['HR Management', 'Employee Documents']);
+    var found = docsRoot.getFoldersByName(body.folderName);
+    if (!found.hasNext()) return jsonOut_({ ok: true, moved: false, reason: 'no folder' });
+    var leaverFolder = found.next();
+    var archive = getOrCreateFolderPath_(['HR Management', 'Employee Documents', 'Left Employees']);
+    archive.addFolder(leaverFolder);
+    docsRoot.removeFolder(leaverFolder);
+    return jsonOut_({ ok: true, moved: true });
+  }
+
   if (body.action === 'getBatch') {
     // Many keys, one request. The client used to fetch attendance one employee
     // at a time, so a twenty-person report meant twenty round trips; the sheet

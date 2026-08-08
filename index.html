@@ -6901,7 +6901,9 @@ async function saveReminderEmail(){
 }
 
 async function renderIncrementReminders(){
-  const employees = await getEmployees();
+  // Somebody who has left has no next increment. Leaving them here put former
+  // staff on a list HR works through every month.
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
   const box = document.getElementById('incrementReminderList');
   if(!box) return;
   const now = new Date();
@@ -6932,7 +6934,8 @@ async function renderIncrementReminders(){
 }
 
 async function renderDocExpiryList(){
-  const employees = await getEmployees();
+  // Their licence or insurance expiring is no longer the company's concern.
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
   const box = document.getElementById('docExpiryList');
   if(!box) return;
   const now = new Date();
@@ -7986,12 +7989,31 @@ async function jumpToGeneratorForNewEmployee(employeeId){
   await autoFillGeneratorFromEmployee();
 }
 
+// Files the employee's document folder under Left Employees so the active
+// folder holds only current staff. Never deletes anything — the documents may
+// still be needed for a statutory return or a reference long after somebody
+// has gone.
+async function archiveEmployeeDocuments(emp){
+  if(!emp) return;
+  try{
+    await apiFetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'moveEmployeeFolder', token: sessionToken,
+        folderName: (emp.name ? emp.name + ' ' : '') + '(' + emp.id + ')'
+      })
+    });
+  }catch(e){}   // never block leaving or deleting because Drive was unreachable
+}
+
 async function deleteEmployee(id){
   if(!confirm('Permanently delete this employee record? This cannot be undone — if they simply left the job, use "Mark as left" instead so their record and history are kept.')) return;
   let employees = await getEmployees();
   const emp = employees.find(e => e.id === id);
   employees = employees.filter(e => e.id !== id);
   await saveEmployees(employees);
+  await archiveEmployeeDocuments(emp);
   if(emp) await addActivityLog('Permanently deleted employee record for ' + emp.name + ' (' + id + ')');
   await renderEmployeeList();
   await refreshDashboard();
@@ -8005,6 +8027,7 @@ async function markEmployeeLeft(id){
   if(!leftDate) return;
   emp.employmentStatus = 'left';
   emp.leftDate = leftDate;
+  await archiveEmployeeDocuments(emp);
   // Disable their km-tracking login, if they had one — their full record stays on file.
   if(emp.trackingUsername){
     const users = await getUsers();
