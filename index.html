@@ -7187,23 +7187,29 @@ function employeeModalHtml(emp){
           <option value="yes" ${emp.form11Submitted==='yes'?'selected':''}>Yes — opted out of PF</option>
         </select>
         <div style="height:10px"></div>
+        <div id="pfWrap">
         <label class="field" id="f_pf_label">PF (provident fund)</label>
         <input type="number" id="f_pf" value="${emp.pf||''}" readonly
                title="Calculated automatically from the configured payroll formula."
                style="background:#F1F4FA;cursor:not-allowed;">
         <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;" id="pfRuleNote"></p>
         <div style="height:12px"></div>
+        </div>
+        <div id="esiWrap">
         <label class="field" id="f_esiDeduction_label">ESI</label>
         <input type="number" id="f_esiDeduction" value="${emp.esiDeduction||''}" readonly
                title="Calculated automatically from the configured payroll formula."
                style="background:#F1F4FA;cursor:not-allowed;">
         <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;" id="esiRuleNote"></p>
         <div style="height:12px"></div>
+        </div>
+        <div id="ptWrap">
         <label class="field" id="f_pt_label">PT (professional tax)</label>
         <input type="number" id="f_pt" value="${emp.pt||''}" readonly
                title="Calculated automatically from the configured payroll formula."
                style="background:#F1F4FA;cursor:not-allowed;">
         <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;" id="ptRuleNote"></p>
+        </div>
         <p style="font-size:11.5px;color:var(--muted);margin:8px 0 0;" id="statutoryHint"></p>
       </div>
 
@@ -7256,6 +7262,13 @@ function employeeModalHtml(emp){
 
       <div class="field-group">
         <div class="sec-title">Bond &amp; retention money</div>
+        <label class="field">Is a retention bond applicable?</label>
+        <select class="field-input" id="f_bondApplicable" onchange="toggleBondFields()">
+          <option value="no" ${emp.bondApplicable==='yes'?'':'selected'}>No</option>
+          <option value="yes" ${emp.bondApplicable==='yes'?'selected':''}>Yes</option>
+        </select>
+        <div id="bondFields" class="hidden">
+        <div style="height:12px"></div>
         <label class="field">Bond start date</label>
         <input type="date" id="f_bondStart" value="${emp.bondStart||''}">
         <div style="height:12px"></div>
@@ -7267,7 +7280,8 @@ function employeeModalHtml(emp){
         <div style="height:12px"></div>
         <label class="field">Number of months to deduct over</label>
         <input type="number" id="f_retentionMonths" placeholder="e.g. 12" value="${emp.retentionMonths||''}">
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">If retention money is set, it's split evenly across these months starting from the bond start date, and deducted from the Salary Sheet automatically each month — shown as its own line item, and tracked in the Retention Money Detail report.</p>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Retention money is split evenly across these months from the bond start date and deducted on the Salary Sheet each month, as its own line and in the Retention Money Detail report.</p>
+        </div>
       </div>
 
       <div class="field-group">
@@ -7323,6 +7337,23 @@ function toggleTrackingFields(){
   const needsTracking = document.getElementById('f_needsTracking').value === 'yes';
   document.getElementById('trackingLoginFields').classList.toggle('hidden', !needsTracking);
 }
+// Bond details only make sense once a bond exists. Hidden rather than greyed
+// out: a form asking for a bond end date for somebody who has no bond is a
+// question that should not be on screen at all.
+function toggleBondFields(){
+  const on = (document.getElementById('f_bondApplicable') || {}).value === 'yes';
+  const box = document.getElementById('bondFields');
+  if(box) box.classList.toggle('hidden', !on);
+  // Clearing on "No" keeps the record honest — a bond switched off must not
+  // leave a retention amount behind that the Salary Sheet would keep deducting.
+  if(!on){
+    ['f_bondStart','f_bondEnd','f_retentionMoney','f_retentionMonths'].forEach(id => {
+      const el = document.getElementById(id);
+      if(el) el.value = '';
+    });
+  }
+}
+
 function toggleLeaveFieldsForType(){
   const isResident = document.getElementById('f_employeeType').value === 'resident';
   document.getElementById('leaveOpeningFields').classList.toggle('hidden', isResident);
@@ -7338,6 +7369,10 @@ function toggleStatutoryFieldsForHeading(){
     // toggle, leaving the other fields in whatever state they were in.
     if(!input) return;
     const applies = heading[flag];
+    // Hide the whole field, not just disable it. A greyed-out box still reads
+    // as something that ought to be filled in; an absent one does not.
+    const wrap = document.getElementById(id.replace('f_', '').replace('Deduction', '') + 'Wrap');
+    if(wrap) wrap.classList.toggle('hidden', !applies);
     // PT stays read-only whether or not it applies: it is derived from gross,
     // never entered. PF and ESI have no configured rate, so they are typed.
     // PF and PT are both derived; only ESI is genuinely typed.
@@ -7829,6 +7864,7 @@ async function saveEmployeeForm(){
     pt: payrollValue('pt'),
     advanceOpening: Number(document.getElementById('f_advanceOpening').value)||0,
     leaveOpeningFrom: (document.getElementById('f_leaveOpeningFrom') || {}).value || '',
+    bondApplicable: document.getElementById('f_bondApplicable').value,
     esiDisabled: document.getElementById('f_esiDisabled').value,
     esiCoveredAtPeriodStart: document.getElementById('f_esiCovered').value,
     esiEmployer: payrollValue('esiEmployer'),
