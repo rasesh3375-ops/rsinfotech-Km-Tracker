@@ -8136,7 +8136,9 @@ async function renderReportsTab(){
     {key:'retention', label:'Retention Money Detail'}
   ];
   document.getElementById('reportCardsBox').innerHTML = reports.map(r => {
-    const withData = employees.filter(e => reportHasData(r.key, e)).length;
+    // Count only the people the report will actually show, so the card does
+    // not promise rows that are then filtered out.
+    const withData = employees.filter(e => e.employmentStatus !== 'left' && reportHasData(r.key, e)).length;
     return `<section class="block">
       <h2 style="margin:0 0 4px;font-size:17px;">${r.label}</h2>
       <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">${withData} employees with data</p>
@@ -8836,7 +8838,11 @@ function whatsappHolidayList(){
 }
 
 async function viewReport(key, label){
-  const employees = await getEmployees();
+  // Every one of these reports is about current staff — contact details,
+  // birthdays, increments due, bonus, salary, CTC, loans and retention. A
+  // leaver belongs in the Left Employees report, not in a bonus list somebody
+  // pays from.
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
   const box = document.getElementById('reportBox_' + key);
   const fsBtn = `<button class="btn ghost full" style="margin-top:8px;" onclick="openFullscreenView('${label.replace(/'/g,"\\'")}','reportBox_${key}')">⛶ Full screen</button>`;
   let rows = '';
