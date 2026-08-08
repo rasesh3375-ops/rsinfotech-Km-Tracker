@@ -7171,6 +7171,21 @@ function employeeModalHtml(emp){
         <div style="height:14px"></div>
         <label class="field">Rate of pay (monthly)</label>
         <input type="number" id="f_ratePay" placeholder="0" value="${emp.ratePay||''}" oninput="renderPayrollBreakdown()">
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;">
+          <strong style="color:var(--navy);">This is the gross, not take-home.</strong>
+          Rate of Pay is the whole monthly figure agreed with the employee, and it already
+          includes the employee's own PF (12%), ESI (0.75%) and Professional Tax — those come
+          <em>out</em> of it, so Net Salary is lower. It also splits into Basic, HRA and LTA by
+          the salary heading; nothing is added on top of it.
+          <br><br>
+          <strong style="color:var(--navy);">The employer's side is separate.</strong>
+          The company's PF (12%, split into pension and EPF), ESI (3.25%), PF admin (0.5%) and
+          EDLI (0.5%) are <em>not</em> inside this figure — they are paid over and above it, and
+          appear as Employer Contribution and CTC in the breakdown below.
+          <br><br>
+          So when agreeing a figure with a candidate: quote this as gross, tell them take-home is
+          less, and remember CTC to the company is more.
+        </p>
         <div id="payrollBreakdownBox"></div>
         <div style="height:12px"></div>
         <label class="field">Advance for temporary</label>
