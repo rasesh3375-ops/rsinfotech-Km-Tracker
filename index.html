@@ -6445,13 +6445,18 @@ async function buildHrDashboardHome(box){
   // `route` turns the card into a shortcut into that module — it goes through
   // hrNavigate, the same call the sidebar makes, so there is one page per
   // module and whatever governs access there governs it here too.
-  const kpi = (icon, cap, n, sub, tone, id, route) => `
-    <div class="kpi${route ? ' kpi-link' : ''}" data-tone="${tone || 'indigo'}"${
-      route ? ` onclick="hrNavigate('${route}')" role="button" tabindex="0"
-      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();hrNavigate('${route}');}"` : ''}>
+  // `route` opens a module; `action` runs something in place, for figures with
+  // no screen of their own.
+  const kpi = (icon, cap, n, sub, tone, id, route, action) => {
+    const go = route ? `hrNavigate('${route}')` : (action || '');
+    return `
+    <div class="kpi${go ? ' kpi-link' : ''}" data-tone="${tone || 'indigo'}"${
+      go ? ` onclick="${go}" role="button" tabindex="0"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${go};}"` : ''}>
       <div class="top"><div class="ic">${icon}</div><div class="cap">${cap}</div></div>
       <div class="n"${id ? ` id="${id}"` : ''}>${n}</div><div class="sub">${sub}</div>
     </div>`;
+  };
 
   const bdayList = birthdays.length ? birthdays.slice(0, 5).map(b => `
     <div class="feed-row">
@@ -6491,9 +6496,10 @@ async function buildHrDashboardHome(box){
     <div class="kpi-row">
       ${kpi('👥','Employee Master', onRoll.length, 'Open employee records', 'indigo', null, 'employees')}
       ${kpi('🗓️','Attendance Sheet', '', 'Mark and review attendance', 'green', null, 'attendance')}
-      ${kpi('🚫','Absent Today', '—', 'Marked absent or LP', 'red', 'dashAbsentCount')}
-      ${kpi('📄','Documents Expiring', expiring.length, 'Within 30 days', 'amber')}
+      ${kpi('🚫','Absent Today', '—', 'Tap to see who', 'red', 'dashAbsentCount', null, 'toggleAbsentPanel()')}
+      ${kpi('📄','Documents Expiring', expiring.length, 'Within 30 days — tap to open', 'amber', null, 'expiry')}
     </div>
+    <div id="dashAbsentPanel" class="hidden"></div>
 
     <div class="dash-2col">
       <details class="dash-card dash-fold" open>
@@ -6592,6 +6598,36 @@ async function buildHrDashboardHome(box){
 // Read straight from the Attendance Sheet's own codes, so the dashboard and the
 // sheet cannot disagree.
 const ABSENT_TODAY_CODES = { A:'Absent', LP:'Leave without pay', HLP:'Half day (LP)' };
+let dashAbsentList = [], dashAbsentUnread = 0;
+
+function toggleAbsentPanel(){
+  const box = document.getElementById('dashAbsentPanel');
+  if(!box) return;
+  const opening = box.classList.contains('hidden');
+  box.classList.toggle('hidden', !opening);
+  if(opening){
+    renderAbsentPanel();
+    box.scrollIntoView({ behavior:'smooth', block:'nearest' });
+  }
+}
+
+function renderAbsentPanel(){
+  const box = document.getElementById('dashAbsentPanel');
+  if(!box) return;
+  const note = dashAbsentUnread
+    ? `<p class="dash-muted" style="margin-top:8px;">${dashAbsentUnread} employee(s) couldn't be checked — attendance didn't load.</p>` : '';
+  box.innerHTML = `<div class="dash-card">
+    <div class="card-head"><h3>Absent today — ${escapeHtml(todayStr())}</h3>
+      <button class="linkbtn" style="padding:0" onclick="hrNavigate('attendance')">Attendance sheet</button></div>
+    ${dashAbsentList.length
+      ? dashAbsentList.sort((a, b) => a.name.localeCompare(b.name)).map(a => `
+          <div class="legend-row"><span><strong>${escapeHtml(a.name)}</strong>
+            <span class="inc-sub">${escapeHtml(a.dept)}</span></span>
+            <span class="feed-tag" style="background:#FBE3E0;color:#B23A32;">${escapeHtml(a.label)}</span></div>`).join('')
+      : '<p class="dash-muted">Nobody is marked absent today.</p>'}
+    ${note}
+  </div>`;
+}
 let dashAbsentRender = 0;
 
 async function loadDashboardAbsentToday(onRoll){
@@ -6613,6 +6649,9 @@ async function loadDashboardAbsentToday(onRoll){
   if(token !== dashAbsentRender) return;
 
   let absent = 0, unread = 0;
+  // Kept so the panel can name them, not just count them — "3 absent" prompts
+  // the question "which three?" every time.
+  dashAbsentList = [];
   onRoll.forEach((e, i) => {
     const att = atts[i];
     // A failed read is unknown, not absent; a day nobody has marked yet is not
@@ -6620,8 +6659,13 @@ async function loadDashboardAbsentToday(onRoll){
     // at work on the count.
     if(!att){ unread++; return; }
     const entry = att[today];
-    if(entry && ABSENT_TODAY_CODES[entry.code]) absent++;
+    const label = entry && ABSENT_TODAY_CODES[entry.code];
+    if(label){ absent++; dashAbsentList.push({ name: e.name || e.id, dept: e.department || '—', label }); }
   });
+  dashAbsentUnread = unread;
+  // If the panel is already open, refresh it in place.
+  const openPanel = document.getElementById('dashAbsentPanel');
+  if(openPanel && !openPanel.classList.contains('hidden')) renderAbsentPanel();
   if(countEl){
     countEl.textContent = absent;
     if(unread) countEl.title = unread + ' employee(s) could not be checked — attendance did not load.';
