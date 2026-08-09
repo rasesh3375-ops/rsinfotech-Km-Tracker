@@ -1529,6 +1529,24 @@
             <p style="font-size:11.5px;color:var(--muted);margin:8px 0 0;">Designation, department and date of joining below are pulled from Employee Master automatically — edit them here only if this document needs something different.</p>
             <div style="height:14px"></div>
           </div>
+          <div id="genLoanFieldsWrap" class="hidden">
+            <div class="sec-title">Request details</div>
+            <div id="genLoanStandingBox"></div>
+            <label class="field">Amount requested</label>
+            <input type="number" id="genLoanAmount" placeholder="0" oninput="renderLoanRequestHint()" />
+            <div style="height:12px"></div>
+            <label class="field">Reason for the request</label>
+            <textarea class="field-input" id="genLoanReason" rows="3" placeholder="e.g. Medical treatment for a family member"></textarea>
+            <div style="height:12px"></div>
+            <label class="field">Repay over how many months?</label>
+            <input type="number" id="genLoanMonths" placeholder="e.g. 10" oninput="renderLoanRequestHint()" />
+            <div id="genLoanEmiHint" class="bonus-callout" style="margin-top:10px;"></div>
+            <div style="height:12px"></div>
+            <label class="field">Needed by</label>
+            <input type="date" id="genLoanNeededBy" />
+            <p style="font-size:11.5px;color:var(--muted);margin:8px 0 0;">Leave any of these blank and the printed form keeps a ruled line there to be filled in by hand.</p>
+            <div style="height:14px"></div>
+          </div>
           <label class="field">Designation</label>
           <input type="text" id="genDesignation" />
           <div style="height:12px"></div>
@@ -10033,6 +10051,7 @@ async function autoFillGeneratorFromEmployee(){
   document.getElementById('genDesignation').value = emp.designation || '';
   document.getElementById('genDepartment').value = emp.department || '';
   document.getElementById('genDoj').value = emp.doj || '';
+  if(LETTER_TYPES[selectedLetterIdx] === 'Loan/Advance Request Form') showLoanStanding();
 }
 function selectLetterType(idx){
   selectedLetterIdx = idx;
@@ -10040,9 +10059,56 @@ function selectLetterType(idx){
   toggleGeneratorFieldsForType();
 }
 function toggleGeneratorFieldsForType(){
-  const isOffer = LETTER_TYPES[selectedLetterIdx] === 'Offer Letter';
+  const type = LETTER_TYPES[selectedLetterIdx];
+  const isOffer = type === 'Offer Letter';
+  const isLoan = type === 'Loan/Advance Request Form';
   document.getElementById('genOfferFieldsWrap').classList.toggle('hidden', !isOffer);
   document.getElementById('genEmpSelectWrap').classList.toggle('hidden', isOffer);
+  const loanWrap = document.getElementById('genLoanFieldsWrap');
+  if(loanWrap){
+    loanWrap.classList.toggle('hidden', !isLoan);
+    if(isLoan){ renderLoanRequestHint(); showLoanStanding(); }
+  }
+}
+
+// The instalment is the number the approver actually argues about, so it is
+// worked out on screen rather than left to be discovered after the form is
+// signed.
+function renderLoanRequestHint(){
+  const box = document.getElementById('genLoanEmiHint');
+  if(!box) return;
+  const amount = Number((document.getElementById('genLoanAmount') || {}).value) || 0;
+  const months = Number((document.getElementById('genLoanMonths') || {}).value) || 0;
+  if(!amount || !months){
+    box.textContent = 'Enter an amount and a number of months to see the monthly instalment.';
+    return;
+  }
+  box.textContent = 'Monthly instalment: ₹' + fmtMoney(Math.round((amount / months) * 100) / 100) +
+                    ' for ' + months + ' month(s).';
+}
+
+// What the employee already owes, shown before the request is approved rather
+// than after. An advance still being recovered is the single most useful thing
+// to know when somebody asks for another one.
+async function showLoanStanding(){
+  const box = document.getElementById('genLoanStandingBox');
+  if(!box) return;
+  const empId = (document.getElementById('genEmpSelect') || {}).value;
+  if(!empId){ box.innerHTML = ''; return; }
+  const emp = (await getEmployees()).find(e => e.id === empId);
+  if(!emp){ box.innerHTML = ''; return; }
+  const parts = [];
+  if((Number(emp.loanAmount) || 0) > 0 && emp.loanStatus === 'active'){
+    parts.push('an active loan of ₹' + fmtMoney(Number(emp.loanAmount) || 0) +
+               ' at ₹' + fmtMoney(Number(emp.emiPerMonth) || 0) + ' a month');
+  }
+  if((Number(emp.advanceOpening) || 0) > 0){
+    parts.push('an advance balance of ₹' + fmtMoney(Number(emp.advanceOpening) || 0) + ' brought forward');
+  }
+  box.innerHTML = parts.length
+    ? '<p class="pol-warn" style="font-size:12.5px;margin:0 0 12px;">Already on record: ' +
+      escapeHtml(parts.join(', ')) + '.</p>'
+    : '<p style="font-size:12.5px;color:var(--muted);margin:0 0 12px;">Nothing outstanding on record for this employee.</p>';
 }
 
 function letterTemplate(type, f){
@@ -10080,8 +10146,31 @@ function letterTemplate(type, f){
       return `${company}\n\nDate: ${issueDate}\n\nTO WHOMSOEVER IT MAY CONCERN\n\nThis is to certify that ${name}, who worked as ${designation} in the ${department} department, has cleared all dues, returned all company assets and has no outstanding financial obligation towards ${company} as of ${lwd || issueDate}.\n\nFor ${company}\n\nAuthorised Signatory`;
     case 'Full & Final Settlement Letter':
       return `${company}\n\nDate: ${issueDate}\n\nDear ${name},\n\nThis letter is to inform you that your full and final settlement with respect to your employment as ${designation} (last working day ${lwd}) has been processed. Any dues payable will be credited to your registered bank account.\n\nFor ${company}\n\nAuthorised Signatory`;
-    case 'Loan/Advance Request Form':
-      return `${company}\n\nDate: ${issueDate}\n\nLOAN / ADVANCE REQUEST FORM\n\nEmployee name: ${name}\nDesignation: ${designation}\nDepartment: ${department}\nDate of joining: ${doj}\n\nRequested amount: ____________________\nReason: ____________________________________________\n\nEmployee signature: ____________________\nHR approval: ____________________`;
+    case 'Loan/Advance Request Form': {
+      // A value that was entered is printed; one that was not keeps its ruled
+      // line, so the same document works whether it is filled in here or by
+      // hand across a desk.
+      const line = '____________________';
+      const rupees = n => n ? '₹' + fmtMoney(n) : line;
+      const owed = [];
+      if(f.existingLoan) owed.push('Loan of ₹' + fmtMoney(f.existingLoan) +
+                                   ', recovering ₹' + fmtMoney(f.existingEmi) + ' a month');
+      if(f.existingAdvance) owed.push('Advance balance of ₹' + fmtMoney(f.existingAdvance));
+      const standing = 'EXISTING POSITION\n' +
+        (owed.length ? owed.join('\n') : 'Nothing outstanding on record.') + '\n\n';
+      return `${company}\n\nDate: ${issueDate}\n\nLOAN / ADVANCE REQUEST FORM\n\n` +
+        `Employee name: ${name}\nDesignation: ${designation}\nDepartment: ${department}\n` +
+        `Date of joining: ${doj}\n\n${standing}` +
+        `REQUEST\nAmount requested: ${rupees(f.loanAmount)}\n` +
+        `Reason: ${f.loanReason || '____________________________________________'}\n` +
+        `Needed by: ${f.loanNeededBy ? niceDate_(f.loanNeededBy) : line}\n\n` +
+        `PROPOSED REPAYMENT\nRepay over: ${f.loanMonths ? f.loanMonths + ' month(s)' : line}\n` +
+        `Monthly instalment: ${rupees(f.loanInstalment)}\n\n` +
+        `I request the above loan / advance and authorise the company to recover it from my monthly salary as set out here.\n\n` +
+        `Employee signature: ${line}\n\nFOR OFFICE USE\nApproved / Not approved: ${line}\n` +
+        `Sanctioned amount: ${line}\nRecovery to begin from: ${line}\n\nHR approval: ${line}\n` +
+        `Management approval: ${line}`;
+    }
     case 'Salary Slip':
       return `${company}\n\nSALARY SLIP — ${issueDate}\n\nEmployee name: ${name}\nDesignation: ${designation}\nDepartment: ${department}\n\nEARNINGS\nBasic: ${f.basic||0}\nHRA: ${f.hra||0}\nLTA: ${f.lta||0}\nOther allowances: ${f.other||0}\nGross: ${f.gross||0}\n\nDEDUCTIONS\nPF: ${f.pf||0}\nESI: ${f.esiDeduction||0}\nPT: ${f.pt||0}\nEMI (if applicable): ${f.emi||0}\n\nNET PAY: ${f.net||0}`;
     default:
@@ -10149,6 +10238,20 @@ async function generateLetter(){
   if(isOffer){
     f.offeredSalary = document.getElementById('genOfferedSalary').value.trim();
     f.replyBy = document.getElementById('genOfferReplyBy').value;
+  }
+  if(type === 'Loan/Advance Request Form'){
+    f.loanAmount = Number(document.getElementById('genLoanAmount').value) || 0;
+    f.loanReason = document.getElementById('genLoanReason').value.trim();
+    f.loanMonths = Number(document.getElementById('genLoanMonths').value) || 0;
+    f.loanNeededBy = document.getElementById('genLoanNeededBy').value;
+    f.loanInstalment = (f.loanAmount && f.loanMonths)
+      ? Math.round((f.loanAmount / f.loanMonths) * 100) / 100 : 0;
+    if(matched){
+      f.existingLoan = (Number(matched.loanAmount) || 0) > 0 && matched.loanStatus === 'active'
+        ? Number(matched.loanAmount) || 0 : 0;
+      f.existingEmi = f.existingLoan ? (Number(matched.emiPerMonth) || 0) : 0;
+      f.existingAdvance = Number(matched.advanceOpening) || 0;
+    }
   }
   if(matched && type === 'Salary Slip'){
     // Derived from Rate of Pay and the salary heading, not from stored Basic
