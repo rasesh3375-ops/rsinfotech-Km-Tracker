@@ -1530,6 +1530,7 @@
             <div style="height:14px"></div>
           </div>
           <div id="genLoanFieldsWrap" class="hidden">
+            <div id="genLoanPendingBox"></div>
             <div class="sec-title">Request details</div>
             <div id="genLoanStandingBox"></div>
             <label class="field">Amount requested</label>
@@ -4678,6 +4679,44 @@ function closeFullscreenView(){
 }
 
 
+// Loan recovery, month by month, from the two figures HR already enters — the
+// amount and the instalment. How many months it runs is not stored: it is
+// however many instalments the amount needs, so the schedule can never
+// disagree with itself, and the final instalment is the remainder so recovery
+// stops exactly at the loan and never overshoots it.
+//
+// A loan with no recovery start month deducts nothing. That is deliberate: an
+// EMI has never actually come off the Salary Sheet, so every loan on record
+// today was entered on the understanding that it would not. Starting to deduct
+// from somebody's salary because their record was migrated is not a decision
+// this code gets to make — HR sets the start month, and only then does money
+// move.
+function computeLoanEmiForMonth(emp, year, month){
+  if(emp.loanStatus !== 'active') return 0;
+  const amount = Number(emp.loanAmount) || 0;
+  const emi = Number(emp.emiPerMonth) || 0;
+  if(!amount || !emi || !emp.loanStartMonth) return 0;
+  const [sy, sm] = String(emp.loanStartMonth).split('-').map(Number);
+  if(!sy || !sm) return 0;
+  const offset = (year * 12 + (month - 1)) - (sy * 12 + (sm - 1));
+  if(offset < 0) return 0;
+  const remaining = Math.round((amount - Math.min(amount, emi * offset)) * 100) / 100;
+  return remaining <= 0 ? 0 : Math.min(emi, remaining);
+}
+
+// What is still owed once the given month's instalment has been taken.
+function loanBalanceAfterMonth(emp, year, month){
+  const amount = Number(emp.loanAmount) || 0;
+  if(!amount || emp.loanStatus !== 'active') return 0;
+  if(!emp.loanStartMonth) return amount;
+  const [sy, sm] = String(emp.loanStartMonth).split('-').map(Number);
+  if(!sy || !sm) return amount;
+  const offset = (year * 12 + (month - 1)) - (sy * 12 + (sm - 1));
+  if(offset < 0) return amount;
+  const emi = Number(emp.emiPerMonth) || 0;
+  return Math.max(0, Math.round((amount - Math.min(amount, emi * (offset + 1))) * 100) / 100);
+}
+
 function computeRetentionForMonth(emp, year, month){
   const money = Number(emp.retentionMoney) || 0;
   const months = Number(emp.retentionMonths) || 0;
@@ -4764,7 +4803,9 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   const advance = Number(emp.advance) || 0;
   const [dYear, dMonth] = dateList[0].split('-').map(Number);
   const retention = computeRetentionForMonth(emp, dYear, dMonth);
-  const totalDeduction = pf + esi + pt + advanceTemp + advance + retention;
+  const loanEmi = computeLoanEmiForMonth(emp, dYear, dMonth);
+  const loanBalance = loanBalanceAfterMonth(emp, dYear, dMonth);
+  const totalDeduction = pf + esi + pt + advanceTemp + advance + loanEmi + retention;
   // Money already in the employee's account. It is not a statutory deduction
   // and must not sit inside Total Deduction — Gross, PF, ESI and PT are all
   // computed as if it were not there. It only reduces what is left to pay.
@@ -4792,6 +4833,7 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   const fullDayLeaveBal = Math.max(0, (Number(emp.elOpening) || 0) - ytd.el);
   const halfDayLeaveBal = Math.max(0, (Number(emp.slOpening) || 0) - ytd.sl);
   return { rate, leaveDays, leaveAmount, basic, hra, lta, gross, pf, esi, pt, advanceTemp, advance,
+           loanEmi, loanBalance,
            retention, totalDeduction, netSalary, pen, employerPf, pfAdmin, edli, employerCont, ctc,
            esiEmployer, advanceBalance, fullDayLeaveBal, halfDayLeaveBal,
            pfWage, pfType: pfCalc.type, pfApplicable: pfCalc.applicable, pfReason: pfCalc.reason,
@@ -4821,12 +4863,12 @@ async function renderSalarySheet(){
   // Employer columns follow Net Salary, never inside Total Deduction — they are
   // company cost, not money withheld from the employee.
   const cols = ['SR NO','Name','Rate of Pay','Leave Days','Leave Amount','Basic','HRA','LTA','Gross',
-    'PF','ESI','PT','Advance Temp','Advance','Retention','Total Deduction','Net Before Direct','Paid Directly','Net Salary',
+    'PF','ESI','PT','Advance Temp','Advance','Loan EMI','Retention','Total Deduction','Net Before Direct','Paid Directly','Net Salary',
     'PEN','Employer PF','PF Admin','EDLI','ESI Employer','Employer Cont.','CTC',
-    'Advance Balance','Full Day Leave Bal','Half Day Leave Bal'];
+    'Advance Balance','Loan Balance','Full Day Leave Bal','Half Day Leave Bal'];
   let bodyRows = '';
   let srNo = 1;
-  const grand = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0, directPaid:0, netBeforeDirect:0 };
+  const grand = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, loanEmi:0, loanBalance:0, retention:0, totalDeduction:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0, directPaid:0, netBeforeDirect:0 };
   const csvRows = [];
 
   for(const headingKey of SALARY_HEADING_ORDER){
@@ -4834,44 +4876,44 @@ async function renderSalarySheet(){
     if(!group.length) continue;
     bodyRows += `<tr class="sal-heading"><td colspan="30">${SALARY_HEADINGS[headingKey].label}</td></tr>`;
     csvRows.push([SALARY_HEADINGS[headingKey].label]);
-    const sub = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0, directPaid:0, netBeforeDirect:0 };
+    const sub = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, loanEmi:0, loanBalance:0, retention:0, totalDeduction:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0, directPaid:0, netBeforeDirect:0 };
     for(const emp of group){
       const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
       bodyRows += `<tr><td>${srNo++}</td><td class="sal-name">${escapeHtml(emp.name)}</td><td>${fmtMoney(s.rate)}</td><td>${s.leaveDays}</td><td>${fmtMoney(s.leaveAmount)}</td>` +
         `<td>${fmtMoney(s.basic)}</td><td>${fmtMoney(s.hra)}</td><td>${fmtMoney(s.lta)}</td><td>${fmtMoney(s.gross)}</td>` +
-        `<td>${fmtMoney(s.pf)}</td><td>${fmtMoney(s.esi)}</td><td>${fmtMoney(s.pt)}</td><td>${fmtMoney(s.advanceTemp)}</td><td>${fmtMoney(s.advance)}</td><td>${fmtMoney(s.retention)}</td>` +
+        `<td>${fmtMoney(s.pf)}</td><td>${fmtMoney(s.esi)}</td><td>${fmtMoney(s.pt)}</td><td>${fmtMoney(s.advanceTemp)}</td><td>${fmtMoney(s.advance)}</td><td>${fmtMoney(s.loanEmi)}</td><td>${fmtMoney(s.retention)}</td>` +
         `<td>${fmtMoney(s.totalDeduction)}</td><td>${fmtMoney(s.netBeforeDirect)}</td>` +
         `<td>${s.directPaid ? fmtMoney(s.directPaid) : '—'}</td><td><strong>${fmtMoney(s.netSalary)}</strong></td>` +
         `<td>${fmtMoney(s.pen)}</td><td>${fmtMoney(s.employerPf)}</td><td>${fmtMoney(s.pfAdmin)}</td>` +
         `<td>${fmtMoney(s.edli)}</td><td>${fmtMoney(s.esiEmployer)}</td><td>${fmtMoney(s.employerCont)}</td><td>${fmtMoney(s.ctc)}</td>` +
-        `<td>${fmtMoney(s.advanceBalance)}</td><td>${s.fullDayLeaveBal}</td><td>${s.halfDayLeaveBal}</td></tr>`;
-      csvRows.push([srNo-1, emp.name, s.rate, s.leaveDays, s.leaveAmount, s.basic, s.hra, s.lta, s.gross, s.pf, s.esi, s.pt, s.advanceTemp, s.advance, s.retention, s.totalDeduction, s.netBeforeDirect, s.directPaid, s.netSalary,
+        `<td>${fmtMoney(s.advanceBalance)}</td><td>${fmtMoney(s.loanBalance)}</td><td>${s.fullDayLeaveBal}</td><td>${s.halfDayLeaveBal}</td></tr>`;
+      csvRows.push([srNo-1, emp.name, s.rate, s.leaveDays, s.leaveAmount, s.basic, s.hra, s.lta, s.gross, s.pf, s.esi, s.pt, s.advanceTemp, s.advance, s.loanEmi, s.retention, s.totalDeduction, s.netBeforeDirect, s.directPaid, s.netSalary,
         s.pen, s.employerPf, s.pfAdmin, s.edli, s.esiEmployer, s.employerCont, s.ctc,
-        s.advanceBalance, s.fullDayLeaveBal, s.halfDayLeaveBal]);
-      ['rate','leaveAmount','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','retention','totalDeduction','netSalary','pen','employerPf','pfAdmin','edli','employerCont','ctc','esiEmployer','advanceBalance','directPaid','netBeforeDirect'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; });
+        s.advanceBalance, s.loanBalance, s.fullDayLeaveBal, s.halfDayLeaveBal]);
+      ['rate','leaveAmount','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','loanEmi','retention','totalDeduction','netSalary','pen','employerPf','pfAdmin','edli','employerCont','ctc','esiEmployer','advanceBalance','loanBalance','directPaid','netBeforeDirect'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; });
     }
     bodyRows += `<tr class="sal-subtotal"><td></td><td>Subtotal</td><td>${fmtMoney(sub.rate)}</td><td></td><td>${fmtMoney(sub.leaveAmount)}</td>` +
       `<td>${fmtMoney(sub.basic)}</td><td>${fmtMoney(sub.hra)}</td><td>${fmtMoney(sub.lta)}</td><td>${fmtMoney(sub.gross)}</td>` +
-      `<td>${fmtMoney(sub.pf)}</td><td>${fmtMoney(sub.esi)}</td><td>${fmtMoney(sub.pt)}</td><td>${fmtMoney(sub.advanceTemp)}</td><td>${fmtMoney(sub.advance)}</td><td>${fmtMoney(sub.retention)}</td>` +
+      `<td>${fmtMoney(sub.pf)}</td><td>${fmtMoney(sub.esi)}</td><td>${fmtMoney(sub.pt)}</td><td>${fmtMoney(sub.advanceTemp)}</td><td>${fmtMoney(sub.advance)}</td><td>${fmtMoney(sub.loanEmi)}</td><td>${fmtMoney(sub.retention)}</td>` +
       `<td>${fmtMoney(sub.totalDeduction)}</td><td>${fmtMoney(sub.netBeforeDirect)}</td>` +
       `<td>${sub.directPaid ? fmtMoney(sub.directPaid) : '—'}</td><td>${fmtMoney(sub.netSalary)}</td>` +
       `<td>${fmtMoney(sub.pen)}</td><td>${fmtMoney(sub.employerPf)}</td><td>${fmtMoney(sub.pfAdmin)}</td>` +
       `<td>${fmtMoney(sub.edli)}</td><td>${fmtMoney(sub.esiEmployer)}</td><td>${fmtMoney(sub.employerCont)}</td><td>${fmtMoney(sub.ctc)}</td>` +
-      `<td>${fmtMoney(sub.advanceBalance)}</td><td></td><td></td></tr>`;
-    csvRows.push(['', 'Subtotal', sub.rate, '', sub.leaveAmount, sub.basic, sub.hra, sub.lta, sub.gross, sub.pf, sub.esi, sub.pt, sub.advanceTemp, sub.advance, sub.retention, sub.totalDeduction, sub.netSalary]);
+      `<td>${fmtMoney(sub.advanceBalance)}</td><td>${fmtMoney(sub.loanBalance)}</td><td></td><td></td></tr>`;
+    csvRows.push(['', 'Subtotal', sub.rate, '', sub.leaveAmount, sub.basic, sub.hra, sub.lta, sub.gross, sub.pf, sub.esi, sub.pt, sub.advanceTemp, sub.advance, sub.loanEmi, sub.retention, sub.totalDeduction, sub.netSalary]);
   }
 
   bodyRows += `<tr class="sal-grandtotal"><td></td><td>Grand Total</td><td>${fmtMoney(grand.rate)}</td><td></td><td>${fmtMoney(grand.leaveAmount)}</td>` +
     `<td>${fmtMoney(grand.basic)}</td><td>${fmtMoney(grand.hra)}</td><td>${fmtMoney(grand.lta)}</td><td>${fmtMoney(grand.gross)}</td>` +
-    `<td>${fmtMoney(grand.pf)}</td><td>${fmtMoney(grand.esi)}</td><td>${fmtMoney(grand.pt)}</td><td>${fmtMoney(grand.advanceTemp)}</td><td>${fmtMoney(grand.advance)}</td><td>${fmtMoney(grand.retention)}</td>` +
+    `<td>${fmtMoney(grand.pf)}</td><td>${fmtMoney(grand.esi)}</td><td>${fmtMoney(grand.pt)}</td><td>${fmtMoney(grand.advanceTemp)}</td><td>${fmtMoney(grand.advance)}</td><td>${fmtMoney(grand.loanEmi)}</td><td>${fmtMoney(grand.retention)}</td>` +
     `<td>${fmtMoney(grand.totalDeduction)}</td><td>${fmtMoney(grand.netBeforeDirect)}</td>` +
     `<td>${grand.directPaid ? fmtMoney(grand.directPaid) : '—'}</td><td>${fmtMoney(grand.netSalary)}</td>` +
     `<td>${fmtMoney(grand.pen)}</td><td>${fmtMoney(grand.employerPf)}</td><td>${fmtMoney(grand.pfAdmin)}</td>` +
     `<td>${fmtMoney(grand.edli)}</td><td>${fmtMoney(grand.esiEmployer)}</td><td>${fmtMoney(grand.employerCont)}</td><td>${fmtMoney(grand.ctc)}</td>` +
-    `<td>${fmtMoney(grand.advanceBalance)}</td><td></td><td></td></tr>`;
-  csvRows.push(['', 'Grand Total', grand.rate, '', grand.leaveAmount, grand.basic, grand.hra, grand.lta, grand.gross, grand.pf, grand.esi, grand.pt, grand.advanceTemp, grand.advance, grand.retention, grand.totalDeduction, grand.netBeforeDirect,
+    `<td>${fmtMoney(grand.advanceBalance)}</td><td>${fmtMoney(grand.loanBalance)}</td><td></td><td></td></tr>`;
+  csvRows.push(['', 'Grand Total', grand.rate, '', grand.leaveAmount, grand.basic, grand.hra, grand.lta, grand.gross, grand.pf, grand.esi, grand.pt, grand.advanceTemp, grand.advance, grand.loanEmi, grand.retention, grand.totalDeduction, grand.netBeforeDirect,
     grand.directPaid, grand.netSalary, grand.pen, grand.employerPf, grand.pfAdmin, grand.edli, grand.esiEmployer, grand.employerCont, grand.ctc,
-    grand.advanceBalance, '', '']);
+    grand.advanceBalance, grand.loanBalance, '', '']);
 
   saveFileToDrive(['HR Management', financialYearLabel(monthVal + '-01'), 'Dashboard', 'Salary Sheet'], `Salary Sheet - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
 
@@ -5111,27 +5153,27 @@ async function renderApprenticeSalaryReport(){
   // Paid Directly gets its own column between the deductions and what is left
   // to pay, so the report shows the stipend that already reached the account
   // rather than a net figure nobody can reconcile.
-  const cols = ['Name','Rate of Pay','Leave Days','Leave Amount','Basic','HRA','LTA','Gross','Advance Temp','Advance','Retention','Total Deduction','Net Before Direct','Paid Directly','Net Payable'];
+  const cols = ['Name','Rate of Pay','Leave Days','Leave Amount','Basic','HRA','LTA','Gross','Advance Temp','Advance','Loan EMI','Retention','Total Deduction','Net Before Direct','Paid Directly','Net Payable'];
   const csvRows = [];
   let srNo = 1;
-  const grand = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netBeforeDirect:0, directPaid:0, netSalary:0 };
+  const grand = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, advanceTemp:0, advance:0, loanEmi:0, retention:0, totalDeduction:0, netBeforeDirect:0, directPaid:0, netSalary:0 };
   let bodyRows = '';
   for(const emp of employees){
     const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
     bodyRows += `<tr><td>${escapeHtml(emp.name)}</td><td class="num">${fmtMoney(s.rate)}</td><td class="num">${s.leaveDays}</td><td class="num">${fmtMoney(s.leaveAmount)}</td>` +
       `<td class="num">${fmtMoney(s.basic)}</td><td class="num">${fmtMoney(s.hra)}</td><td class="num">${fmtMoney(s.lta)}</td><td class="num">${fmtMoney(s.gross)}</td>` +
-      `<td class="num">${fmtMoney(s.advanceTemp)}</td><td class="num">${fmtMoney(s.advance)}</td><td class="num">${fmtMoney(s.retention)}</td><td class="num">${fmtMoney(s.totalDeduction)}</td>` +
+      `<td class="num">${fmtMoney(s.advanceTemp)}</td><td class="num">${fmtMoney(s.advance)}</td><td class="num">${fmtMoney(s.loanEmi)}</td><td class="num">${fmtMoney(s.retention)}</td><td class="num">${fmtMoney(s.totalDeduction)}</td>` +
       `<td class="num">${fmtMoney(s.netBeforeDirect)}</td><td class="num">${s.directPaid ? fmtMoney(s.directPaid) : '—'}</td>` +
       `<td class="num"><strong>${fmtMoney(s.netSalary)}</strong></td></tr>`;
-    csvRows.push([emp.name, s.rate, s.leaveDays, s.leaveAmount, s.basic, s.hra, s.lta, s.gross, s.advanceTemp, s.advance, s.retention, s.totalDeduction, s.netBeforeDirect, s.directPaid, s.netSalary]);
-    ['rate','leaveAmount','basic','hra','lta','gross','advanceTemp','advance','retention','totalDeduction','netBeforeDirect','directPaid','netSalary'].forEach(k => { grand[k]+=s[k]; });
+    csvRows.push([emp.name, s.rate, s.leaveDays, s.leaveAmount, s.basic, s.hra, s.lta, s.gross, s.advanceTemp, s.advance, s.loanEmi, s.retention, s.totalDeduction, s.netBeforeDirect, s.directPaid, s.netSalary]);
+    ['rate','leaveAmount','basic','hra','lta','gross','advanceTemp','advance','loanEmi','retention','totalDeduction','netBeforeDirect','directPaid','netSalary'].forEach(k => { grand[k]+=s[k]; });
   }
   bodyRows += `<tr class="sal-grandtotal"><td><strong>Grand Total</strong></td><td class="num">${fmtMoney(grand.rate)}</td><td></td><td class="num">${fmtMoney(grand.leaveAmount)}</td>` +
     `<td class="num">${fmtMoney(grand.basic)}</td><td class="num">${fmtMoney(grand.hra)}</td><td class="num">${fmtMoney(grand.lta)}</td><td class="num">${fmtMoney(grand.gross)}</td>` +
-    `<td class="num">${fmtMoney(grand.advanceTemp)}</td><td class="num">${fmtMoney(grand.advance)}</td><td class="num">${fmtMoney(grand.retention)}</td><td class="num">${fmtMoney(grand.totalDeduction)}</td>` +
+    `<td class="num">${fmtMoney(grand.advanceTemp)}</td><td class="num">${fmtMoney(grand.advance)}</td><td class="num">${fmtMoney(grand.loanEmi)}</td><td class="num">${fmtMoney(grand.retention)}</td><td class="num">${fmtMoney(grand.totalDeduction)}</td>` +
     `<td class="num">${fmtMoney(grand.netBeforeDirect)}</td><td class="num">${grand.directPaid ? fmtMoney(grand.directPaid) : '—'}</td>` +
     `<td class="num">${fmtMoney(grand.netSalary)}</td></tr>`;
-  csvRows.push(['Grand Total', grand.rate, '', grand.leaveAmount, grand.basic, grand.hra, grand.lta, grand.gross, grand.advanceTemp, grand.advance, grand.retention, grand.totalDeduction, grand.netSalary]);
+  csvRows.push(['Grand Total', grand.rate, '', grand.leaveAmount, grand.basic, grand.hra, grand.lta, grand.gross, grand.advanceTemp, grand.advance, grand.loanEmi, grand.retention, grand.totalDeduction, grand.netSalary]);
 
   box.innerHTML = `<div class="sal-sheet-wrap print-isolate" id="apprenticeReportPrintArea">
       ${reportLogoHeader('Apprentice Salary Report — ' + monthVal)}
@@ -6297,6 +6339,18 @@ async function saveEmployees(list){
   }
   await safeSet('employees', payload, true);
 }
+// Loan and advance requests, from the moment the form is generated to the
+// moment somebody decides. Kept apart from the employee record because a
+// request is not a loan — it only becomes one when it is approved, and a
+// declined one still has to be findable afterwards.
+async function getLoanRequests(){
+  const v = await safeGet('loan_requests', true);
+  return v ? JSON.parse(v) : [];
+}
+async function saveLoanRequests(list){
+  await safeSet('loan_requests', JSON.stringify(list), true);
+}
+
 async function getLettersLog(){
   const v = await safeGet('letters_log', true);
   return v ? JSON.parse(v) : [];
@@ -7272,7 +7326,7 @@ function emptyEmployee(){
     pan:'', aadhaar:'', uan:'', esiNumber:'', bankName:'', ifsc:'', accountNumber:'',
     phone:'', email:'', address:'',
     basic:0, hra:0, otherAllowances:0, dressAllowance:0, mobileExpense:0, pf:0, esiDeduction:0, pt:0,
-    loanAmount:0, emiPerMonth:0, loanStatus:'active',
+    loanAmount:0, emiPerMonth:0, loanStatus:'active', loanStartMonth:'',
     diwaliEligible:'yes',
     emergencyName:'', emergencyNumber:'',
     bloodGroup:'', insuranceDetails:'',
@@ -7618,12 +7672,22 @@ function employeeModalHtml(emp){
         <label class="field">EMI per month</label>
         <input type="number" id="f_emiPerMonth" placeholder="0" value="${emp.emiPerMonth||''}">
         <div style="height:12px"></div>
+        <label class="field">Recovery starts from (month)</label>
+        <input type="month" class="field-input" id="f_loanStartMonth" value="${emp.loanStartMonth || ''}">
+        <div style="height:12px"></div>
         <label class="field">Loan status</label>
         <select class="field-input" id="f_loanStatus">
           <option value="active" ${emp.loanStatus==='active'?'selected':''}>Active - deduct EMI from salary</option>
           <option value="closed" ${emp.loanStatus==='closed'?'selected':''}>Closed</option>
         </select>
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">While active, the EMI is automatically deducted on this employee's Salary Slip. Set to "Closed" once the loan is fully repaid.</p>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;">
+          While the loan is active, the EMI is deducted on the Salary Sheet from the recovery month
+          onward, and it stops on its own once the whole amount is back — the last instalment is
+          whatever is left, so recovery never overshoots the loan.
+          ${emp.loanAmount && !emp.loanStartMonth
+            ? '<br><br><strong style="color:var(--amber-dark);">No recovery month is set, so nothing is being deducted for this loan.</strong> Set one to start recovery.'
+            : ''}
+        </p>
       </div>
 
       <div class="field-group">
@@ -7963,24 +8027,47 @@ function payrollRecordContext(emp){
 // surface that wants a month's pay without attendance now derives it here,
 // from the same master the Salary Sheet uses, so they cannot drift apart
 // again.
-function monthlyPayFor(emp){
+function monthlyPayFor(emp, asOfYear, asOfMonth){
   const comps = computePayrollComponents(emp.ratePay, emp.salaryHeading, {}, payrollRecordContext(emp));
   const val = k => { const c = comps.find(x => x.key === k); return c && c.applies ? (Number(c.value) || 0) : 0; };
+  const heading = SALARY_HEADINGS[emp.salaryHeading] || SALARY_HEADINGS.managerial;
+  const basic = val('basic'), hra = val('hra'), lta = val('lta');
+  const salaryGross = basic + hra + lta;
+
+  // PF, ESI and PT come from the calls computeSalaryForEmployee itself makes,
+  // not from the component master. The master applies the percentages to
+  // anyone whose heading attracts PF; the Salary Sheet goes through
+  // calculatePfFor, which also honours the PF Eligible answer and the flat
+  // ₹1,800 option. Reading the master here would have a report quoting a
+  // deduction the sheet does not take — ₹3,000 against an employee whose
+  // eligibility was never set, whose sheet shows nil.
+  const pfWage = PF_RULES.wageComponents.reduce((t, k) => t + ({ basic, hra, lta }[k] || 0), 0);
+  const pfCalc = calculatePfFor(emp, pfWage);
+  const esiCalc = heading.esi ? computeEsi(salaryGross, {
+        isDisabled: emp.esiDisabled === 'yes',
+        coveredAtPeriodStart: emp.esiCoveredAtPeriodStart === 'yes'
+      }) : { employee:0, employer:0 };
+  const pt = heading.pt ? monthlyPtFor(salaryGross, emp.ptPaidThisYear) : 0;
+
+  const now = new Date();
+  const y = asOfYear || now.getFullYear();
+  const m = asOfMonth || (now.getMonth() + 1);
   const other = (Number(emp.otherAllowances) || 0);
   const perks = (Number(emp.dressAllowance) || 0) + (Number(emp.mobileExpense) || 0);
-  const emi = emp.loanStatus === 'active' ? (Number(emp.emiPerMonth) || 0) : 0;
-  const statutory = val('pf') + val('esi') + val('pt');
+  const emi = computeLoanEmiForMonth(emp, y, m);
+  const statutory = pfCalc.employee + esiCalc.employee + pt;
   return {
-    basic: val('basic'), hra: val('hra'), lta: val('lta'),
-    salaryGross: val('gross'),               // Basic + HRA + LTA — what PF, ESI and PT are read against
+    basic, hra, lta,
+    salaryGross,                       // Basic + HRA + LTA — what PF, ESI and PT are read against
     other, perks,
-    gross: val('gross') + other,             // what the employee is paid before deductions
-    ctcGross: val('gross') + other + perks,  // plus what the company spends on dress and mobile
-    pf: val('pf'), esi: val('esi'), pt: val('pt'),
-    esiEmployer: val('esiEmployer'), employerTotal: val('employerTotal'),
+    gross: salaryGross + other,        // what the employee is paid before deductions
+    ctcGross: salaryGross + other + perks,  // plus what the company spends on dress and mobile
+    pf: pfCalc.employee, esi: esiCalc.employee, pt,
+    pfReason: pfCalc.reason,
+    esiEmployer: esiCalc.employer, employerTotal: pfCalc.employerTotal + esiCalc.employer,
     emi, statutory,
     deductions: statutory + emi,
-    net: val('gross') + other - statutory - emi
+    net: salaryGross + other - statutory - emi
   };
 }
 
@@ -8388,6 +8475,7 @@ async function saveEmployeeForm(){
     pt: Number(document.getElementById('f_pt').value)||0,
     loanAmount: Number(document.getElementById('f_loanAmount').value)||0,
     emiPerMonth: Number(document.getElementById('f_emiPerMonth').value)||0,
+    loanStartMonth: (document.getElementById('f_loanStartMonth') || {}).value || '',
     loanStatus: document.getElementById('f_loanStatus').value,
     diwaliEligible: document.getElementById('f_diwaliEligible').value,
     emergencyName: document.getElementById('f_emergencyName').value.trim(),
@@ -9447,10 +9535,32 @@ async function viewReport(key, label){
     }).join('');
     box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}<table><tr><th>Name</th><th class="num">Monthly gross</th><th class="num">Annual gross</th><th class="num">Diwali bonus</th><th class="num">Annual CTC</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table><p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Annual CTC = (Rate of Pay + Other allowances + Dress allowance + Mobile expense) × 12 + Diwali bonus. Rate of Pay is the whole Basic + HRA + LTA gross. PF, ESI and PT come out of it, so they are not added again. The employer's own PF and ESI are not included here either.</p>${fsBtn}</div>`;
   } else if(key === 'loan'){
-    csvHeader = ['Name','Loan amount','EMI','Status'];
-    csvRows = employees.filter(e=>(Number(e.loanAmount)||0)>0).map(e => [e.name, e.loanAmount, e.emiPerMonth, e.loanStatus]);
-    rows = employees.filter(e=>(Number(e.loanAmount)||0)>0).map(e => `<tr><td>${escapeHtml(e.name)}</td><td class="num">₹${e.loanAmount}</td><td class="num">₹${e.emiPerMonth}</td><td>${e.loanStatus}</td></tr>`).join('');
-    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th class="num">Loan amount</th><th class="num">EMI</th><th>Status</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
+    // Recovered-so-far and balance are worked out from the start month, not
+    // stored, so the report cannot go stale between months.
+    const nowD = new Date(), nowY = nowD.getFullYear(), nowM = nowD.getMonth() + 1;
+    csvHeader = ['Name','Loan amount','EMI','Recovery from','Recovered so far','Balance','Status'];
+    const withLoan = employees.filter(e => (Number(e.loanAmount)||0) > 0);
+    rows = withLoan.map(e => {
+      const amount = Number(e.loanAmount) || 0;
+      const bal = e.loanStatus === 'active' ? loanBalanceAfterMonth(e, nowY, nowM) : 0;
+      const recovered = Math.max(0, Math.round((amount - bal) * 100) / 100);
+      const started = e.loanStartMonth || '';
+      const note = e.loanStatus !== 'active' ? 'closed'
+                 : started ? 'active' : 'active — no recovery month set, nothing is being deducted';
+      csvRows.push([e.name, amount, e.emiPerMonth || 0, started || '—', started ? recovered : 0, started ? bal : amount, note]);
+      return `<tr${(!started && e.loanStatus === 'active') ? ' class="inc-overdue"' : ''}>
+        <td>${escapeHtml(e.name)}</td>
+        <td class="num">₹${fmtMoney(amount)}</td>
+        <td class="num">₹${fmtMoney(Number(e.emiPerMonth)||0)}</td>
+        <td>${started ? escapeHtml(started) : '<span class="pol-warn">not set</span>'}</td>
+        <td class="num">₹${fmtMoney(started ? recovered : 0)}</td>
+        <td class="num">₹${fmtMoney(started ? bal : amount)}</td>
+        <td>${escapeHtml(note)}</td></tr>`;
+    }).join('');
+    const unset = withLoan.filter(e => e.loanStatus === 'active' && !e.loanStartMonth).length;
+    box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}
+      ${unset ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${unset} active loan(s) have no recovery month set, so no instalment is coming off the Salary Sheet for them. Set one on the employee record to start recovery.</p>` : ''}
+      <table><tr><th>Name</th><th class="num">Loan amount</th><th class="num">EMI</th><th>Recovery from</th><th class="num">Recovered so far</th><th class="num">Balance</th><th>Status</th></tr>${rows || '<tr><td colspan="7" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'retention'){
     const now = new Date();
     csvHeader = ['Name','Bond start','Bond end','Retention money','Months','Monthly deduction','Months elapsed','Deducted so far','Balance'];
@@ -10067,8 +10177,107 @@ function toggleGeneratorFieldsForType(){
   const loanWrap = document.getElementById('genLoanFieldsWrap');
   if(loanWrap){
     loanWrap.classList.toggle('hidden', !isLoan);
-    if(isLoan){ renderLoanRequestHint(); showLoanStanding(); }
+    if(isLoan){ renderLoanRequestHint(); showLoanStanding(); renderPendingLoanRequests(); }
   }
+}
+
+// The month recovery would start if a request were approved now — the one
+// after this one, so nothing is ever taken out of a salary that has already
+// been worked.
+function nextMonthValue(){
+  const d = new Date();
+  const y = d.getMonth() === 11 ? d.getFullYear() + 1 : d.getFullYear();
+  const m = (d.getMonth() + 1) % 12 + 1;
+  return y + '-' + String(m).padStart(2, '0');
+}
+
+async function renderPendingLoanRequests(){
+  const box = document.getElementById('genLoanPendingBox');
+  if(!box) return;
+  const pending = (await getLoanRequests()).filter(r => r.status === 'pending');
+  if(!pending.length){ box.innerHTML = ''; return; }
+  pending.sort((a, b) => String(b.requestedOn).localeCompare(String(a.requestedOn)));
+  box.innerHTML = `<div class="sec-title">Awaiting a decision (${pending.length})</div>` +
+    pending.map(r => `<div class="emp-row">
+        <div class="head"><strong>${escapeHtml(r.employeeName)}</strong><span class="id">₹${fmtMoney(r.amount)}</span></div>
+        <p style="font-size:12.5px;color:var(--muted);margin:6px 0 0;">
+          ${r.months ? escapeHtml(String(r.months)) + ' month(s) at ₹' + fmtMoney(r.instalment) + ' a month' : 'No repayment period given'}
+          ${r.reason ? ' · ' + escapeHtml(r.reason) : ''}
+          <br>Requested ${escapeHtml(String(r.requestedOn || '').slice(0, 10))}
+        </p>
+        <div class="row-inline" style="margin:10px 0 0;">
+          <button class="btn" style="flex:1;" onclick="approveLoanRequest('${escapeHtml(r.id)}')">Approve</button>
+          <button class="btn ghost" style="flex:1;" onclick="declineLoanRequest('${escapeHtml(r.id)}')">Decline</button>
+        </div>
+      </div>`).join('') +
+    `<p style="font-size:11.5px;color:var(--muted);margin:2px 0 16px;">Approving sets the loan and the instalment on the employee's record and starts recovery from the month you confirm. Nothing is deducted until then.</p>`;
+}
+
+// Approval is the moment a request becomes money. It writes the amount, the
+// instalment and the recovery month onto the employee record in one go, so the
+// Salary Sheet picks it up from that month without anybody retyping it — and
+// so the figures on the sheet are the ones that were actually approved.
+async function approveLoanRequest(id){
+  const requests = await getLoanRequests();
+  const req = requests.find(r => r.id === id);
+  if(!req || req.status !== 'pending') return;
+
+  const employees = await getEmployees();
+  const emp = employees.find(e => e.id === req.employeeId);
+  if(!emp){ alert('That employee is no longer on the roster, so this request cannot be approved.'); return; }
+
+  const existing = (Number(emp.loanAmount) || 0) > 0 && emp.loanStatus === 'active'
+    ? Number(emp.loanAmount) || 0 : 0;
+  if(existing && !confirm(emp.name + ' already has an active loan of ₹' + fmtMoney(existing) +
+      '.\n\nApproving this replaces it with ₹' + fmtMoney(req.amount) +
+      '. Anything already recovered against the old loan is not carried over.\n\nGo ahead?')) return;
+
+  const start = prompt('Recover from which month? (YYYY-MM)\n\n' +
+    'Nothing is deducted before this month.', req.startMonth || nextMonthValue());
+  if(start === null) return;
+  if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(start.trim())){
+    alert('That is not a month in YYYY-MM form — for example 2026-09. Nothing has been changed.');
+    return;
+  }
+
+  const instalment = req.instalment || req.amount;
+  emp.loanAmount = req.amount;
+  emp.emiPerMonth = instalment;
+  emp.loanStatus = 'active';
+  emp.loanStartMonth = start.trim();
+
+  req.status = 'approved';
+  req.decidedOn = new Date().toISOString();
+  req.startMonth = start.trim();
+
+  const merged = await remoteSetItem('employees', emp, 'id');
+  if(!merged) await saveEmployees(employees);
+  const savedJson = JSON.stringify(employees);
+  localStorage.setItem('kmt_shared_employees', savedJson);
+  primeSharedRead('employees', savedJson);
+  await saveLoanRequests(requests);
+  invalidateSharedRead('employees');
+  invalidateDashboardSnapshot();
+  addActivityLog('Approved ₹' + fmtMoney(req.amount) + ' loan/advance for ' + emp.name +
+                 ', recovering ₹' + fmtMoney(instalment) + ' a month from ' + start.trim()).catch(() => {});
+
+  await renderPendingLoanRequests();
+  await showLoanStanding();
+  alert('Approved. ₹' + fmtMoney(instalment) + ' a month comes off ' + emp.name +
+        "'s Salary Sheet from " + start.trim() + ' until the ₹' + fmtMoney(req.amount) + ' is recovered.');
+}
+
+async function declineLoanRequest(id){
+  const requests = await getLoanRequests();
+  const req = requests.find(r => r.id === id);
+  if(!req || req.status !== 'pending') return;
+  if(!confirm('Decline the ₹' + fmtMoney(req.amount) + ' request from ' + req.employeeName +
+              '?\n\nNothing is deducted and the request stays on record as declined.')) return;
+  req.status = 'declined';
+  req.decidedOn = new Date().toISOString();
+  await saveLoanRequests(requests);
+  addActivityLog('Declined ₹' + fmtMoney(req.amount) + ' loan/advance request from ' + req.employeeName).catch(() => {});
+  await renderPendingLoanRequests();
 }
 
 // The instalment is the number the approver actually argues about, so it is
@@ -10269,6 +10478,23 @@ async function generateLetter(){
   document.getElementById('letterPaper').innerHTML = reportLogoHeader(type) + '<div style="white-space:pre-wrap;">' + escapeHtml(text) + '</div>';
   document.getElementById('letterOutput').classList.add('show');
   document.getElementById('letterActionsBox').classList.remove('hidden');
+
+  // A generated form with an amount on it is a request somebody has to answer,
+  // so it is filed as one. A blank form printed to be filled in by hand is not
+  // — there is nothing yet to approve.
+  if(type === 'Loan/Advance Request Form' && matched && f.loanAmount > 0){
+    const requests = await getLoanRequests();
+    requests.push({
+      id: 'LR-' + Date.now(),
+      employeeId: matched.id, employeeName: matched.name,
+      amount: f.loanAmount, reason: f.loanReason, months: f.loanMonths,
+      instalment: f.loanInstalment, neededBy: f.loanNeededBy,
+      requestedOn: new Date().toISOString(), status: 'pending',
+      startMonth: '', decidedOn: ''
+    });
+    await saveLoanRequests(requests);
+    renderPendingLoanRequests();
+  }
 
   const log = await getLettersLog();
   log.push({ type, employeeName: name, date: new Date().toISOString() });
