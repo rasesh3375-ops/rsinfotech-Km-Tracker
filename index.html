@@ -5810,10 +5810,16 @@ const PAYROLL_MASTER = [
 // component with its value, whether it was derived or typed, and the formula
 // used — the same numbers computeSalaryForEmployee produces for a full-
 // attendance month, because both read the split from SALARY_HEADINGS.
-function computePayrollComponents(rate, headingKey, manual){
+//
+// `ctx` supplies the four answers that change PF and ESI for an individual —
+// prior UAN, Form 11, disability, already-covered. Passed in, the master can be
+// run for a stored employee with no form on screen, which is what the reports
+// need. Left out, it reads the open form exactly as before.
+function computePayrollComponents(rate, headingKey, manual, ctx){
   const h = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
   const r = Number(rate) || 0;
   const m = manual || {};
+  const c = ctx || payrollFormContext();
   const out = [];
   const val = k => { const c = out.find(x => x.key === k); return c ? c.value : 0; };
 
@@ -5837,7 +5843,7 @@ function computePayrollComponents(rate, headingKey, manual){
       else { value = base * def.pct; formula = (def.of === 'rate' ? 'Rate of Pay' : def.of) + ' × ' + headingPct(def.pct); }
     } else if(def.source === 'pfEmployee' || def.source === 'pfEps' || def.source === 'pfEpf'){
       const pfWage = pfWageOf(out);
-      const excl = pfExclusionStatus(payrollExclusionInputs(), pfWage);
+      const excl = pfExclusionStatus({ hasPriorUan: c.hasPriorUan, form11Submitted: c.form11Submitted }, pfWage);
       const pf = excl.excluded
         ? { employee:0, employerEps:0, employerEpf:0, employerTotal:0, wage:pfWage, capApplied:false }
         : computePf(pfWage);
@@ -5866,8 +5872,8 @@ function computePayrollComponents(rate, headingKey, manual){
     } else if(def.source === 'esiEmployee' || def.source === 'esiEmployer'){
       const gr = out.find(x => x.key === 'gross');
       const r = computeEsi(gr ? gr.value : 0, {
-        isDisabled: (document.getElementById('f_esiDisabled') || {}).value === 'yes',
-        coveredAtPeriodStart: (document.getElementById('f_esiCovered') || {}).value === 'yes'
+        isDisabled: c.isDisabled,
+        coveredAtPeriodStart: c.coveredAtPeriodStart
       });
       value = def.source === 'esiEmployee' ? r.employee : r.employer;
       formula = r.reason;
@@ -7909,6 +7915,57 @@ function payrollExclusionInputs(){
   };
 }
 
+// The four per-person answers, read from the open form.
+function payrollFormContext(){
+  return {
+    hasPriorUan: (document.getElementById('f_hasPriorUan') || {}).value || '',
+    form11Submitted: (document.getElementById('f_form11') || {}).value || '',
+    isDisabled: (document.getElementById('f_esiDisabled') || {}).value === 'yes',
+    coveredAtPeriodStart: (document.getElementById('f_esiCovered') || {}).value === 'yes'
+  };
+}
+
+// The same four, read from a stored record.
+function payrollRecordContext(emp){
+  const e = emp || {};
+  return {
+    hasPriorUan: e.hasPriorUan || '',
+    form11Submitted: e.form11Submitted || '',
+    isDisabled: e.esiDisabled === 'yes',
+    coveredAtPeriodStart: e.esiCoveredAtPeriodStart === 'yes'
+  };
+}
+
+// One monthly figure for one stored employee, at full attendance.
+//
+// Basic and HRA stopped being typed when Rate of Pay became the only salary
+// input, so anything still adding up `emp.basic + emp.hra` reads zero for
+// everybody hired since — which is what had the Salary, CTC and Increment
+// reports showing ₹0 and their cards claiming nobody had any data. Every
+// surface that wants a month's pay without attendance now derives it here,
+// from the same master the Salary Sheet uses, so they cannot drift apart
+// again.
+function monthlyPayFor(emp){
+  const comps = computePayrollComponents(emp.ratePay, emp.salaryHeading, {}, payrollRecordContext(emp));
+  const val = k => { const c = comps.find(x => x.key === k); return c && c.applies ? (Number(c.value) || 0) : 0; };
+  const other = (Number(emp.otherAllowances) || 0);
+  const perks = (Number(emp.dressAllowance) || 0) + (Number(emp.mobileExpense) || 0);
+  const emi = emp.loanStatus === 'active' ? (Number(emp.emiPerMonth) || 0) : 0;
+  const statutory = val('pf') + val('esi') + val('pt');
+  return {
+    basic: val('basic'), hra: val('hra'), lta: val('lta'),
+    salaryGross: val('gross'),               // Basic + HRA + LTA — what PF, ESI and PT are read against
+    other, perks,
+    gross: val('gross') + other,             // what the employee is paid before deductions
+    ctcGross: val('gross') + other + perks,  // plus what the company spends on dress and mobile
+    pf: val('pf'), esi: val('esi'), pt: val('pt'),
+    esiEmployer: val('esiEmployer'), employerTotal: val('employerTotal'),
+    emi, statutory,
+    deductions: statutory + emi,
+    net: val('gross') + other - statutory - emi
+  };
+}
+
 function payrollValue(key){
   const rate = Number((document.getElementById('f_ratePay') || {}).value) || 0;
   const headingKey = (document.getElementById('f_salaryHeading') || {}).value || 'managerial';
@@ -8915,8 +8972,8 @@ function reportHasData(key, e){
   if(key==='birthday') return !!e.dob;
   if(key==='increment') return !!e.nextIncrement;
   if(key==='diwali') return diwaliBonusFor(e) > 0;
-  if(key==='salary') return (Number(e.basic)||0) > 0;
-  if(key==='ctc') return (Number(e.basic)||0) > 0;
+  if(key==='salary') return (Number(e.ratePay)||0) > 0;
+  if(key==='ctc') return (Number(e.ratePay)||0) > 0;
   if(key==='loan') return (Number(e.loanAmount)||0) > 0;
   if(key==='retention') return (Number(e.retentionMoney)||0) > 0 && (Number(e.retentionMonths)||0) > 0 && !!e.bondStart;
   return false;
@@ -9341,7 +9398,7 @@ async function viewReport(key, label){
     rows = employees.filter(e=>e.nextIncrement).map(e => {
       const d = new Date(e.nextIncrement);
       const monthName = d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-      const lastSalary = (Number(e.basic)||0)+(Number(e.hra)||0)+(Number(e.otherAllowances)||0);
+      const lastSalary = monthlyPayFor(e).gross;
       csvRows.push([e.name, monthName, e.nextIncrement, lastSalary]);
       return `<tr><td>${escapeHtml(e.name)}</td><td>${monthName}</td><td>${e.nextIncrement}</td><td class="num">₹${lastSalary.toFixed(0)}</td></tr>`;
     }).join('');
@@ -9354,10 +9411,8 @@ async function viewReport(key, label){
   } else if(key === 'salary'){
     csvHeader = ['Name','Gross','Deductions','Net'];
     rows = employees.map(e => {
-      const gross = (Number(e.basic)||0)+(Number(e.hra)||0)+(Number(e.otherAllowances)||0);
-      const emi = e.loanStatus === 'active' ? (Number(e.emiPerMonth)||0) : 0;
-      const deductions = (Number(e.pf)||0)+(Number(e.esiDeduction)||0)+(Number(e.pt)||0)+emi;
-      const net = gross - deductions;
+      const p = monthlyPayFor(e);
+      const gross = p.gross, deductions = p.deductions, net = p.net;
       csvRows.push([e.name, gross, deductions, net]);
       return `<tr><td>${escapeHtml(e.name)}</td><td class="num">₹${gross.toFixed(0)}</td><td class="num">₹${deductions.toFixed(0)}</td><td class="num">₹${net.toFixed(0)}</td></tr>`;
     }).join('');
@@ -9365,14 +9420,14 @@ async function viewReport(key, label){
   } else if(key === 'ctc'){
     csvHeader = ['Name','Monthly gross','Annual gross','Diwali bonus','Annual CTC'];
     rows = employees.map(e => {
-      const monthlyGross = (Number(e.basic)||0)+(Number(e.hra)||0)+(Number(e.otherAllowances)||0)+(Number(e.dressAllowance)||0)+(Number(e.mobileExpense)||0);
+      const monthlyGross = monthlyPayFor(e).ctcGross;
       const annualGross = monthlyGross * 12;
       const bonus = diwaliBonusFor(e);
       const annualCtc = annualGross + bonus;
       csvRows.push([e.name, monthlyGross, annualGross, bonus, annualCtc]);
       return `<tr><td>${escapeHtml(e.name)}</td><td class="num">₹${monthlyGross.toFixed(0)}</td><td class="num">₹${annualGross.toFixed(0)}</td><td class="num">₹${bonus.toFixed(0)}</td><td class="num">₹${annualCtc.toFixed(0)}</td></tr>`;
     }).join('');
-    box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}<table><tr><th>Name</th><th class="num">Monthly gross</th><th class="num">Annual gross</th><th class="num">Diwali bonus</th><th class="num">Annual CTC</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table><p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Annual CTC = (Basic + HRA + Other allowances + Dress allowance + Mobile expense) × 12 + Diwali bonus. PF, ESI and PT are employee-side deductions, not added here.</p>${fsBtn}</div>`;
+    box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}<table><tr><th>Name</th><th class="num">Monthly gross</th><th class="num">Annual gross</th><th class="num">Diwali bonus</th><th class="num">Annual CTC</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table><p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Annual CTC = (Rate of Pay + Other allowances + Dress allowance + Mobile expense) × 12 + Diwali bonus. Rate of Pay is the whole Basic + HRA + LTA gross. PF, ESI and PT come out of it, so they are not added again. The employer's own PF and ESI are not included here either.</p>${fsBtn}</div>`;
   } else if(key === 'loan'){
     csvHeader = ['Name','Loan amount','EMI','Status'];
     csvRows = employees.filter(e=>(Number(e.loanAmount)||0)>0).map(e => [e.name, e.loanAmount, e.emiPerMonth, e.loanStatus]);
@@ -10028,7 +10083,7 @@ function letterTemplate(type, f){
     case 'Loan/Advance Request Form':
       return `${company}\n\nDate: ${issueDate}\n\nLOAN / ADVANCE REQUEST FORM\n\nEmployee name: ${name}\nDesignation: ${designation}\nDepartment: ${department}\nDate of joining: ${doj}\n\nRequested amount: ____________________\nReason: ____________________________________________\n\nEmployee signature: ____________________\nHR approval: ____________________`;
     case 'Salary Slip':
-      return `${company}\n\nSALARY SLIP — ${issueDate}\n\nEmployee name: ${name}\nDesignation: ${designation}\nDepartment: ${department}\n\nEARNINGS\nBasic: ${f.basic||0}\nHRA: ${f.hra||0}\nOther allowances: ${f.other||0}\n\nDEDUCTIONS\nPF: ${f.pf||0}\nESI: ${f.esiDeduction||0}\nPT: ${f.pt||0}\nEMI (if applicable): ${f.emi||0}\n\nNET PAY: ${f.net||0}`;
+      return `${company}\n\nSALARY SLIP — ${issueDate}\n\nEmployee name: ${name}\nDesignation: ${designation}\nDepartment: ${department}\n\nEARNINGS\nBasic: ${f.basic||0}\nHRA: ${f.hra||0}\nLTA: ${f.lta||0}\nOther allowances: ${f.other||0}\nGross: ${f.gross||0}\n\nDEDUCTIONS\nPF: ${f.pf||0}\nESI: ${f.esiDeduction||0}\nPT: ${f.pt||0}\nEMI (if applicable): ${f.emi||0}\n\nNET PAY: ${f.net||0}`;
     default:
       return `${company}\n\nDate: ${issueDate}\n\n${name}`;
   }
@@ -10096,11 +10151,15 @@ async function generateLetter(){
     f.replyBy = document.getElementById('genOfferReplyBy').value;
   }
   if(matched && type === 'Salary Slip'){
-    const gross = (Number(matched.basic)||0)+(Number(matched.hra)||0)+(Number(matched.otherAllowances)||0);
-    const emi = matched.loanStatus === 'active' ? (Number(matched.emiPerMonth)||0) : 0;
-    f.basic = matched.basic; f.hra = matched.hra; f.other = matched.otherAllowances;
-    f.pf = matched.pf; f.esiDeduction = matched.esiDeduction; f.pt = matched.pt; f.emi = emi;
-    f.net = gross - ((Number(matched.pf)||0)+(Number(matched.esiDeduction)||0)+(Number(matched.pt)||0)+emi);
+    // Derived from Rate of Pay and the salary heading, not from stored Basic
+    // and HRA — those are no longer typed, so a slip built on them printed
+    // zeros for every employee taken on since Rate of Pay took over.
+    const p = monthlyPayFor(matched);
+    f.basic = Math.round(p.basic); f.hra = Math.round(p.hra); f.lta = Math.round(p.lta);
+    f.other = p.other; f.gross = Math.round(p.gross);
+    f.pf = Math.round(p.pf); f.esiDeduction = Math.round(p.esi); f.pt = Math.round(p.pt);
+    f.emi = p.emi;
+    f.net = Math.round(p.net);
   }
   const text = letterTemplate(type, f);
   lastGeneratedLetter = { type, text, employeeName: name };
