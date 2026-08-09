@@ -9909,16 +9909,19 @@ async function generateLetter(){
   const type = LETTER_TYPES[selectedLetterIdx];
   const isOffer = type === 'Offer Letter';
 
-  // Company property has to come back before service is certified. Issuing the
-  // Experience Letter first removes the only leverage there is to get a laptop
-  // or a uniform returned.
-  if(type === 'Experience Letter'){
+  // Every letter an employee needs on the way out waits until company property
+  // is back. Issuing any of them first removes the only leverage there is to
+  // get a laptop or a uniform returned. The No Dues Letter is the sharpest case
+  // — it certifies that nothing is owed, which is untrue while a laptop is out.
+  const ASSET_GATED_LETTERS = ['Experience Letter', 'Relieving Letter', 'No Dues Letter',
+                               'Full & Final Settlement Letter', 'Exit Letter'];
+  if(ASSET_GATED_LETTERS.indexOf(type) !== -1){
     const empId = (document.getElementById('genEmpSelect') || {}).value;
     if(empId){
       const emp = (await getEmployees()).find(e => e.id === empId);
       const owed = emp ? outstandingAssets(emp) : [];
       if(owed.length){
-        msg.textContent = 'Not issued — ' + owed.length + ' item(s) still with ' + (emp.name || empId) +
+        msg.textContent = type + ' not issued — ' + owed.length + ' item(s) still with ' + (emp.name || empId) +
           ': ' + owed.map(a => a.item + (a.qty ? ' ×' + a.qty : '')).join(', ') +
           '. Record the return date on the Joining Kit first.';
         msg.classList.add('error');
