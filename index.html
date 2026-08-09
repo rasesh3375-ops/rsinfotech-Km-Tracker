@@ -1415,6 +1415,18 @@
         </section>
 
         <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">Final Salary Sheet</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The payment list: every employee grouped by salary heading, sorted by bank within each heading, with account number and the final amount payable after all deductions. Built for handing to the bank — one block per heading, subtotalled, with a grand total at the end.</p>
+          <div class="row-inline">
+            <div><label class="field">Month</label><select class="field-input" id="finalSalMonthSel"></select></div>
+            <div><label class="field">Year</label><select class="field-input" id="finalSalYearSel"></select></div>
+          </div>
+          <button class="btn full" onclick="renderFinalSalarySheet()">Generate final salary sheet</button>
+          <div style="height:14px"></div>
+          <div id="finalSalaryBox"></div>
+        </section>
+
+        <section class="block">
           <h2 style="margin:0 0 4px;font-size:17px;">Consultant Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The monthly attendance sheet in the exact column format the consultant asks for — one row per employee, built automatically from Employee Master and the month's attendance. Pick any month; export the CSV and send it on.</p>
           <div class="row-inline">
@@ -5154,6 +5166,77 @@ function consultantDayCounts(att, dateList, holidayMap){
     }
   });
   return { present, el, sl, absent };
+}
+
+// The bank payment list. Deliberately narrow — name, bank, account, amount —
+// because a transfer sheet with twenty columns is harder to check than one with
+// four, and every other figure already has a report of its own.
+async function renderFinalSalarySheet(){
+  const box = document.getElementById('finalSalaryBox');
+  populateMonthYearSelects('finalSalMonthSel', 'finalSalYearSel');
+  const monthVal = getMonthYearValue('finalSalMonthSel', 'finalSalYearSel');
+  const [year, month] = monthVal.split('-').map(Number);
+  const monthDays = new Date(year, month, 0).getDate();
+  const dateList = [];
+  for(let d = 1; d <= monthDays; d++) dateList.push(monthVal + '-' + String(d).padStart(2,'0'));
+
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
+  if(!employees.length){ box.innerHTML = '<div class="empty">No employees on roll.</div>'; return; }
+  box.innerHTML = '<p class="dash-muted">Building…</p>';
+  const holidayMap = await getHolidayMap_local();
+  await getAttendanceMany(employees.map(e => e.id));
+
+  const money = v => '₹' + fmtMoney(v);
+  let bodyRows = '', csvRows = [], sr = 0, grand = 0, grandCount = 0;
+
+  for(const headingKey of SALARY_HEADING_ORDER){
+    const group = employees.filter(e => (e.salaryHeading || 'managerial') === headingKey);
+    if(!group.length) continue;
+    const label = SALARY_HEADINGS[headingKey].label;
+
+    const rows = [];
+    for(const emp of group){
+      const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
+      rows.push({ emp, net: s.netSalary });
+    }
+    // Bank first, then name, so every employee at one bank sits together and
+    // the block can be handed over as a single transfer instruction.
+    rows.sort((a, b) => (a.emp.bankName || '').localeCompare(b.emp.bankName || '')
+      || (a.emp.name || '').localeCompare(b.emp.name || ''));
+
+    let sub = 0;
+    bodyRows += `<tr class="sal-heading"><td colspan="6">${escapeHtml(label)}</td></tr>`;
+    csvRows.push([label]);
+    rows.forEach(r => {
+      sr++; sub += r.net; grand += r.net; grandCount++;
+      bodyRows += `<tr><td>${sr}</td><td>${escapeHtml(r.emp.name)}</td>
+        <td>${escapeHtml(r.emp.bankName || '—')}</td>
+        <td>${escapeHtml(r.emp.accountNumber || '—')}</td>
+        <td>${escapeHtml(r.emp.ifsc || '—')}</td>
+        <td class="num"><strong>${money(r.net)}</strong></td></tr>`;
+      csvRows.push([sr, r.emp.name, r.emp.bankName || '', r.emp.accountNumber || '',
+                    r.emp.ifsc || '', Math.round(r.net * 100) / 100]);
+    });
+    bodyRows += `<tr class="sal-subtotal"><td></td><td>${escapeHtml(label)} subtotal</td>
+      <td colspan="3">${rows.length} employee(s)</td><td class="num">${money(sub)}</td></tr>`;
+    csvRows.push(['', label + ' subtotal', rows.length + ' employee(s)', '', '', Math.round(sub * 100) / 100]);
+  }
+
+  bodyRows += `<tr class="sal-grandtotal"><td></td><td>Grand Total</td>
+    <td colspan="3">${grandCount} employee(s)</td><td class="num">${money(grand)}</td></tr>`;
+  csvRows.push(['', 'GRAND TOTAL', grandCount + ' employee(s)', '', '', Math.round(grand * 100) / 100]);
+
+  const cols = ['SR NO','Employee Name','Bank Name','Account Number','IFSC','Final Payable Salary'];
+  saveFileToDrive(['HR Management', financialYearLabel(monthVal + '-01'), 'Dashboard', 'Final Salary Sheet'],
+    `Final Salary Sheet - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
+
+  box.innerHTML = `${reportLogoHeader('Final Salary Sheet — ' + monthVal)}
+    <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by salary heading, sorted by bank. Final Payable is after every deduction, including anything paid directly to the account.</p>
+    <div class="sal-sheet-wrap"><table class="sal-table">
+      <thead><tr><th>SR</th><th>Employee Name</th><th>Bank Name</th><th>Account Number</th><th>IFSC</th><th class="num">Final Payable</th></tr></thead>
+      <tbody>${bodyRows}</tbody></table></div>
+    <button class="btn ghost full" style="margin-top:12px;" onclick="openFullscreenView('Final Salary Sheet','finalSalaryBox')">⛶ Full screen</button>
+    <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(monthVal + '-01'))} &gt; Dashboard &gt; Final Salary Sheet.</p>`;
 }
 
 async function renderConsultantReport(){
