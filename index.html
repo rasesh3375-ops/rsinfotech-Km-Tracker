@@ -8330,14 +8330,50 @@ async function archiveEmployeeDocuments(emp){
   }catch(e){}   // never block leaving or deleting because Drive was unreachable
 }
 
+// Deleting means gone. The record used to be dropped from the employee list
+// while everything keyed off it stayed behind — attendance for every month, the
+// tracking login, trip and check-in history, live position, letters issued — so
+// the person disappeared from the roster but kept surfacing in reports built
+// from those keys.
 async function deleteEmployee(id){
-  if(!confirm('Permanently delete this employee record? This cannot be undone — if they simply left the job, use "Mark as left" instead so their record and history are kept.')) return;
   let employees = await getEmployees();
   const emp = employees.find(e => e.id === id);
+  if(!emp) return;
+  const uname = emp.trackingUsername || '';
+  const what = ['the employee record', 'all attendance history']
+    .concat(uname ? ['the km-tracking login @' + uname, 'trip and check-in history'] : [])
+    .concat(['issued-asset records', 'entries in the letters log']);
+  if(!confirm('Permanently delete ' + (emp.name || id) + '?\n\nThis removes ' + what.join(', ') +
+    '.\n\nIt cannot be undone. If they have simply left the job, use "Mark as left" instead — that keeps ' +
+    'the record and history and still takes them out of the active reports.')) return;
+
+  // Every key that hangs off this employee, cleared before the record itself so
+  // nothing is left pointing at an id that no longer exists.
+  await remoteDelete('attendance:' + id);
+  if(uname){
+    await remoteDelete('trips:' + uname);
+    await remoteDelete('checkins:' + uname);
+    await remoteDelete('active:' + uname);
+    const users = await getUsers();
+    await saveUsers(users.filter(u => u.username !== uname));
+  }
+  try{
+    const log = await getLettersLog();
+    const kept = log.filter(l => l.employeeId !== id && l.empId !== id &&
+      !(l.name && emp.name && l.name === emp.name));
+    if(kept.length !== log.length) await saveLettersLog(kept);
+  }catch(e){}
+
   employees = employees.filter(e => e.id !== id);
   await saveEmployees(employees);
   await archiveEmployeeDocuments(emp);
-  if(emp) await addActivityLog('Permanently deleted employee record for ' + emp.name + ' (' + id + ')');
+  // The activity log is deliberately kept and added to. It is the audit trail
+  // of who deleted what, and erasing that alongside the data would leave no
+  // record that the person ever existed.
+  await addActivityLog('Permanently deleted employee ' + (emp.name || '') + ' (' + id + ') — record, attendance' +
+    (uname ? ', tracking login @' + uname + ', trip history' : '') + ' and letters log entries removed');
+  ['employees', 'users', 'letters_log', 'attendance:' + id].forEach(invalidateSharedRead);
+  invalidateDashboardSnapshot();
   await renderEmployeeList();
   await refreshDashboard();
 }
