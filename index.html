@@ -4728,7 +4728,13 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   const [dYear, dMonth] = dateList[0].split('-').map(Number);
   const retention = computeRetentionForMonth(emp, dYear, dMonth);
   const totalDeduction = pf + esi + pt + advanceTemp + advance + retention;
-  const netSalary = gross - totalDeduction;
+  // Money already in the employee's account. It is not a statutory deduction
+  // and must not sit inside Total Deduction — Gross, PF, ESI and PT are all
+  // computed as if it were not there. It only reduces what is left to pay.
+  const directPaid = (emp.directPaid === 'yes' && heading === SALARY_HEADINGS.apprentice)
+    ? (Number(emp.directPaidAmount) || 0) : 0;
+  const netBeforeDirect = gross - totalDeduction;
+  const netSalary = netBeforeDirect - directPaid;
   // Employer side, from the same call — never recomputed.
   const pen = pfCalc.employerEps;
   const employerPf = pfCalc.employerEpf;
@@ -4752,6 +4758,7 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
            retention, totalDeduction, netSalary, pen, employerPf, pfAdmin, edli, employerCont, ctc,
            esiEmployer, advanceBalance, fullDayLeaveBal, halfDayLeaveBal,
            pfWage, pfType: pfCalc.type, pfApplicable: pfCalc.applicable, pfReason: pfCalc.reason,
+           directPaid, netBeforeDirect,
            pfEmployeeTotal: pfCalc.employeeTotal, pfEmployerTotal: pfCalc.employerTotal,
            pfGrandTotal: pfCalc.grandTotal };
 }
@@ -4777,38 +4784,40 @@ async function renderSalarySheet(){
   // Employer columns follow Net Salary, never inside Total Deduction — they are
   // company cost, not money withheld from the employee.
   const cols = ['SR NO','Name','Rate of Pay','Leave Days','Leave Amount','Basic','HRA','LTA','Gross',
-    'PF','ESI','PT','Advance Temp','Advance','Retention','Total Deduction','Net Salary',
+    'PF','ESI','PT','Advance Temp','Advance','Retention','Total Deduction','Net Before Direct','Paid Directly','Net Salary',
     'PEN','Employer PF','PF Admin','EDLI','ESI Employer','Employer Cont.','CTC',
     'Advance Balance','Full Day Leave Bal','Half Day Leave Bal'];
   let bodyRows = '';
   let srNo = 1;
-  const grand = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0 };
+  const grand = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0, directPaid:0, netBeforeDirect:0 };
   const csvRows = [];
 
   for(const headingKey of SALARY_HEADING_ORDER){
     const group = employees.filter(e => (e.salaryHeading||'managerial') === headingKey);
     if(!group.length) continue;
-    bodyRows += `<tr class="sal-heading"><td colspan="27">${SALARY_HEADINGS[headingKey].label}</td></tr>`;
+    bodyRows += `<tr class="sal-heading"><td colspan="30">${SALARY_HEADINGS[headingKey].label}</td></tr>`;
     csvRows.push([SALARY_HEADINGS[headingKey].label]);
-    const sub = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0 };
+    const sub = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0, directPaid:0, netBeforeDirect:0 };
     for(const emp of group){
       const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
       bodyRows += `<tr><td>${srNo++}</td><td class="sal-name">${escapeHtml(emp.name)}</td><td>${fmtMoney(s.rate)}</td><td>${s.leaveDays}</td><td>${fmtMoney(s.leaveAmount)}</td>` +
         `<td>${fmtMoney(s.basic)}</td><td>${fmtMoney(s.hra)}</td><td>${fmtMoney(s.lta)}</td><td>${fmtMoney(s.gross)}</td>` +
         `<td>${fmtMoney(s.pf)}</td><td>${fmtMoney(s.esi)}</td><td>${fmtMoney(s.pt)}</td><td>${fmtMoney(s.advanceTemp)}</td><td>${fmtMoney(s.advance)}</td><td>${fmtMoney(s.retention)}</td>` +
-        `<td>${fmtMoney(s.totalDeduction)}</td><td>${fmtMoney(s.netSalary)}</td>` +
+        `<td>${fmtMoney(s.totalDeduction)}</td><td>${fmtMoney(s.netBeforeDirect)}</td>` +
+        `<td>${s.directPaid ? fmtMoney(s.directPaid) : '—'}</td><td><strong>${fmtMoney(s.netSalary)}</strong></td>` +
         `<td>${fmtMoney(s.pen)}</td><td>${fmtMoney(s.employerPf)}</td><td>${fmtMoney(s.pfAdmin)}</td>` +
         `<td>${fmtMoney(s.edli)}</td><td>${fmtMoney(s.esiEmployer)}</td><td>${fmtMoney(s.employerCont)}</td><td>${fmtMoney(s.ctc)}</td>` +
         `<td>${fmtMoney(s.advanceBalance)}</td><td>${s.fullDayLeaveBal}</td><td>${s.halfDayLeaveBal}</td></tr>`;
-      csvRows.push([srNo-1, emp.name, s.rate, s.leaveDays, s.leaveAmount, s.basic, s.hra, s.lta, s.gross, s.pf, s.esi, s.pt, s.advanceTemp, s.advance, s.retention, s.totalDeduction, s.netSalary,
+      csvRows.push([srNo-1, emp.name, s.rate, s.leaveDays, s.leaveAmount, s.basic, s.hra, s.lta, s.gross, s.pf, s.esi, s.pt, s.advanceTemp, s.advance, s.retention, s.totalDeduction, s.netBeforeDirect, s.directPaid, s.netSalary,
         s.pen, s.employerPf, s.pfAdmin, s.edli, s.esiEmployer, s.employerCont, s.ctc,
         s.advanceBalance, s.fullDayLeaveBal, s.halfDayLeaveBal]);
-      ['rate','leaveAmount','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','retention','totalDeduction','netSalary','pen','employerPf','pfAdmin','edli','employerCont','ctc','esiEmployer','advanceBalance'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; });
+      ['rate','leaveAmount','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','retention','totalDeduction','netSalary','pen','employerPf','pfAdmin','edli','employerCont','ctc','esiEmployer','advanceBalance','directPaid','netBeforeDirect'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; });
     }
     bodyRows += `<tr class="sal-subtotal"><td></td><td>Subtotal</td><td>${fmtMoney(sub.rate)}</td><td></td><td>${fmtMoney(sub.leaveAmount)}</td>` +
       `<td>${fmtMoney(sub.basic)}</td><td>${fmtMoney(sub.hra)}</td><td>${fmtMoney(sub.lta)}</td><td>${fmtMoney(sub.gross)}</td>` +
       `<td>${fmtMoney(sub.pf)}</td><td>${fmtMoney(sub.esi)}</td><td>${fmtMoney(sub.pt)}</td><td>${fmtMoney(sub.advanceTemp)}</td><td>${fmtMoney(sub.advance)}</td><td>${fmtMoney(sub.retention)}</td>` +
-      `<td>${fmtMoney(sub.totalDeduction)}</td><td>${fmtMoney(sub.netSalary)}</td>` +
+      `<td>${fmtMoney(sub.totalDeduction)}</td><td>${fmtMoney(sub.netBeforeDirect)}</td>` +
+      `<td>${sub.directPaid ? fmtMoney(sub.directPaid) : '—'}</td><td>${fmtMoney(sub.netSalary)}</td>` +
       `<td>${fmtMoney(sub.pen)}</td><td>${fmtMoney(sub.employerPf)}</td><td>${fmtMoney(sub.pfAdmin)}</td>` +
       `<td>${fmtMoney(sub.edli)}</td><td>${fmtMoney(sub.esiEmployer)}</td><td>${fmtMoney(sub.employerCont)}</td><td>${fmtMoney(sub.ctc)}</td>` +
       `<td>${fmtMoney(sub.advanceBalance)}</td><td></td><td></td></tr>`;
@@ -4818,12 +4827,13 @@ async function renderSalarySheet(){
   bodyRows += `<tr class="sal-grandtotal"><td></td><td>Grand Total</td><td>${fmtMoney(grand.rate)}</td><td></td><td>${fmtMoney(grand.leaveAmount)}</td>` +
     `<td>${fmtMoney(grand.basic)}</td><td>${fmtMoney(grand.hra)}</td><td>${fmtMoney(grand.lta)}</td><td>${fmtMoney(grand.gross)}</td>` +
     `<td>${fmtMoney(grand.pf)}</td><td>${fmtMoney(grand.esi)}</td><td>${fmtMoney(grand.pt)}</td><td>${fmtMoney(grand.advanceTemp)}</td><td>${fmtMoney(grand.advance)}</td><td>${fmtMoney(grand.retention)}</td>` +
-    `<td>${fmtMoney(grand.totalDeduction)}</td><td>${fmtMoney(grand.netSalary)}</td>` +
+    `<td>${fmtMoney(grand.totalDeduction)}</td><td>${fmtMoney(grand.netBeforeDirect)}</td>` +
+    `<td>${grand.directPaid ? fmtMoney(grand.directPaid) : '—'}</td><td>${fmtMoney(grand.netSalary)}</td>` +
     `<td>${fmtMoney(grand.pen)}</td><td>${fmtMoney(grand.employerPf)}</td><td>${fmtMoney(grand.pfAdmin)}</td>` +
     `<td>${fmtMoney(grand.edli)}</td><td>${fmtMoney(grand.esiEmployer)}</td><td>${fmtMoney(grand.employerCont)}</td><td>${fmtMoney(grand.ctc)}</td>` +
     `<td>${fmtMoney(grand.advanceBalance)}</td><td></td><td></td></tr>`;
-  csvRows.push(['', 'Grand Total', grand.rate, '', grand.leaveAmount, grand.basic, grand.hra, grand.lta, grand.gross, grand.pf, grand.esi, grand.pt, grand.advanceTemp, grand.advance, grand.retention, grand.totalDeduction, grand.netSalary,
-    grand.pen, grand.employerPf, grand.pfAdmin, grand.edli, grand.esiEmployer, grand.employerCont, grand.ctc,
+  csvRows.push(['', 'Grand Total', grand.rate, '', grand.leaveAmount, grand.basic, grand.hra, grand.lta, grand.gross, grand.pf, grand.esi, grand.pt, grand.advanceTemp, grand.advance, grand.retention, grand.totalDeduction, grand.netBeforeDirect,
+    grand.directPaid, grand.netSalary, grand.pen, grand.employerPf, grand.pfAdmin, grand.edli, grand.esiEmployer, grand.employerCont, grand.ctc,
     grand.advanceBalance, '', '']);
 
   saveFileToDrive(['HR Management', financialYearLabel(monthVal + '-01'), 'Dashboard', 'Salary Sheet'], `Salary Sheet - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
@@ -5061,22 +5071,29 @@ async function renderApprenticeSalaryReport(){
   }
   const holidayMap = await getHolidayMap_local();
 
-  const cols = ['Name','Rate of Pay','Leave Days','Leave Amount','Basic','HRA','LTA','Gross','Advance Temp','Advance','Retention','Total Deduction','Net Salary'];
+  // Paid Directly gets its own column between the deductions and what is left
+  // to pay, so the report shows the stipend that already reached the account
+  // rather than a net figure nobody can reconcile.
+  const cols = ['Name','Rate of Pay','Leave Days','Leave Amount','Basic','HRA','LTA','Gross','Advance Temp','Advance','Retention','Total Deduction','Net Before Direct','Paid Directly','Net Payable'];
   const csvRows = [];
   let srNo = 1;
-  const grand = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netSalary:0 };
+  const grand = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, advanceTemp:0, advance:0, retention:0, totalDeduction:0, netBeforeDirect:0, directPaid:0, netSalary:0 };
   let bodyRows = '';
   for(const emp of employees){
     const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
     bodyRows += `<tr><td>${escapeHtml(emp.name)}</td><td class="num">${fmtMoney(s.rate)}</td><td class="num">${s.leaveDays}</td><td class="num">${fmtMoney(s.leaveAmount)}</td>` +
       `<td class="num">${fmtMoney(s.basic)}</td><td class="num">${fmtMoney(s.hra)}</td><td class="num">${fmtMoney(s.lta)}</td><td class="num">${fmtMoney(s.gross)}</td>` +
-      `<td class="num">${fmtMoney(s.advanceTemp)}</td><td class="num">${fmtMoney(s.advance)}</td><td class="num">${fmtMoney(s.retention)}</td><td class="num">${fmtMoney(s.totalDeduction)}</td><td class="num">${fmtMoney(s.netSalary)}</td></tr>`;
-    csvRows.push([emp.name, s.rate, s.leaveDays, s.leaveAmount, s.basic, s.hra, s.lta, s.gross, s.advanceTemp, s.advance, s.retention, s.totalDeduction, s.netSalary]);
-    ['rate','leaveAmount','basic','hra','lta','gross','advanceTemp','advance','retention','totalDeduction','netSalary'].forEach(k => { grand[k]+=s[k]; });
+      `<td class="num">${fmtMoney(s.advanceTemp)}</td><td class="num">${fmtMoney(s.advance)}</td><td class="num">${fmtMoney(s.retention)}</td><td class="num">${fmtMoney(s.totalDeduction)}</td>` +
+      `<td class="num">${fmtMoney(s.netBeforeDirect)}</td><td class="num">${s.directPaid ? fmtMoney(s.directPaid) : '—'}</td>` +
+      `<td class="num"><strong>${fmtMoney(s.netSalary)}</strong></td></tr>`;
+    csvRows.push([emp.name, s.rate, s.leaveDays, s.leaveAmount, s.basic, s.hra, s.lta, s.gross, s.advanceTemp, s.advance, s.retention, s.totalDeduction, s.netBeforeDirect, s.directPaid, s.netSalary]);
+    ['rate','leaveAmount','basic','hra','lta','gross','advanceTemp','advance','retention','totalDeduction','netBeforeDirect','directPaid','netSalary'].forEach(k => { grand[k]+=s[k]; });
   }
   bodyRows += `<tr class="sal-grandtotal"><td><strong>Grand Total</strong></td><td class="num">${fmtMoney(grand.rate)}</td><td></td><td class="num">${fmtMoney(grand.leaveAmount)}</td>` +
     `<td class="num">${fmtMoney(grand.basic)}</td><td class="num">${fmtMoney(grand.hra)}</td><td class="num">${fmtMoney(grand.lta)}</td><td class="num">${fmtMoney(grand.gross)}</td>` +
-    `<td class="num">${fmtMoney(grand.advanceTemp)}</td><td class="num">${fmtMoney(grand.advance)}</td><td class="num">${fmtMoney(grand.retention)}</td><td class="num">${fmtMoney(grand.totalDeduction)}</td><td class="num">${fmtMoney(grand.netSalary)}</td></tr>`;
+    `<td class="num">${fmtMoney(grand.advanceTemp)}</td><td class="num">${fmtMoney(grand.advance)}</td><td class="num">${fmtMoney(grand.retention)}</td><td class="num">${fmtMoney(grand.totalDeduction)}</td>` +
+    `<td class="num">${fmtMoney(grand.netBeforeDirect)}</td><td class="num">${grand.directPaid ? fmtMoney(grand.directPaid) : '—'}</td>` +
+    `<td class="num">${fmtMoney(grand.netSalary)}</td></tr>`;
   csvRows.push(['Grand Total', grand.rate, '', grand.leaveAmount, grand.basic, grand.hra, grand.lta, grand.gross, grand.advanceTemp, grand.advance, grand.retention, grand.totalDeduction, grand.netSalary]);
 
   box.innerHTML = `<div class="sal-sheet-wrap print-isolate" id="apprenticeReportPrintArea">
@@ -7313,6 +7330,20 @@ function employeeModalHtml(emp){
           So when agreeing a figure with a candidate: quote this as gross, tell them take-home is
           less, and remember CTC to the company is more.
         </p>
+        <div id="directPayWrap" class="hidden">
+          <div style="height:12px"></div>
+          <label class="field">Paid directly to the employee's account?</label>
+          <select class="field-input" id="f_directPaid" onchange="toggleDirectPay()">
+            <option value="no" ${emp.directPaid==='yes'?'':'selected'}>No</option>
+            <option value="yes" ${emp.directPaid==='yes'?'selected':''}>Yes — deduct from net payable</option>
+          </select>
+          <div id="directPayAmountWrap" class="hidden">
+            <div style="height:10px"></div>
+            <label class="field">Amount paid directly (per month)</label>
+            <input type="number" class="field-input" id="f_directPaidAmount" placeholder="0" value="${emp.directPaidAmount||''}" oninput="renderPayrollBreakdown()">
+            <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Money already in their account, so it comes off Net Payable and shows as its own line on the Salary Sheet. Everything above it — Gross, PF, ESI, PT — is untouched.</p>
+          </div>
+        </div>
         <div id="payrollBreakdownBox"></div>
         <div style="height:12px"></div>
         <label class="field">Advance for temporary</label>
@@ -7533,6 +7564,30 @@ function toggleTrackingFields(){
 // Bond details only make sense once a bond exists. Hidden rather than greyed
 // out: a form asking for a bond end date for somebody who has no bond is a
 // question that should not be on screen at all.
+// Only the Apprentices heading pays anything directly, so the question is not
+// put to anyone else. Switching heading away clears it, so a stipend cannot be
+// left behind on somebody it no longer applies to.
+function toggleDirectPay(){
+  const heading = (document.getElementById('f_salaryHeading') || {}).value;
+  const wrap = document.getElementById('directPayWrap');
+  const sel = document.getElementById('f_directPaid');
+  const amtWrap = document.getElementById('directPayAmountWrap');
+  if(!wrap || !sel) return;
+  const isApprentice = heading === 'apprentice';
+  wrap.classList.toggle('hidden', !isApprentice);
+  if(!isApprentice){
+    sel.value = 'no';
+    const amt = document.getElementById('f_directPaidAmount');
+    if(amt) amt.value = '';
+  }
+  if(amtWrap) amtWrap.classList.toggle('hidden', sel.value !== 'yes');
+  if(sel.value !== 'yes'){
+    const amt = document.getElementById('f_directPaidAmount');
+    if(amt) amt.value = '';
+  }
+  try{ renderPayrollBreakdown(); }catch(e){}
+}
+
 function toggleBondFields(){
   const on = (document.getElementById('f_bondApplicable') || {}).value === 'yes';
   const box = document.getElementById('bondFields');
@@ -7676,6 +7731,7 @@ function toggleStatutoryFieldsForHeading(){
   // the moment it changes.
   renderHeadingExplainer();
   renderPayrollBreakdown();
+  try{ toggleDirectPay(); }catch(e){}
 }
 
 let editingEmployeeDraft = null;
@@ -8079,6 +8135,8 @@ async function saveEmployeeForm(){
     advanceOpening: Number(document.getElementById('f_advanceOpening').value)||0,
     leaveOpeningFrom: (document.getElementById('f_leaveOpeningFrom') || {}).value || '',
     bondApplicable: document.getElementById('f_bondApplicable').value,
+    directPaid: document.getElementById('f_directPaid').value,
+    directPaidAmount: Number(document.getElementById('f_directPaidAmount').value)||0,
     pfEligible: document.getElementById('f_pfEligible').value,
     pfContributionType: document.getElementById('f_pfContributionType').value,
     esiDisabled: document.getElementById('f_esiDisabled').value,
