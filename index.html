@@ -4018,10 +4018,76 @@ PF_RULES.wageComponents = ['basic', 'hra'];
 PF_RULES.adminPct = 0.005;
 PF_RULES.edliPct  = 0.005;
 
+PF_RULES.fixedAmount = 1800;      // the flat option, both sides
+
 PF_RULES.exclusion = {
   wageAbove: 15000,
   conditions: ['No prior UAN or EPF account', 'Basic + DA strictly above ₹15,000', 'Form 11 declaration submitted']
 };
+
+// ===== THE central PF calculation =====
+// Employee Master, the Salary Sheet and the PF Return all call this and only
+// this. Three separate implementations would drift, and payroll disagreeing
+// with the return is the one difference nobody notices until a challan is
+// short.
+//
+// `wage` is the FINAL PAYABLE basic — after unpaid leave has reduced it — not
+// the contracted figure. The caller is responsible for that reduction, and the
+// Salary Sheet already applies it before Basic and HRA are summed.
+function pfConfigStatus(emp){
+  const e = (emp || {}).pfEligible;
+  if(e !== 'yes' && e !== 'no') return { configured:false, eligible:false, type:'', problem:'PF eligibility not configured' };
+  if(e === 'no') return { configured:true, eligible:false, type:'', problem:'' };
+  const t = (emp || {}).pfContributionType;
+  if(t !== 'percent' && t !== 'fixed')
+    return { configured:false, eligible:true, type:'', problem:'PF contribution type not selected' };
+  return { configured:true, eligible:true, type:t, problem:'' };
+}
+
+const PF_ZERO = { applicable:false, employee:0, employerEpf:0, employerEps:0, edli:0, admin:0,
+                  employeeTotal:0, employerTotal:0, grandTotal:0, wage:0, type:'' };
+
+function calculatePfFor(emp, wage){
+  const w = Math.max(0, Number(wage) || 0);
+  const heading = SALARY_HEADINGS[(emp || {}).salaryHeading] || SALARY_HEADINGS.managerial;
+
+  // Step 1 — the heading must attract PF at all (R.S. Infotech headings only).
+  if(!heading.pf) return { ...PF_ZERO, wage:w, reason:'PF does not apply to ' + heading.label };
+
+  // Step 2 — eligibility, before any formula runs.
+  const cfg = pfConfigStatus(emp);
+  if(!cfg.configured) return { ...PF_ZERO, wage:w, notConfigured:true, reason:cfg.problem };
+  if(!cfg.eligible)   return { ...PF_ZERO, wage:w, reason:'PF Not Applicable — marked not eligible' };
+
+  // Step 3 — the statutory exclusion still stands above eligibility being Yes.
+  const ex = pfExclusionStatus(emp, w);
+  if(ex.excluded) return { ...PF_ZERO, wage:w, reason:'Excluded employee — no prior UAN, Form 11 submitted, wage above ₹' + fmtMoney(PF_RULES.exclusion.wageAbove) };
+
+  // Step 4 — the configured contribution type.
+  if(cfg.type === 'fixed'){
+    const f = PF_RULES.fixedAmount;
+    // A flat amount on both sides. Deliberately not 12% of anything, and the
+    // EPS split does not apply — the figure is the agreed contribution.
+    return { applicable:true, type:'fixed', wage:w,
+             employee:f, employerEpf:f, employerEps:0, edli:0, admin:0,
+             employeeTotal:f, employerTotal:f, grandTotal:f * 2,
+             reason:'Fixed ₹' + fmtMoney(f) + ' each side' };
+  }
+
+  const c = computePf(w);
+  const edli  = w * PF_RULES.edliPct;
+  const admin = w * PF_RULES.adminPct;
+  return {
+    applicable:true, type:'percent', wage:w,
+    employee:c.employee, employerEpf:c.employerEpf, employerEps:c.employerEps, edli, admin,
+    employeeTotal:c.employee,
+    employerTotal:c.employerEpf + c.employerEps + edli + admin,
+    grandTotal:c.employee + c.employerEpf + c.employerEps + edli + admin,
+    reason:c.capApplied
+      ? 'Percentage — EPS capped at ₹' + fmtMoney(PF_RULES.epsMonthlyCap) + ' on a wage of ₹' + fmtMoney(w)
+      : 'Percentage on a wage of ₹' + fmtMoney(w)
+  };
+}
 
 // Returns why PF is or is not being deducted, so the form can say so rather
 // than silently showing zero — a zero with no reason looks like a bug, and an
@@ -4644,7 +4710,12 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
     lta   = (rate*heading.ltaPct)   - (rate*heading.ltaPct)/monthDays*leaveDays;
   }
   const gross = basic + hra + lta;
-  const pf = heading.pf ? (Number(emp.pf) || 0) : 0;
+  // basic and hra here are ALREADY reduced for unpaid leave, so this is the
+  // final payable wage the policy requires PF to be charged on, not the
+  // contracted figure. One central call serves both sides of the contribution.
+  const pfWage = PF_RULES.wageComponents.reduce((t, k) => t + ({ basic, hra, lta }[k] || 0), 0);
+  const pfCalc = calculatePfFor(emp, pfWage);
+  const pf = pfCalc.employee;
   const esiCalc = heading.esi ? computeEsi(gross, {
         isDisabled: emp.esiDisabled === 'yes',
         coveredAtPeriodStart: emp.esiCoveredAtPeriodStart === 'yes',
@@ -4658,16 +4729,11 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   const retention = computeRetentionForMonth(emp, dYear, dMonth);
   const totalDeduction = pf + esi + pt + advanceTemp + advance + retention;
   const netSalary = gross - totalDeduction;
-  // Employer side. Charged on the same wage as the employee share and skipped
-  // entirely for an excluded employee, since there is no membership to fund.
-  const pfWage = PF_RULES.wageComponents.reduce((t, k) => t + ({ basic, hra, lta }[k] || 0), 0);
-  const excluded = pfExclusionStatus(emp, pfWage).excluded;
-  const e = (heading.pf && !excluded) ? computePf(pfWage)
-          : { employee:0, employerEps:0, employerEpf:0, employerTotal:0 };
-  const pen = e.employerEps;
-  const employerPf = e.employerEpf;
-  const pfAdmin = (heading.pf && !excluded) ? pfWage * PF_RULES.adminPct : 0;
-  const edli    = (heading.pf && !excluded) ? pfWage * PF_RULES.edliPct  : 0;
+  // Employer side, from the same call — never recomputed.
+  const pen = pfCalc.employerEps;
+  const employerPf = pfCalc.employerEpf;
+  const pfAdmin = pfCalc.admin;
+  const edli    = pfCalc.edli;
   const esiEmployer = esiCalc.employer;
   const employerCont = pen + employerPf + pfAdmin + edli + esiEmployer;
   const ctc = gross + employerCont;
@@ -4684,7 +4750,10 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   const halfDayLeaveBal = Math.max(0, (Number(emp.slOpening) || 0) - ytd.sl);
   return { rate, leaveDays, leaveAmount, basic, hra, lta, gross, pf, esi, pt, advanceTemp, advance,
            retention, totalDeduction, netSalary, pen, employerPf, pfAdmin, edli, employerCont, ctc,
-           esiEmployer, advanceBalance, fullDayLeaveBal, halfDayLeaveBal };
+           esiEmployer, advanceBalance, fullDayLeaveBal, halfDayLeaveBal,
+           pfWage, pfType: pfCalc.type, pfApplicable: pfCalc.applicable, pfReason: pfCalc.reason,
+           pfEmployeeTotal: pfCalc.employeeTotal, pfEmployerTotal: pfCalc.employerTotal,
+           pfGrandTotal: pfCalc.grandTotal };
 }
 
 async function renderSalarySheet(){
@@ -4813,22 +4882,24 @@ async function renderStatutoryReport(key, label){
     if(key === 'pf'){
       const heading = SALARY_HEADINGS[emp.salaryHeading] || SALARY_HEADINGS.managerial;
       if(heading.pf){
-        const wage = PF_RULES.wageComponents.reduce((t, k) => t + (s[k] || 0), 0);
-        const ex = pfExclusionStatus(emp, wage);
-        const c = ex.excluded ? { employee:0, employerEpf:0, employerEps:0 } : computePf(wage);
-        const admin = ex.excluded ? 0 : wage * PF_RULES.adminPct;
-        const edli  = ex.excluded ? 0 : wage * PF_RULES.edliPct;
-        const total = c.employee + c.employerEpf + c.employerEps + admin + edli;
-        pfRows.push({ emp, wage, excluded: ex.excluded, employee: c.employee,
-          epf: c.employerEpf, eps: c.employerEps, admin, edli, total,
-          reason: ex.excluded
-            ? 'Excluded employee — no prior UAN, Form 11 submitted, wage above ₹' + fmtMoney(PF_RULES.exclusion.wageAbove)
-            : (wage >= PF_RULES.epsWageCeiling
-                ? 'EPS capped at ₹' + fmtMoney(PF_RULES.epsMonthlyCap) + '; the balance of the employer 12% goes to EPF'
-                : 'Standard rates on a wage of ₹' + fmtMoney(wage)) });
-        if(!ex.excluded){
-          pfTot.wage += wage; pfTot.employee += c.employee; pfTot.epf += c.employerEpf;
-          pfTot.eps += c.employerEps; pfTot.admin += admin; pfTot.edli += edli; pfTot.total += total;
+        // The Salary Sheet has already run the central calculation for this
+        // employee and month; the report reads its result rather than working
+        // it out again, so the two cannot disagree.
+        const cfg = pfConfigStatus(emp);
+        pfRows.push({ emp, wage: s.pfWage, applicable: s.pfApplicable,
+          notConfigured: !cfg.configured,
+          eligible: cfg.configured ? (cfg.eligible ? 'Yes' : 'No') : 'Not configured',
+          pfType: s.pfType === 'fixed' ? 'Fixed ₹' + fmtMoney(PF_RULES.fixedAmount)
+                : s.pfType === 'percent' ? 'Percentage / Actual' : '—',
+          leaveDays: s.leaveDays, leaveAmount: s.leaveAmount,
+          employee: s.pf, epf: s.employerPf, eps: s.pen, admin: s.pfAdmin, edli: s.edli,
+          employeeTotal: s.pfEmployeeTotal, employerTotal: s.pfEmployerTotal,
+          total: s.pfGrandTotal, reason: s.pfReason });
+        // Employees who are not contributing add nothing to any total.
+        if(s.pfApplicable){
+          pfTot.wage += s.pfWage; pfTot.employee += s.pf; pfTot.epf += s.employerPf;
+          pfTot.eps += s.pen; pfTot.admin += s.pfAdmin; pfTot.edli += s.edli;
+          pfTot.total += s.pfGrandTotal;
         }
       }
     }
@@ -4851,27 +4922,35 @@ async function renderStatutoryReport(key, label){
   if(key === 'pf' && pfRows.length){
     const money = v => '₹' + fmtMoney(v);
     const body = pfRows.map((x, i) => `
-      <tr class="${x.excluded ? 'inc-overdue' : ''}">
-        <td>${i + 1}</td><td>${escapeHtml(x.emp.name)}</td>
-        <td>${escapeHtml(x.emp.uan || '—')}</td>
+      <tr class="${x.applicable ? '' : 'inc-overdue'}">
+        <td>${i + 1}</td><td>${escapeHtml(x.emp.name)}<span class="inc-sub">${escapeHtml(x.emp.id)}</span></td>
+        <td>${escapeHtml(x.eligible)}<span class="inc-sub">${escapeHtml(x.pfType)}</span></td>
+        <td class="num">${x.leaveDays || 0}<span class="inc-sub">${money(x.leaveAmount)}</span></td>
         <td class="num">${money(x.wage)}</td>
-        <td class="num">${x.excluded ? '—' : money(x.employee)}</td>
-        <td class="num">${x.excluded ? '—' : money(x.epf)}</td>
-        <td class="num">${x.excluded ? '—' : money(x.eps)}</td>
-        <td class="num">${x.excluded ? '—' : money(x.admin)}</td>
-        <td class="num">${x.excluded ? '—' : money(x.edli)}</td>
-        <td class="num"><strong>${x.excluded ? '—' : money(x.total)}</strong></td>
-        <td>${x.excluded ? 'Excluded' : 'Member'}<span class="inc-sub">${escapeHtml(x.reason)}</span></td>
+        <td class="num">${x.applicable ? money(x.employee) : '—'}</td>
+        <td class="num">${x.applicable ? money(x.epf) : '—'}</td>
+        <td class="num">${x.applicable ? money(x.eps) : '—'}</td>
+        <td class="num">${x.applicable ? money(x.admin) : '—'}</td>
+        <td class="num">${x.applicable ? money(x.edli) : '—'}</td>
+        <td class="num">${x.applicable ? money(x.employerTotal) : '—'}</td>
+        <td class="num"><strong>${x.applicable ? money(x.total) : '—'}</strong></td>
+        <td>${x.applicable ? 'Contributing' : (x.notConfigured ? 'Not configured' : 'PF Not Applicable')}
+          <span class="inc-sub">${escapeHtml(x.reason)}</span></td>
       </tr>`).join('');
     const csv = toCsv(
-      ['SR NO','Name','UAN','PF Wage (Basic+DA)','Employee 12%','Employer EPF 3.67%','Employer EPS 8.33%',
-       'Admin 0.5%','EDLI 0.5%','Total Remittance','Status','Rule Applied'],
-      pfRows.map((x, i) => [i + 1, x.emp.name, x.emp.uan || '', x.wage,
-        x.excluded ? 0 : x.employee, x.excluded ? 0 : x.epf, x.excluded ? 0 : x.eps,
-        x.excluded ? 0 : x.admin, x.excluded ? 0 : x.edli, x.excluded ? 0 : x.total,
-        x.excluded ? 'Excluded' : 'Member', x.reason])
-        .concat([['', 'GRAND TOTAL', '', pfTot.wage, pfTot.employee, pfTot.epf, pfTot.eps,
-                  pfTot.admin, pfTot.edli, pfTot.total, '', '']]));
+      ['SR NO','Employee','Employee Code','UAN','PF Eligible','PF Type','Basic Salary','Leave/LOP Days',
+       'Leave/LOP Deduction','Final Payable Basic','Employee EPF','Employer EPF','Employer EPS',
+       'EDLI','Admin Charges','Employee Total','Employer Total','Grand Total','Status','Rule Applied'],
+      pfRows.map((x, i) => [i + 1, x.emp.name, x.emp.id, x.emp.uan || '', x.eligible, x.pfType,
+        x.wage + (x.leaveAmount || 0), x.leaveDays || 0, x.leaveAmount || 0, x.wage,
+        x.applicable ? x.employee : 0, x.applicable ? x.epf : 0, x.applicable ? x.eps : 0,
+        x.applicable ? x.edli : 0, x.applicable ? x.admin : 0,
+        x.applicable ? x.employeeTotal : 0, x.applicable ? x.employerTotal : 0,
+        x.applicable ? x.total : 0,
+        x.applicable ? 'Contributing' : (x.notConfigured ? 'Not configured' : 'PF Not Applicable'), x.reason])
+        .concat([['', 'GRAND TOTAL', '', '', '', '', '', '', '', pfTot.wage, pfTot.employee,
+                  pfTot.epf, pfTot.eps, pfTot.edli, pfTot.admin, pfTot.employee,
+                  pfTot.epf + pfTot.eps + pfTot.edli + pfTot.admin, pfTot.total, '', '']]));
     saveFileToDrive(['HR Management', financialYearLabel(monthVal + '-01'), 'Reports', 'PF'], `PF Return - ${monthVal}.csv`, csv, 'text/csv');
     box.innerHTML = `${reportLogoHeader('Provident Fund Return — ' + monthVal)}
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Charged on ${
@@ -4881,14 +4960,18 @@ async function renderStatutoryReport(key, label){
         admin ${headingPct(PF_RULES.adminPct)} · EDLI ${headingPct(PF_RULES.edliPct)}.
         Covers the R.S. Infotech payroll headings only.</p>
       <div class="inc-scroll"><table class="inc-table">
-        <thead><tr><th>#</th><th>Name</th><th>UAN</th><th class="num">PF Wage</th>
+        <thead><tr><th>#</th><th>Employee</th><th>Eligible / Type</th>
+          <th class="num">Leave<br><span class="th-sub">days / ₹</span></th>
+          <th class="num">Final Payable<br><span class="th-sub">Basic + DA</span></th>
           <th class="num">Employee</th><th class="num">Empr EPF</th><th class="num">Empr EPS</th>
-          <th class="num">Admin</th><th class="num">EDLI</th><th class="num">Total</th><th>Status</th></tr></thead>
+          <th class="num">Admin</th><th class="num">EDLI</th>
+          <th class="num">Employer Total</th><th class="num">Grand Total</th><th>Status</th></tr></thead>
         <tbody>${body}
-          <tr class="pay-total"><td></td><td><strong>Grand Total</strong></td><td></td>
+          <tr class="pay-total"><td></td><td><strong>Grand Total</strong></td><td></td><td></td>
             <td class="num">${money(pfTot.wage)}</td><td class="num">${money(pfTot.employee)}</td>
             <td class="num">${money(pfTot.epf)}</td><td class="num">${money(pfTot.eps)}</td>
             <td class="num">${money(pfTot.admin)}</td><td class="num">${money(pfTot.edli)}</td>
+            <td class="num">${money(pfTot.epf + pfTot.eps + pfTot.admin + pfTot.edli)}</td>
             <td class="num">${money(pfTot.total)}</td><td></td></tr>
         </tbody></table></div>
       <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Employee share ${money(pfTot.employee)} ·
@@ -7284,6 +7367,20 @@ function employeeModalHtml(emp){
         </select>
         <div style="height:10px"></div>
         <div id="pfWrap">
+        <label class="field">PF Eligible</label>
+        <select class="field-input" id="f_pfEligible" onchange="toggleStatutoryFieldsForHeading()">
+          <option value="" ${!['yes','no'].includes(emp.pfEligible)?'selected':''}>— Not configured —</option>
+          <option value="yes" ${emp.pfEligible==='yes'?'selected':''}>Yes</option>
+          <option value="no" ${emp.pfEligible==='no'?'selected':''}>No</option>
+        </select>
+        <div style="height:10px"></div>
+        <label class="field">PF Contribution Type</label>
+        <select class="field-input" id="f_pfContributionType" onchange="toggleStatutoryFieldsForHeading()">
+          <option value="" ${!['percent','fixed'].includes(emp.pfContributionType)?'selected':''}>— Select —</option>
+          <option value="percent" ${emp.pfContributionType==='percent'?'selected':''}>Percentage / Actual</option>
+          <option value="fixed" ${emp.pfContributionType==='fixed'?'selected':''}>Fixed ₹1,800</option>
+        </select>
+        <div style="height:10px"></div>
         <label class="field" id="f_pf_label">PF (provident fund)</label>
         <input type="number" id="f_pf" value="${emp.pf||''}" readonly
                title="Calculated automatically from the configured payroll formula."
@@ -7494,8 +7591,31 @@ function toggleStatutoryFieldsForHeading(){
       const rate = Number((document.getElementById('f_ratePay') || {}).value) || 0;
       const comps = computePayrollComponents(rate, document.getElementById('f_salaryHeading').value, {});
       const wage = pfWageOf(comps);
-      const excl = pfExclusionStatus(payrollExclusionInputs(), wage);
-      if(excl.excluded){
+      // Contribution type is only offered once eligibility says Yes.
+      const elig = (document.getElementById('f_pfEligible') || {}).value;
+      const typeEl = document.getElementById('f_pfContributionType');
+      if(typeEl){
+        typeEl.disabled = elig !== 'yes';
+        typeEl.style.background = elig === 'yes' ? '' : '#F1F4FA';
+        if(elig !== 'yes') typeEl.value = '';
+      }
+      const probe = Object.assign({}, payrollExclusionInputs(), {
+        salaryHeading: (document.getElementById('f_salaryHeading') || {}).value,
+        pfEligible: elig,
+        pfContributionType: typeEl ? typeEl.value : ''
+      });
+      const pfr = calculatePfFor(probe, wage);
+      if(!pfr.applicable){
+        pfEl.value = 0;
+        if(pfNote) pfNote.innerHTML = pfr.notConfigured
+          ? '<span class="pol-warn">⚠ ' + escapeHtml(pfr.reason) + ' — PF cannot be calculated until this is set.</span>'
+          : '<span class="pol-ok">✓ ' + escapeHtml(pfr.reason) + '</span>';
+      } else {
+        pfEl.value = Math.round(pfr.employee * 100) / 100;
+        if(pfNote) pfNote.textContent = pfr.reason + ' — employee ₹' + fmtMoney(pfr.employeeTotal) +
+          ', employer ₹' + fmtMoney(pfr.employerTotal) + ', total ₹' + fmtMoney(pfr.grandTotal) + '.';
+      }
+      if(false){
         pfEl.value = 0;
         if(pfNote) pfNote.innerHTML = '<span class="pol-ok">✓ Excluded employee — no PF deducted.</span> ' +
           'No prior UAN, Form 11 submitted, and Basic + DA of ₹' + fmtMoney(wage) +
@@ -7959,6 +8079,8 @@ async function saveEmployeeForm(){
     advanceOpening: Number(document.getElementById('f_advanceOpening').value)||0,
     leaveOpeningFrom: (document.getElementById('f_leaveOpeningFrom') || {}).value || '',
     bondApplicable: document.getElementById('f_bondApplicable').value,
+    pfEligible: document.getElementById('f_pfEligible').value,
+    pfContributionType: document.getElementById('f_pfContributionType').value,
     esiDisabled: document.getElementById('f_esiDisabled').value,
     esiCoveredAtPeriodStart: document.getElementById('f_esiCovered').value,
     esiEmployer: payrollValue('esiEmployer'),
