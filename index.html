@@ -407,6 +407,12 @@
   .cheque-img{width:100%;max-width:420px;border:1px solid var(--line);border-radius:10px;
     margin-top:8px;display:block;}
 
+  /* The two actions are not equivalent and should not look it. Mark as left is
+     the everyday one; Delete erases history and is for rows that were never a
+     real person. */
+  .btn.btn-danger{color:var(--red);border-color:#F1D7D4;}
+  .btn.btn-danger:hover{background:#FBE3E0;border-color:var(--red);}
+
   .draft-note{display:block;font-size:11px;color:var(--muted);margin-top:8px;text-align:center;}
 
   /* ---- loading skeletons ---- */
@@ -8443,8 +8449,10 @@ async function renderEmployeeList(){
         <div class="sub">${escapeHtml(e.designation || '—')} · ${escapeHtml(e.department || '—')}</div>
         <div class="actions">
           <button class="btn ghost" onclick="openAddEmployeeModal('${e.id}')">Edit</button>
-          <button class="btn ghost" onclick="markEmployeeLeft('${e.id}')">Mark as left</button>
-          <button class="btn ghost" onclick="deleteEmployee('${e.id}')">Delete</button>
+          <button class="btn ghost" onclick="markEmployeeLeft('${e.id}')"
+                  title="Someone who worked here and has now left. Keeps the record, attendance and documents; removes them from every active report.">Mark as left</button>
+          <button class="btn ghost btn-danger" onclick="deleteEmployee('${e.id}')"
+                  title="Only for test rows and mistakes — records that were never a real person. Erases attendance, tracking login and history.">Delete</button>
         </div>
       </div>`).join('');
   }
