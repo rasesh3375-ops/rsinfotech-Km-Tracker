@@ -1498,6 +1498,7 @@
           <div class="field-group">
             <div class="sec-title">Choose a letter</div>
             <div id="letterChoiceList"></div>
+            <div id="joiningKitBox" class="hidden" style="margin-top:14px;"></div>
           </div>
           <label class="field">Company name</label>
           <input type="text" id="genCompanyName" value="R.S.Infotech" />
@@ -8455,7 +8456,8 @@ async function renderReportsTab(){
     {key:'salary', label:'Salary Report'},
     {key:'ctc', label:'Cost to Company Report'},
     {key:'loan', label:'Loan & Advance Report'},
-    {key:'retention', label:'Retention Money Detail'}
+    {key:'retention', label:'Retention Money Detail'},
+    {key:'assets', label:'Employee Assets'}
   ];
   document.getElementById('reportCardsBox').innerHTML = reports.map(r => {
     // Count only the people the report will actually show, so the card does
@@ -8778,6 +8780,7 @@ async function generateRoleReport(){
 }
 
 function reportHasData(key, e){
+  if(key === 'assets') return (e.assets || []).some(a => a && a.item);
   if(key==='contact') return !!(e.phone || e.email);
   if(key==='birthday') return !!e.dob;
   if(key==='increment') return !!e.nextIncrement;
@@ -9169,6 +9172,30 @@ async function viewReport(key, label){
   const fsBtn = `<button class="btn ghost full" style="margin-top:8px;" onclick="openFullscreenView('${label.replace(/'/g,"\\'")}','reportBox_${key}')">⛶ Full screen</button>`;
   let rows = '';
   let csvHeader = [], csvRows = [];
+  if(key === 'assets'){
+    // Outstanding first — the list exists to chase things that have not come
+    // back, and a returned item is history.
+    const rows2 = [];
+    employees.forEach(e => (e.assets || []).forEach(a => {
+      if(a && a.item) rows2.push({ e, a, out: !a.returnedOn });
+    }));
+    rows2.sort((x, y) => (y.out - x.out) || (x.e.name || '').localeCompare(y.e.name || ''));
+    csvHeader = ['Employee','Employee Code','Item','Qty','Issued On','Returned On','Status'];
+    csvRows = rows2.map(r => [r.e.name, r.e.id, r.a.item, r.a.qty || '', r.a.issuedOn || '',
+                              r.a.returnedOn || '', r.out ? 'Outstanding' : 'Returned']);
+    const outCount = rows2.filter(r => r.out).length;
+    rows = rows2.map(r => `<tr class="${r.out ? 'inc-overdue' : ''}">
+        <td>${escapeHtml(r.e.name)}<span class="inc-sub">${escapeHtml(r.e.id)}</span></td>
+        <td>${escapeHtml(r.a.item)}</td><td class="num">${r.a.qty || '—'}</td>
+        <td>${escapeHtml(r.a.issuedOn || '—')}</td>
+        <td>${r.out ? '<span class="pol-warn">Not returned</span>' : escapeHtml(r.a.returnedOn)}</td></tr>`).join('');
+    document.getElementById('reportBox_assets').innerHTML =
+      `${reportLogoHeader('Employee Assets — issued and outstanding')}
+       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">${rows2.length} item(s) issued, <strong>${outCount} still outstanding</strong>. An Experience Letter cannot be generated while anything is outstanding.</p>
+       <table><thead><tr><th>Employee</th><th>Item</th><th class="num">Qty</th><th>Issued</th><th>Returned</th></tr></thead><tbody>${rows}</tbody></table>${fsBtn}`;
+    saveFileToDrive(['HR Management','Reports','Assets'], 'Employee Assets.csv', toCsv(csvHeader, csvRows), 'text/csv');
+    return;
+  }
   if(key === 'contact'){
     csvHeader = ['Name','Designation','Phone','Email'];
     csvRows = employees.map(e => [e.name, e.designation||'', e.phone||'', e.email||'']);
@@ -9289,6 +9316,82 @@ function closeChecklistModal(){
   document.getElementById('checklistModalRoot').innerHTML = '';
 }
 
+// ---- joining kit / issued assets ----
+// Assets live on the employee record so they follow the person, and each line
+// carries its own return date rather than one flag for the lot: a uniform can
+// come back while a laptop has not.
+const KIT_SLOTS = 7;
+
+async function openJoiningKit(){
+  switchHrSub('generator');
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
+  const box = document.getElementById('letterOutput') || document.getElementById('generatorOutput');
+  const host = document.getElementById('joiningKitBox');
+  if(!host) return;
+  host.classList.remove('hidden');
+  host.innerHTML = `<div class="dash-card">
+    <div class="card-head"><h3>Joining Kit — items issued</h3></div>
+    <p class="card-sub" style="margin:0 0 10px;">Pick the employee, list what was handed over, and save. It shows on the Employee Assets report and has to be returned before an Experience Letter can be issued.</p>
+    <label class="field">Employee</label>
+    <select class="field-input" id="kitEmp" onchange="loadJoiningKit()">
+      <option value="">— Select employee —</option>
+      ${employees.map(e => `<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)} (${escapeHtml(e.id)})</option>`).join('')}
+    </select>
+    <div id="kitFields"></div>
+  </div>`;
+}
+
+async function loadJoiningKit(){
+  const id = (document.getElementById('kitEmp') || {}).value;
+  const box = document.getElementById('kitFields');
+  if(!box) return;
+  if(!id){ box.innerHTML = ''; return; }
+  const emp = (await getEmployees()).find(e => e.id === id);
+  if(!emp) return;
+  const a = emp.assets || [];
+  const row = (i, d) => `
+    <tr><td>${i === 0 ? 'Uniform' : 'Item ' + i}</td>
+      <td><input class="field-input" id="kitItem${i}" value="${escapeHtml((d && d.item) || (i === 0 ? 'Uniform' : ''))}" placeholder="${i === 0 ? 'Uniform' : 'What was issued'}"></td>
+      <td style="width:90px"><input class="field-input" type="number" id="kitQty${i}" value="${(d && d.qty) || ''}" placeholder="Qty"></td>
+      <td style="width:150px"><input class="field-input" type="date" id="kitRet${i}" value="${(d && d.returnedOn) || ''}" title="Date returned"></td></tr>`;
+  box.innerHTML = `<div style="height:12px"></div>
+    <div class="inc-scroll"><table class="inc-table">
+      <thead><tr><th>Slot</th><th>Item</th><th>Qty</th><th>Returned on</th></tr></thead>
+      <tbody>${Array.from({ length: KIT_SLOTS + 1 }, (_, i) => row(i, a[i])).join('')}</tbody></table></div>
+    <div style="height:12px"></div>
+    <button class="btn full" onclick="saveJoiningKit()">Save issued items</button>
+    <div class="msg" id="kitMsg"></div>`;
+}
+
+async function saveJoiningKit(){
+  const id = (document.getElementById('kitEmp') || {}).value;
+  if(!id) return;
+  const employees = await getEmployees();
+  const emp = employees.find(e => e.id === id);
+  if(!emp) return;
+  const assets = [];
+  for(let i = 0; i <= KIT_SLOTS; i++){
+    const item = (document.getElementById('kitItem' + i) || {}).value || '';
+    const qty = Number((document.getElementById('kitQty' + i) || {}).value) || 0;
+    const returnedOn = (document.getElementById('kitRet' + i) || {}).value || '';
+    // A blank line is not an asset. Storing empty rows would make the report
+    // count items nobody was given.
+    if(!item.trim()) { assets.push(null); continue; }
+    assets.push({ item: item.trim(), qty, issuedOn: (emp.assets && emp.assets[i] && emp.assets[i].issuedOn) || todayStr(), returnedOn });
+  }
+  emp.assets = assets;
+  await saveEmployees(employees);
+  invalidateSharedRead('employees');
+  addActivityLog('Joining kit updated for ' + (emp.name || id)).catch(() => {});
+  const msg = document.getElementById('kitMsg');
+  if(msg){ msg.textContent = 'Saved.'; msg.classList.remove('error'); }
+}
+
+// Anything issued and not yet returned.
+function outstandingAssets(emp){
+  return (emp.assets || []).filter(a => a && a.item && !a.returnedOn);
+}
+
 // ---- generator ----
 function jumpToGenerator(letterLabel){
   switchHrSub('generator');
@@ -9308,8 +9411,11 @@ async function renderGeneratorTab(){
     <div class="letter-choice" onclick="openChecklistPicker('joining')">
       <span class="num">${String(LETTER_TYPES.length+1).padStart(2,'0')}</span> Joining Checklist <span style="margin-left:auto;color:var(--muted);font-weight:400;font-size:12px;">${employees.length} employees${joiningDone ? ', ' + joiningDone + ' complete' : ''}</span>
     </div>
+    <div class="letter-choice" onclick="openJoiningKit()">
+      <span class="num">${String(LETTER_TYPES.length+2).padStart(2,'0')}</span> Joining Kit <span style="margin-left:auto;color:var(--muted);font-weight:400;font-size:12px;">uniform &amp; assets issued</span>
+    </div>
     <div class="letter-choice" onclick="openChecklistPicker('exit')">
-      <span class="num">${String(LETTER_TYPES.length+2).padStart(2,'0')}</span> Exit Checklist <span style="margin-left:auto;color:var(--muted);font-weight:400;font-size:12px;">${employees.length} employees${exitDone ? ', ' + exitDone + ' complete' : ''}</span>
+      <span class="num">${String(LETTER_TYPES.length+3).padStart(2,'0')}</span> Exit Checklist <span style="margin-left:auto;color:var(--muted);font-weight:400;font-size:12px;">${employees.length} employees${exitDone ? ', ' + exitDone + ' complete' : ''}</span>
     </div>`;
   document.getElementById('letterChoiceList').innerHTML = letterItems + checklistItems;
 
@@ -9802,6 +9908,24 @@ async function generateLetter(){
   const msg = document.getElementById('genMsg');
   const type = LETTER_TYPES[selectedLetterIdx];
   const isOffer = type === 'Offer Letter';
+
+  // Company property has to come back before service is certified. Issuing the
+  // Experience Letter first removes the only leverage there is to get a laptop
+  // or a uniform returned.
+  if(type === 'Experience Letter'){
+    const empId = (document.getElementById('genEmpSelect') || {}).value;
+    if(empId){
+      const emp = (await getEmployees()).find(e => e.id === empId);
+      const owed = emp ? outstandingAssets(emp) : [];
+      if(owed.length){
+        msg.textContent = 'Not issued — ' + owed.length + ' item(s) still with ' + (emp.name || empId) +
+          ': ' + owed.map(a => a.item + (a.qty ? ' ×' + a.qty : '')).join(', ') +
+          '. Record the return date on the Joining Kit first.';
+        msg.classList.add('error');
+        return;
+      }
+    }
+  }
 
   let name, matched = null;
   if(isOffer){
