@@ -4691,12 +4691,42 @@ function closeFullscreenView(){
 // from somebody's salary because their record was migrated is not a decision
 // this code gets to make — HR sets the start month, and only then does money
 // move.
-function computeLoanEmiForMonth(emp, year, month){
-  if(emp.loanStatus !== 'active') return 0;
+// An employee's loans, as a list, whatever shape the record is in.
+//
+// Records written before there was a ledger carry one loan in flat fields.
+// Rather than migrate the stored data — which would rewrite every employee to
+// answer a read — the single loan is presented as a one-entry list at the point
+// of reading. A record that has a `loans` array uses it and the flat fields are
+// ignored, so the first save through the form settles the question for good.
+function loansOf(emp){
+  if(!emp) return [];
+  if(Array.isArray(emp.loans)) return emp.loans.filter(l => l && (Number(l.amount) || 0) > 0);
   const amount = Number(emp.loanAmount) || 0;
-  const emi = Number(emp.emiPerMonth) || 0;
-  if(!amount || !emi || !emp.loanStartMonth) return 0;
-  const [sy, sm] = String(emp.loanStartMonth).split('-').map(Number);
+  if(!amount) return [];
+  return [{
+    id: 'legacy',
+    amount,
+    instalment: Number(emp.emiPerMonth) || 0,
+    startMonth: emp.loanStartMonth || '',
+    status: emp.loanStatus === 'closed' ? 'closed' : 'active',
+    reason: '',
+    approvedOn: ''
+  }];
+}
+
+// One loan's instalment for one month. How many months it runs is not stored:
+// it is however many instalments the amount needs, so the schedule cannot
+// disagree with itself, and the last one is the remainder so recovery stops
+// exactly at the loan.
+//
+// A loan with no recovery month deducts nothing — see the note on the employee
+// form. Nothing comes out of a salary until somebody says when.
+function loanEmiForMonth(loan, year, month){
+  if(!loan || loan.status !== 'active') return 0;
+  const amount = Number(loan.amount) || 0;
+  const emi = Number(loan.instalment) || 0;
+  if(!amount || !emi || !loan.startMonth) return 0;
+  const [sy, sm] = String(loan.startMonth).split('-').map(Number);
   if(!sy || !sm) return 0;
   const offset = (year * 12 + (month - 1)) - (sy * 12 + (sm - 1));
   if(offset < 0) return 0;
@@ -4704,17 +4734,34 @@ function computeLoanEmiForMonth(emp, year, month){
   return remaining <= 0 ? 0 : Math.min(emi, remaining);
 }
 
-// What is still owed once the given month's instalment has been taken.
-function loanBalanceAfterMonth(emp, year, month){
-  const amount = Number(emp.loanAmount) || 0;
-  if(!amount || emp.loanStatus !== 'active') return 0;
-  if(!emp.loanStartMonth) return amount;
-  const [sy, sm] = String(emp.loanStartMonth).split('-').map(Number);
+// What is still owed on one loan once the given month's instalment is taken.
+function loanBalanceAfter(loan, year, month){
+  if(!loan || loan.status !== 'active') return 0;
+  const amount = Number(loan.amount) || 0;
+  if(!amount) return 0;
+  if(!loan.startMonth) return amount;
+  const [sy, sm] = String(loan.startMonth).split('-').map(Number);
   if(!sy || !sm) return amount;
   const offset = (year * 12 + (month - 1)) - (sy * 12 + (sm - 1));
   if(offset < 0) return amount;
-  const emi = Number(emp.emiPerMonth) || 0;
+  const emi = Number(loan.instalment) || 0;
   return Math.max(0, Math.round((amount - Math.min(amount, emi * (offset + 1))) * 100) / 100);
+}
+
+// Everything being recovered from this employee this month, across every loan
+// running at once. Two loans recover two instalments — the second no longer
+// displaces the first.
+function computeLoanEmiForMonth(emp, year, month){
+  return Math.round(loansOf(emp).reduce((t, l) => t + loanEmiForMonth(l, year, month), 0) * 100) / 100;
+}
+
+function loanBalanceAfterMonth(emp, year, month){
+  return Math.round(loansOf(emp).reduce((t, l) => t + loanBalanceAfter(l, year, month), 0) * 100) / 100;
+}
+
+// Loans that are running but recovering nothing, because no month was set.
+function loansWithoutStart(emp){
+  return loansOf(emp).filter(l => l.status === 'active' && !l.startMonth);
 }
 
 function computeRetentionForMonth(emp, year, month){
@@ -5355,7 +5402,7 @@ async function renderConsultantReport(){
     // would otherwise be counted twice (once in `present`, once in weekOff).
     const payableDays = Math.max(0, monthDays - absentDays);
 
-    const loanEmi = (emp.loanStatus === 'active' ? (Number(emp.emiPerMonth) || 0) : 0);
+    const loanEmi = computeLoanEmiForMonth(emp, year, month);
     const advance = (Number(emp.advance) || 0) + (Number(emp.advanceTemp) || 0);
     const deduction = loanEmi + advance;
     let loanLabel = '';
@@ -7326,7 +7373,7 @@ function emptyEmployee(){
     pan:'', aadhaar:'', uan:'', esiNumber:'', bankName:'', ifsc:'', accountNumber:'',
     phone:'', email:'', address:'',
     basic:0, hra:0, otherAllowances:0, dressAllowance:0, mobileExpense:0, pf:0, esiDeduction:0, pt:0,
-    loanAmount:0, emiPerMonth:0, loanStatus:'active', loanStartMonth:'',
+    loans:[],
     diwaliEligible:'yes',
     emergencyName:'', emergencyNumber:'',
     bloodGroup:'', insuranceDetails:'',
@@ -7665,29 +7712,15 @@ function employeeModalHtml(emp){
       </div>
 
       <div class="field-group">
-        <div class="sec-title">Loan &amp; advance</div>
-        <label class="field">Loan / advance amount</label>
-        <input type="number" id="f_loanAmount" placeholder="0" value="${emp.loanAmount||''}">
-        <div style="height:12px"></div>
-        <label class="field">EMI per month</label>
-        <input type="number" id="f_emiPerMonth" placeholder="0" value="${emp.emiPerMonth||''}">
-        <div style="height:12px"></div>
-        <label class="field">Recovery starts from (month)</label>
-        <input type="month" class="field-input" id="f_loanStartMonth" value="${emp.loanStartMonth || ''}">
-        <div style="height:12px"></div>
-        <label class="field">Loan status</label>
-        <select class="field-input" id="f_loanStatus">
-          <option value="active" ${emp.loanStatus==='active'?'selected':''}>Active - deduct EMI from salary</option>
-          <option value="closed" ${emp.loanStatus==='closed'?'selected':''}>Closed</option>
-        </select>
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;">
-          While the loan is active, the EMI is deducted on the Salary Sheet from the recovery month
-          onward, and it stops on its own once the whole amount is back — the last instalment is
-          whatever is left, so recovery never overshoots the loan.
-          ${emp.loanAmount && !emp.loanStartMonth
-            ? '<br><br><strong style="color:var(--amber-dark);">No recovery month is set, so nothing is being deducted for this loan.</strong> Set one to start recovery.'
-            : ''}
+        <div class="sec-title">Loans &amp; advances</div>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;line-height:1.55;">
+          An employee can be repaying more than one at a time — each is recovered on its own
+          schedule and they all come off the Salary Sheet together. Recovery runs from the month
+          set against it and stops on its own once the whole amount is back; the last instalment
+          is whatever is left, so it never overshoots.
         </p>
+        <div id="loanRowsBox"></div>
+        <a href="#" onclick="addLoanRow();return false;" style="font-size:13px;color:var(--amber-dark);font-weight:600;">+ Add a loan or advance</a>
       </div>
 
       <div class="field-group">
@@ -7914,22 +7947,6 @@ function toggleStatutoryFieldsForHeading(){
         pfEl.value = Math.round(pfr.employee * 100) / 100;
         if(pfNote) pfNote.textContent = pfr.reason + ' — employee ₹' + fmtMoney(pfr.employeeTotal) +
           ', employer ₹' + fmtMoney(pfr.employerTotal) + ', total ₹' + fmtMoney(pfr.grandTotal) + '.';
-      }
-      if(false){
-        pfEl.value = 0;
-        if(pfNote) pfNote.innerHTML = '<span class="pol-ok">✓ Excluded employee — no PF deducted.</span> ' +
-          'No prior UAN, Form 11 submitted, and Basic + DA of ₹' + fmtMoney(wage) +
-          ' is above ₹' + fmtMoney(PF_RULES.exclusion.wageAbove) + '.';
-      } else {
-        const pf = computePf(wage);
-        pfEl.value = Math.round(pf.employee * 100) / 100;
-        const why = excl.missing.length
-          ? ' PF is mandatory because ' + excl.missing.join(', and ') + '.'
-          : '';
-        if(pfNote) pfNote.textContent =
-          headingPct(PF_RULES.employeePct) + ' of Basic + HRA ₹' + fmtMoney(wage) + '. Employer adds ₹' +
-          fmtMoney(pf.employerTotal) + ' — ₹' + fmtMoney(pf.employerEps) + ' to pension' +
-          (pf.capApplied ? ' (capped)' : '') + ' and ₹' + fmtMoney(pf.employerEpf) + ' to EPF.' + why;
       }
     }
   }
@@ -8221,6 +8238,112 @@ async function handleDocUpload(event, field){
   event.target.insertAdjacentElement('afterend', card);
 }
 
+// ---- loan ledger, employee form ----
+// The rows are rebuilt from the draft rather than edited in place, so removing
+// the middle loan of three cannot leave the remaining two bound to stale
+// indexes. Values are read back out of the DOM on save.
+function renderLoanRows(){
+  const box = document.getElementById('loanRowsBox');
+  if(!box) return;
+  const loans = editingEmployeeDraft.loans || [];
+  if(!loans.length){
+    box.innerHTML = '<p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;">No loan or advance on record for this employee.</p>';
+    return;
+  }
+  const now = new Date(), y = now.getFullYear(), m = now.getMonth() + 1;
+  box.innerHTML = loans.map((l, i) => {
+    const amount = Number(l.amount) || 0;
+    const bal = loanBalanceAfter(l, y, m);
+    const recovered = Math.max(0, Math.round((amount - bal) * 100) / 100);
+    const warn = l.status === 'active' && !l.startMonth;
+    return `<div class="emp-row" style="margin-bottom:12px;">
+      <div class="head">
+        <strong>${l.reason ? escapeHtml(l.reason) : 'Loan / advance ' + (i + 1)}</strong>
+        <a href="#" onclick="removeLoanRow(${i});return false;" style="font-size:12px;color:var(--muted);">Remove</a>
+      </div>
+      <div style="height:8px"></div>
+      <label class="field">Amount</label>
+      <input type="number" id="loan_amount_${i}" placeholder="0" value="${amount || ''}" oninput="syncLoanRow(${i})">
+      <div style="height:10px"></div>
+      <label class="field">Monthly instalment</label>
+      <input type="number" id="loan_emi_${i}" placeholder="0" value="${Number(l.instalment) || ''}" oninput="syncLoanRow(${i})">
+      <div style="height:10px"></div>
+      <label class="field">Recovery starts from (month)</label>
+      <input type="month" class="field-input" id="loan_start_${i}" value="${escapeHtml(l.startMonth || '')}" onchange="syncLoanRow(${i})">
+      <div style="height:10px"></div>
+      <label class="field">Status</label>
+      <select class="field-input" id="loan_status_${i}" onchange="syncLoanRow(${i})">
+        <option value="active" ${l.status !== 'closed' ? 'selected' : ''}>Active — recover from salary</option>
+        <option value="closed" ${l.status === 'closed' ? 'selected' : ''}>Closed</option>
+      </select>
+      <p style="font-size:11.5px;margin:8px 0 0;${warn ? 'color:var(--amber-dark);font-weight:600;' : 'color:var(--muted);'}">
+        ${warn
+          ? 'No recovery month set, so nothing is being deducted for this one.'
+          : l.status === 'closed'
+            ? 'Closed — nothing is deducted.'
+            : 'Recovered so far ₹' + fmtMoney(recovered) + ' · balance ₹' + fmtMoney(bal)}
+      </p>
+    </div>`;
+  }).join('');
+}
+
+// Keeps the draft in step with what has been typed, so the summary line under
+// each row and the balances stay honest while the form is open.
+function syncLoanRow(i){
+  const l = (editingEmployeeDraft.loans || [])[i];
+  if(!l) return;
+  l.amount = Number((document.getElementById('loan_amount_' + i) || {}).value) || 0;
+  l.instalment = Number((document.getElementById('loan_emi_' + i) || {}).value) || 0;
+  l.startMonth = (document.getElementById('loan_start_' + i) || {}).value || '';
+  l.status = (document.getElementById('loan_status_' + i) || {}).value || 'active';
+}
+
+function addLoanRow(){
+  if(!Array.isArray(editingEmployeeDraft.loans)) editingEmployeeDraft.loans = [];
+  editingEmployeeDraft.loans.push({
+    id: 'L-' + Date.now() + '-' + editingEmployeeDraft.loans.length,
+    amount: 0, instalment: 0, startMonth: '', status: 'active', reason: '', approvedOn: ''
+  });
+  renderLoanRows();
+}
+
+function removeLoanRow(i){
+  const loans = editingEmployeeDraft.loans || [];
+  const l = loans[i];
+  if(!l) return;
+  const amount = Number(l.amount) || 0;
+  // Removing is for a row entered by mistake. A loan that has been recovering
+  // is history the Salary Sheet has already acted on, so deleting it silently
+  // would leave months of deductions with nothing behind them.
+  if(amount > 0 && l.startMonth &&
+     !confirm('Remove this ₹' + fmtMoney(amount) + ' loan?\n\n' +
+              'It has a recovery month set, so instalments may already have come off the Salary Sheet. ' +
+              'If it is simply repaid, set it to Closed instead — that keeps the record.')) return;
+  loans.splice(i, 1);
+  renderLoanRows();
+}
+
+// Reads the rows back out of the form. Rows left at zero are dropped rather
+// than saved as empty loans.
+function collectLoanRows(){
+  const out = [];
+  const loans = editingEmployeeDraft.loans || [];
+  loans.forEach((l, i) => {
+    const amount = Number((document.getElementById('loan_amount_' + i) || {}).value) || 0;
+    if(!amount) return;
+    out.push({
+      id: l.id || ('L-' + Date.now() + '-' + i),
+      amount,
+      instalment: Number((document.getElementById('loan_emi_' + i) || {}).value) || 0,
+      startMonth: (document.getElementById('loan_start_' + i) || {}).value || '',
+      status: (document.getElementById('loan_status_' + i) || {}).value || 'active',
+      reason: l.reason || '',
+      approvedOn: l.approvedOn || ''
+    });
+  });
+  return out;
+}
+
 function addOtherDocSlot(){
   const box = document.getElementById('otherDocsBox');
   const idx = box.children.length;
@@ -8306,6 +8429,10 @@ function applyEmployeeDraft(fields){
   // otherwise a resident engineer's site and shift come back filled in but
   // hidden, where they cannot be corrected.
   try{ toggleLeaveFieldsForType(); }catch(e){}
+  // The restored values sit in the loan rows; pull them back into the draft so
+  // the balances printed under each row describe what is now on screen.
+  (editingEmployeeDraft.loans || []).forEach((_, i) => { try{ syncLoanRow(i); }catch(e){} });
+  try{ renderLoanRows(); }catch(e){}
   renderPayrollBreakdown();
   updateBonusPreview();
 }
@@ -8318,8 +8445,12 @@ async function openAddEmployeeModal(id){
   } else {
     editingEmployeeDraft = emptyEmployee();
   }
+  // A record still holding one loan in the old flat fields is shown as a
+  // one-entry ledger. Saving the form is what writes it back in the new shape.
+  if(!Array.isArray(editingEmployeeDraft.loans)) editingEmployeeDraft.loans = loansOf(editingEmployeeDraft);
   document.getElementById('employeeModalRoot').innerHTML = employeeModalHtml(editingEmployeeDraft);
   toggleStatutoryFieldsForHeading();
+  renderLoanRows();
 
   // Offer the draft back only when it belongs to this form — a half-finished
   // new employee must never be poured into someone else's record.
@@ -8473,10 +8604,7 @@ async function saveEmployeeForm(){
     pf: payrollValue('pf'),
     esiDeduction: Number(document.getElementById('f_esiDeduction').value)||0,
     pt: Number(document.getElementById('f_pt').value)||0,
-    loanAmount: Number(document.getElementById('f_loanAmount').value)||0,
-    emiPerMonth: Number(document.getElementById('f_emiPerMonth').value)||0,
-    loanStartMonth: (document.getElementById('f_loanStartMonth') || {}).value || '',
-    loanStatus: document.getElementById('f_loanStatus').value,
+    loans: collectLoanRows(),
     diwaliEligible: document.getElementById('f_diwaliEligible').value,
     emergencyName: document.getElementById('f_emergencyName').value.trim(),
     emergencyNumber: document.getElementById('f_emergencyNumber').value.trim(),
@@ -8589,7 +8717,7 @@ async function deleteEmployee(id){
   const uname = emp.trackingUsername || '';
   const what = ['the employee record', 'all attendance history']
     .concat(uname ? ['the km-tracking login @' + uname, 'trip and check-in history'] : [])
-    .concat(['issued-asset records', 'entries in the letters log']);
+    .concat(['issued-asset records', 'loan and advance requests', 'entries in the letters log']);
   if(!confirm('Permanently delete ' + (emp.name || id) + '?\n\nThis removes ' + what.join(', ') +
     '.\n\nIt cannot be undone. If they have simply left the job, use "Mark as left" instead — that keeps ' +
     'the record and history and still takes them out of the active reports.')) return;
@@ -8605,6 +8733,11 @@ async function deleteEmployee(id){
     await saveUsers(users.filter(u => u.username !== uname));
   }
   try{
+    const reqs = await getLoanRequests();
+    const keptReqs = reqs.filter(r => r.employeeId !== id);
+    if(keptReqs.length !== reqs.length) await saveLoanRequests(keptReqs);
+  }catch(e){}
+  try{
     const log = await getLettersLog();
     const kept = log.filter(l => l.employeeId !== id && l.empId !== id &&
       !(l.name && emp.name && l.name === emp.name));
@@ -8619,7 +8752,7 @@ async function deleteEmployee(id){
   // record that the person ever existed.
   await addActivityLog('Permanently deleted employee ' + (emp.name || '') + ' (' + id + ') — record, attendance' +
     (uname ? ', tracking login @' + uname + ', trip history' : '') + ' and letters log entries removed');
-  ['employees', 'users', 'letters_log', 'attendance:' + id].forEach(invalidateSharedRead);
+  ['employees', 'users', 'letters_log', 'loan_requests', 'attendance:' + id].forEach(invalidateSharedRead);
   invalidateDashboardSnapshot();
   await renderEmployeeList();
   await refreshDashboard();
@@ -9080,7 +9213,7 @@ function reportHasData(key, e){
   if(key==='diwali') return diwaliBonusFor(e) > 0;
   if(key==='salary') return (Number(e.ratePay)||0) > 0;
   if(key==='ctc') return (Number(e.ratePay)||0) > 0;
-  if(key==='loan') return (Number(e.loanAmount)||0) > 0;
+  if(key==='loan') return loansOf(e).length > 0;
   if(key==='retention') return (Number(e.retentionMoney)||0) > 0 && (Number(e.retentionMonths)||0) > 0 && !!e.bondStart;
   return false;
 }
@@ -9535,32 +9668,51 @@ async function viewReport(key, label){
     }).join('');
     box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}<table><tr><th>Name</th><th class="num">Monthly gross</th><th class="num">Annual gross</th><th class="num">Diwali bonus</th><th class="num">Annual CTC</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table><p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Annual CTC = (Rate of Pay + Other allowances + Dress allowance + Mobile expense) × 12 + Diwali bonus. Rate of Pay is the whole Basic + HRA + LTA gross. PF, ESI and PT come out of it, so they are not added again. The employer's own PF and ESI are not included here either.</p>${fsBtn}</div>`;
   } else if(key === 'loan'){
-    // Recovered-so-far and balance are worked out from the start month, not
-    // stored, so the report cannot go stale between months.
+    // One row per loan, not per employee — somebody repaying two shows twice,
+    // which is the point of the ledger. Recovered-so-far and balance are worked
+    // out from the start month rather than stored, so they cannot go stale
+    // between months.
     const nowD = new Date(), nowY = nowD.getFullYear(), nowM = nowD.getMonth() + 1;
-    csvHeader = ['Name','Loan amount','EMI','Recovery from','Recovered so far','Balance','Status'];
-    const withLoan = employees.filter(e => (Number(e.loanAmount)||0) > 0);
-    rows = withLoan.map(e => {
-      const amount = Number(e.loanAmount) || 0;
-      const bal = e.loanStatus === 'active' ? loanBalanceAfterMonth(e, nowY, nowM) : 0;
-      const recovered = Math.max(0, Math.round((amount - bal) * 100) / 100);
-      const started = e.loanStartMonth || '';
-      const note = e.loanStatus !== 'active' ? 'closed'
-                 : started ? 'active' : 'active — no recovery month set, nothing is being deducted';
-      csvRows.push([e.name, amount, e.emiPerMonth || 0, started || '—', started ? recovered : 0, started ? bal : amount, note]);
-      return `<tr${(!started && e.loanStatus === 'active') ? ' class="inc-overdue"' : ''}>
-        <td>${escapeHtml(e.name)}</td>
+    csvHeader = ['Name','Loan','Amount','EMI','Recovery from','Recovered so far','Balance','Status'];
+    const ledger = [];
+    employees.forEach(e => loansOf(e).forEach((l, i) => ledger.push({ e, l, i })));
+    // Anything still being recovered first, biggest balance at the top: the
+    // report exists to show what is outstanding, and a closed loan is history.
+    ledger.sort((a, b) =>
+      (Number(b.l.status === 'active') - Number(a.l.status === 'active')) ||
+      (loanBalanceAfter(b.l, nowY, nowM) - loanBalanceAfter(a.l, nowY, nowM)) ||
+      String(a.e.name || '').localeCompare(String(b.e.name || '')));
+
+    rows = ledger.map(({ e, l, i }) => {
+      const amount = Number(l.amount) || 0;
+      const bal = loanBalanceAfter(l, nowY, nowM);
+      const recovered = l.status === 'active' ? Math.max(0, Math.round((amount - bal) * 100) / 100) : amount;
+      const started = l.startMonth || '';
+      const stalled = l.status === 'active' && !started;
+      const note = l.status !== 'active' ? 'closed'
+                 : stalled ? 'active — no recovery month set, nothing is being deducted' : 'active';
+      const what = l.reason ? l.reason : 'Loan ' + (i + 1);
+      csvRows.push([e.name, what, amount, Number(l.instalment) || 0, started || '—',
+                    l.status === 'active' ? recovered : amount,
+                    l.status === 'active' ? bal : 0, note]);
+      return `<tr${stalled ? ' class="inc-overdue"' : ''}>
+        <td>${escapeHtml(e.name)}<span class="inc-sub">${escapeHtml(what)}</span></td>
         <td class="num">₹${fmtMoney(amount)}</td>
-        <td class="num">₹${fmtMoney(Number(e.emiPerMonth)||0)}</td>
+        <td class="num">₹${fmtMoney(Number(l.instalment) || 0)}</td>
         <td>${started ? escapeHtml(started) : '<span class="pol-warn">not set</span>'}</td>
-        <td class="num">₹${fmtMoney(started ? recovered : 0)}</td>
-        <td class="num">₹${fmtMoney(started ? bal : amount)}</td>
+        <td class="num">₹${fmtMoney(l.status === 'active' ? recovered : amount)}</td>
+        <td class="num">₹${fmtMoney(l.status === 'active' ? bal : 0)}</td>
         <td>${escapeHtml(note)}</td></tr>`;
     }).join('');
-    const unset = withLoan.filter(e => e.loanStatus === 'active' && !e.loanStartMonth).length;
+
+    const stalledCount = ledger.filter(({ l }) => l.status === 'active' && !l.startMonth).length;
+    const outstanding = ledger.reduce((t, { l }) => t + loanBalanceAfter(l, nowY, nowM), 0);
+    const monthly = ledger.reduce((t, { l }) => t + loanEmiForMonth(l, nowY, nowM), 0);
+    const multi = employees.filter(e => loansOf(e).filter(l => l.status === 'active').length > 1).length;
     box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}
-      ${unset ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${unset} active loan(s) have no recovery month set, so no instalment is coming off the Salary Sheet for them. Set one on the employee record to start recovery.</p>` : ''}
-      <table><tr><th>Name</th><th class="num">Loan amount</th><th class="num">EMI</th><th>Recovery from</th><th class="num">Recovered so far</th><th class="num">Balance</th><th>Status</th></tr>${rows || '<tr><td colspan="7" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;">₹${fmtMoney(outstanding)} outstanding across ${ledger.length} loan(s); ₹${fmtMoney(monthly)} coming off this month's Salary Sheet.${multi ? ' ' + multi + ' employee(s) are repaying more than one at a time.' : ''}</p>
+      ${stalledCount ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${stalledCount} active loan(s) have no recovery month set, so no instalment is coming off the Salary Sheet for them. Set one on the employee record to start recovery.</p>` : ''}
+      <table><tr><th>Name</th><th class="num">Amount</th><th class="num">EMI</th><th>Recovery from</th><th class="num">Recovered so far</th><th class="num">Balance</th><th>Status</th></tr>${rows || '<tr><td colspan="7" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'retention'){
     const now = new Date();
     csvHeader = ['Name','Bond start','Bond end','Retention money','Months','Monthly deduction','Months elapsed','Deducted so far','Balance'];
@@ -9580,7 +9732,11 @@ async function viewReport(key, label){
     box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Bond start</th><th>Bond end</th><th class="num">Retention money</th><th class="num">Months</th><th class="num">Monthly deduction</th><th class="num">Months elapsed</th><th class="num">Deducted so far</th><th class="num">Balance</th></tr>${rows || '<tr><td colspan="9" class="empty">No employees with retention money configured</td></tr>'}</table>${fsBtn}</div>`;
   }
   if(csvHeader.length){
-    saveFileToDrive(['HR Management', financialYearLabel(monthVal + '-01'), 'Reports', label], `${label} - ${todayStr()}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
+    // Filed under the financial year this is being run in. These reports are a
+    // snapshot of today rather than of a chosen month, so there is no month to
+    // take the year from — reaching for one threw a ReferenceError on the last
+    // line of every report, which is why none of them ever reached Drive.
+    saveFileToDrive(['HR Management', financialYearLabel(), 'Reports', label], `${label} - ${todayStr()}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
   }
 }
 
@@ -10226,11 +10382,20 @@ async function approveLoanRequest(id){
   const emp = employees.find(e => e.id === req.employeeId);
   if(!emp){ alert('That employee is no longer on the roster, so this request cannot be approved.'); return; }
 
-  const existing = (Number(emp.loanAmount) || 0) > 0 && emp.loanStatus === 'active'
-    ? Number(emp.loanAmount) || 0 : 0;
-  if(existing && !confirm(emp.name + ' already has an active loan of ₹' + fmtMoney(existing) +
-      '.\n\nApproving this replaces it with ₹' + fmtMoney(req.amount) +
-      '. Anything already recovered against the old loan is not carried over.\n\nGo ahead?')) return;
+  // A second loan runs alongside the first rather than displacing it, so what
+  // the approver is warned about is the total coming out of one salary — not
+  // that they are about to lose the earlier loan.
+  const now = new Date();
+  const running = loansOf(emp).filter(l => l.status === 'active');
+  const instalment = req.instalment || req.amount;
+  if(running.length){
+    const owed = running.reduce((t, l) => t + loanBalanceAfter(l, now.getFullYear(), now.getMonth() + 1), 0);
+    const emiNow = running.reduce((t, l) => t + (Number(l.instalment) || 0), 0);
+    if(!confirm(emp.name + ' is already repaying ' + running.length + ' loan(s): ₹' + fmtMoney(owed) +
+        ' outstanding at ₹' + fmtMoney(emiNow) + ' a month.\n\n' +
+        'This one runs alongside them, taking the monthly recovery to ₹' +
+        fmtMoney(emiNow + instalment) + '.\n\nGo ahead?')) return;
+  }
 
   const start = prompt('Recover from which month? (YYYY-MM)\n\n' +
     'Nothing is deducted before this month.', req.startMonth || nextMonthValue());
@@ -10240,11 +10405,19 @@ async function approveLoanRequest(id){
     return;
   }
 
-  const instalment = req.instalment || req.amount;
-  emp.loanAmount = req.amount;
-  emp.emiPerMonth = instalment;
-  emp.loanStatus = 'active';
-  emp.loanStartMonth = start.trim();
+  // loansOf normalises a legacy flat-field record into a list first, so an
+  // employee whose old single loan was never migrated keeps it.
+  emp.loans = loansOf(emp);
+  emp.loans.push({
+    id: 'L-' + Date.now(),
+    amount: req.amount,
+    instalment,
+    startMonth: start.trim(),
+    status: 'active',
+    reason: req.reason || '',
+    approvedOn: new Date().toISOString(),
+    requestId: req.id
+  });
 
   req.status = 'approved';
   req.decidedOn = new Date().toISOString();
@@ -10306,10 +10479,16 @@ async function showLoanStanding(){
   if(!empId){ box.innerHTML = ''; return; }
   const emp = (await getEmployees()).find(e => e.id === empId);
   if(!emp){ box.innerHTML = ''; return; }
+  const now = new Date(), y = now.getFullYear(), m = now.getMonth() + 1;
+  const running = loansOf(emp).filter(l => l.status === 'active');
   const parts = [];
-  if((Number(emp.loanAmount) || 0) > 0 && emp.loanStatus === 'active'){
-    parts.push('an active loan of ₹' + fmtMoney(Number(emp.loanAmount) || 0) +
-               ' at ₹' + fmtMoney(Number(emp.emiPerMonth) || 0) + ' a month');
+  if(running.length){
+    const owed = running.reduce((t, l) => t + loanBalanceAfter(l, y, m), 0);
+    const emiNow = running.reduce((t, l) => t + (Number(l.instalment) || 0), 0);
+    parts.push(running.length === 1
+      ? 'an active loan with ₹' + fmtMoney(owed) + ' still to recover at ₹' + fmtMoney(emiNow) + ' a month'
+      : running.length + ' active loans with ₹' + fmtMoney(owed) + ' still to recover, ₹' +
+        fmtMoney(emiNow) + ' a month between them');
   }
   if((Number(emp.advanceOpening) || 0) > 0){
     parts.push('an advance balance of ₹' + fmtMoney(Number(emp.advanceOpening) || 0) + ' brought forward');
@@ -10362,8 +10541,10 @@ function letterTemplate(type, f){
       const line = '____________________';
       const rupees = n => n ? '₹' + fmtMoney(n) : line;
       const owed = [];
-      if(f.existingLoan) owed.push('Loan of ₹' + fmtMoney(f.existingLoan) +
-                                   ', recovering ₹' + fmtMoney(f.existingEmi) + ' a month');
+      (f.existingLoans || []).forEach(l => owed.push(
+        (l.reason ? l.reason + ' — ' : 'Loan of ') + '₹' + fmtMoney(l.amount) +
+        ', ₹' + fmtMoney(l.balance) + ' still to recover at ₹' + fmtMoney(l.instalment) + ' a month' +
+        (l.startMonth ? ' from ' + l.startMonth : ' (no recovery month set)')));
       if(f.existingAdvance) owed.push('Advance balance of ₹' + fmtMoney(f.existingAdvance));
       const standing = 'EXISTING POSITION\n' +
         (owed.length ? owed.join('\n') : 'Nothing outstanding on record.') + '\n\n';
@@ -10456,9 +10637,14 @@ async function generateLetter(){
     f.loanInstalment = (f.loanAmount && f.loanMonths)
       ? Math.round((f.loanAmount / f.loanMonths) * 100) / 100 : 0;
     if(matched){
-      f.existingLoan = (Number(matched.loanAmount) || 0) > 0 && matched.loanStatus === 'active'
-        ? Number(matched.loanAmount) || 0 : 0;
-      f.existingEmi = f.existingLoan ? (Number(matched.emiPerMonth) || 0) : 0;
+      const nowL = new Date(), ly = nowL.getFullYear(), lm = nowL.getMonth() + 1;
+      f.existingLoans = loansOf(matched).filter(l => l.status === 'active').map(l => ({
+        amount: Number(l.amount) || 0,
+        balance: loanBalanceAfter(l, ly, lm),
+        instalment: Number(l.instalment) || 0,
+        reason: l.reason || '',
+        startMonth: l.startMonth || ''
+      }));
       f.existingAdvance = Number(matched.advanceOpening) || 0;
     }
   }
