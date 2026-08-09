@@ -7247,16 +7247,19 @@ function emptyEmployee(){
     doj:'', nextIncrement:'', dob:'',
     pan:'', aadhaar:'', uan:'', esiNumber:'', bankName:'', ifsc:'', accountNumber:'',
     phone:'', email:'', address:'',
-    basic:0, hra:0, otherAllowances:0, dressAllowance:0, mobileExpense:0, stdDeductions:0, pf:0, esiDeduction:0, pt:0,
+    basic:0, hra:0, otherAllowances:0, dressAllowance:0, mobileExpense:0, pf:0, esiDeduction:0, pt:0,
     loanAmount:0, emiPerMonth:0, loanStatus:'active',
     diwaliEligible:'yes',
     emergencyName:'', emergencyNumber:'',
+    bloodGroup:'', insuranceDetails:'',
     trackingEnabled:'no', trackingUsername:'',
     employmentStatus:'active', leftDate:'',
     employeeType:'field', slOpening:0, elOpening:0,
+    workLocation:'', shiftTime:'',
     salaryHeading:'managerial', ratePay:0, advanceTemp:0, advance:0,
+    fatherName:'', motherName:'',
     bondStart:'', bondEnd:'', retentionMoney:0, retentionMonths:0,
-    aadhaarCardImg:'', panCardImg:'', otherDocs:[],
+    aadhaarCardImg:'', panCardImg:'', educationCertImg:'', signatureImg:'', otherDocs:[],
     checklists:{ joining:{}, exit:{} }
   };
 }
@@ -7329,12 +7332,22 @@ function employeeModalHtml(emp){
       </div>
 
       <div class="field-group">
-        <div class="sec-title">Emergency contact</div>
+        <div class="sec-title">Emergency &amp; medical</div>
         <label class="field">Contact name</label>
         <input type="text" id="f_emergencyName" placeholder="Full name" value="${emp.emergencyName}">
         <div style="height:12px"></div>
         <label class="field">Contact number</label>
         <input type="text" id="f_emergencyNumber" placeholder="10-digit mobile number" value="${emp.emergencyNumber}">
+        <div style="height:12px"></div>
+        <label class="field">Blood group</label>
+        <select class="field-input" id="f_bloodGroup">
+          ${['','A+','A-','B+','B-','AB+','AB-','O+','O-'].map(g =>
+            `<option value="${g}" ${emp.bloodGroup===g?'selected':''}>${g || 'Not known'}</option>`).join('')}
+        </select>
+        <div style="height:12px"></div>
+        <label class="field">Insurance details</label>
+        <textarea class="field-input" id="f_insuranceDetails" rows="3" placeholder="Insurer, policy number, sum insured, validity — e.g.&#10;Star Health, policy P/123456789, ₹3,00,000, valid to 31-03-2027">${escapeHtml(emp.insuranceDetails || '')}</textarea>
+        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Blood group and policy details are the two things needed fastest in an emergency — kept here so they are with the contact who would be called.</p>
       </div>
 
       <div class="field-group">
@@ -7370,6 +7383,14 @@ function employeeModalHtml(emp){
           <input type="month" class="field-input" id="f_leaveOpeningFrom" value="${emp.leaveOpeningFrom || ''}">
           <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Leave taken from this month onward is deducted from the balances above. Leave it blank and the financial year start is used.</p>
           <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Enter manually for this year only. From next year onward, the EL Calculation Sheet report carries the closing balance forward automatically.</p>
+        </div>
+        <div id="residentFields" class="${emp.employeeType==='resident'?'':'hidden'}" style="margin-top:14px;">
+          <label class="field">Work location (client site)</label>
+          <input type="text" id="f_workLocation" placeholder="e.g. Reliance, Jamnagar — Plant 2" value="${escapeHtml(emp.workLocation||'')}">
+          <div style="height:12px"></div>
+          <label class="field">Shift time</label>
+          <input type="text" id="f_shiftTime" placeholder="e.g. 08:00 to 17:00, or General shift" value="${escapeHtml(emp.shiftTime||'')}">
+          <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Resident Engineers sit at the client's site on the client's hours, not the office 09:30–19:00 shift — so their location and timing are recorded here rather than assumed.</p>
         </div>
       </div>
 
@@ -7447,6 +7468,16 @@ function employeeModalHtml(emp){
         <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Enter the outstanding advance as it stands today, once. The Salary Sheet then carries it forward each month, less what is recovered, so it does not need entering again.</p>
       </div>
 
+      <div class="field-group ${emp.salaryHeading==='apprentice'?'':'hidden'}" id="familyFields">
+        <div class="sec-title">Family information</div>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Required for apprentices — the apprenticeship registration and the NAPS/board records ask for parents' names in full.</p>
+        <label class="field">Father's full name</label>
+        <input type="text" id="f_fatherName" placeholder="Full name as on records" value="${escapeHtml(emp.fatherName||'')}">
+        <div style="height:12px"></div>
+        <label class="field">Mother's full name</label>
+        <input type="text" id="f_motherName" placeholder="Full name as on records" value="${escapeHtml(emp.motherName||'')}">
+      </div>
+
       <div class="field-group">
         <div class="sec-title">Salary structure (for salary slip)</div>
         <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Basic and HRA are worked out from Rate of Pay and the salary heading — they are shown in the breakdown above and are no longer typed here, because the Salary Sheet has always derived them and ignored anything entered by hand.</p>
@@ -7458,9 +7489,6 @@ function employeeModalHtml(emp){
         <div style="height:12px"></div>
         <label class="field">Mobile / communication expense (monthly)</label>
         <input type="number" id="f_mobileExpense" placeholder="0" value="${emp.mobileExpense||''}">
-        <div style="height:12px"></div>
-        <label class="field">Standard deductions</label>
-        <input type="number" id="f_stdDeductions" placeholder="0" value="${emp.stdDeductions||''}">
         <div style="height:12px"></div>
         <label class="field">Person with disability? (raises the ESI ceiling)</label>
         <select class="field-input" id="f_esiDisabled" onchange="toggleStatutoryFieldsForHeading()">
@@ -7632,6 +7660,15 @@ function employeeModalHtml(emp){
         <input type="file" accept="image/*" id="f_lastSlipFile" onchange="handleDocUpload(event,'lastSalarySlipImg')">
         ${docCardHtml(emp.lastSalarySlipImg)}
         <div style="height:12px"></div>
+        <label class="field">Education certificate</label>
+        <input type="file" accept="image/*" id="f_educationFile" onchange="handleDocUpload(event,'educationCertImg')">
+        ${docCardHtml(emp.educationCertImg)}
+        <div style="height:12px"></div>
+        <label class="field">Specimen signature</label>
+        <input type="file" accept="image/*" id="f_signatureFile" onchange="handleDocUpload(event,'signatureImg')">
+        ${docCardHtml(emp.signatureImg)}
+        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">A photo of the signature on plain paper is enough — it is what the bank and PF forms are checked against.</p>
+        <div style="height:12px"></div>
         <label class="field">Other documents</label>
         <a href="#" onclick="addOtherDocSlot();return false;" style="font-size:13px;color:var(--amber-dark);font-weight:600;">+ Add another document</a>
         <div id="otherDocsBox"></div>
@@ -7692,9 +7729,39 @@ function toggleBondFields(){
   }
 }
 
+// Resident Engineers are the one type whose place and hours are the client's,
+// not ours — so they are the only ones asked for a site and a shift, and the
+// answers are cleared if the type changes rather than left describing a posting
+// that no longer exists.
 function toggleLeaveFieldsForType(){
   const isResident = document.getElementById('f_employeeType').value === 'resident';
   document.getElementById('leaveOpeningFields').classList.toggle('hidden', isResident);
+  const resBox = document.getElementById('residentFields');
+  if(resBox){
+    resBox.classList.toggle('hidden', !isResident);
+    if(!isResident){
+      ['f_workLocation','f_shiftTime'].forEach(id => {
+        const el = document.getElementById(id);
+        if(el) el.value = '';
+      });
+    }
+  }
+}
+
+// Parents' names are asked for apprentices only, because only the
+// apprenticeship registration needs them. Same rule as the direct-pay question:
+// switch the heading away and the answers go with it.
+function toggleFamilyFields(){
+  const isApprentice = (document.getElementById('f_salaryHeading') || {}).value === 'apprentice';
+  const box = document.getElementById('familyFields');
+  if(!box) return;
+  box.classList.toggle('hidden', !isApprentice);
+  if(!isApprentice){
+    ['f_fatherName','f_motherName'].forEach(id => {
+      const el = document.getElementById(id);
+      if(el) el.value = '';
+    });
+  }
 }
 
 function toggleStatutoryFieldsForHeading(){
@@ -7822,6 +7889,7 @@ function toggleStatutoryFieldsForHeading(){
   renderHeadingExplainer();
   renderPayrollBreakdown();
   try{ toggleDirectPay(); }catch(e){}
+  try{ toggleFamilyFields(); }catch(e){}
 }
 
 let editingEmployeeDraft = null;
@@ -8071,6 +8139,11 @@ function applyEmployeeDraft(fields){
     if(el.type === 'checkbox') el.checked = !!fields[id]; else el.value = fields[id];
   });
   toggleStatutoryFieldsForHeading();
+  // A restored draft can carry a different employee type than the one the form
+  // was built for, so the type-dependent sections have to be re-evaluated too —
+  // otherwise a resident engineer's site and shift come back filled in but
+  // hidden, where they cannot be corrected.
+  try{ toggleLeaveFieldsForType(); }catch(e){}
   renderPayrollBreakdown();
   updateBonusPreview();
 }
@@ -8220,7 +8293,6 @@ async function saveEmployeeForm(){
     otherAllowances: Number(document.getElementById('f_otherAllowances').value)||0,
     dressAllowance: Number(document.getElementById('f_dressAllowance').value)||0,
     mobileExpense: Number(document.getElementById('f_mobileExpense').value)||0,
-    stdDeductions: Number(document.getElementById('f_stdDeductions').value)||0,
     pt: payrollValue('pt'),
     advanceOpening: Number(document.getElementById('f_advanceOpening').value)||0,
     leaveOpeningFrom: (document.getElementById('f_leaveOpeningFrom') || {}).value || '',
@@ -8245,6 +8317,8 @@ async function saveEmployeeForm(){
     diwaliEligible: document.getElementById('f_diwaliEligible').value,
     emergencyName: document.getElementById('f_emergencyName').value.trim(),
     emergencyNumber: document.getElementById('f_emergencyNumber').value.trim(),
+    bloodGroup: (document.getElementById('f_bloodGroup') || {}).value || '',
+    insuranceDetails: ((document.getElementById('f_insuranceDetails') || {}).value || '').trim(),
     trackingEnabled: needsTracking,
     bondStart: document.getElementById('f_bondStart').value,
     bondEnd: document.getElementById('f_bondEnd').value,
@@ -8253,6 +8327,10 @@ async function saveEmployeeForm(){
     employeeType: document.getElementById('f_employeeType').value,
     slOpening: Number(document.getElementById('f_slOpening').value)||0,
     elOpening: Number(document.getElementById('f_elOpening').value)||0,
+    workLocation: ((document.getElementById('f_workLocation') || {}).value || '').trim(),
+    shiftTime: ((document.getElementById('f_shiftTime') || {}).value || '').trim(),
+    fatherName: ((document.getElementById('f_fatherName') || {}).value || '').trim(),
+    motherName: ((document.getElementById('f_motherName') || {}).value || '').trim(),
     salaryHeading: document.getElementById('f_salaryHeading').value,
     ratePay: Number(document.getElementById('f_ratePay').value)||0,
     advanceTemp: Number(document.getElementById('f_advanceTemp').value)||0,
@@ -8552,7 +8630,7 @@ async function populateRoleReportPickers(){
 async function migrateDocumentsToDrive(){
   const box = document.getElementById('docMigrateBox');
   const FIELDS = ['aadhaarCardImg','panCardImg','photoImg','residenceProofImg',
-                  'lastSalarySlipImg','chequeImg'];
+                  'lastSalarySlipImg','chequeImg','educationCertImg','signatureImg'];
   const employees = await getEmployees();
   const pending = employees.filter(e => FIELDS.some(f => e[f] && !/^https?:/.test(e[f])));
   if(!pending.length){
@@ -8658,13 +8736,19 @@ const IMPORT_COLUMNS = [
   { key:'designation',   label:'Designation' },
   { key:'department',    label:'Department' },
   { key:'employeeType',  label:'Employee Type (field/office/wfh/resident)' },
+  { key:'workLocation',  label:'Work Location (resident engineers)' },
+  { key:'shiftTime',     label:'Shift Time (resident engineers)' },
   { key:'salaryHeading', label:'Salary Heading (managerial/senior/junior/apprentice/rsit/contractor)' },
   { key:'ratePay',       label:'Rate of Pay', num:true },
   { key:'doj',           label:'Date of Joining (YYYY-MM-DD)' },
   { key:'dob',           label:'Date of Birth (YYYY-MM-DD)' },
+  { key:'fatherName',    label:'Father Full Name (apprentices)' },
+  { key:'motherName',    label:'Mother Full Name (apprentices)' },
   { key:'phone',         label:'Mobile' },
   { key:'email',         label:'Email' },
   { key:'address',       label:'Address' },
+  { key:'bloodGroup',    label:'Blood Group' },
+  { key:'insuranceDetails', label:'Insurance Details' },
   { key:'aadhaar',       label:'Aadhaar' },
   { key:'pan',           label:'PAN' },
   { key:'uan',           label:'UAN' },
@@ -8686,7 +8770,9 @@ function downloadEmployeeTemplate(){
   const example = {
     id:'E101', name:'Example Employee', designation:'Service Engineer', department:'Service',
     employeeType:'field', salaryHeading:'junior', ratePay:'25000', doj:'2026-04-01', dob:'1995-06-15',
-    phone:'9876543210', email:'name@example.com', address:'Ahmedabad', aadhaar:'123456789012',
+    fatherName:'', motherName:'', workLocation:'', shiftTime:'',
+    phone:'9876543210', email:'name@example.com', address:'Ahmedabad',
+    bloodGroup:'O+', insuranceDetails:'', aadhaar:'123456789012',
     pan:'ABCDE1234F', uan:'', esiNumber:'', bankName:'Axis Bank', accountNumber:'123456789',
     ifsc:'UTIB0001234', elOpening:'0', slOpening:'7', advanceOpening:'0',
     hasPriorUan:'no', form11Submitted:'no', esiDisabled:'no', esiCoveredAtPeriodStart:'no'
@@ -9270,7 +9356,7 @@ async function viewReport(key, label){
     rows = employees.map(e => {
       const gross = (Number(e.basic)||0)+(Number(e.hra)||0)+(Number(e.otherAllowances)||0);
       const emi = e.loanStatus === 'active' ? (Number(e.emiPerMonth)||0) : 0;
-      const deductions = (Number(e.stdDeductions)||0)+(Number(e.pf)||0)+(Number(e.esiDeduction)||0)+(Number(e.pt)||0)+emi;
+      const deductions = (Number(e.pf)||0)+(Number(e.esiDeduction)||0)+(Number(e.pt)||0)+emi;
       const net = gross - deductions;
       csvRows.push([e.name, gross, deductions, net]);
       return `<tr><td>${escapeHtml(e.name)}</td><td class="num">₹${gross.toFixed(0)}</td><td class="num">₹${deductions.toFixed(0)}</td><td class="num">₹${net.toFixed(0)}</td></tr>`;
@@ -9942,7 +10028,7 @@ function letterTemplate(type, f){
     case 'Loan/Advance Request Form':
       return `${company}\n\nDate: ${issueDate}\n\nLOAN / ADVANCE REQUEST FORM\n\nEmployee name: ${name}\nDesignation: ${designation}\nDepartment: ${department}\nDate of joining: ${doj}\n\nRequested amount: ____________________\nReason: ____________________________________________\n\nEmployee signature: ____________________\nHR approval: ____________________`;
     case 'Salary Slip':
-      return `${company}\n\nSALARY SLIP — ${issueDate}\n\nEmployee name: ${name}\nDesignation: ${designation}\nDepartment: ${department}\n\nEARNINGS\nBasic: ${f.basic||0}\nHRA: ${f.hra||0}\nOther allowances: ${f.other||0}\n\nDEDUCTIONS\nStandard deductions: ${f.stdDeductions||0}\nPF: ${f.pf||0}\nESI: ${f.esiDeduction||0}\nPT: ${f.pt||0}\nEMI (if applicable): ${f.emi||0}\n\nNET PAY: ${f.net||0}`;
+      return `${company}\n\nSALARY SLIP — ${issueDate}\n\nEmployee name: ${name}\nDesignation: ${designation}\nDepartment: ${department}\n\nEARNINGS\nBasic: ${f.basic||0}\nHRA: ${f.hra||0}\nOther allowances: ${f.other||0}\n\nDEDUCTIONS\nPF: ${f.pf||0}\nESI: ${f.esiDeduction||0}\nPT: ${f.pt||0}\nEMI (if applicable): ${f.emi||0}\n\nNET PAY: ${f.net||0}`;
     default:
       return `${company}\n\nDate: ${issueDate}\n\n${name}`;
   }
@@ -10013,8 +10099,8 @@ async function generateLetter(){
     const gross = (Number(matched.basic)||0)+(Number(matched.hra)||0)+(Number(matched.otherAllowances)||0);
     const emi = matched.loanStatus === 'active' ? (Number(matched.emiPerMonth)||0) : 0;
     f.basic = matched.basic; f.hra = matched.hra; f.other = matched.otherAllowances;
-    f.stdDeductions = matched.stdDeductions; f.pf = matched.pf; f.esiDeduction = matched.esiDeduction; f.pt = matched.pt; f.emi = emi;
-    f.net = gross - ((Number(matched.stdDeductions)||0)+(Number(matched.pf)||0)+(Number(matched.esiDeduction)||0)+(Number(matched.pt)||0)+emi);
+    f.pf = matched.pf; f.esiDeduction = matched.esiDeduction; f.pt = matched.pt; f.emi = emi;
+    f.net = gross - ((Number(matched.pf)||0)+(Number(matched.esiDeduction)||0)+(Number(matched.pt)||0)+emi);
   }
   const text = letterTemplate(type, f);
   lastGeneratedLetter = { type, text, employeeName: name };
