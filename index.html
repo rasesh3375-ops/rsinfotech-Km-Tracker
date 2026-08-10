@@ -4439,8 +4439,9 @@ const CONSULTANT_REPORT_HEADINGS = ['managerial','senior','junior'];
 // read the same numbers — the calculation is unchanged.
 // ---- provident fund ----
 // Statutory rates, kept as config so a change in the law is an edit here.
-// The wage PF is charged on is Basic + DA. This payroll has no DA component,
-// so Basic is the base; add a DA heading and include it in pfWageOf below.
+// The wage PF is charged on is Basic. HR's instruction, and it matches the
+// EPF Act's Basic + DA where there is no DA component: HRA is a house rent
+// allowance and is excluded. Add a DA heading one day and list it below.
 const PF_RULES = {
   employeePct: 0.12,        // employee share, all of it to EPF
   employerPct: 0.12,        // employer share, split between EPS and EPF
@@ -4449,11 +4450,13 @@ const PF_RULES = {
   epsMonthlyCap: 1250       // and therefore never exceeds this
 };
 
-// Which earnings PF is charged on. HR has confirmed that the component this
-// payroll calls HRA is its dearness allowance, so it is part of the PF wage
-// here. Listed as config rather than written into the sum, so the base can be
-// changed without touching the calculation.
-PF_RULES.wageComponents = ['basic', 'hra'];
+// Which earnings PF is charged on. Basic only — HRA was in this list until HR
+// confirmed it is a house rent allowance rather than a dearness allowance, and
+// HRA is excluded from PF wages. Listed as config rather than written into the
+// sum, which is why that change was one line here and needed no migration:
+// every employee's PF is worked out from Rate of Pay and their heading at the
+// moment it is shown, so existing staff picked up the new base at once.
+PF_RULES.wageComponents = ['basic'];
 
 // EPF Scheme "excluded employee". All three conditions must hold — any one of
 // them missing and PF is mandatory. The threshold is strictly greater than the
@@ -4467,7 +4470,7 @@ PF_RULES.fixedAmount = 1800;      // the flat option, both sides
 
 PF_RULES.exclusion = {
   wageAbove: 15000,
-  conditions: ['No prior UAN or EPF account', 'Basic + DA strictly above ₹15,000', 'Form 11 declaration submitted']
+  conditions: ['No prior UAN or EPF account', 'Basic strictly above ₹15,000', 'Form 11 declaration submitted']
 };
 
 // ===== THE central PF calculation =====
@@ -4545,7 +4548,7 @@ function pfExclusionStatus(emp, wage){
   const excluded = noUan && form11 && aboveThreshold;
   const missing = [];
   if(!noUan)  missing.push('a prior UAN or EPF account exists');
-  if(!aboveThreshold) missing.push('Basic + DA of ₹' + fmtMoney(wage) + ' is not above ₹' + fmtMoney(X.wageAbove));
+  if(!aboveThreshold) missing.push('Basic of ₹' + fmtMoney(wage) + ' is not above ₹' + fmtMoney(X.wageAbove));
   if(!form11) missing.push('Form 11 declaration not recorded');
   return { excluded, missing, noUan, form11, aboveThreshold };
 }
@@ -5601,7 +5604,7 @@ async function renderStatutoryReport(key, label){
     saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'PF'), `PF Return - ${monthVal}.csv`, csv, 'text/csv');
     box.innerHTML = `${reportLogoHeader('Provident Fund Return — ' + monthVal)}
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Charged on ${
-        PF_RULES.wageComponents.map(k => k === 'basic' ? 'Basic' : 'HRA (DA)').join(' + ')} ·
+        PF_RULES.wageComponents.map(k => ({ basic:'Basic', hra:'HRA', lta:'LTA' }[k] || k)).join(' + ')} ·
         employee ${headingPct(PF_RULES.employeePct)} · employer ${headingPct(0.0367)} EPF and ${headingPct(PF_RULES.epsPct)} EPS,
         EPS capped at ₹${fmtMoney(PF_RULES.epsMonthlyCap)} above a ₹${fmtMoney(PF_RULES.epsWageCeiling)} wage ·
         admin ${headingPct(PF_RULES.adminPct)} · EDLI ${headingPct(PF_RULES.edliPct)}.
@@ -5609,7 +5612,7 @@ async function renderStatutoryReport(key, label){
       <div class="inc-scroll"><table class="inc-table">
         <thead><tr><th>#</th><th>Employee</th><th>Eligible / Type</th>
           <th class="num">Leave<br><span class="th-sub">days / ₹</span></th>
-          <th class="num">Final Payable<br><span class="th-sub">Basic + DA</span></th>
+          <th class="num">Final Payable<br><span class="th-sub">${PF_RULES.wageComponents.map(k => ({ basic:'Basic', hra:'HRA', lta:'LTA' }[k] || k)).join(' + ')}</span></th>
           <th class="num">Employee</th><th class="num">Empr EPF</th><th class="num">Empr EPS</th>
           <th class="num">Admin</th><th class="num">EDLI</th>
           <th class="num">Employer Total</th><th class="num">Grand Total</th><th>Status</th></tr></thead>
@@ -6558,7 +6561,7 @@ function computePayrollComponents(rate, headingKey, manual, ctx){
         .map(k => (PAYROLL_MASTER.find(x => x.key === k) || {}).label || k)
         .join(' + ') + ' (₹' + fmtMoney(pf.wage) + ')';
       if(excl.excluded){
-        formula = 'Excluded employee — no prior UAN, Form 11 submitted, and Basic + DA above ₹' +
+        formula = 'Excluded employee — no prior UAN, Form 11 submitted, and Basic above ₹' +
                   fmtMoney(PF_RULES.exclusion.wageAbove) + '. No PF is deducted.';
         out.push({ ...def, applies:true, auto:true, value, formula, missing:false });
         return;
