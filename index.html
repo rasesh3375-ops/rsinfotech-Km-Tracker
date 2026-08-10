@@ -903,6 +903,56 @@
       </section>
 
       <section class="block">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+          <h2 style="margin:0;">Leave &amp; late coming</h2>
+          <button class="linkbtn" style="padding:0" onclick="toggleEngLeaveForm()" id="engLeaveToggleBtn">apply</button>
+        </div>
+        <div id="engLeaveBalance"></div>
+        <div id="engLeaveForm" class="hidden" style="margin-top:12px;">
+          <label class="field">What are you applying for?</label>
+          <select class="field-input" id="engLeaveType" onchange="onEngLeaveTypeChange()">
+            <option value="EL">Earned Leave (EL) — full day</option>
+            <option value="SL">Sick Leave (SL) — full day</option>
+            <option value="HEL">Half day — Earned Leave</option>
+            <option value="HSL">Half day — Sick Leave</option>
+            <option value="LATE">Late coming — arriving after shift start</option>
+          </select>
+
+          <div id="engSickCertWrap" class="hidden" style="margin-top:12px;border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--cream);">
+            <div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:6px;">Doctor's certificate</div>
+            <p style="font-size:12px;color:var(--muted);margin:0 0 10px;line-height:1.55;">
+              Sick leave is applied for <strong>after</strong> the certificate, not before. Attach it here
+              and the application can be sent; without it the Send button stays off.
+            </p>
+            <input type="file" accept="image/*,application/pdf" id="engSickCertFile" onchange="handleEngSickCert(event)">
+            <div id="engSickCertStatus" style="margin-top:8px;font-size:12.5px;"></div>
+          </div>
+
+          <div id="engLeaveDatesWrap" style="margin-top:12px;">
+            <div class="row-inline">
+              <div><label class="field">From</label><input type="date" id="engLeaveFrom" onchange="renderEngLeavePreview()" /></div>
+              <div id="engLeaveToWrap"><label class="field">To</label><input type="date" id="engLeaveTo" onchange="renderEngLeavePreview()" /></div>
+            </div>
+          </div>
+
+          <div id="engLateTimeWrap" class="hidden" style="margin-top:12px;">
+            <label class="field">What time will you reach?</label>
+            <input type="time" class="field-input" id="engLateTime" onchange="renderEngLeavePreview()" />
+          </div>
+
+          <div style="height:12px"></div>
+          <label class="field">Reason</label>
+          <textarea class="field-input" id="engLeaveReason" rows="3" placeholder="Tell HR why, in a line or two"></textarea>
+
+          <div id="engLeavePreview" class="bonus-callout" style="margin-top:12px;"></div>
+          <div style="height:12px"></div>
+          <button class="btn full" id="engLeaveSubmitBtn" onclick="submitEngLeaveRequest()">Send to HR</button>
+          <div class="msg" id="engLeaveMsg"></div>
+        </div>
+        <div id="engLeaveList" style="margin-top:14px;"></div>
+      </section>
+
+      <section class="block">
         <h2>Last 30 days</h2>
         <div id="daily30Table"></div>
       </section>
@@ -2149,6 +2199,17 @@ async function getAttendance(employeeId){
   const v = await safeGet('attendance:' + employeeId, true);
   return v ? JSON.parse(v) : {};
 }
+// Late coming is a flag on the day, not a code that replaces it. Somebody who
+// arrives late still worked, so overwriting their Present with anything else
+// would cost them a day; this keeps whatever the day already says and records
+// that they were late, which is what the policy counts.
+async function markLateArrival(employeeId, dateStr, extra){
+  const att = await getAttendance(employeeId);
+  const existing = att[dateStr] || {};
+  att[dateStr] = Object.assign({}, existing, { code: existing.code || 'P', lateFlag: true }, extra || {});
+  await safeSet('attendance:' + employeeId, JSON.stringify(att), true);
+}
+
 async function setAttendanceDay(employeeId, dateStr, code, extra){
   const att = await getAttendance(employeeId);
   att[dateStr] = Object.assign({ code }, extra || {});
@@ -2949,6 +3010,234 @@ async function loginEngineer(){
   armExitGuard();
 }
 
+// ---- employee portal: leave, half day and late coming ----
+// The employee writes into the same leave_requests store HR reads, so there is
+// one queue and nothing has to be copied between the two sides. Approval on
+// the HR side is what touches attendance; nothing an employee does marks their
+// own attendance.
+let engSickCertUrl = '';
+
+function toggleEngLeaveForm(){
+  const box = document.getElementById('engLeaveForm');
+  const btn = document.getElementById('engLeaveToggleBtn');
+  if(!box) return;
+  const opening = box.classList.contains('hidden');
+  box.classList.toggle('hidden', !opening);
+  if(btn) btn.textContent = opening ? 'cancel' : 'apply';
+  if(opening){ onEngLeaveTypeChange(); }
+}
+
+function engLeaveIsSick(code){ return code === 'SL' || code === 'HSL'; }
+
+function onEngLeaveTypeChange(){
+  const code = (document.getElementById('engLeaveType') || {}).value || 'EL';
+  const sick = engLeaveIsSick(code);
+  const half = code === 'HEL' || code === 'HSL';
+  const late = code === 'LATE';
+  const show = (id, on) => { const el = document.getElementById(id); if(el) el.classList.toggle('hidden', !on); };
+  show('engSickCertWrap', sick);
+  show('engLateTimeWrap', late);
+  show('engLeaveToWrap', !half && !late);
+  // A half day and a late arrival are one date each, so the second date is not
+  // asked for and cannot be left behind from a previous choice.
+  const to = document.getElementById('engLeaveTo');
+  if(to && (half || late)) to.value = '';
+  renderEngLeavePreview();
+}
+
+async function handleEngSickCert(event){
+  const file = event.target.files[0];
+  const status = document.getElementById('engSickCertStatus');
+  if(!file) return;
+  status.textContent = 'Uploading…';
+  try{
+    const emp = await findEmployeeByTrackingUsername(engineerName);
+    const dataUrl = /^image\//.test(file.type) ? await compressDocumentFile(file) : await fileToDataUrl(file);
+    const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl || '');
+    if(!m) throw new Error('unreadable');
+    const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.') + 1) : 'jpg';
+    const res = await apiFetch(API_URL, {
+      method:'POST', headers:{ 'Content-Type':'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action:'uploadDocument', token: sessionToken,
+        folderPath: hrYearPath('', 'Office Documents', 'Medical Certificates',
+                               (emp && emp.name) || engineerName),
+        fileName: 'Medical certificate - ' + todayStr() + '.' + ext,
+        mimeType: m[1], base64Data: m[2]
+      })
+    });
+    const data = await res.json();
+    engSickCertUrl = (data && data.ok && data.fileUrl) ? data.fileUrl : '';
+    status.innerHTML = engSickCertUrl
+      ? '<span class="pol-ok">✓ Certificate attached — you can send the application now.</span>'
+      : '<span class="pol-warn">Upload failed. Try again, or hand the certificate to HR directly.</span>';
+  }catch(e){
+    engSickCertUrl = '';
+    status.innerHTML = '<span class="pol-warn">Upload failed. Try again, or hand the certificate to HR directly.</span>';
+  }
+  renderEngLeavePreview();
+}
+
+function fileToDataUrl(file){
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+
+function readEngLeaveForm(){
+  const g = id => (document.getElementById(id) || {}).value || '';
+  const code = g('engLeaveType') || 'EL';
+  const half = code === 'HEL' || code === 'HSL';
+  const late = code === 'LATE';
+  return {
+    code,
+    from: g('engLeaveFrom'),
+    to: (half || late) ? g('engLeaveFrom') : g('engLeaveTo'),
+    lateTime: g('engLateTime'),
+    reason: g('engLeaveReason').trim()
+  };
+}
+
+async function renderEngLeavePreview(){
+  const box = document.getElementById('engLeavePreview');
+  const btn = document.getElementById('engLeaveSubmitBtn');
+  if(!box) return;
+  const r = readEngLeaveForm();
+  const sick = engLeaveIsSick(r.code);
+  const problems = [];
+  if(!r.from) problems.push('Pick the date.');
+  if(r.code === 'LATE' && !r.lateTime) problems.push('Say what time you will reach.');
+  if(sick && !engSickCertUrl) problems.push('Attach the doctor\'s certificate — sick leave is applied for after the certificate.');
+
+  if(r.code === 'LATE'){
+    box.innerHTML = problems.length
+      ? '<span class="pol-warn">' + problems.map(escapeHtml).join('<br>') + '</span>'
+      : 'Late arrival on <strong>' + escapeHtml(r.from) + '</strong> at ' + escapeHtml(r.lateTime) +
+        '. HR is told; your attendance stays as it is unless they mark otherwise.';
+    if(btn) btn.disabled = problems.length > 0;
+    return;
+  }
+
+  const emp = await findEmployeeByTrackingUsername(engineerName);
+  if(!emp){ box.textContent = 'Your employee record could not be read — ask HR to check your login is linked.'; if(btn) btn.disabled = true; return; }
+  const d = await describeLeaveRequest({ code:r.code, from:r.from, to:r.to, hodApproved:'no',
+                                         medicalCertificate: engSickCertUrl ? 'yes' : 'no' }, emp);
+  if(r.from && !d.dates.length) problems.push('No working days in that range — Sundays and holidays are not leave.');
+  if(problems.length){
+    box.innerHTML = '<span class="pol-warn">' + problems.map(escapeHtml).join('<br>') + '</span>';
+    if(btn) btn.disabled = true;
+    return;
+  }
+  const lines = ['<strong>' + escapeHtml(d.label) + ' — ' + d.days + ' day(s)</strong>',
+                 'Your balance ' + d.balance + ' → <strong>' + d.after + '</strong> after this.'];
+  if(d.after < 0) lines.push('<span class="pol-warn">That is more than you have left. HR can still allow it, but the extra may be unpaid.</span>');
+  d.policy.notes.forEach(n => lines.push('<span style="color:var(--muted);">' + escapeHtml(n) + '</span>'));
+  box.innerHTML = lines.join('<br>');
+  if(btn) btn.disabled = false;
+}
+
+async function submitEngLeaveRequest(){
+  const msg = document.getElementById('engLeaveMsg');
+  const btn = document.getElementById('engLeaveSubmitBtn');
+  const r = readEngLeaveForm();
+  msg.classList.remove('error');
+  const emp = await findEmployeeByTrackingUsername(engineerName);
+  if(!emp){ msg.textContent = 'Your employee record could not be read — ask HR to check your login is linked.'; msg.classList.add('error'); return; }
+  if(!r.from){ msg.textContent = 'Pick the date.'; msg.classList.add('error'); return; }
+  if(engLeaveIsSick(r.code) && !engSickCertUrl){
+    msg.textContent = 'Attach the doctor\'s certificate first — sick leave cannot be sent without it.';
+    msg.classList.add('error'); return;
+  }
+  if(r.code === 'LATE' && !r.lateTime){ msg.textContent = 'Say what time you will reach.'; msg.classList.add('error'); return; }
+
+  const isLate = r.code === 'LATE';
+  const d = isLate ? null : await describeLeaveRequest({ code:r.code, from:r.from, to:r.to }, emp);
+  if(!isLate && !d.dates.length){ msg.textContent = 'No working days in that range.'; msg.classList.add('error'); return; }
+
+  btn.disabled = true; btn.textContent = 'Sending…';
+  const req = {
+    id: 'LV-' + Date.now() + '-' + (emp.id || 'x'),
+    employeeId: emp.id, employeeName: emp.name || engineerDisplayName || engineerName,
+    code: r.code,
+    typeLabel: isLate ? 'Late coming' : d.label,
+    from: r.from, to: r.to || r.from,
+    days: isLate ? 0 : d.days,
+    lateTime: r.lateTime || '',
+    reason: r.reason,
+    hodApproved: 'no',
+    medicalCertificate: engSickCertUrl ? 'yes' : 'no',
+    certificateUrl: engSickCertUrl || '',
+    requestedOn: new Date().toISOString(),
+    status: 'pending', decidedOn: '', dates: [],
+    source: 'employee'
+  };
+  try{
+    // Merged into the stored list by the backend so two people applying at the
+    // same moment cannot overwrite one another.
+    const merged = await remoteSetItem('leave_requests', req, 'id');
+    if(!merged){
+      const list = await getLeaveRequests();
+      list.push(req);
+      await saveLeaveRequests(list);
+    }
+    invalidateSharedRead('leave_requests');
+    msg.textContent = 'Sent to HR. You will see it here as Approved or Declined.';
+    document.getElementById('engLeaveReason').value = '';
+    engSickCertUrl = '';
+    const st = document.getElementById('engSickCertStatus'); if(st) st.textContent = '';
+    const cf = document.getElementById('engSickCertFile'); if(cf) cf.value = '';
+    toggleEngLeaveForm();
+    await renderEngLeave();
+  }catch(e){
+    msg.textContent = 'Could not send — check your connection and try again.';
+    msg.classList.add('error');
+  }
+  btn.disabled = false; btn.textContent = 'Send to HR';
+}
+
+// Balance at the top, then this employee's own applications and where each one
+// got to. Approved leave shows the dates HR actually marked, so what is on the
+// attendance sheet and what the employee sees are the same thing.
+async function renderEngLeave(){
+  const balBox = document.getElementById('engLeaveBalance');
+  const listBox = document.getElementById('engLeaveList');
+  if(!balBox || !listBox) return;
+  const emp = await findEmployeeByTrackingUsername(engineerName);
+  if(!emp){
+    balBox.innerHTML = '<p style="font-size:12.5px;color:var(--muted);margin:0;">Your leave balance will appear once HR links this login to your employee record.</p>';
+    listBox.innerHTML = '';
+    return;
+  }
+  if(emp.employeeType === 'resident'){
+    balBox.innerHTML = '<p style="font-size:12.5px;color:var(--muted);margin:0;">Resident Engineers are outside the EL/SL scheme — apply through your site in-charge.</p>';
+  } else {
+    const att = await getAttendance(emp.id);
+    const used = leaveUsedThisFinancialYear(att, financialYearEnd(todayStr()), emp.leaveOpeningFrom);
+    const el = Math.max(0, (Number(emp.elOpening) || 0) - used.el);
+    const sl = Math.max(0, (Number(emp.slOpening) || 0) - used.sl);
+    balBox.innerHTML = `<div class="legend-row"><span>Earned Leave left</span><strong>${el}</strong></div>
+      <div class="legend-row"><span>Sick Leave left</span><strong>${sl}</strong></div>`;
+  }
+
+  let mine = [];
+  try{
+    mine = (await getLeaveRequests()).filter(r => r.employeeId === emp.id)
+      .sort((a, b) => String(b.requestedOn).localeCompare(String(a.requestedOn))).slice(0, 10);
+  }catch(e){}
+  const tag = st => st === 'approved' ? '<span class="feed-tag" style="background:#DDEEE3;color:#2E7D4F;">Approved</span>'
+             : st === 'declined' ? '<span class="feed-tag" style="background:#FBE3E0;color:#B23A32;">Declined</span>'
+             : '<span class="feed-tag">Waiting for HR</span>';
+  listBox.innerHTML = mine.length
+    ? '<div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:8px;">Your applications</div>' +
+      mine.map(r => `<div class="legend-row"><span><strong>${escapeHtml(r.typeLabel || r.code)}</strong>
+          <span class="inc-sub">${escapeHtml(r.from)}${r.to && r.to !== r.from ? ' → ' + escapeHtml(r.to) : ''}${r.lateTime ? ' at ' + escapeHtml(r.lateTime) : ''}</span></span>
+          ${tag(r.status)}</div>`).join('')
+    : '<p style="font-size:12.5px;color:var(--muted);margin:0;">You have not applied for anything yet.</p>';
+}
+
 async function renderEmployeeHandbookForEngineer(){
   const card = document.getElementById('engHandbookCard');
   const body = document.getElementById('engHandbookBody');
@@ -3013,6 +3302,7 @@ async function enterEngineerMain(){
   await renderDaily30();
   await refreshTodayTotal();
   await renderEmployeeHandbookForEngineer();
+  await renderEngLeave();
 
   const active = await getActive(engineerName);
   if(active){
@@ -4867,6 +5157,17 @@ function financialYearLabel(dateStr){
   const d = dateStr ? new Date(dateStr) : new Date();
   const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
   return y + '-' + String((y + 1) % 100).padStart(2, '0');
+}
+
+// The last day of the financial year a date falls in. Leave balances are
+// measured to here rather than to today, so leave already approved for a date
+// in the future is counted as spent. Measured to today it would not be, and
+// somebody could book the same days twice over by applying for them one block
+// at a time.
+function financialYearEnd(dateStr){
+  const d = dateStr ? new Date(dateStr) : new Date();
+  const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+  return (y + 1) + '-03-31';
 }
 
 function financialYearStart(dateStr){
@@ -7039,7 +7340,7 @@ async function renderLeavePanel(){
   try{
     const reqs = await getLeaveRequests();
     pending = reqs.filter(r => r.status === 'pending').length;
-    upcoming = reqs.filter(r => r.status === 'approved' && r.from > today && r.from <= until)
+    upcoming = reqs.filter(r => r.status === 'approved' && r.code !== 'LATE' && r.from > today && r.from <= until)
                    .sort((a, b) => String(a.from).localeCompare(String(b.from)));
   }catch(e){}
 
@@ -10665,7 +10966,10 @@ async function describeLeaveRequest(req, emp){
   const isSick = req.code === 'SL' || req.code === 'HSL';
 
   const att = emp ? await getAttendance(emp.id) : {};
-  const used = leaveUsedThisFinancialYear(att, req.to || req.from || todayStr(),
+  // To the end of the year, not to this request's dates: leave already
+  // approved for December is spent whether or not the application in front of
+  // you is for September.
+  const used = leaveUsedThisFinancialYear(att, financialYearEnd(req.to || req.from || todayStr()),
                                           emp ? emp.leaveOpeningFrom : '');
   const openingEl = Number(emp && emp.elOpening) || 0;
   const openingSl = Number(emp && emp.slOpening) || 0;
@@ -10754,9 +11058,10 @@ async function renderPendingLeaveRequests(){
     pending.map(r => `<div class="emp-row">
         <div class="head"><strong>${escapeHtml(r.employeeName)}</strong><span class="id">${escapeHtml(String(r.days))} day(s)</span></div>
         <p style="font-size:12.5px;color:var(--muted);margin:6px 0 0;">
-          ${escapeHtml(r.typeLabel)} · ${escapeHtml(r.from)}${r.to && r.to !== r.from ? ' to ' + escapeHtml(r.to) : ''}
+          ${escapeHtml(r.typeLabel)} · ${escapeHtml(r.from)}${r.to && r.to !== r.from ? ' to ' + escapeHtml(r.to) : ''}${r.lateTime ? ' at ' + escapeHtml(r.lateTime) : ''}
           ${r.reason ? ' · ' + escapeHtml(r.reason) : ''}
-          <br>Applied ${escapeHtml(String(r.requestedOn || '').slice(0, 10))}
+          <br>Applied ${escapeHtml(String(r.requestedOn || '').slice(0, 10))}${r.source === 'employee' ? ' by the employee' : ''}
+          ${r.certificateUrl ? '<br><a href="' + escapeHtml(r.certificateUrl) + '" target="_blank" rel="noopener" style="color:var(--amber-dark);font-weight:600;">View medical certificate</a>' : ''}
         </p>
         <div class="row-inline" style="margin:10px 0 0;">
           <button class="btn" style="flex:1;" onclick="approveLeaveRequest('${escapeHtml(r.id)}')">Approve</button>
@@ -10777,6 +11082,25 @@ async function approveLeaveRequest(id){
   const employees = await getEmployees();
   const emp = employees.find(e => e.id === req.employeeId);
   if(!emp){ alert('That employee is no longer on the roster, so this cannot be approved.'); return; }
+
+  if(req.code === 'LATE'){
+    if(!confirm('Allow ' + emp.name + ' to come in late on ' + req.from +
+        (req.lateTime ? ' at ' + req.lateTime : '') + '?\n\n' +
+        'The day keeps whatever attendance it already has and is marked as a late arrival, ' +
+        'which counts towards the late-coming rule.')) return;
+    await markLateArrival(emp.id, req.from, { lateReason: req.reason || '', leaveRequestId: req.id });
+    req.status = 'approved';
+    req.decidedOn = new Date().toISOString();
+    req.dates = [req.from];
+    await saveLeaveRequests(requests);
+    invalidateSharedRead('attendance:' + emp.id);
+    invalidateDashboardSnapshot();
+    addActivityLog('Allowed late arrival for ' + emp.name + ' on ' + req.from +
+                   (req.lateTime ? ' at ' + req.lateTime : '')).catch(() => {});
+    await renderPendingLeaveRequests();
+    alert('Recorded. ' + emp.name + "'s " + req.from + ' is flagged as a late arrival.');
+    return;
+  }
 
   const d = await describeLeaveRequest({ code:req.code, from:req.from, to:req.to,
     hodApproved: req.hodApproved, medicalCertificate: req.medicalCertificate }, emp);
