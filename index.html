@@ -1531,7 +1531,7 @@
 
         <section class="block">
           <h2 style="margin:0 0 4px;font-size:17px;">Diwali Bonus Payment Sheet</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The payment list for the bonus, in the same shape as the Final Salary Sheet — grouped by salary heading, sorted by bank, with account number and the amount payable. Only employees marked eligible appear. Nothing is deducted from a bonus, so the amount is one whole month at the Rate of Pay.</p>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The payment list for the bonus, in the same shape as the Final Salary Sheet — grouped by salary heading, sorted by bank, with account number and the amount payable. Only employees marked eligible appear. The amount is one whole month at the Rate of Pay: no PF, ESI, Professional Tax, advance, loan or retention is deducted, and leave taken during the year does not reduce it.</p>
           <label class="field">Paid on</label>
           <input type="date" class="field-input" id="bonusPaidOn" />
           <div style="height:12px"></div>
@@ -5936,7 +5936,7 @@ async function renderBonusPaymentSheet(){
   const noRate = onRoll.filter(e => e.diwaliEligible === 'yes' && !(diwaliBonusFor(e) > 0));
 
   box.innerHTML = `${reportLogoHeader('Diwali Bonus Payment Sheet — paid ' + paidOn)}
-    <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by salary heading, sorted by bank. One whole month at the Rate of Pay — no PF, ESI, Professional Tax, loan, advance or retention is taken off a bonus.</p>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by salary heading, sorted by bank. One whole month at the Rate of Pay for every employee — nothing is taken off a bonus: no PF, no ESI, no Professional Tax, no loan instalment, no advance, no retention money, and no reduction for leave taken, however many days were lost that year.</p>
     ${noBank.length ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${noBank.length} employee(s) have no bank details on file and cannot be paid by transfer: ${escapeHtml(noBank.join(', '))}.</p>` : ''}
     <div class="sal-sheet-wrap"><table class="sal-table">
       <thead><tr><th>SR</th><th>Employee Name</th><th>Bank Name</th><th>Account Number</th><th>IFSC</th><th class="num">Bonus Payable</th></tr></thead>
@@ -8091,10 +8091,12 @@ function emptyEmployee(){
 }
 
 // Bonus is a full month's gross — Basic plus HRA plus LTA on the employee's
-// salary heading. Confirmed by HR: no deduction of any kind comes off it, for
-// any employee. Not PF, not ESI, not Professional Tax, not a loan instalment,
-// not an advance, not retention money, and no reduction for leave taken during
-// the year. Those all reduce what is paid in a given month; none of them change
+// salary heading. Confirmed by HR twice: no deduction of any kind comes off it,
+// for any employee. Not PF, not ESI, not Professional Tax, not a loan
+// instalment, not an advance, not retention money, and not one rupee for leave
+// — however many days somebody lost that year, their bonus is a whole month.
+// That is why this function takes only the employee and never the month, the
+// date list or the attendance: it has nothing to read them for. Those all reduce what is paid in a given month; none of them change
 // what a month is worth, which is what the bonus is a month of.
 //
 // So this function takes no deduction as an argument and must not grow one. If
@@ -10424,7 +10426,7 @@ async function viewReport(key, label){
     csvHeader = ['Name','Eligible','Bonus'];
     csvRows = employees.map(e => [e.name, e.diwaliEligible==='yes'?'Yes':'No', diwaliBonusFor(e)]);
     rows = employees.map(e => `<tr><td>${escapeHtml(e.name)}</td><td>${e.diwaliEligible==='yes'?'Yes':'No'}</td><td class="num">₹${diwaliBonusFor(e)}</td></tr>`).join('');
-    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Eligible</th><th class="num">Bonus</th></tr>${rows || '<tr><td colspan="3" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
+    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">One whole month at the Rate of Pay. Nothing is deducted from a bonus — not PF, ESI, Professional Tax, advance, loan or retention — and leave taken during the year does not reduce it.</p><table><tr><th>Name</th><th>Eligible</th><th class="num">Bonus</th></tr>${rows || '<tr><td colspan="3" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'salary'){
     csvHeader = ['Name','Gross','Deductions','Net'];
     rows = employees.map(e => {
