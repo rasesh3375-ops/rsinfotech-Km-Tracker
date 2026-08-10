@@ -1666,18 +1666,27 @@
             <p style="font-size:11.5px;color:var(--muted);margin:8px 0 0;">Leave any of these blank and the printed form keeps a ruled line there to be filled in by hand.</p>
             <div style="height:14px"></div>
           </div>
-          <label class="field">Designation</label>
-          <input type="text" id="genDesignation" />
-          <div style="height:12px"></div>
-          <label class="field">Department</label>
-          <input type="text" id="genDepartment" />
-          <div style="height:12px"></div>
-          <label class="field">Date of joining</label>
-          <input type="date" id="genDoj" />
-          <div style="height:12px"></div>
-          <label class="field">Last working date</label>
-          <input type="date" id="genLwd" />
-          <div style="height:12px"></div>
+          <div id="genDesignationWrap">
+            <label class="field">Designation</label>
+            <input type="text" id="genDesignation" />
+            <div style="height:12px"></div>
+          </div>
+          <div id="genDepartmentWrap">
+            <label class="field">Department</label>
+            <input type="text" id="genDepartment" />
+            <div style="height:12px"></div>
+          </div>
+          <div id="genDojWrap">
+            <label class="field">Date of joining</label>
+            <input type="date" id="genDoj" />
+            <div style="height:12px"></div>
+          </div>
+          <div id="genLwdWrap">
+            <label class="field">Last working date</label>
+            <input type="date" id="genLwd" />
+            <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Filled in from the employee record for anyone already marked as left.</p>
+            <div style="height:12px"></div>
+          </div>
           <label class="field">Date of issue</label>
           <input type="date" id="genIssueDate" />
           <div style="height:16px"></div>
@@ -6726,6 +6735,31 @@ const LETTER_TYPES = [
   'Leave Application Form',
   'Salary Slip'
 ];
+// Which of the shared fields each letter actually puts on the page. Asking for
+// a last working date on a Salary Slip invites somebody to fill it in and
+// wonder where it went; worse, it makes the field look optional on the five
+// letters that genuinely need it. Taken straight from what the templates read,
+// so a template that starts using a field has to be added here to get it.
+const LETTER_FIELDS = {
+  'Offer Letter':                   { designation:true,  department:true,  doj:true,  lwd:false },
+  'Appointment Letter':             { designation:true,  department:true,  doj:true,  lwd:false },
+  'Experience Letter':              { designation:true,  department:false, doj:true,  lwd:true  },
+  'Relieving Letter':               { designation:true,  department:true,  doj:false, lwd:true  },
+  'Exit Letter':                    { designation:false, department:false, doj:false, lwd:true  },
+  'No Dues Letter':                 { designation:true,  department:true,  doj:false, lwd:true  },
+  'Full & Final Settlement Letter': { designation:true,  department:false, doj:false, lwd:true  },
+  'Loan/Advance Request Form':      { designation:true,  department:true,  doj:true,  lwd:false },
+  'Leave Application Form':         { designation:true,  department:true,  doj:false, lwd:false },
+  'Salary Slip':                    { designation:true,  department:true,  doj:false, lwd:false }
+};
+// A letter that asks for a last working date is a letter for somebody on their
+// way out, so those are the ones whose employee list includes people already
+// marked as left. Every other letter stays current staff only.
+function letterFieldsFor(type){
+  return LETTER_FIELDS[type] || { designation:true, department:true, doj:true, lwd:true };
+}
+function letterIsForLeavers(type){ return letterFieldsFor(type).lwd; }
+
 const CHECKLIST_ITEMS = {
   joining: ['ID proof collected', 'Offer letter signed', 'Bank details captured', 'Induction completed', 'Assets issued'],
   exit: ['Resignation accepted', 'Exit interview done', 'Assets returned', 'Full & final settlement initiated', 'System access revoked']
@@ -10331,6 +10365,32 @@ function outstandingAssets(emp){
 }
 
 // ---- generator ----
+// An Experience Letter is usually asked for after somebody has gone, so the
+// five letters that carry a last working date offer leavers as well — they
+// were unreachable here, which made that field unusable for the very letters
+// that need it. Everything else stays current staff only.
+async function populateGeneratorEmployees(){
+  const sel = document.getElementById('genEmpSelect');
+  if(!sel) return;
+  const type = LETTER_TYPES[selectedLetterIdx];
+  const includeLeavers = letterIsForLeavers(type);
+  const employees = await getEmployees();
+  const list = employees.filter(e => includeLeavers || e.employmentStatus !== 'left');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">— Select employee —</option>' +
+    list.map(e => `<option value="${e.id}">${escapeHtml(e.name)} (${e.id})${
+      e.employmentStatus === 'left' ? ' — left' + (e.leftDate ? ' ' + escapeHtml(e.leftDate) : '') : ''}</option>`).join('');
+  if(prev && list.some(e => e.id === prev)) sel.value = prev;
+  else if(prev) { sel.value = ''; clearGeneratorEmployeeFields(); }
+}
+
+function clearGeneratorEmployeeFields(){
+  ['genDesignation', 'genDepartment', 'genDoj', 'genLwd'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.value = '';
+  });
+}
+
 function jumpToGenerator(letterLabel){
   switchHrSub('generator');
   const idx = LETTER_TYPES.indexOf(letterLabel);
@@ -10357,12 +10417,7 @@ async function renderGeneratorTab(){
     </div>`;
   document.getElementById('letterChoiceList').innerHTML = letterItems + checklistItems;
 
-  const activeEmployees = employees.filter(e => e.employmentStatus !== 'left');
-  const sel = document.getElementById('genEmpSelect');
-  const prevSelected = sel.value;
-  sel.innerHTML = '<option value="">— Select employee —</option>' +
-    activeEmployees.map(e => `<option value="${e.id}">${escapeHtml(e.name)} (${e.id})</option>`).join('');
-  if(prevSelected && activeEmployees.some(e => e.id === prevSelected)) sel.value = prevSelected;
+  await populateGeneratorEmployees();
 
   document.getElementById('genIssueDate').value = document.getElementById('genIssueDate').value || todayStr();
   document.getElementById('letterOutput').classList.remove('show');
@@ -10786,6 +10841,10 @@ async function autoFillGeneratorFromEmployee(){
   document.getElementById('genDesignation').value = emp.designation || '';
   document.getElementById('genDepartment').value = emp.department || '';
   document.getElementById('genDoj').value = emp.doj || '';
+  // Reset on every employee change, not just filled when known. Left behind,
+  // one person's last working day would end up on the next person's relieving
+  // letter — a wrong date on a document that goes outside the company.
+  document.getElementById('genLwd').value = emp.leftDate || '';
   if(LETTER_TYPES[selectedLetterIdx] === 'Loan/Advance Request Form') showLoanStanding();
   if(LETTER_TYPES[selectedLetterIdx] === 'Leave Application Form') renderLeaveRequestHint();
 }
@@ -10806,6 +10865,18 @@ function toggleGeneratorFieldsForType(){
     leaveWrap.classList.toggle('hidden', !isLeave);
     if(isLeave){ renderLeaveRequestHint(); renderPendingLeaveRequests(); }
   }
+  // Only the fields this letter actually prints. Values are left in place
+  // rather than cleared: they came from the employee record, so a field that
+  // reappears still holds the right answer. The exception is the last working
+  // date, which is not autofilled from the record for current staff and so is
+  // cleared with the employee instead — see populateGeneratorEmployees.
+  const need = letterFieldsFor(type);
+  [['genDesignationWrap', need.designation], ['genDepartmentWrap', need.department],
+   ['genDojWrap', need.doj], ['genLwdWrap', need.lwd]].forEach(([id, on]) => {
+    const el = document.getElementById(id);
+    if(el) el.classList.toggle('hidden', !on);
+  });
+  populateGeneratorEmployees();
   const loanWrap = document.getElementById('genLoanFieldsWrap');
   if(loanWrap){
     loanWrap.classList.toggle('hidden', !isLoan);
