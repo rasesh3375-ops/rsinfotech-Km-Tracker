@@ -10449,10 +10449,25 @@ async function viewReport(key, label){
     }).join('');
     box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Increment month</th><th>Increment date</th><th class="num">Last salary (gross)</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'diwali'){
-    csvHeader = ['Name','Eligible','Bonus'];
-    csvRows = employees.map(e => [e.name, e.diwaliEligible==='yes'?'Yes':'No', diwaliBonusFor(e)]);
-    rows = employees.map(e => `<tr><td>${escapeHtml(e.name)}</td><td>${e.diwaliEligible==='yes'?'Yes':'No'}</td><td class="num">₹${diwaliBonusFor(e)}</td></tr>`).join('');
-    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">One whole month at the Rate of Pay. Nothing is deducted from a bonus — not PF, ESI, Professional Tax, advance, loan or retention — and leave taken during the year does not reduce it.</p><table><tr><th>Name</th><th>Eligible</th><th class="num">Bonus</th></tr>${rows || '<tr><td colspan="3" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
+    // Rate of Pay sits beside the bonus so the two can be read against each
+    // other. They are always the same figure, and showing only the bonus left
+    // no way to see that from the report — which is how a rate that happens to
+    // end in 200 came to look like Professional Tax had been added to it.
+    csvHeader = ['Name','Eligible','Rate of Pay','Bonus','Difference'];
+    csvRows = employees.map(e => [e.name, e.diwaliEligible==='yes'?'Yes':'No',
+                                  Number(e.ratePay)||0, diwaliBonusFor(e),
+                                  e.diwaliEligible==='yes' ? Math.round((diwaliBonusFor(e) - (Number(e.ratePay)||0))*100)/100 : '']);
+    rows = employees.map(e => {
+      const rate = Number(e.ratePay) || 0;
+      const bonus = diwaliBonusFor(e);
+      const eligible = e.diwaliEligible === 'yes';
+      return `<tr><td>${escapeHtml(e.name)}</td><td>${eligible?'Yes':'No'}</td>
+        <td class="num">₹${fmtMoney(rate)}</td><td class="num">₹${fmtMoney(bonus)}</td>
+        <td class="num">${eligible ? (Math.abs(bonus - rate) < 0.005
+          ? '<span class="pol-ok">same</span>'
+          : '<span class="pol-warn">₹' + fmtMoney(bonus - rate) + '</span>') : '—'}</td></tr>`;
+    }).join('');
+    box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">The bonus is one whole month at the Rate of Pay — the two columns below are always the same figure, which is what the last column checks. Nothing is deducted from a bonus and nothing is added to one: no PF, ESI or Professional Tax, no advance, loan or retention, and no reduction for leave taken during the year.</p><table><tr><th>Name</th><th>Eligible</th><th class="num">Rate of Pay</th><th class="num">Bonus</th><th class="num">Check</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'salary'){
     csvHeader = ['Name','Gross','Deductions','Net'];
     rows = employees.map(e => {
