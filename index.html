@@ -7885,9 +7885,16 @@ function emptyEmployee(){
 }
 
 // Bonus is a full month's gross — Basic plus HRA plus LTA on the employee's
-// salary heading — before PT, ESI, PF, retention, advances or any reduction for
-// leave. Those all reduce what is paid in a given month; none of them change
+// salary heading. Confirmed by HR: no deduction of any kind comes off it, for
+// any employee. Not PF, not ESI, not Professional Tax, not a loan instalment,
+// not an advance, not retention money, and no reduction for leave taken during
+// the year. Those all reduce what is paid in a given month; none of them change
 // what a month is worth, which is what the bonus is a month of.
+//
+// So this function takes no deduction as an argument and must not grow one. If
+// a future change needs the bonus net of something, that belongs at the place
+// the money is paid, not here — otherwise the Diwali Bonus Report, the CTC
+// report and the figure on the employee form stop agreeing with each other.
 //
 // Derived from Rate of Pay and the heading rather than from the stored basic
 // and hra fields, so it is right for every employee already on file without
