@@ -10,8 +10,15 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png">
 
-<!-- Android / Chrome / desktop PWA install -->
-<link rel="manifest" id="appManifest" href="/manifest.json">
+<!-- Android / Chrome / desktop PWA install.
+     Deliberately relative, not "/manifest.json". One HTML file is served at
+     both entry points, so this link is the only thing that can tell them
+     apart before any script runs — and iOS decides a home-screen icon's
+     launch URL from the manifest it reads out of the served HTML, not from
+     one swapped in later by script. At "/" this resolves to /manifest.json;
+     at "/hr/" it resolves to /hr/manifest.json, which vercel.json serves the
+     HR manifest for. That is why the HR URL has to keep its trailing slash. -->
+<link rel="manifest" id="appManifest" href="manifest.json">
 <meta name="theme-color" content="#16213E">
 
 <!-- iOS Add to Home Screen -->
@@ -31,14 +38,20 @@
   (function(){
     var isHrPath = location.pathname.replace(/\/+$/, '') === '/hr';
     if(isHrPath){
+      // The manifest link is already correct here — it is relative, and at
+      // "/hr/" it resolves to the HR manifest. Setting it again costs nothing
+      // and covers a stale bookmark to "/hr" that reaches this page without
+      // going through the redirect, where the relative link would have
+      // resolved to the engineer manifest.
       document.getElementById('appManifest').setAttribute('href', '/manifest-hr.json');
       document.getElementById('appleTitle').setAttribute('content', 'RS HR');
       document.title = 'R.S. Infotech — HR';
-      // Remember that this device was installed from the HR entry. iOS decides
-      // the home-screen start URL when the icon is created and does not
-      // reliably honour a manifest swapped in by script, so an HR install can
-      // launch at "/" and land on the engineer login. The path still wins when
-      // there is one; this only fills in when there is not.
+      // Remembering the entry is a last resort for an icon that was installed
+      // before the manifest was served per-path and still launches at "/".
+      // It cannot rescue an iPhone: a home-screen web app there gets its own
+      // storage, separate from Safari, so nothing written while browsing is
+      // visible to it on first launch. Such an icon has to be deleted and
+      // added again.
       try{ localStorage.setItem('kmt_entry', 'hr'); }catch(e){}
     }
     // Only trust the remembered entry when running as an installed app. In a

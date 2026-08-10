@@ -1,6 +1,9 @@
 {
+  "redirects": [
+    { "source": "/hr", "destination": "/hr/", "permanent": true }
+  ],
   "rewrites": [
-    { "source": "/hr", "destination": "/index.html" },
-    { "source": "/hr/", "destination": "/index.html" }
+    { "source": "/hr/", "destination": "/index.html" },
+    { "source": "/hr/manifest.json", "destination": "/manifest-hr.json" }
   ]
 }
