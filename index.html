@@ -145,6 +145,17 @@
   .rolecard h3{margin:0 0 6px;font-size:15px;}
   .rolecard p{margin:0;font-size:12.5px;color:var(--muted);}
   .hidden{display:none !important;}
+  /* The arrival-time chip under each attendance cell. Small and quiet when
+     empty, so a month of them does not shout over the codes, but readable once
+     a time is in. */
+  .att-time{
+    display:inline-block; margin-top:2px; padding:1px 4px; min-width:20px;
+    border:1px dashed var(--line); border-radius:5px; background:transparent;
+    font-size:9.5px; line-height:1.4; color:var(--muted); cursor:pointer;
+    font-family:inherit;
+  }
+  .att-time:hover{ border-color:var(--amber-dark); color:var(--amber-dark); }
+  .att-time.has-time{ border-style:solid; color:var(--navy); font-weight:600; }
   /* Save confirmation. Fixed to the top so it is seen wherever the save lands —
      adding an employee moves you to the Generator, and a message left behind on
      the previous screen tells nobody anything. Above the modal layer, so a save
@@ -3490,16 +3501,22 @@ async function applyAttendanceOnCheckin(username){
       return;
     }
 
+    // Judged by the policy, not by numbers copied out of it. These were 9:45
+    // and 10:00 written in by hand, which happened to agree with the policy —
+    // until somebody edited the grace period in one place and not the other.
     const minutes = now.getHours() * 60 + now.getMinutes();
-    const graceEnd = 9 * 60 + 45;   // 9:45 AM — up to this is on-time
-    const shortLeaveCutoff = 10 * 60; // 30+ min late (past 10:00 AM) = short leave
+    const verdict = evaluateAttendanceDay({ inMin: minutes });
+    const graceEnd = LEAVE_POLICY.shift.startMin + LEAVE_POLICY.lateComing.graceMinutes;
+    const shortLeaveCutoff = LEAVE_POLICY.shift.startMin + LEAVE_POLICY.lateComing.shortLeaveAfterMinutes;
 
-    if(minutes > shortLeaveCutoff){
+    if(verdict.becomesShortLeave){
       await setAttendanceDay(emp.id, today, 'SHORT', { lateFlag: true, checkinTime: now.toTimeString().slice(0,5) });
-      notifyEngineerOnDevice('Marked as short leave', 'You checked in after 10:00 AM, which the leave policy counts as a short leave today.');
-    } else if(minutes > graceEnd){
+      notifyEngineerOnDevice('Marked as short leave', 'You checked in after ' + minToHHMM(shortLeaveCutoff) + ', which the leave policy counts as a short leave today.');
+    } else if(verdict.countsAsLateInstance){
       await setAttendanceDay(emp.id, today, 'P', { lateFlag: true, checkinTime: now.toTimeString().slice(0,5) });
-      notifyEngineerOnDevice('Late arrival recorded', 'You checked in after 9:45 AM. More than 3 late arrivals in a month leads to a half-day deduction for every 2 further late instances, per policy.');
+      notifyEngineerOnDevice('Late arrival recorded', 'You checked in after ' + minToHHMM(graceEnd) + '. More than ' +
+        LEAVE_POLICY.lateComing.freeInstancesPerMonth + ' late arrivals in a month leads to a half-day deduction for every ' +
+        LEAVE_POLICY.lateComing.halfDayPerExtraInstances + ' further late instances, per policy.');
     } else {
       await setAttendanceDay(emp.id, today, 'P', { checkinTime: now.toTimeString().slice(0,5) });
     }
@@ -4847,7 +4864,7 @@ async function renderAttendanceSheet(){
     const att = Object.assign({}, stored);
     Object.values(pendingAttendance).forEach(it => {
       if(it.employeeId !== emp.id) return;
-      att[it.dateStr] = Object.assign({}, stored[it.dateStr] || {}, { code: it.code });
+      att[it.dateStr] = Object.assign({}, stored[it.dateStr] || {}, { code: it.code }, it.extra || {});
     });
     const isResident = emp.employeeType === 'resident';
     const summary = computeAttendanceSummary(att, emp, dateList, holidayMap);
@@ -4862,7 +4879,14 @@ async function renderAttendanceSheet(){
       const blankOpt = defaultCode ? '' : `<option value="" selected></option>`;
       const lateMark = entry && entry.lateFlag ? '<br><span class="att-late">late</span>' : '';
       const dirty = pendingAttendance[emp.id + '|' + dateStr] ? ' att-dirty' : '';
-      return `<td><select class="att-code code-${defaultCode||''}${dirty}" onchange="handleAttendanceCellChange('${emp.id}','${dateStr}',this)">${blankOpt}${options}</select>${lateMark}</td>`;
+      // The in-time, and a way to enter one. Filling a month by hand leaves no
+      // check-in times, so the late rules had nothing to read and the Late
+      // column stayed at nought however many people came in at ten.
+      const inT = entry && entry.checkinTime ? entry.checkinTime : '';
+      const timeChip = isResident ? '' :
+        `<br><button class="att-time${inT ? ' has-time' : ''}" title="Set arrival and leaving time"
+           onclick="openDayTimeEditor('${emp.id}','${dateStr}')">${inT || '+'}</button>`;
+      return `<td><select class="att-code code-${defaultCode||''}${dirty}" onchange="handleAttendanceCellChange('${emp.id}','${dateStr}',this)">${blankOpt}${options}</select>${lateMark}${timeChip}</td>`;
     }).join('');
     bodyRows += `<tr><td>${i+1}</td><td class="att-name">${escapeHtml(emp.name)}${isResident?' <span style="color:var(--muted);font-size:10px;">(Resident)</span>':''}</td>${dayCells}` +
       `<td>${summary.present}</td><td>${summary.absent}</td><td>${summary.elUsed}</td><td>${summary.slUsed}</td><td>${summary.lpDays}</td><td>${summary.halfDays}</td><td>${summary.shortCount}</td><td>${summary.lateCount}</td></tr>`;
@@ -4951,6 +4975,126 @@ function updateAttendanceSaveBar(){
   if(label) label.textContent = n === 1 ? '1 unsaved change' : n + ' unsaved changes';
 }
 
+// ---- entering a day's times by hand ----
+// HR fills a past month in from a register, so there are no check-in times and
+// nothing for the late-coming rules to read. This puts the times in, and the
+// policy decides what they mean — the same evaluateAttendanceDay the Attendance
+// tab already judges everything else with, so a manual entry and a phone
+// check-in are graded by one formula and cannot disagree.
+let dayTimeEditorFor = null;
+
+function hhmmToMin(t){
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(t || '').trim());
+  if(!m) return null;
+  const h = Number(m[1]), mi = Number(m[2]);
+  if(h > 23 || mi > 59) return null;
+  return h * 60 + mi;
+}
+
+async function openDayTimeEditor(employeeId, dateStr){
+  const employees = await getEmployees();
+  const emp = employees.find(e => e.id === employeeId);
+  if(!emp) return;
+  const att = await getAttendance(employeeId);
+  const pend = pendingAttendance[employeeId + '|' + dateStr];
+  const entry = Object.assign({}, att[dateStr] || {}, (pend && pend.extra) || {});
+  dayTimeEditorFor = { employeeId, dateStr, currentCode: (pend && pend.code) || entry.code || '' };
+
+  document.getElementById('checklistModalRoot').innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)closeDayTimeEditor()">
+      <div class="modal-box">
+        <h2 style="margin:0 0 4px;">${escapeHtml(emp.name)}</h2>
+        <p class="hint" style="margin:0 0 14px;">${escapeHtml(dateStr)} · shift ${minToHHMM(LEAVE_POLICY.shift.startMin)} to ${minToHHMM(LEAVE_POLICY.shift.endMin)}</p>
+        <label class="field">Time in</label>
+        <input type="time" class="field-input" id="dayInTime" value="${escapeHtml(entry.checkinTime || '')}" onchange="renderDayTimeVerdict()" oninput="renderDayTimeVerdict()">
+        <div style="height:12px"></div>
+        <label class="field">Time out <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
+        <input type="time" class="field-input" id="dayOutTime" value="${escapeHtml(entry.checkoutTime || '')}" onchange="renderDayTimeVerdict()" oninput="renderDayTimeVerdict()">
+        <div id="dayTimeVerdict" class="bonus-callout" style="margin-top:14px;"></div>
+        <div class="modal-actions">
+          <button class="btn ghost" onclick="clearDayTimes()">Clear times</button>
+          <button class="btn" onclick="applyDayTimes()">Apply</button>
+        </div>
+      </div>
+    </div>`;
+  renderDayTimeVerdict();
+}
+
+function closeDayTimeEditor(){
+  document.getElementById('checklistModalRoot').innerHTML = '';
+  dayTimeEditorFor = null;
+}
+
+// What the policy makes of the times, shown before anything is applied.
+function judgeDayTimes(){
+  const inMin  = hhmmToMin((document.getElementById('dayInTime')  || {}).value);
+  const outMin = hhmmToMin((document.getElementById('dayOutTime') || {}).value);
+  if(inMin === null && outMin === null) return null;
+  return { inMin, outMin, r: evaluateAttendanceDay({ inMin, outMin }) };
+}
+
+function renderDayTimeVerdict(){
+  const box = document.getElementById('dayTimeVerdict');
+  if(!box) return;
+  const j = judgeDayTimes();
+  if(!j){ box.textContent = 'Enter the time they came in. Leaving time is only needed for early leaving or overtime.'; return; }
+  const r = j.r;
+  const lines = [];
+  if(j.inMin !== null){
+    if(r.lateMinutes === 0) lines.push('<span class="pol-ok">On time.</span>');
+    else if(!r.countsAsLateInstance) lines.push('<span class="pol-ok">' + r.lateMinutes + ' minute(s) late — inside the ' +
+      LEAVE_POLICY.lateComing.graceMinutes + '-minute grace, not counted.</span>');
+    else if(r.becomesShortLeave) lines.push('<span class="pol-warn">' + r.lateMinutes +
+      ' minutes late — past ' + LEAVE_POLICY.lateComing.shortLeaveAfterMinutes + ' minutes, so the day becomes SHORT (short leave).</span>');
+    else lines.push('<span class="pol-warn">' + r.lateMinutes + ' minutes late — counted as one late instance. The day stays as it is.</span>');
+  }
+  if(r.earlyMinutes) lines.push('Left ' + r.earlyMinutes + ' minute(s) before shift end.');
+  if(r.overtimeMinutes) lines.push('Overtime ' + Math.floor(r.overtimeMinutes / 60) + 'h ' + (r.overtimeMinutes % 60) + 'm, counted from ' + minToHHMM(LEAVE_POLICY.shift.overtimeFromMin) + '.');
+  lines.push('<span style="font-size:11.5px;color:var(--muted);">' +
+    LEAVE_POLICY.lateComing.freeInstancesPerMonth + ' late instances a month are free; beyond that, one half-day for every ' +
+    LEAVE_POLICY.lateComing.halfDayPerExtraInstances + '. The Late column counts them.</span>');
+  box.innerHTML = lines.join('<br>');
+}
+
+function applyDayTimes(){
+  if(!dayTimeEditorFor) return;
+  const { employeeId, dateStr, currentCode } = dayTimeEditorFor;
+  const j = judgeDayTimes();
+  if(!j){ closeDayTimeEditor(); return; }
+  const r = j.r;
+  const inTime  = (document.getElementById('dayInTime')  || {}).value || '';
+  const outTime = (document.getElementById('dayOutTime') || {}).value || '';
+
+  // Past the short-leave cutoff the policy changes the day itself; otherwise
+  // the code is left alone, except that somebody with a time recorded plainly
+  // turned up, so a blank or Absent day becomes Present.
+  let code = currentCode;
+  if(r.becomesShortLeave) code = 'SHORT';
+  else if(!code || code === 'A') code = 'P';
+
+  pendingAttendance[employeeId + '|' + dateStr] = {
+    employeeId, dateStr, code,
+    extra: { checkinTime: inTime, checkoutTime: outTime, lateFlag: !!r.countsAsLateInstance }
+  };
+  persistPendingAttendance();
+  updateAttendanceSaveBar();
+  closeDayTimeEditor();
+  renderAttendanceSheet();
+}
+
+function clearDayTimes(){
+  if(!dayTimeEditorFor) return;
+  const { employeeId, dateStr, currentCode } = dayTimeEditorFor;
+  pendingAttendance[employeeId + '|' + dateStr] = {
+    employeeId, dateStr, code: currentCode || 'P',
+    extra: { checkinTime: '', checkoutTime: '', lateFlag: false }
+  };
+  persistPendingAttendance();
+  updateAttendanceSaveBar();
+  closeDayTimeEditor();
+  renderAttendanceSheet();
+}
+
 function handleAttendanceCellChange(employeeId, dateStr, selectEl){
   const code = selectEl.value;
   pendingAttendance[employeeId + '|' + dateStr] = { employeeId, dateStr, code };
@@ -5003,7 +5147,7 @@ async function saveAttendanceChanges(){
       // Everything already known about that day is kept and only the code
       // replaced — a check-in time, a late flag, the leave request it came
       // from. The old version copied two fields across and dropped the rest.
-      att[it.dateStr] = Object.assign({}, att[it.dateStr] || {}, { code: it.code });
+      att[it.dateStr] = Object.assign({}, att[it.dateStr] || {}, { code: it.code }, it.extra || {});
     });
     const json = JSON.stringify(att);
     const key = 'attendance:' + empId;
