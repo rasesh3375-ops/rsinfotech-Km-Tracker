@@ -229,51 +229,104 @@ function doUploadDocument_(body) {
   return { ok: true, fileUrl: file.getUrl() };
 }
 
-// ===== one-off: file existing reports under their financial year =====
-// Reports used to be written to HR Management > Dashboard > ... and
-// HR Management > Reports > ...; they now go to HR Management > 2026-27 > ...
-// This walks the old locations and moves each file into the year its filename
-// belongs to, so history sits alongside everything written from now on.
+// ===== one-off: file everything dated under its financial year =====
+// Reports, generated letters and uploaded office documents used to be written
+// straight under HR Management > Dashboard / Reports / Generator / Office
+// Documents. They now go to HR Management > <financial year> > the same place.
+// This walks the old locations and moves each file into the year it belongs
+// to, so history sits alongside everything written from now on.
 //
-// Run it from the Apps Script editor: select organiseReportsByYear and press
-// Run. It is safe to run twice — a file already in a year folder is left
-// alone. Nothing is deleted; files are moved, and the log lists every one.
-function organiseReportsByYear() {
-  var root = getOrCreateFolderPath_(['HR Management']);
-  var moved = 0, skipped = 0, unnamed = 0;
+// Employee Documents is left where it is on purpose: a person's Aadhaar and
+// photo belong to the person, not to a year, and the Left Employees archive
+// moves an employee's whole folder in one step.
+//
+// Run it from the Apps Script editor: select organiseDriveByYear and press
+// Run. Safe to run as often as you like — a file already in a year folder is
+// never looked at, and one that would collide with a file of the same name
+// already at the destination is left alone and reported. Nothing is deleted.
+var YEAR_FILED_SECTIONS = ['Dashboard', 'Reports', 'Generator', 'Office Documents'];
 
-  ['Dashboard', 'Reports'].forEach(function (section) {
+// April to March, so January belongs to the year that opened the previous April.
+function fyLabelFor_(year, mon) {
+  var fyStart = mon >= 4 ? year : year - 1;
+  return fyStart + '-' + ('0' + ((fyStart + 1) % 100)).slice(-2);
+}
+
+// The year a file belongs to. The filename is trusted first because it names
+// the month the content is ABOUT — a March challan uploaded in April has to
+// land in the year that is closing, not the one that just opened. Only when
+// there is no date in the name does the file's own timestamp decide, which is
+// still better than leaving it loose at the top where nobody looks.
+function fyLabelForFile_(file) {
+  var m = /(\d{4})-(\d{2})(?:-\d{2})?/.exec(file.getName());
+  if (m) {
+    var mon = parseInt(m[2], 10);
+    if (mon >= 1 && mon <= 12) return { label: fyLabelFor_(parseInt(m[1], 10), mon), from: 'name' };
+  }
+  var d = file.getLastUpdated();
+  return { label: fyLabelFor_(d.getFullYear(), d.getMonth() + 1), from: 'date' };
+}
+
+function organiseDriveByYear() {
+  var root = getOrCreateFolderPath_(['HR Management']);
+  var stats = { moved: 0, collided: 0, byDate: 0 };
+  var log = [];
+
+  YEAR_FILED_SECTIONS.forEach(function (section) {
     var it = root.getFoldersByName(section);
-    if (!it.hasNext()) return;
-    var sectionFolder = it.next();
-    var subs = sectionFolder.getFolders();
-    while (subs.hasNext()) {
-      var sub = subs.next();                       // e.g. "Salary Sheet", "PF"
-      var files = sub.getFiles();
-      while (files.hasNext()) {
-        var file = files.next();
-        // Filenames carry the month: "Salary Sheet - 2026-08.csv".
-        var m = /(\d{4})-(\d{2})/.exec(file.getName());
-        if (!m) { unnamed++; continue; }
-        var year = parseInt(m[1], 10), mon = parseInt(m[2], 10);
-        // April to March, so January belongs to the year that opened in April.
-        var fyStart = mon >= 4 ? year : year - 1;
-        var label = fyStart + '-' + ('0' + ((fyStart + 1) % 100)).slice(-2);
-        var target = getOrCreateFolderPath_(['HR Management', label, section, sub.getName()]);
-        // Already there? leave it.
-        var existing = target.getFilesByName(file.getName());
-        if (existing.hasNext()) { skipped++; continue; }
-        target.addFile(file);
-        sub.removeFile(file);
-        moved++;
-        Logger.log('moved: ' + file.getName() + ' -> HR Management/' + label + '/' + section + '/' + sub.getName());
-      }
+    while (it.hasNext()) {
+      moveFolderIntoYears_(it.next(), [section], stats, log);
     }
   });
-  var msg = 'Moved ' + moved + ' file(s). Skipped ' + skipped +
-            ' already in place. ' + unnamed + ' had no date in the filename and were left alone.';
+
+  // The Employee Handbook once went to a top-level "Office Documents" folder
+  // rather than under HR Management, so it is swept in from there too.
+  var stray = DriveApp.getFolderById(ROOT_FOLDER_ID).getFoldersByName('Office Documents');
+  while (stray.hasNext()) {
+    moveFolderIntoYears_(stray.next(), ['Office Documents'], stats, log);
+  }
+
+  var msg = 'Moved ' + stats.moved + ' file(s) (' + stats.byDate +
+            ' placed by their upload date because the name carried no month). ' +
+            stats.collided + ' left alone — a file of that name is already at the destination.';
   Logger.log(msg);
+  log.forEach(function (l) { Logger.log(l); });
   return msg;
+}
+
+// Walks one section folder and everything under it, moving files into
+// HR Management/<year>/<the same relative path>. Recurses, so a two-deep
+// path like Office Documents > Payroll Documents > PF Challan is kept intact.
+function moveFolderIntoYears_(folder, relPath, stats, log) {
+  var files = folder.getFiles();
+  while (files.hasNext()) {
+    var file = files.next();
+    var fy = fyLabelForFile_(file);
+    var target = getOrCreateFolderPath_(['HR Management', fy.label].concat(relPath));
+    if (target.getId() === folder.getId()) continue;          // already in place
+    if (target.getFilesByName(file.getName()).hasNext()) {
+      stats.collided++;
+      log.push('left: ' + file.getName() + ' — already in ' + fy.label + '/' + relPath.join('/'));
+      continue;
+    }
+    file.moveTo(target);
+    stats.moved++;
+    if (fy.from === 'date') stats.byDate++;
+    log.push('moved: ' + file.getName() + ' -> HR Management/' + fy.label + '/' + relPath.join('/'));
+  }
+
+  var subs = folder.getFolders();
+  while (subs.hasNext()) {
+    var sub = subs.next();
+    // Never walk into a year folder — that is where things are being put.
+    if (/^\d{4}-\d{2}$/.test(sub.getName())) continue;
+    moveFolderIntoYears_(sub, relPath.concat([sub.getName()]), stats, log);
+  }
+}
+
+// Kept so an older bookmark of the function name still runs the organiser.
+function organiseReportsByYear() {
+  return organiseDriveByYear();
 }
 
 function jsonOut_(obj) {

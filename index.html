@@ -1917,6 +1917,20 @@ async function remoteDelete(key){
   }catch(e){}
 }
 
+// Where a dated output belongs in Drive: HR Management / <financial year> /
+// whatever it is. Every report, letter and uploaded document goes through
+// this, so a new one cannot end up outside the year folder by somebody
+// hand-building the path — which is how Generator, Office Documents and the
+// Assets report came to sit loose at the top alongside the year folders.
+//
+// `forDate` is the date the output is ABOUT, not the day it was made. A March
+// PF challan uploaded in April belongs to the year that is closing, not the
+// one that just opened. Pass nothing and it files under today, which is right
+// for anything that is a snapshot of now.
+function hrYearPath(forDate, ...rest){
+  return ['HR Management', financialYearLabel(forDate || undefined), ...rest];
+}
+
 // Saves a file into the matching tab/report folder in Google Drive, under
 // "R.S. Infotech HR Dashboard". Folder path mirrors the app's own tab names.
 // Non-blocking: if it fails, the report/letter itself still works normally.
@@ -4475,7 +4489,7 @@ async function renderAttendanceSheet(){
     csvRows.push([i+1, emp.name, ...dayCodes, summary.present, summary.absent, summary.elUsed, summary.slUsed, summary.lpDays, summary.halfDays, summary.shortCount, summary.lateCount]);
   }
 
-  saveFileToDrive(['HR Management', financialYearLabel(monthVal + '-01'), 'Dashboard', 'Attendance Sheet'], `Attendance Sheet - ${monthVal}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
+  saveFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Attendance Sheet'), `Attendance Sheet - ${monthVal}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
 
   box.innerHTML = `${reportLogoHeader('Attendance Sheet — ' + monthVal)}
     <div class="att-sheet-wrap"><table class="att-table">${headerRow}${bodyRows}</table></div>
@@ -4994,7 +5008,7 @@ async function renderSalarySheet(){
     grand.directPaid, grand.netSalary, grand.pen, grand.employerPf, grand.pfAdmin, grand.edli, grand.esiEmployer, grand.employerCont, grand.ctc,
     grand.advanceBalance, grand.loanBalance, '', '']);
 
-  saveFileToDrive(['HR Management', financialYearLabel(monthVal + '-01'), 'Dashboard', 'Salary Sheet'], `Salary Sheet - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
+  saveFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Salary Sheet'), `Salary Sheet - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
 
   box.innerHTML = `<div class="sal-sheet-wrap print-isolate" id="salaryPrintArea">
       ${reportLogoHeader('Salary Sheet — ' + monthVal)}
@@ -5119,7 +5133,7 @@ async function renderStatutoryReport(key, label){
         .concat([['', 'GRAND TOTAL', '', '', '', '', '', '', '', pfTot.wage, pfTot.employee,
                   pfTot.epf, pfTot.eps, pfTot.edli, pfTot.admin, pfTot.employee,
                   pfTot.epf + pfTot.eps + pfTot.edli + pfTot.admin, pfTot.total, '', '']]));
-    saveFileToDrive(['HR Management', financialYearLabel(monthVal + '-01'), 'Reports', 'PF'], `PF Return - ${monthVal}.csv`, csv, 'text/csv');
+    saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'PF'), `PF Return - ${monthVal}.csv`, csv, 'text/csv');
     box.innerHTML = `${reportLogoHeader('Provident Fund Return — ' + monthVal)}
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Charged on ${
         PF_RULES.wageComponents.map(k => k === 'basic' ? 'Basic' : 'HRA (DA)').join(' + ')} ·
@@ -5167,7 +5181,7 @@ async function renderStatutoryReport(key, label){
         x.r.covered ? x.r.employee : 0, x.r.covered ? x.r.employer : 0, x.r.covered ? x.r.total : 0,
         x.r.covered ? 'Covered' : 'Exempt', x.r.reason])
         .concat([['', 'TOTAL', '', esiTot.gross, esiTot.employee, esiTot.employer, esiTot.total, '', '']]));
-    saveFileToDrive(['HR Management', financialYearLabel(monthVal + '-01'), 'Reports', 'ESI'], `ESI Return - ${monthVal}.csv`, csv, 'text/csv');
+    saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'ESI'), `ESI Return - ${monthVal}.csv`, csv, 'text/csv');
     box.innerHTML = `${reportLogoHeader('ESI Contribution Return — ' + monthVal)}
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Contribution period ${escapeHtml(period.label)} ·
         employee ${headingPct(ESI_RULES.employeePct)} · employer ${headingPct(ESI_RULES.employerPct)} ·
@@ -5202,7 +5216,7 @@ async function renderStatutoryReport(key, label){
 
   const csvRows = rows.map(r => [r[0], r[1]]);
   csvRows.push(['Grand Total', grandTotal]);
-  saveFileToDrive(['HR Management', financialYearLabel(monthVal + '-01'), 'Reports', cfg.folder], `${label} - ${monthVal}.csv`, toCsv(['Name', key.toUpperCase() + ' Amount'], csvRows), 'text/csv');
+  saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', cfg.folder), `${label} - ${monthVal}.csv`, toCsv(['Name', key.toUpperCase() + ' Amount'], csvRows), 'text/csv');
 }
 
 // Small local helper so these reports don't depend on load order of the holiday-map builder elsewhere
@@ -5264,7 +5278,7 @@ async function renderApprenticeSalaryReport(){
       <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
     </div>`;
 
-  saveFileToDrive(['HR Management', financialYearLabel(monthVal + '-01'), 'Reports', 'Apprentice Salary Report'], `Apprentice Salary Report - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
+  saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Apprentice Salary Report'), `Apprentice Salary Report - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
 }
 
 // ---- Consultant Report ----
@@ -5373,7 +5387,7 @@ async function renderFinalSalarySheet(){
   csvRows.push(['', 'GRAND TOTAL', grandCount + ' employee(s)', '', '', Math.round(grand * 100) / 100]);
 
   const cols = ['SR NO','Employee Name','Bank Name','Account Number','IFSC','Final Payable Salary'];
-  saveFileToDrive(['HR Management', financialYearLabel(monthVal + '-01'), 'Dashboard', 'Final Salary Sheet'],
+  saveFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Final Salary Sheet'),
     `Final Salary Sheet - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
 
   box.innerHTML = `${reportLogoHeader('Final Salary Sheet — ' + monthVal)}
@@ -5487,7 +5501,7 @@ async function renderConsultantReport(){
       <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
     </div>`;
 
-  saveFileToDrive(['HR Management', financialYearLabel(monthVal + '-01'), 'Reports', 'Consultant Report'], `Consultant Report - ${monthVal}.csv`,
+  saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Consultant Report'), `Consultant Report - ${monthVal}.csv`,
     toCsv(CONSULTANT_REPORT_COLS, rows), 'text/csv');
 }
 
@@ -5617,7 +5631,7 @@ async function renderSalaryComparisonReport(){
     ['Difference', '', Math.round(difference * 100) / 100],
     ['', '', '']
   ].concat(csvRows, [['Grand Total', '', Math.round(difference * 100) / 100]]);
-  saveFileToDrive(['HR Management', financialYearLabel(monthVal + '-01'), 'Reports', 'Salary Comparison'],
+  saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Salary Comparison'),
     `Month-wise Salary Comparison - ${monthVal}.csv`, toCsv(csvHead, csvAll), 'text/csv');
 }
 
@@ -7309,7 +7323,7 @@ async function renderIncrementReminders(){
     return;
   }
   const email = await getReminderEmail();
-  saveFileToDrive(['HR Management', financialYearLabel(monthVal + '-01'), 'Dashboard', 'Increment Reminders'], `Increment Reminders - ${todayStr()}.csv`,
+  saveFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Increment Reminders'), `Increment Reminders - ${todayStr()}.csv`,
     toCsv(['Name','Designation','Increment due','Days away'], upcoming.map(e => [e.name, e.designation||'', e.nextIncrement, Math.ceil((new Date(e.nextIncrement) - now) / 86400000)])), 'text/csv');
   box.innerHTML = reportLogoHeader('Increment Reminders') + upcoming.map(e => {
     const days = Math.ceil((new Date(e.nextIncrement) - now) / 86400000);
@@ -8225,6 +8239,14 @@ function checkBankFieldsLive(){
 // failed. The backend already had the Drive upload; this uses it.
 // Each employee gets their own folder, so the files are browsable in Drive as
 // well as reachable from here.
+//
+// Deliberately NOT under a financial year, and the one exception to that rule.
+// A person's Aadhaar, PAN, photo and signature belong to the person, not to a
+// year: filing by year would scatter one employee's documents across several
+// folders as they upload things over time, and the "Left Employees" archive
+// move — which relocates a whole employee folder in one step — would have
+// nothing single to move. Everything dated goes through hrYearPath; this does
+// not, on purpose.
 async function uploadEmployeeDocToDrive(label, dataUrl){
   const emp = editingEmployeeDraft || {};
   const id = (document.getElementById('f_id') || {}).value || emp.id || 'unfiled';
@@ -9405,7 +9427,7 @@ async function renderElCalculationSheet(){
     rows.push({ id: emp.id, name: emp.name, opening, presentDays, earned, elUsed, closing });
   }
 
-  saveFileToDrive(['HR Management', financialYearLabel(monthVal + '-01'), 'Reports', 'EL Calculation Sheet'], `EL Calculation Sheet - FY ${startYear}-${String(startYear+1).slice(2)}.csv`,
+  saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'EL Calculation Sheet'), `EL Calculation Sheet - FY ${startYear}-${String(startYear+1).slice(2)}.csv`,
     toCsv(['Name','Opening EL','Present days (FY)','EL earned','EL used','Closing EL'], rows.map(r => [r.name, r.opening, r.presentDays, r.earned, r.elUsed, r.closing])), 'text/csv');
 
   box.innerHTML = `
@@ -9490,7 +9512,7 @@ async function renderMonthlyLeaveReport(){
 
   const csvHeader = header;
   const csvRows = rows.map(r => [r.name, ...r.monthTotals, r.yearTotal]);
-  saveFileToDrive(['HR Management', financialYearLabel(monthVal + '-01'), 'Reports', 'Monthly Leave Report'], `Monthly Leave Report - FY ${startYear}-${String(startYear+1).slice(2)}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
+  saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Monthly Leave Report'), `Monthly Leave Report - FY ${startYear}-${String(startYear+1).slice(2)}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
 }
 
 // ---- overtime report ----
@@ -9551,7 +9573,7 @@ async function renderOvertimeReport(){
     return;
   }
   const totalHours = log.reduce((sum,o) => sum + Number(o.hours), 0);
-  saveFileToDrive(['HR Management', financialYearLabel(monthVal + '-01'), 'Reports', 'Overtime Report'], `Overtime Report - ${monthStr}.csv`,
+  saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Overtime Report'), `Overtime Report - ${monthStr}.csv`,
     toCsv(['Name','Date','Hours','Note'], log.map(o => [o.name, o.date, o.hours, o.note||''])), 'text/csv');
   box.innerHTML = `<div style="overflow-x:auto;"><table>
       <tr><th>Name</th><th>Date</th><th class="num">Hours</th><th>Note</th><th></th></tr>
@@ -9606,7 +9628,7 @@ async function generateHolidayListDoc(){
         }).join('\n')
       : 'No holidays added for ' + fyLabel + ' yet.');
 
-  saveFileToDrive(['HR Management', financialYearLabel(monthVal + '-01'), 'Reports', 'Holiday List'], `Holiday List - ${fyLabel}.txt`, lastHolidayListText, 'text/plain');
+  saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Holiday List'), `Holiday List - ${fyLabel}.txt`, lastHolidayListText, 'text/plain');
 }
 
 function emailHolidayList(){
@@ -9651,7 +9673,7 @@ async function viewReport(key, label){
       `${reportLogoHeader('Employee Assets — issued and outstanding')}
        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">${rows2.length} item(s) issued, <strong>${outCount} still outstanding</strong>. An Experience Letter cannot be generated while anything is outstanding.</p>
        <table><thead><tr><th>Employee</th><th>Item</th><th class="num">Qty</th><th>Issued</th><th>Returned</th></tr></thead><tbody>${rows}</tbody></table>${fsBtn}`;
-    saveFileToDrive(['HR Management','Reports','Assets'], 'Employee Assets.csv', toCsv(csvHeader, csvRows), 'text/csv');
+    saveFileToDrive(hrYearPath('', 'Reports', 'Assets'), `Employee Assets - ${todayStr()}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
     return;
   }
   if(key === 'contact'){
@@ -9768,7 +9790,7 @@ async function viewReport(key, label){
     // snapshot of today rather than of a chosen month, so there is no month to
     // take the year from — reaching for one threw a ReferenceError on the last
     // line of every report, which is why none of them ever reached Drive.
-    saveFileToDrive(['HR Management', financialYearLabel(), 'Reports', label], `${label} - ${todayStr()}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
+    saveFileToDrive(hrYearPath('', 'Reports', label), `${label} - ${todayStr()}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
   }
 }
 
@@ -9982,7 +10004,7 @@ async function uploadEmployeeHandbook(){
   msg.classList.remove('error');
   const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
   const fileName = `Employee Handbook${year ? ' - ' + year : ''}${ext}`;
-  const url = await uploadDocumentToDrive(['Office Documents','Employee Handbook'], fileName, file);
+  const url = await uploadDocumentToDrive(hrYearPath('', 'Office Documents', 'Employee Handbook'), fileName, file);
   if(!url){
     msg.textContent = 'Upload failed — check your connection and try again.';
     msg.classList.add('error');
@@ -10021,7 +10043,7 @@ async function uploadPayrollDoc(){
   msg.classList.remove('error');
   const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
   const fileName = `${type} - ${monthVal}${ext}`;
-  const url = await uploadDocumentToDrive(['HR Management','Office Documents','Payroll Documents', type], fileName, file);
+  const url = await uploadDocumentToDrive(hrYearPath(monthVal + '-01', 'Office Documents', 'Payroll Documents', type), fileName, file);
   if(!url){
     msg.textContent = 'Upload failed — check your connection and try again.';
     msg.classList.add('error');
@@ -10080,7 +10102,7 @@ async function uploadApprenticeDoc(){
   msg.classList.remove('error');
   const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
   const fileName = `${emp ? emp.name + ' - ' : ''}${category}${ext}`;
-  const url = await uploadDocumentToDrive(['HR Management','Office Documents','Apprentice Documents', category], fileName, file);
+  const url = await uploadDocumentToDrive(hrYearPath('', 'Office Documents', 'Apprentice Documents', category), fileName, file);
   if(!url){
     msg.textContent = 'Upload failed — check your connection and try again.';
     msg.classList.add('error');
@@ -10144,7 +10166,7 @@ async function uploadCompanyDoc(category, folderLabel){
   msg.classList.remove('error');
   const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
   const fileName = `${docName} - ${todayStr()}${ext}`;
-  const url = await uploadDocumentToDrive(['HR Management','Office Documents', folderLabel], fileName, file);
+  const url = await uploadDocumentToDrive(hrYearPath('', 'Office Documents', folderLabel), fileName, file);
   if(!url){
     msg.textContent = 'Upload failed — check your connection and try again.';
     msg.classList.add('error');
@@ -10236,7 +10258,7 @@ async function uploadWorkmanDoc(employeeId, event){
   if(!entry) return;
   const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
   const fileName = `${escapeHtml(entry.name)} - Insurance Policy${ext}`;
-  const url = await uploadDocumentToDrive(['HR Management','Office Documents','Workman Compensation', entry.name], fileName, file);
+  const url = await uploadDocumentToDrive(hrYearPath('', 'Office Documents', 'Workman Compensation', entry.name), fileName, file);
   if(!url){ alert('Upload failed — check your connection and try again.'); return; }
   entry.docUrl = url;
   entry.docName = fileName;
@@ -10325,7 +10347,7 @@ async function uploadUniformDoc(employeeId, employeeName, event){
   if(!file) return;
   const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
   const fileName = `${employeeName} - Uniform-ID Document${ext}`;
-  const url = await uploadDocumentToDrive(['HR Management','Office Documents','Uniform and ID', employeeName], fileName, file);
+  const url = await uploadDocumentToDrive(hrYearPath('', 'Office Documents', 'Uniform and ID', employeeName), fileName, file);
   if(!url){ alert('Upload failed — check your connection and try again.'); return; }
   const list = await getUniformIdList();
   let entry = list.find(u => u.employeeId === employeeId);
@@ -10720,7 +10742,7 @@ async function generateLetter(){
   await addActivityLog('Generated ' + type + ' for ' + name);
 
   const safeType = type.replace(/\//g, '-'); // matches the Drive folder name (no slashes in folder names)
-  saveFileToDrive(['HR Management','Generator',safeType], `${name} - ${f.issueDate}.txt`, text, 'text/plain');
+  saveFileToDrive(hrYearPath(f.issueDate, 'Generator', safeType), `${name} - ${f.issueDate}.txt`, text, 'text/plain');
 }
 
 // Everything user-entered goes through this before it reaches innerHTML.
