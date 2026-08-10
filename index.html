@@ -4725,7 +4725,7 @@ function buildHeadingExplainer(key){
 
   const statLogic = stat.length
     ? ` ${stat.map(s => s.name + ' is ' + s.rule).join('; ')}.`
-    : ` No PF, ESI or PT applies to this heading — those fields stay greyed out and are excluded from the Salary Sheet.`;
+    : ` No PF, ESI or PT applies to this heading — those fields are hidden on the form and excluded from the Salary Sheet.`;
 
   const fields = ['Rate of pay (monthly)', 'Attendance — Absent and LP days for the month']
     .concat(h.pf ? ['PF'] : []).concat(h.esi ? ['ESI deduction'] : [])
@@ -8325,6 +8325,7 @@ function employeeModalHtml(emp){
         <label class="field">Mobile / communication expense (monthly)</label>
         <input type="number" id="f_mobileExpense" placeholder="0" value="${emp.mobileExpense||''}">
         <div style="height:12px"></div>
+        <div id="esiQuestionsWrap">
         <label class="field">Person with disability? (raises the ESI ceiling)</label>
         <select class="field-input" id="f_esiDisabled" onchange="toggleStatutoryFieldsForHeading()">
           <option value="no" ${emp.esiDisabled!=='yes'?'selected':''}>No</option>
@@ -8338,6 +8339,8 @@ function employeeModalHtml(emp){
         </select>
         <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Only matters once someone's gross goes above the ceiling. Answer No for a new employee — they were not contributing before they joined. Change it to Yes for an existing member whose pay rises past the ceiling mid half-year, so deductions carry on to 30 September or 31 March as the rules require.</p>
         <div style="height:10px"></div>
+        </div>
+        <div id="pfQuestionsWrap">
         <label class="field">Had a UAN or EPF account before?</label>
         <select class="field-input" id="f_hasPriorUan" onchange="toggleStatutoryFieldsForHeading()">
           <option value="yes" ${emp.hasPriorUan!=='no'?'selected':''}>Yes — has a prior UAN</option>
@@ -8350,6 +8353,7 @@ function employeeModalHtml(emp){
           <option value="yes" ${emp.form11Submitted==='yes'?'selected':''}>Yes — opted out of PF</option>
         </select>
         <div style="height:10px"></div>
+        </div>
         <div id="pfWrap">
         <label class="field">PF Eligible</label>
         <select class="field-input" id="f_pfEligible" onchange="toggleStatutoryFieldsForHeading()">
@@ -8405,12 +8409,16 @@ function employeeModalHtml(emp){
         <label class="field">Aadhaar number</label>
         <input type="text" id="f_aadhaar" placeholder="XXXX XXXX XXXX" value="${emp.aadhaar}">
         <div style="height:12px"></div>
-        <label class="field">UAN (PF number)</label>
-        <input type="text" id="f_uan" placeholder="10-digit UAN" value="${emp.uan}">
-        <div style="height:12px"></div>
-        <label class="field">ESI number</label>
-        <input type="text" id="f_esiNumber" placeholder="ESI number" value="${emp.esiNumber}">
-        <div style="height:12px"></div>
+        <div id="uanWrap">
+          <label class="field">UAN (PF number)</label>
+          <input type="text" id="f_uan" placeholder="10-digit UAN" value="${emp.uan}">
+          <div style="height:12px"></div>
+        </div>
+        <div id="esiNumberWrap">
+          <label class="field">ESI number</label>
+          <input type="text" id="f_esiNumber" placeholder="ESI number" value="${emp.esiNumber}">
+          <div style="height:12px"></div>
+        </div>
         <label class="field">Bank name</label>
         <input type="text" oninput="checkBankFieldsLive()" id="f_bankName" placeholder="e.g. HDFC Bank" value="${emp.bankName}">
         <div style="height:12px"></div>
@@ -8598,6 +8606,19 @@ function toggleFamilyFields(){
 function toggleStatutoryFieldsForHeading(){
   const heading = SALARY_HEADINGS[document.getElementById('f_salaryHeading').value] || SALARY_HEADINGS.managerial;
   const notes = [];
+  // Everything that belongs to a contribution goes with it: the amount, the
+  // questions that decide it, and the number the authority issues for it. A
+  // Contractor was still being asked whether they had a prior UAN and whether
+  // they were contributing to ESI at the start of the half-year — questions
+  // with no bearing on anybody who attracts neither.
+  [['pfQuestionsWrap','pf'], ['esiQuestionsWrap','esi'],
+   ['uanWrap','pf'], ['esiNumberWrap','esi']].forEach(([wrapId, flag]) => {
+    const el = document.getElementById(wrapId);
+    if(el) el.classList.toggle('hidden', !heading[flag]);
+  });
+  // The answers themselves are left alone rather than cleared. A UAN is a fact
+  // about the person that stays true whatever heading they are put on, and
+  // switching heading by mistake should not wipe it.
   [['f_pf','pf','PF'], ['f_esiDeduction','esi','ESI'], ['f_pt','pt','PT']].forEach(([id, flag, label]) => {
     const input = document.getElementById(id);
     // The form may not be on screen — this also runs from the heading dropdown
@@ -8698,7 +8719,12 @@ function toggleStatutoryFieldsForHeading(){
   }
 
   const hint = document.getElementById('statutoryHint');
-  if(hint) hint.textContent = notes.length ? (notes.join(', ') + ' not applicable for ' + SALARY_HEADINGS[document.getElementById('f_salaryHeading').value].label + ' — greyed out and excluded from the Salary Sheet automatically.') : '';
+  // The fields are gone from the form, not greyed out, so the hint has to say
+  // where they went — otherwise the section simply looks short.
+  if(hint) hint.textContent = notes.length
+    ? (notes.join(', ') + ' do not apply to ' + SALARY_HEADINGS[document.getElementById('f_salaryHeading').value].label +
+       ', so those fields are hidden here and excluded from the Salary Sheet automatically.')
+    : '';
   // Same handler the dropdown already fired, so the card follows the heading
   // the moment it changes.
   renderHeadingExplainer();
