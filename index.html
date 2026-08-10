@@ -1542,7 +1542,7 @@
 
         <section class="block">
           <h2 style="margin:0 0 4px;font-size:17px;">Diwali Bonus Payment Sheet</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The payment list for the bonus, in the same shape as the Final Salary Sheet — grouped by salary heading, sorted by bank, with account number and the amount payable. Only employees marked eligible appear. The amount is one whole month at the Rate of Pay: no PF, ESI, Professional Tax, advance, loan or retention is deducted, and leave taken during the year does not reduce it.</p>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The payment list for the bonus, in the same shape as the Final Salary Sheet — grouped by salary heading, sorted by bank, with account number and the amount payable. An employee appears once they are marked eligible <em>and</em> have a Diwali bonus amount set on their record; anyone eligible without one is named above the table rather than left off quietly. No PF, ESI, Professional Tax, advance, loan or retention is deducted, and leave taken during the year does not reduce it.</p>
           <label class="field">Paid on</label>
           <input type="date" class="field-input" id="bonusPaidOn" />
           <div style="height:12px"></div>
@@ -6028,7 +6028,10 @@ async function renderBonusPaymentSheet(){
   const onRoll = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
   const eligible = onRoll.filter(e => e.diwaliEligible === 'yes' && diwaliBonusFor(e) > 0);
   if(!eligible.length){
-    box.innerHTML = '<div class="empty">Nobody is marked eligible for the Diwali bonus, or no Rate of Pay is set.</div>';
+    const eligibleNoAmount = onRoll.filter(e => diwaliBonusSource(e) === 'unset').length;
+    box.innerHTML = '<div class="empty">' + (eligibleNoAmount
+      ? eligibleNoAmount + ' employee(s) are marked eligible but none has a bonus amount set yet. Open each record and fill in Diwali bonus amount, above Rate of Pay.'
+      : 'Nobody is marked eligible for the Diwali bonus.') + '</div>';
     return;
   }
 
@@ -6077,17 +6080,16 @@ async function renderBonusPaymentSheet(){
   // Anyone left out is named rather than silently missing — "why is he not on
   // the list" is the first question asked of a payment sheet.
   const notEligible = onRoll.filter(e => e.diwaliEligible !== 'yes');
-  const noRate = onRoll.filter(e => e.diwaliEligible === 'yes' && !(diwaliBonusFor(e) > 0));
+  const noAmount = onRoll.filter(e => diwaliBonusSource(e) === 'unset');
 
   box.innerHTML = `${reportLogoHeader('Diwali Bonus Payment Sheet — paid ' + paidOn)}
-    <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by salary heading, sorted by bank. One whole month at the Rate of Pay for every employee — nothing is taken off a bonus: no PF, no ESI, no Professional Tax, no loan instalment, no advance, no retention money, and no reduction for leave taken, however many days were lost that year.</p>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by salary heading, sorted by bank. Each figure is the Diwali bonus amount set on that employee's record — nothing is taken off it: no PF, no ESI, no Professional Tax, no loan instalment, no advance, no retention money, and no reduction for leave taken, however many days were lost that year.</p>
+    ${noAmount.length ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${noAmount.length} eligible employee(s) are missing from this sheet because no bonus amount has been set for them: ${escapeHtml(noAmount.map(e => e.name || e.id).join(', '))}. Set an amount on each record, then generate the sheet again.</p>` : ''}
     ${noBank.length ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${noBank.length} employee(s) have no bank details on file and cannot be paid by transfer: ${escapeHtml(noBank.join(', '))}.</p>` : ''}
     <div class="sal-sheet-wrap"><table class="sal-table">
       <thead><tr><th>SR</th><th>Employee Name</th><th>Bank Name</th><th>Account Number</th><th>IFSC</th><th class="num">Bonus Payable</th></tr></thead>
       <tbody>${bodyRows}</tbody></table></div>
-    ${notEligible.length || noRate.length ? `<p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">Not on this sheet: ${
-      [notEligible.length ? notEligible.length + ' marked not eligible' : '',
-       noRate.length ? noRate.length + ' eligible but with no Rate of Pay set' : ''].filter(Boolean).join(', ')}.</p>` : ''}
+    ${notEligible.length ? `<p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">Not on this sheet: ${notEligible.length} marked not eligible.</p>` : ''}
     <div class="row-inline" style="margin-top:12px;">
       <button class="btn ghost" style="flex:1;" onclick="openFullscreenView('Diwali Bonus Payment Sheet','bonusPaymentBox')">⛶ Full screen</button>
       <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
@@ -8254,24 +8256,28 @@ function emptyEmployee(){
 // column on the Salary Sheet.
 function diwaliBonusFor(emp){
   if(emp.diwaliEligible !== 'yes') return 0;
-  // A figure entered against the employee wins. It is what they are actually
-  // being paid, and a payroll that recalculates an agreed amount is a payroll
-  // nobody trusts.
+  // The amount entered against the employee, and nothing else. HR sets what
+  // each person is paid; the app does not decide it for them.
   const manual = Number(emp.diwaliBonusAmount) || 0;
-  if(manual > 0) return Math.round(manual * 100) / 100;
-  // Nothing entered falls back to a whole month, which is what every employee
-  // on file was getting before this box existed. Treating blank as nil would
-  // have zeroed the bonus for the entire company the moment it shipped.
-  const h = SALARY_HEADINGS[emp.salaryHeading] || SALARY_HEADINGS.managerial;
-  const rate = Number(emp.ratePay) || 0;
-  const gross = h.flat ? rate : rate * (h.basicPct + h.hraPct + h.ltaPct);
-  return Math.round(gross * 100) / 100;
+  return manual > 0 ? Math.round(manual * 100) / 100 : 0;
 }
 
-// Where a bonus figure came from, so a report can say which employees have an
-// agreed amount and which are on the default.
+// One month at the Rate of Pay — what the bonus used to default to, kept as the
+// suggestion offered on the form so the old figure is one tap away rather than
+// something to work out by hand.
+function suggestedDiwaliBonus(emp){
+  const h = SALARY_HEADINGS[(emp || {}).salaryHeading] || SALARY_HEADINGS.managerial;
+  const rate = Number((emp || {}).ratePay) || 0;
+  return Math.round((h.flat ? rate : rate * (h.basicPct + h.hraPct + h.ltaPct)) * 100) / 100;
+}
+
+// Three states, not two. An eligible employee with no amount set is not somebody
+// being paid nothing — it is a decision nobody has made yet, and the difference
+// matters on a sheet that goes to a bank. Reporting them as ₹0 would let a
+// missing figure pass for a deliberate one.
 function diwaliBonusSource(emp){
-  return (Number(emp.diwaliBonusAmount) || 0) > 0 ? 'entered' : 'month';
+  if((emp || {}).diwaliEligible !== 'yes') return 'ineligible';
+  return (Number(emp.diwaliBonusAmount) || 0) > 0 ? 'entered' : 'unset';
 }
 
 function employeeModalHtml(emp){
@@ -8419,7 +8425,7 @@ function employeeModalHtml(emp){
         <div style="height:14px"></div>
         <label class="field">Diwali bonus amount</label>
         <input type="number" id="f_diwaliBonusAmount" placeholder="Leave blank for one month's pay" value="${emp.diwaliBonusAmount||''}" oninput="updateBonusPreview()">
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;">The figure this employee is actually paid at Diwali. Enter it here and it is used as it stands — the Diwali Bonus Report, the payment sheet and the CTC all take it from here. Leave it blank and one whole month at the Rate of Pay is used instead, which is what happened before there was a box for it. Either way it is only paid if the eligibility below says Yes, and nothing is ever deducted from it.</p>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;">The figure this employee is actually paid at Diwali, used exactly as entered — the Diwali Bonus Report, the payment sheet and the CTC all take it from here, and nothing is ever deducted from it. <strong style="color:var(--amber-dark);">Left blank, no bonus is paid</strong> and they will not appear on the payment sheet; the box below the eligibility question offers one month's pay if that is the figure you want. It is only paid at all if the eligibility below says Yes.</p>
         <div style="height:14px"></div>
         <label class="field">Rate of pay (monthly)</label>
         <input type="number" id="f_ratePay" placeholder="0" value="${emp.ratePay||''}" oninput="renderPayrollBreakdown()">
@@ -9041,6 +9047,15 @@ function renderPayrollBreakdown(){
   </details>`;
 }
 
+// Fills the box with a month's pay. The old default, kept as one tap rather
+// than a rule, so choosing it stays a decision somebody made.
+function useMonthAsDiwaliBonus(){
+  const el = document.getElementById('f_diwaliBonusAmount');
+  if(!el) return;
+  el.value = Math.round(payrollValue('gross') * 100) / 100 || '';
+  updateBonusPreview();
+}
+
 function updateBonusPreview(){
   // Same rule as diwaliBonusFor, read off the form so it follows Rate of Pay
   // and the heading as they are typed. The parts are spelled out rather than
@@ -9051,13 +9066,21 @@ function updateBonusPreview(){
   const eligible = (document.getElementById('f_diwaliEligible') || {}).value === 'yes';
   if(!eligible){ el.textContent = 'Not eligible for Diwali bonus.'; return; }
   const manual = Number((document.getElementById('f_diwaliBonusAmount') || {}).value) || 0;
-  const gross = manual > 0 ? manual : payrollValue('gross');
-  const parts = manual > 0
-    ? 'the amount entered above.'
-    : ([['basic','Basic'], ['hra','HRA'], ['lta','LTA']]
-        .map(([k, label]) => [label, payrollValue(k)])
-        .filter(([, v]) => v > 0)
-        .map(([label, v]) => label + ' ' + fmtMoney(v)).join(' + ') + ' — one whole month at the Rate of Pay.');
+  const month = payrollValue('gross');
+  if(!(manual > 0)){
+    // Not a zero bonus — an amount nobody has set yet, and the two must not
+    // look alike on a form that feeds a bank payment sheet.
+    el.innerHTML = '<span class="pol-warn">No bonus amount set — this employee will not appear on the ' +
+      'Diwali Bonus Payment Sheet.</span><br><span style="font-size:11.5px;">Enter the figure in the box ' +
+      'above Rate of Pay.' + (month > 0
+        ? ' One whole month at their Rate of Pay would be ₹' + fmtMoney(month) +
+          ' — <button class="linkbtn" style="padding:0" onclick="useMonthAsDiwaliBonus()">use that</button>.'
+        : '') + '</span>';
+    return;
+  }
+  const gross = manual;
+  const parts = 'the amount entered above.' +
+    (month > 0 ? ' One whole month at their Rate of Pay would be ₹' + fmtMoney(month) + '.' : '');
   // Only the parts that make the bonus UP carry figures. The deductions are
   // named but never priced here: printing "PT 200" a line under the bonus put
   // a number in the box that is not part of it, and it read as though PT had
@@ -10182,7 +10205,7 @@ function reportHasData(key, e){
   if(key==='contact') return !!(e.phone || e.email);
   if(key==='birthday') return !!e.dob;
   if(key==='increment') return !!e.nextIncrement;
-  if(key==='diwali') return diwaliBonusFor(e) > 0;
+  if(key==='diwali') return e.diwaliEligible === 'yes';
   if(key==='salary') return (Number(e.ratePay)||0) > 0;
   if(key==='ctc') return (Number(e.ratePay)||0) > 0;
   if(key==='loan') return loansOf(e).length > 0;
@@ -10619,24 +10642,26 @@ async function viewReport(key, label){
     // other. They are always the same figure, and showing only the bonus left
     // no way to see that from the report — which is how a rate that happens to
     // end in 200 came to look like Professional Tax had been added to it.
-    csvHeader = ['Name','Eligible','Rate of Pay','Bonus','Taken from'];
-    const srcLabel = e => diwaliBonusSource(e) === 'entered'
-      ? 'Amount entered on the employee' : "One month's Rate of Pay";
+    csvHeader = ['Name','Eligible','Rate of Pay','Bonus','Status'];
+    const SRC = { entered:'Amount set', unset:'AMOUNT NOT SET', ineligible:'Not eligible' };
     csvRows = employees.map(e => [e.name, e.diwaliEligible==='yes'?'Yes':'No',
-                                  Number(e.ratePay)||0, diwaliBonusFor(e),
-                                  e.diwaliEligible==='yes' ? srcLabel(e) : '']);
+                                  Number(e.ratePay)||0,
+                                  diwaliBonusSource(e) === 'entered' ? diwaliBonusFor(e) : '',
+                                  SRC[diwaliBonusSource(e)]]);
     rows = employees.map(e => {
       const rate = Number(e.ratePay) || 0;
-      const bonus = diwaliBonusFor(e);
-      const eligible = e.diwaliEligible === 'yes';
-      const entered = diwaliBonusSource(e) === 'entered';
-      return `<tr><td>${escapeHtml(e.name)}</td><td>${eligible?'Yes':'No'}</td>
-        <td class="num">₹${fmtMoney(rate)}</td><td class="num">₹${fmtMoney(bonus)}</td>
-        <td>${!eligible ? '—' : (entered
-          ? '<span class="pol-ok">Amount entered</span>'
-          : "<span style=\"color:var(--muted);\">One month's pay</span>")}</td></tr>`;
+      const src = diwaliBonusSource(e);
+      return `<tr${src === 'unset' ? ' class="inc-overdue"' : ''}>
+        <td>${escapeHtml(e.name)}</td><td>${e.diwaliEligible==='yes'?'Yes':'No'}</td>
+        <td class="num">₹${fmtMoney(rate)}</td>
+        <td class="num">${src === 'entered' ? '₹' + fmtMoney(diwaliBonusFor(e)) : '—'}</td>
+        <td>${src === 'entered' ? '<span class="pol-ok">Amount set</span>'
+            : src === 'unset' ? '<span class="pol-warn">No amount set</span>'
+            : '<span style="color:var(--muted);">Not eligible</span>'}</td></tr>`;
     }).join('');
-    box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">The bonus is whatever amount is entered against the employee; where none is, one whole month at the Rate of Pay is used, and the last column says which. Nothing is deducted from a bonus and nothing is added to one: no PF, ESI or Professional Tax, no advance, loan or retention, and no reduction for leave taken during the year.</p><table><tr><th>Name</th><th>Eligible</th><th class="num">Rate of Pay</th><th class="num">Bonus</th><th>Taken from</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
+    const unsetCount = employees.filter(e => diwaliBonusSource(e) === 'unset').length;
+    box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">The bonus is the amount entered against each employee — nothing is worked out from the Rate of Pay, which is shown only for comparison. Nothing is deducted from a bonus and nothing is added to one: no PF, ESI or Professional Tax, no advance, loan or retention, and no reduction for leave taken during the year.</p>
+      ${unsetCount ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${unsetCount} eligible employee(s) have no bonus amount set, so nothing will be paid to them. Open each record and fill in Diwali bonus amount — the form suggests one month's pay if that is what you want.</p>` : ''}<table><tr><th>Name</th><th>Eligible</th><th class="num">Rate of Pay</th><th class="num">Bonus</th><th>Status</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'salary'){
     csvHeader = ['Name','Gross','Deductions','Net'];
     rows = employees.map(e => {
