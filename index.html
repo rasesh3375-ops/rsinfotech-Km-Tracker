@@ -622,6 +622,18 @@
   .modal-overlay{position:fixed;inset:0;background:rgba(22,33,62,0.55);display:flex;align-items:flex-start;justify-content:center;padding:20px 12px;overflow-y:auto;z-index:50;}
   .modal-box{background:var(--paper);border-radius:14px;max-width:520px;width:100%;padding:22px;margin:20px 0 40px;}
   .modal-box h2{margin:0 0 6px;font-size:19px;}
+  /* Title bar that stays put. The overlay is the scrolling element, so sticky
+     children of the box pin against it without the box having to become its own
+     scroller — which would mean restructuring every modal. Negative margins
+     cancel the box padding so the bar spans the full width and content passes
+     under it rather than beside it. */
+  .modal-head{position:sticky;top:0;z-index:3;display:flex;align-items:center;gap:12px;
+    margin:-22px -22px 14px;padding:16px 22px 12px;background:var(--paper);
+    border-radius:14px 14px 0 0;border-bottom:1px solid var(--line);}
+  .modal-head h2{margin:0;flex:1;}
+  .modal-x{border:none;background:transparent;font-size:26px;line-height:1;color:var(--muted);
+    cursor:pointer;padding:0 2px;font-family:inherit;}
+  .modal-x:hover,.modal-x:focus{color:var(--navy);}
   .modal-box .hint{font-size:12.5px;color:var(--muted);margin:0 0 18px;}
   .field-group{margin-bottom:16px;}
   .field-group .sec-title{font-size:11.5px;font-weight:700;color:var(--amber-dark);text-transform:uppercase;letter-spacing:.5px;margin:18px 0 12px;padding-top:14px;border-top:1px dashed var(--line);}
@@ -736,7 +748,12 @@
   .report-logo-title{font-size:12.5px;color:var(--navy);font-weight:600;}
   .report-logo-date{font-size:11px;color:var(--muted);}
   .bonus-callout{background:#FDECC8;border:1px solid var(--amber);border-radius:8px;padding:12px 14px;font-size:13.5px;font-weight:700;color:var(--amber-dark);margin-bottom:8px;}
-  .modal-actions{display:flex;gap:10px;margin-top:18px;}
+  /* Save and Cancel pinned to the foot of the screen for the same reason —
+     on a form this long they were a scroll away from wherever you were. */
+  .modal-actions{display:flex;gap:10px;margin-top:18px;position:sticky;bottom:0;z-index:3;
+    background:var(--paper);padding:14px 22px;margin-left:-22px;margin-right:-22px;
+    margin-bottom:-22px;border-top:1px solid var(--line);border-radius:0 0 14px 14px;
+    flex-wrap:wrap;}
   .modal-actions .btn{flex:1;}
 
   .letter-choice{border:1px solid var(--line);border-left:4px solid transparent;border-radius:10px;padding:13px 14px;margin-bottom:8px;cursor:pointer;font-size:14px;display:flex;gap:12px;align-items:center;}
@@ -8282,10 +8299,13 @@ function diwaliBonusSource(emp){
 
 function employeeModalHtml(emp){
   return `
-  <div class="modal-overlay" id="employeeModalOverlay">
+  <div class="modal-overlay" id="employeeModalOverlay" onclick="if(event.target===this)closeEmployeeModal()">
     <div class="modal-box">
-      <h2>${editingEmployeeId ? 'Edit employee' : 'Add employee'}</h2>
-      <p class="hint">This information is stored once and auto-fills letters and payslips for this employee — no need to retype it each time.</p>
+      <div class="modal-head">
+        <h2>${editingEmployeeId ? 'Edit employee' : 'Add employee'}</h2>
+        <button class="modal-x" type="button" title="Close" aria-label="Close" onclick="closeEmployeeModal()">×</button>
+      </div>
+      <p class="hint">This information is stored once and auto-fills letters and payslips for this employee — no need to retype it each time. Close it at any point with the × above — anything typed is kept on this device and offered back next time.</p>
 
             <div class="field-group">
         <div class="sec-title">Basic details</div>
@@ -9411,14 +9431,37 @@ async function openAddEmployeeModal(id){
   }
   const root = document.getElementById('employeeModalRoot');
   if(root){
+    const touched = () => { employeeFormTouched = true; };
+    root.addEventListener('input', touched);
+    root.addEventListener('change', touched);
     root.addEventListener('input', scheduleEmployeeDraftSave);
     root.addEventListener('change', scheduleEmployeeDraftSave);
   }
+  employeeFormTouched = false;
+  document.addEventListener('keydown', employeeModalEscHandler);
 }
-function closeEmployeeModal(){
+// Closing is now possible from anywhere — the ×, the backdrop, or Escape — so
+// it has to ask before throwing away a half-filled form. Only once something
+// has actually been typed: confirming on a form nobody touched is noise.
+let employeeFormTouched = false;
+
+function closeEmployeeModal(force){
+  if(!force && employeeFormTouched && document.getElementById('employeeModalOverlay')){
+    if(!confirm('Close without saving?\n\nWhat you have typed is kept on this device and offered back the next time you open this form.')) return;
+  }
+  employeeFormTouched = false;
+  document.removeEventListener('keydown', employeeModalEscHandler);
   document.getElementById('employeeModalRoot').innerHTML = '';
   editingEmployeeDraft = null;
   editingEmployeeId = null;
+}
+
+function employeeModalEscHandler(e){
+  if(e.key !== 'Escape') return;
+  if(!document.getElementById('employeeModalOverlay')) return;
+  // Not while a picker or another modal is on top of it.
+  if(document.getElementById('checklistModalRoot').innerHTML) return;
+  closeEmployeeModal();
 }
 
 // A save is several seconds against Apps Script. Two taps on a slow connection
@@ -9626,7 +9669,7 @@ async function saveEmployeeForm(){
     // A full or unavailable local store costs one re-read, not a save.
   }
   try{ clearEmployeeDraft(); }catch(e){}
-  closeEmployeeModal();
+  closeEmployeeModal(true);
   showSavedToast((isNew ? 'Added ' : 'Updated ') + name + ' (' + id + ')' +
                  (isNew ? ' — opening their appointment letter' : ''));
 
