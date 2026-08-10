@@ -8893,17 +8893,17 @@ function updateBonusPreview(){
     .map(([k, label]) => [label, payrollValue(k)])
     .filter(([, v]) => v > 0)
     .map(([label, v]) => label + ' ' + fmtMoney(v)).join(' + ');
-  const held = [['pf','PF'], ['esi','ESI'], ['pt','PT']]
-    .map(([k, label]) => [label, payrollValue(k)])
-    .filter(([, v]) => v > 0)
-    .map(([label, v]) => label + ' ' + fmtMoney(v));
+  // Only the parts that make the bonus UP carry figures. The deductions are
+  // named but never priced here: printing "PT 200" a line under the bonus put
+  // a number in the box that is not part of it, and it read as though PT had
+  // been added to the bonus. Their amounts belong in the payroll breakdown
+  // above, which is about the monthly salary, where they actually apply.
   el.innerHTML = 'Calculated Diwali bonus: <strong>Rs. ' + fmtMoney(gross) + '</strong>' +
-    (parts ? '<br><span style="font-size:11.5px;">' + escapeHtml(parts) + '</span>' : '') +
-    '<br><span style="font-size:11.5px;">' +
-    (held.length
-      ? 'Not deducted from it: ' + escapeHtml(held.join(', ')) + ' — those come off the monthly salary, not the bonus.'
-      : 'Nothing is deducted from it.') +
-    ' Advance, loan instalment and retention are not taken off either.</span>';
+    (parts ? '<br><span style="font-size:11.5px;">' + escapeHtml(parts) +
+             ' — one whole month at the Rate of Pay.</span>' : '') +
+    '<br><span style="font-size:11.5px;">Nothing is deducted from a bonus: no PF, no ESI, ' +
+    'no Professional Tax, no advance, no loan instalment, no retention money, and no reduction ' +
+    'for leave taken during the year.</span>';
 }
 
 // The cheque is kept at a higher resolution than an ID scan, because the whole
