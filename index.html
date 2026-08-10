@@ -1515,6 +1515,17 @@
         </section>
 
         <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">Diwali Bonus Payment Sheet</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The payment list for the bonus, in the same shape as the Final Salary Sheet — grouped by salary heading, sorted by bank, with account number and the amount payable. Only employees marked eligible appear. Nothing is deducted from a bonus, so the amount is one whole month at the Rate of Pay.</p>
+          <label class="field">Paid on</label>
+          <input type="date" class="field-input" id="bonusPaidOn" />
+          <div style="height:12px"></div>
+          <button class="btn full" onclick="renderBonusPaymentSheet()">Generate bonus payment sheet</button>
+          <div style="height:14px"></div>
+          <div id="bonusPaymentBox"></div>
+        </section>
+
+        <section class="block">
           <h2 style="margin:0 0 4px;font-size:17px;">Consultant Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The monthly attendance sheet in the exact column format the consultant asks for — one row per employee, built automatically from Employee Master and the month's attendance. Pick any month; export the CSV and send it on.</p>
           <div class="row-inline">
@@ -5743,6 +5754,90 @@ async function renderFinalSalarySheet(){
       <tbody>${bodyRows}</tbody></table></div>
     <button class="btn ghost full" style="margin-top:12px;" onclick="openFullscreenView('Final Salary Sheet','finalSalaryBox')">⛶ Full screen</button>
     <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(monthVal + '-01'))} &gt; Dashboard &gt; Final Salary Sheet.</p>`;
+}
+
+// The bonus payment list. Same shape as the Final Salary Sheet so it can be
+// handed over the same way, and deliberately just as narrow — name, bank,
+// account, amount.
+//
+// No attendance is read and no month is chosen. A bonus is a whole month at
+// the current Rate of Pay with nothing taken off, so there is nothing to
+// compute per day and nothing a past month would change; asking for one would
+// only invite somebody to generate "last Diwali" and get today's rates.
+async function renderBonusPaymentSheet(){
+  const box = document.getElementById('bonusPaymentBox');
+  const paidOnEl = document.getElementById('bonusPaidOn');
+  if(paidOnEl && !paidOnEl.value) paidOnEl.value = todayStr();
+  const paidOn = (paidOnEl && paidOnEl.value) || todayStr();
+
+  const onRoll = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
+  const eligible = onRoll.filter(e => e.diwaliEligible === 'yes' && diwaliBonusFor(e) > 0);
+  if(!eligible.length){
+    box.innerHTML = '<div class="empty">Nobody is marked eligible for the Diwali bonus, or no Rate of Pay is set.</div>';
+    return;
+  }
+
+  const money = v => '₹' + fmtMoney(v);
+  let bodyRows = '', csvRows = [], sr = 0, grand = 0, grandCount = 0;
+  const noBank = [];
+
+  for(const headingKey of SALARY_HEADING_ORDER){
+    const group = eligible.filter(e => (e.salaryHeading || 'managerial') === headingKey);
+    if(!group.length) continue;
+    const label = SALARY_HEADINGS[headingKey].label;
+    // Bank first, then name, so everyone at one bank sits together and the
+    // block can go over as a single transfer instruction.
+    group.sort((a, b) => (a.bankName || '').localeCompare(b.bankName || '')
+      || (a.name || '').localeCompare(b.name || ''));
+
+    let sub = 0;
+    bodyRows += `<tr class="sal-heading"><td colspan="6">${escapeHtml(label)}</td></tr>`;
+    csvRows.push([label]);
+    group.forEach(e => {
+      const amount = diwaliBonusFor(e);
+      sr++; sub += amount; grand += amount; grandCount++;
+      const missing = !e.bankName || !e.accountNumber;
+      if(missing) noBank.push(e.name || e.id);
+      bodyRows += `<tr${missing ? ' class="inc-overdue"' : ''}><td>${sr}</td><td>${escapeHtml(e.name)}</td>
+        <td>${e.bankName ? escapeHtml(e.bankName) : '<span class="pol-warn">not on file</span>'}</td>
+        <td>${e.accountNumber ? escapeHtml(e.accountNumber) : '<span class="pol-warn">not on file</span>'}</td>
+        <td>${escapeHtml(e.ifsc || '—')}</td>
+        <td class="num"><strong>${money(amount)}</strong></td></tr>`;
+      csvRows.push([sr, e.name, e.bankName || '', e.accountNumber || '', e.ifsc || '',
+                    Math.round(amount * 100) / 100]);
+    });
+    bodyRows += `<tr class="sal-subtotal"><td></td><td>${escapeHtml(label)} subtotal</td>
+      <td colspan="3">${group.length} employee(s)</td><td class="num">${money(sub)}</td></tr>`;
+    csvRows.push(['', label + ' subtotal', group.length + ' employee(s)', '', '', Math.round(sub * 100) / 100]);
+  }
+
+  bodyRows += `<tr class="sal-grandtotal"><td></td><td>Grand Total</td>
+    <td colspan="3">${grandCount} employee(s)</td><td class="num">${money(grand)}</td></tr>`;
+  csvRows.push(['', 'GRAND TOTAL', grandCount + ' employee(s)', '', '', Math.round(grand * 100) / 100]);
+
+  const cols = ['SR NO','Employee Name','Bank Name','Account Number','IFSC','Bonus Payable'];
+  saveFileToDrive(hrYearPath(paidOn, 'Dashboard', 'Diwali Bonus Payment Sheet'),
+    `Diwali Bonus Payment Sheet - ${paidOn}.csv`, toCsv(cols, csvRows), 'text/csv');
+
+  // Anyone left out is named rather than silently missing — "why is he not on
+  // the list" is the first question asked of a payment sheet.
+  const notEligible = onRoll.filter(e => e.diwaliEligible !== 'yes');
+  const noRate = onRoll.filter(e => e.diwaliEligible === 'yes' && !(diwaliBonusFor(e) > 0));
+
+  box.innerHTML = `${reportLogoHeader('Diwali Bonus Payment Sheet — paid ' + paidOn)}
+    <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by salary heading, sorted by bank. One whole month at the Rate of Pay — no PF, ESI, Professional Tax, loan, advance or retention is taken off a bonus.</p>
+    ${noBank.length ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${noBank.length} employee(s) have no bank details on file and cannot be paid by transfer: ${escapeHtml(noBank.join(', '))}.</p>` : ''}
+    <div class="sal-sheet-wrap"><table class="sal-table">
+      <thead><tr><th>SR</th><th>Employee Name</th><th>Bank Name</th><th>Account Number</th><th>IFSC</th><th class="num">Bonus Payable</th></tr></thead>
+      <tbody>${bodyRows}</tbody></table></div>
+    ${notEligible.length || noRate.length ? `<p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">Not on this sheet: ${
+      [notEligible.length ? notEligible.length + ' marked not eligible' : '',
+       noRate.length ? noRate.length + ' eligible but with no Rate of Pay set' : ''].filter(Boolean).join(', ')}.</p>` : ''}
+    <div class="row-inline" style="margin-top:12px;">
+      <button class="btn ghost" style="flex:1;" onclick="openFullscreenView('Diwali Bonus Payment Sheet','bonusPaymentBox')">⛶ Full screen</button>
+      <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
+    </div>
+    <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(paidOn))} &gt; Dashboard &gt; Diwali Bonus Payment Sheet.</p>`;
 }
 
 async function renderConsultantReport(){
