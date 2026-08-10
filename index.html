@@ -8250,7 +8250,7 @@ function employeeModalHtml(emp){
           <option value="no" ${emp.diwaliEligible==='no'?'selected':''}>No</option>
         </select>
         <div class="bonus-callout" id="bonusPreview" style="margin-top:12px;">Calculated Diwali bonus: Rs. ${diwaliBonusFor(emp)}</div>
-        <p style="font-size:12px;color:var(--muted);margin:0;">Bonus amount is calculated automatically as Basic + HRA + Other allowances (PF, ESI, and PT are not included) - no need to enter it manually.</p>
+        <p style="font-size:12px;color:var(--muted);margin:0;line-height:1.55;">Worked out automatically — nothing to enter by hand. It is one whole month at the Rate of Pay: Basic plus HRA plus LTA, with <strong>no PF, ESI, Professional Tax, advance, loan instalment or retention taken off</strong>, and no reduction for leave taken during the year. Other allowances, dress and mobile are separate from the Rate of Pay and are not added in.</p>
       </div>
 
       <div class="field-group">
@@ -8640,14 +8640,29 @@ function renderPayrollBreakdown(){
 
 function updateBonusPreview(){
   // Same rule as diwaliBonusFor, read off the form so it follows Rate of Pay
-  // and the heading as they are typed.
+  // and the heading as they are typed. The parts are spelled out rather than
+  // just totalled: "is PT inside this number?" is the question people actually
+  // have about a bonus, and a bare figure does not answer it.
   const el = document.getElementById('bonusPreview');
   if(!el) return;
   const eligible = (document.getElementById('f_diwaliEligible') || {}).value === 'yes';
+  if(!eligible){ el.textContent = 'Not eligible for Diwali bonus.'; return; }
   const gross = payrollValue('gross');
-  el.textContent = eligible
-    ? 'Calculated Diwali bonus: Rs. ' + fmtMoney(gross) + '  (one month\u2019s gross, before any deduction)'
-    : 'Not eligible for Diwali bonus.';
+  const parts = [['basic','Basic'], ['hra','HRA'], ['lta','LTA']]
+    .map(([k, label]) => [label, payrollValue(k)])
+    .filter(([, v]) => v > 0)
+    .map(([label, v]) => label + ' ' + fmtMoney(v)).join(' + ');
+  const held = [['pf','PF'], ['esi','ESI'], ['pt','PT']]
+    .map(([k, label]) => [label, payrollValue(k)])
+    .filter(([, v]) => v > 0)
+    .map(([label, v]) => label + ' ' + fmtMoney(v));
+  el.innerHTML = 'Calculated Diwali bonus: <strong>Rs. ' + fmtMoney(gross) + '</strong>' +
+    (parts ? '<br><span style="font-size:11.5px;">' + escapeHtml(parts) + '</span>' : '') +
+    '<br><span style="font-size:11.5px;">' +
+    (held.length
+      ? 'Not deducted from it: ' + escapeHtml(held.join(', ')) + ' — those come off the monthly salary, not the bonus.'
+      : 'Nothing is deducted from it.') +
+    ' Advance, loan instalment and retention are not taken off either.</span>';
 }
 
 // The cheque is kept at a higher resolution than an ID scan, because the whole
