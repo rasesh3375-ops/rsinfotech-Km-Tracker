@@ -1561,6 +1561,42 @@
             <p style="font-size:11.5px;color:var(--muted);margin:8px 0 0;">Designation, department and date of joining below are pulled from Employee Master automatically — edit them here only if this document needs something different.</p>
             <div style="height:14px"></div>
           </div>
+          <div id="genLeaveFieldsWrap" class="hidden">
+            <div id="genLeavePendingBox"></div>
+            <div class="sec-title">Leave requested</div>
+            <label class="field">Type of leave</label>
+            <select class="field-input" id="genLeaveType" onchange="renderLeaveRequestHint()">
+              <option value="EL">Earned Leave (EL) — full day</option>
+              <option value="SL">Sick Leave (SL) — full day</option>
+              <option value="HEL">Half day — Earned Leave</option>
+              <option value="HSL">Half day — Sick Leave</option>
+            </select>
+            <div style="height:12px"></div>
+            <label class="field">From</label>
+            <input type="date" id="genLeaveFrom" onchange="renderLeaveRequestHint()" />
+            <div style="height:12px"></div>
+            <label class="field">To</label>
+            <input type="date" id="genLeaveTo" onchange="renderLeaveRequestHint()" />
+            <div style="height:12px"></div>
+            <label class="field">Reason</label>
+            <textarea class="field-input" id="genLeaveReason" rows="3" placeholder="e.g. Sister's wedding, out of town"></textarea>
+            <div style="height:12px"></div>
+            <label class="field">HOD has approved?</label>
+            <select class="field-input" id="genLeaveHod" onchange="renderLeaveRequestHint()">
+              <option value="no">Not yet</option>
+              <option value="yes">Yes</option>
+            </select>
+            <div id="genLeaveMedWrap" class="hidden">
+              <div style="height:12px"></div>
+              <label class="field">Medical certificate attached?</label>
+              <select class="field-input" id="genLeaveMed" onchange="renderLeaveRequestHint()">
+                <option value="no">No</option>
+                <option value="yes">Yes</option>
+              </select>
+            </div>
+            <div id="genLeaveHint" class="bonus-callout" style="margin-top:12px;"></div>
+            <div style="height:14px"></div>
+          </div>
           <div id="genLoanFieldsWrap" class="hidden">
             <div id="genLoanPendingBox"></div>
             <div class="sec-title">Request details</div>
@@ -6386,6 +6422,7 @@ const LETTER_TYPES = [
   'No Dues Letter',
   'Full & Final Settlement Letter',
   'Loan/Advance Request Form',
+  'Leave Application Form',
   'Salary Slip'
 ];
 const CHECKLIST_ITEMS = {
@@ -6436,6 +6473,18 @@ async function saveEmployees(list){
 // moment somebody decides. Kept apart from the employee record because a
 // request is not a loan — it only becomes one when it is approved, and a
 // declined one still has to be findable afterwards.
+// Leave applied for in advance, from the form being generated to the day it is
+// approved. Kept apart from attendance because a request is not leave: it only
+// becomes leave when somebody approves it, and a declined one still has to be
+// findable afterwards.
+async function getLeaveRequests(){
+  const v = await safeGet('leave_requests', true);
+  return v ? JSON.parse(v) : [];
+}
+async function saveLeaveRequests(list){
+  await safeSet('leave_requests', JSON.stringify(list), true);
+}
+
 async function getLoanRequests(){
   const v = await safeGet('loan_requests', true);
   return v ? JSON.parse(v) : [];
@@ -6858,9 +6907,11 @@ async function buildHrDashboardHome(box){
       ${kpi('👥','Employee Master', onRoll.length, 'Open employee records', 'indigo', null, 'employees')}
       ${kpi('🗓️','Attendance Sheet', '', 'Mark and review attendance', 'green', null, 'attendance')}
       ${kpi('🚫','Absent Today', '—', 'Tap to see who', 'red', 'dashAbsentCount', null, 'toggleAbsentPanel()')}
+      ${kpi('🌴','On Leave Today', '—', 'Approved leave — tap to see who', 'green', 'dashLeaveCount', null, 'toggleLeavePanel()')}
       ${kpi('📄','Documents Expiring', expiring.length, 'Within 30 days — tap to open', 'amber', null, 'expiry')}
     </div>
     <div id="dashAbsentPanel" class="hidden"></div>
+    <div id="dashLeavePanel" class="hidden"></div>
 
     <div class="dash-2col">
       <details class="dash-card dash-fold" open>
@@ -6959,7 +7010,60 @@ async function buildHrDashboardHome(box){
 // Read straight from the Attendance Sheet's own codes, so the dashboard and the
 // sheet cannot disagree.
 const ABSENT_TODAY_CODES = { A:'Absent', LP:'Leave without pay', HLP:'Half day (LP)' };
-let dashAbsentList = [], dashAbsentUnread = 0;
+const ON_LEAVE_TODAY_CODES = { EL:'Earned Leave', SL:'Sick Leave',
+                               HEL:'Half day — EL', HSL:'Half day — SL' };
+let dashAbsentList = [], dashAbsentUnread = 0, dashLeaveList = [];
+
+function toggleLeavePanel(){
+  const box = document.getElementById('dashLeavePanel');
+  if(!box) return;
+  const opening = box.classList.contains('hidden');
+  box.classList.toggle('hidden', !opening);
+  if(opening){
+    renderLeavePanel();
+    box.scrollIntoView({ behavior:'smooth', block:'nearest' });
+  }
+}
+
+// Who is off today, and who is off soon. The second half is the point of
+// applying in advance: leave sanctioned three weeks out is invisible until the
+// morning it starts unless something says so beforehand.
+async function renderLeavePanel(){
+  const box = document.getElementById('dashLeavePanel');
+  if(!box) return;
+  const today = todayStr();
+  const horizon = new Date(); horizon.setDate(horizon.getDate() + 30);
+  const until = horizon.getFullYear() + '-' + String(horizon.getMonth() + 1).padStart(2, '0') +
+                '-' + String(horizon.getDate()).padStart(2, '0');
+  let upcoming = [], pending = 0;
+  try{
+    const reqs = await getLeaveRequests();
+    pending = reqs.filter(r => r.status === 'pending').length;
+    upcoming = reqs.filter(r => r.status === 'approved' && r.from > today && r.from <= until)
+                   .sort((a, b) => String(a.from).localeCompare(String(b.from)));
+  }catch(e){}
+
+  box.innerHTML = `<div class="dash-card">
+    <div class="card-head"><h3>On leave today — ${escapeHtml(today)}</h3>
+      <button class="linkbtn" style="padding:0" onclick="hrNavigate('attendance')">Attendance sheet</button></div>
+    ${dashLeaveList.length
+      ? dashLeaveList.sort((a, b) => a.name.localeCompare(b.name)).map(a => `
+          <div class="legend-row"><span><strong>${escapeHtml(a.name)}</strong>
+            <span class="inc-sub">${escapeHtml(a.dept)}</span></span>
+            <span class="feed-tag" style="background:#DDEEE3;color:#2E7D4F;">${escapeHtml(a.label)}</span></div>`).join('')
+      : '<p class="dash-muted">Nobody is on approved leave today.</p>'}
+    <div style="height:14px"></div>
+    <div class="card-head"><h3>Approved leave coming up</h3>
+      <button class="linkbtn" style="padding:0" onclick="jumpToGenerator('Leave Application Form')">Leave forms</button></div>
+    ${upcoming.length
+      ? upcoming.map(r => `
+          <div class="legend-row"><span><strong>${escapeHtml(r.employeeName)}</strong>
+            <span class="inc-sub">${escapeHtml(r.typeLabel)} · ${escapeHtml(String(r.days))} day(s)</span></span>
+            <span class="feed-tag">${escapeHtml(r.from)}${r.to && r.to !== r.from ? ' → ' + escapeHtml(r.to) : ''}</span></div>`).join('')
+      : '<p class="dash-muted">No approved leave in the next 30 days.</p>'}
+    ${pending ? `<p class="dash-muted" style="margin-top:10px;">${pending} application(s) still awaiting a decision — <button class="linkbtn" style="padding:0" onclick="jumpToGenerator('Leave Application Form')">open them</button>.</p>` : ''}
+  </div>`;
+}
 
 function toggleAbsentPanel(){
   const box = document.getElementById('dashAbsentPanel');
@@ -7013,6 +7117,7 @@ async function loadDashboardAbsentToday(onRoll){
   // Kept so the panel can name them, not just count them — "3 absent" prompts
   // the question "which three?" every time.
   dashAbsentList = [];
+  dashLeaveList = [];
   onRoll.forEach((e, i) => {
     const att = atts[i];
     // A failed read is unknown, not absent; a day nobody has marked yet is not
@@ -7022,11 +7127,20 @@ async function loadDashboardAbsentToday(onRoll){
     const entry = att[today];
     const label = entry && ABSENT_TODAY_CODES[entry.code];
     if(label){ absent++; dashAbsentList.push({ name: e.name || e.id, dept: e.department || '—', label }); }
+    // Approved leave is not absence — somebody on sanctioned EL is accounted
+    // for, and lumping them in with the unexplained absences is what made the
+    // absent count something nobody trusted.
+    const onLeave = entry && ON_LEAVE_TODAY_CODES[entry.code];
+    if(onLeave) dashLeaveList.push({ name: e.name || e.id, dept: e.department || '—', label: onLeave });
   });
   dashAbsentUnread = unread;
   // If the panel is already open, refresh it in place.
   const openPanel = document.getElementById('dashAbsentPanel');
   if(openPanel && !openPanel.classList.contains('hidden')) renderAbsentPanel();
+  const openLeave = document.getElementById('dashLeavePanel');
+  if(openLeave && !openLeave.classList.contains('hidden')) renderLeavePanel();
+  const leaveCountEl = document.getElementById('dashLeaveCount');
+  if(leaveCountEl) leaveCountEl.textContent = dashLeaveList.length;
   if(countEl){
     countEl.textContent = absent;
     if(unread) countEl.title = unread + ' employee(s) could not be checked — attendance did not load.';
@@ -10372,6 +10486,7 @@ async function autoFillGeneratorFromEmployee(){
   document.getElementById('genDepartment').value = emp.department || '';
   document.getElementById('genDoj').value = emp.doj || '';
   if(LETTER_TYPES[selectedLetterIdx] === 'Loan/Advance Request Form') showLoanStanding();
+  if(LETTER_TYPES[selectedLetterIdx] === 'Leave Application Form') renderLeaveRequestHint();
 }
 function selectLetterType(idx){
   selectedLetterIdx = idx;
@@ -10382,8 +10497,14 @@ function toggleGeneratorFieldsForType(){
   const type = LETTER_TYPES[selectedLetterIdx];
   const isOffer = type === 'Offer Letter';
   const isLoan = type === 'Loan/Advance Request Form';
+  const isLeave = type === 'Leave Application Form';
   document.getElementById('genOfferFieldsWrap').classList.toggle('hidden', !isOffer);
   document.getElementById('genEmpSelectWrap').classList.toggle('hidden', isOffer);
+  const leaveWrap = document.getElementById('genLeaveFieldsWrap');
+  if(leaveWrap){
+    leaveWrap.classList.toggle('hidden', !isLeave);
+    if(isLeave){ renderLeaveRequestHint(); renderPendingLeaveRequests(); }
+  }
   const loanWrap = document.getElementById('genLoanFieldsWrap');
   if(loanWrap){
     loanWrap.classList.toggle('hidden', !isLoan);
@@ -10507,6 +10628,200 @@ async function declineLoanRequest(id){
   await renderPendingLoanRequests();
 }
 
+// ---- leave applied for in advance ----
+// The dates leave would actually be taken on. Sundays and declared holidays
+// are stepped over: they are not working days, so charging a day of EL against
+// one would spend a leave day the employee never took. The sandwich rule still
+// has its say — the policy engine raises it as a note on the application, where
+// somebody can see it and decide, rather than it being applied silently here.
+function leaveWorkingDays(fromStr, toStr, holidayMap){
+  const out = [];
+  if(!fromStr || !toStr || toStr < fromStr) return out;
+  const end = new Date(toStr + 'T00:00:00');
+  for(let d = new Date(fromStr + 'T00:00:00'); d <= end; d.setDate(d.getDate() + 1)){
+    const iso = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') +
+                '-' + String(d.getDate()).padStart(2, '0');
+    if(d.getDay() === 0) continue;               // Sunday
+    if(holidayMap && holidayMap[iso]) continue;  // declared holiday
+    out.push(iso);
+  }
+  return out;
+}
+
+function isHalfDayLeaveCode(code){ return code === 'HEL' || code === 'HSL'; }
+
+// Everything about one application: the dates, what it costs, what is left,
+// and what the policy has to say. Used by the on-screen summary, the printed
+// form and the approval, so all three agree.
+async function describeLeaveRequest(req, emp){
+  const holidays = await getHolidays();
+  const holidayMap = {};
+  (holidays || []).forEach(h => { holidayMap[h.date] = h.name; });
+  const half = isHalfDayLeaveCode(req.code);
+  const dates = half
+    ? (req.from ? [req.from] : [])
+    : leaveWorkingDays(req.from, req.to, holidayMap);
+  const days = half ? (dates.length ? 0.5 : 0) : dates.length;
+  const isSick = req.code === 'SL' || req.code === 'HSL';
+
+  const att = emp ? await getAttendance(emp.id) : {};
+  const used = leaveUsedThisFinancialYear(att, req.to || req.from || todayStr(),
+                                          emp ? emp.leaveOpeningFrom : '');
+  const openingEl = Number(emp && emp.elOpening) || 0;
+  const openingSl = Number(emp && emp.slOpening) || 0;
+  const balance = isSick ? Math.max(0, openingSl - used.sl) : Math.max(0, openingEl - used.el);
+  const after = balance - days;
+
+  // Same rules the Attendance tab already applies, asked the same way.
+  const first = dates[0] ? new Date(dates[0] + 'T00:00:00') : null;
+  const adjacent = dates.some(iso => {
+    const d = new Date(iso + 'T00:00:00');
+    const prev = new Date(d); prev.setDate(prev.getDate() - 1);
+    const next = new Date(d); next.setDate(next.getDate() + 1);
+    const key = x => x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') +
+                     '-' + String(x.getDate()).padStart(2, '0');
+    return prev.getDay() === 0 || next.getDay() === 0 ||
+           !!holidayMap[key(prev)] || !!holidayMap[key(next)];
+  });
+  const policy = validateLeaveApplication({
+    formSubmitted: true,                    // generating the form is submitting it
+    hodApproved: req.hodApproved === 'yes',
+    weekday: first ? first.getDay() : -1,
+    leaveType: isSick ? 'sick' : 'privilege',
+    medicalCertificate: req.medicalCertificate === 'yes'
+  }, { onLeaveSameDeptSameDay: 0, adjacentToHolidayOrSunday: adjacent });
+
+  return { dates, days, isSick, balance, after, policy, holidayMap,
+           label: { EL:'Earned Leave', SL:'Sick Leave',
+                    HEL:'Half day — Earned Leave', HSL:'Half day — Sick Leave' }[req.code] || req.code };
+}
+
+function readLeaveForm(){
+  const g = id => (document.getElementById(id) || {}).value || '';
+  return {
+    code: g('genLeaveType') || 'EL',
+    from: g('genLeaveFrom'),
+    to: g('genLeaveTo'),
+    reason: (g('genLeaveReason') || '').trim(),
+    hodApproved: g('genLeaveHod'),
+    medicalCertificate: g('genLeaveMed')
+  };
+}
+
+async function renderLeaveRequestHint(){
+  const box = document.getElementById('genLeaveHint');
+  if(!box) return;
+  const req = readLeaveForm();
+  const half = isHalfDayLeaveCode(req.code);
+  const medWrap = document.getElementById('genLeaveMedWrap');
+  if(medWrap) medWrap.classList.toggle('hidden', !(req.code === 'SL' || req.code === 'HSL'));
+  // A half day is one day by definition, so the second date is not asked for.
+  const toEl = document.getElementById('genLeaveTo');
+  if(toEl){
+    toEl.disabled = half;
+    toEl.style.background = half ? '#F1F4FA' : '';
+    if(half) toEl.value = req.from;
+  }
+  if(!req.from){ box.textContent = 'Pick the dates to see how many days this costs and what is left.'; return; }
+
+  const empId = (document.getElementById('genEmpSelect') || {}).value;
+  const emp = empId ? (await getEmployees()).find(e => e.id === empId) : null;
+  if(!emp){ box.textContent = 'Select the employee to see their leave balance.'; return; }
+
+  const d = await describeLeaveRequest(req, emp);
+  if(!d.dates.length){
+    box.textContent = 'No working days in that range — Sundays and declared holidays are not counted as leave.';
+    return;
+  }
+  const lines = [
+    '<strong>' + escapeHtml(d.label) + ' — ' + d.days + ' day(s)</strong> on ' +
+      escapeHtml(d.dates.length > 1 ? d.dates[0] + ' to ' + d.dates[d.dates.length - 1] : d.dates[0]) + '.',
+    'Balance ' + d.balance + ' → <strong>' + d.after + '</strong> after this.'
+  ];
+  if(d.after < 0) lines.push('<span class="pol-warn">More than the balance — the excess becomes leave without pay unless it is granted anyway.</span>');
+  d.policy.blockers.forEach(b => lines.push('<span class="pol-warn">⚠ ' + escapeHtml(b) + '</span>'));
+  d.policy.notes.forEach(n => lines.push('<span style="color:var(--muted);">' + escapeHtml(n) + '</span>'));
+  box.innerHTML = lines.join('<br>');
+}
+
+async function renderPendingLeaveRequests(){
+  const box = document.getElementById('genLeavePendingBox');
+  if(!box) return;
+  const pending = (await getLeaveRequests()).filter(r => r.status === 'pending');
+  if(!pending.length){ box.innerHTML = ''; return; }
+  pending.sort((a, b) => String(a.from).localeCompare(String(b.from)));
+  box.innerHTML = '<div class="sec-title">Awaiting a decision (' + pending.length + ')</div>' +
+    pending.map(r => `<div class="emp-row">
+        <div class="head"><strong>${escapeHtml(r.employeeName)}</strong><span class="id">${escapeHtml(String(r.days))} day(s)</span></div>
+        <p style="font-size:12.5px;color:var(--muted);margin:6px 0 0;">
+          ${escapeHtml(r.typeLabel)} · ${escapeHtml(r.from)}${r.to && r.to !== r.from ? ' to ' + escapeHtml(r.to) : ''}
+          ${r.reason ? ' · ' + escapeHtml(r.reason) : ''}
+          <br>Applied ${escapeHtml(String(r.requestedOn || '').slice(0, 10))}
+        </p>
+        <div class="row-inline" style="margin:10px 0 0;">
+          <button class="btn" style="flex:1;" onclick="approveLeaveRequest('${escapeHtml(r.id)}')">Approve</button>
+          <button class="btn ghost" style="flex:1;" onclick="declineLeaveRequest('${escapeHtml(r.id)}')">Decline</button>
+        </div>
+      </div>`).join('') +
+    '<p style="font-size:11.5px;color:var(--muted);margin:2px 0 16px;">Approving marks those dates on the attendance sheet straight away, so the Salary Sheet pays them as leave and the dashboard shows who is off.</p>';
+}
+
+// Approval is what turns an application into leave. It writes the dates onto
+// the attendance sheet, which is the single place the rest of the app already
+// reads: the Salary Sheet pays EL and SL as present, the leave balance runs
+// down, and the dashboard shows who is off today. Nothing else has to be told.
+async function approveLeaveRequest(id){
+  const requests = await getLeaveRequests();
+  const req = requests.find(r => r.id === id);
+  if(!req || req.status !== 'pending') return;
+  const employees = await getEmployees();
+  const emp = employees.find(e => e.id === req.employeeId);
+  if(!emp){ alert('That employee is no longer on the roster, so this cannot be approved.'); return; }
+
+  const d = await describeLeaveRequest({ code:req.code, from:req.from, to:req.to,
+    hodApproved: req.hodApproved, medicalCertificate: req.medicalCertificate }, emp);
+  if(!d.dates.length){ alert('There are no working days in that range — nothing to approve.'); return; }
+
+  const warn = [];
+  if(d.after < 0) warn.push('This is ' + Math.abs(d.after) + ' day(s) more than the balance.');
+  d.policy.blockers.forEach(b => warn.push(b));
+  const already = [];
+  const att = await getAttendance(emp.id);
+  d.dates.forEach(iso => { if(att && att[iso] && att[iso].code) already.push(iso + ' (' + att[iso].code + ')'); });
+  if(already.length) warn.push('Already marked: ' + already.join(', ') + ' — approving overwrites those.');
+
+  if(!confirm('Approve ' + d.days + ' day(s) of ' + d.label + ' for ' + emp.name + '?\n\n' +
+      d.dates.join(', ') + '\n\n' + (warn.length ? warn.join('\n') + '\n\n' : '') +
+      'These dates go onto the attendance sheet now.')) return;
+
+  for(const iso of d.dates){
+    await setAttendanceDay(emp.id, iso, req.code, { leaveRequestId: req.id });
+  }
+  req.status = 'approved';
+  req.decidedOn = new Date().toISOString();
+  req.dates = d.dates;
+  await saveLeaveRequests(requests);
+  invalidateSharedRead('attendance:' + emp.id);
+  invalidateDashboardSnapshot();
+  addActivityLog('Approved ' + d.days + ' day(s) ' + d.label + ' for ' + emp.name +
+                 ' (' + d.dates[0] + (d.dates.length > 1 ? ' to ' + d.dates[d.dates.length - 1] : '') + ')').catch(() => {});
+  await renderPendingLeaveRequests();
+  alert('Approved. ' + emp.name + ' is marked on leave for ' + d.days + ' day(s), and the Salary Sheet will pay those days as leave.');
+}
+
+async function declineLeaveRequest(id){
+  const requests = await getLeaveRequests();
+  const req = requests.find(r => r.id === id);
+  if(!req || req.status !== 'pending') return;
+  if(!confirm('Decline ' + req.employeeName + "'s leave from " + req.from + '?\n\n' +
+              'Nothing is marked on the attendance sheet and the request stays on record as declined.')) return;
+  req.status = 'declined';
+  req.decidedOn = new Date().toISOString();
+  await saveLeaveRequests(requests);
+  addActivityLog('Declined leave request from ' + req.employeeName + ' (' + req.from + ')').catch(() => {});
+  await renderPendingLeaveRequests();
+}
+
 // The instalment is the number the approver actually argues about, so it is
 // worked out on screen rather than left to be discovered after the form is
 // signed.
@@ -10588,6 +10903,23 @@ function letterTemplate(type, f){
       return `${company}\n\nDate: ${issueDate}\n\nTO WHOMSOEVER IT MAY CONCERN\n\nThis is to certify that ${name}, who worked as ${designation} in the ${department} department, has cleared all dues, returned all company assets and has no outstanding financial obligation towards ${company} as of ${lwd || issueDate}.\n\nFor ${company}\n\nAuthorised Signatory`;
     case 'Full & Final Settlement Letter':
       return `${company}\n\nDate: ${issueDate}\n\nDear ${name},\n\nThis letter is to inform you that your full and final settlement with respect to your employment as ${designation} (last working day ${lwd}) has been processed. Any dues payable will be credited to your registered bank account.\n\nFor ${company}\n\nAuthorised Signatory`;
+    case 'Leave Application Form': {
+      const line = '____________________';
+      const L = f.leave || {};
+      const span = L.from ? (L.to && L.to !== L.from ? niceDate_(L.from) + ' to ' + niceDate_(L.to) : niceDate_(L.from)) : line;
+      const flags = [].concat(L.blockers || [], L.notes || []);
+      return `${company}\n\nDate: ${issueDate}\n\nLEAVE APPLICATION FORM\n\n` +
+        `Employee name: ${name}\nDesignation: ${designation}\nDepartment: ${department}\n\n` +
+        `LEAVE REQUESTED\nType: ${L.label || line}\nDates: ${span}\n` +
+        `Number of days: ${L.days || line}\nReason: ${L.reason || '____________________________________________'}\n\n` +
+        `BALANCE\nAvailable before this leave: ${L.balance === undefined ? line : L.balance} day(s)\n` +
+        `Remaining after: ${L.after === undefined ? line : L.after} day(s)\n\n` +
+        (flags.length ? 'NOTED\n' + flags.map(x => '- ' + x).join('\n') + '\n\n' : '') +
+        `I request leave for the period shown above and undertake to hand over my work before proceeding.\n\n` +
+        `Employee signature: ${line}\n\nFOR OFFICE USE\nHOD approval: ${L.hodApproved ? 'Approved' : line}\n` +
+        `${L.code === 'SL' || L.code === 'HSL' ? 'Medical certificate: ' + (L.medicalCertificate ? 'Received' : line) + '\n' : ''}` +
+        `Sanctioned / Not sanctioned: ${line}\nHR approval: ${line}`;
+    }
     case 'Loan/Advance Request Form': {
       // A value that was entered is printed; one that was not keeps its ruled
       // line, so the same document works whether it is filled in here or by
@@ -10683,6 +11015,18 @@ async function generateLetter(){
     f.offeredSalary = document.getElementById('genOfferedSalary').value.trim();
     f.replyBy = document.getElementById('genOfferReplyBy').value;
   }
+  if(type === 'Leave Application Form' && matched){
+    const lr = readLeaveForm();
+    const d = await describeLeaveRequest(lr, matched);
+    f.leave = {
+      code: lr.code, label: d.label, from: lr.from, to: isHalfDayLeaveCode(lr.code) ? lr.from : lr.to,
+      reason: lr.reason, days: d.days, dates: d.dates,
+      balance: d.balance, after: d.after,
+      hodApproved: lr.hodApproved === 'yes',
+      medicalCertificate: lr.medicalCertificate === 'yes',
+      blockers: d.policy.blockers, notes: d.policy.notes
+    };
+  }
   if(type === 'Loan/Advance Request Form'){
     f.loanAmount = Number(document.getElementById('genLoanAmount').value) || 0;
     f.loanReason = document.getElementById('genLoanReason').value.trim();
@@ -10718,6 +11062,25 @@ async function generateLetter(){
   document.getElementById('letterPaper').innerHTML = reportLogoHeader(type) + '<div style="white-space:pre-wrap;">' + escapeHtml(text) + '</div>';
   document.getElementById('letterOutput').classList.add('show');
   document.getElementById('letterActionsBox').classList.remove('hidden');
+
+  // A generated leave form with dates on it is an application somebody has to
+  // answer, so it is filed as one. A blank form printed to be filled in by hand
+  // is not — there is nothing yet to approve.
+  if(type === 'Leave Application Form' && matched && f.leave && f.leave.dates.length){
+    const list = await getLeaveRequests();
+    list.push({
+      id: 'LV-' + Date.now(),
+      employeeId: matched.id, employeeName: matched.name,
+      code: f.leave.code, typeLabel: f.leave.label,
+      from: f.leave.from, to: f.leave.to, days: f.leave.days,
+      reason: f.leave.reason,
+      hodApproved: f.leave.hodApproved ? 'yes' : 'no',
+      medicalCertificate: f.leave.medicalCertificate ? 'yes' : 'no',
+      requestedOn: new Date().toISOString(), status: 'pending', decidedOn: '', dates: []
+    });
+    await saveLeaveRequests(list);
+    renderPendingLeaveRequests();
+  }
 
   // A generated form with an amount on it is a request somebody has to answer,
   // so it is filed as one. A blank form printed to be filled in by hand is not
