@@ -21,8 +21,12 @@
 <link rel="manifest" id="appManifest" href="manifest.json">
 <meta name="theme-color" content="#16213E">
 
-<!-- iOS Add to Home Screen -->
-<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<!-- iOS Add to Home Screen. Relative for the same reason as the manifest:
+     iOS reads this out of the served HTML, and at "/hr/" it resolves to
+     /hr/icons/apple-touch-icon.png, which vercel.json serves the HR badge
+     for. Two identical icons on one home screen are impossible to tell
+     apart, which makes tapping the wrong one look like a broken login. -->
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" id="appleTitle" content="RS KM Tracker">
@@ -37,6 +41,21 @@
   // so point the manifest/icon metadata at the right one before anything else runs.
   (function(){
     var isHrPath = location.pathname.replace(/\/+$/, '') === '/hr';
+    // Everything that tells iOS this is the HR app — the manifest and the
+    // home-screen icon — is a relative link, so it only resolves correctly
+    // with the trailing slash. The server redirects "/hr" to "/hr/", so this
+    // should never fire; it covers a cached bookmark or a proxy that swallows
+    // the redirect. Guarded so that a host normalising the slash back off
+    // cannot turn it into a reload loop.
+    if(isHrPath && location.pathname !== '/hr/'){
+      var tried = '';
+      try{ tried = sessionStorage.getItem('kmt_hr_slash') || ''; }catch(e){}
+      if(!tried){
+        try{ sessionStorage.setItem('kmt_hr_slash', '1'); }catch(e){}
+        location.replace('/hr/' + location.search + location.hash);
+        return;
+      }
+    }
     if(isHrPath){
       // The manifest link is already correct here — it is relative, and at
       // "/hr/" it resolves to the HR manifest. Setting it again costs nothing

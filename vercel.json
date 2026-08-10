@@ -4,6 +4,7 @@
   ],
   "rewrites": [
     { "source": "/hr/", "destination": "/index.html" },
-    { "source": "/hr/manifest.json", "destination": "/manifest-hr.json" }
+    { "source": "/hr/manifest.json", "destination": "/manifest-hr.json" },
+    { "source": "/hr/icons/apple-touch-icon.png", "destination": "/icons/apple-touch-icon-hr.png" }
   ]
 }
