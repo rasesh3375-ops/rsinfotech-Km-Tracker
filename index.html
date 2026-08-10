@@ -145,6 +145,21 @@
   .rolecard h3{margin:0 0 6px;font-size:15px;}
   .rolecard p{margin:0;font-size:12.5px;color:var(--muted);}
   .hidden{display:none !important;}
+  /* Save confirmation. Fixed to the top so it is seen wherever the save lands —
+     adding an employee moves you to the Generator, and a message left behind on
+     the previous screen tells nobody anything. Above the modal layer, so a save
+     made from a form is confirmed over it. */
+  .kmt-toast{
+    position:fixed; left:50%; top:14px; transform:translate(-50%,-14px);
+    z-index:9999; max-width:min(92vw,420px);
+    background:var(--green); color:#fff; font-size:13.5px; font-weight:600;
+    padding:12px 18px; border-radius:10px; line-height:1.45;
+    box-shadow:0 6px 20px rgba(0,0,0,.18);
+    opacity:0; transition:opacity .25s ease, transform .25s ease;
+    pointer-events:none; text-align:center;
+  }
+  .kmt-toast.show{ opacity:1; transform:translate(-50%,0); }
+  @media (prefers-reduced-motion: reduce){ .kmt-toast{ transition:none; } }
   label.field{display:block;font-size:12.5px;color:var(--muted);margin-bottom:6px;font-weight:600;}
   input[type=text], input[type=number]{
     width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;
@@ -9252,40 +9267,23 @@ async function saveEmployeeForm(){
   const saveBtn = document.querySelector('#employeeModal .btn[onclick="saveEmployeeForm()"]')
     || document.querySelector('[onclick="saveEmployeeForm()"]');
   if(saveBtn){ saveBtn.disabled = true; saveBtn.dataset.label = saveBtn.textContent; saveBtn.textContent = 'Saving…'; }
+  // The write, and only the write. Everything that used to follow it inside
+  // this same try — the activity log round trip, the attendance sheet with its
+  // one read per employee, the reminder email, the increment list — was
+  // rebuilding screens the user cannot see while they watched a spinner. With
+  // twenty staff that was around thirty sequential calls to Apps Script for a
+  // single save. Those screens rebuild when they are next opened instead.
+  const isNew = !editingEmployeeId;
+  let saved = false;
   try{
-    // Only the write is worth waiting for. Everything that used to follow it —
-    // the activity log round trip, the attendance sheet with its one read per
-    // employee, the reminder email, the increment list, the user list — was
-    // rebuilding screens the user cannot see while they watched a spinner. With
-    // twenty staff that was around thirty sequential calls to Apps Script for a
-    // single save. Those screens rebuild when they are next opened instead.
-    const isNew = !editingEmployeeId;
     if(isNew) employees.push(draft);
     else employees[employees.findIndex(e => e.id === editingEmployeeId)] = draft;
-
     // One record over the wire when the backend can merge it, the whole array
     // when it cannot. The merge path also removes the lost-update window: two
     // people editing different employees no longer overwrite each other.
     const merged = await remoteSetItem('employees', draft, 'id');
     if(!merged) await saveEmployees(employees);
-    // The saved array IS the current state, so prime the cache with it rather
-    // than dropping it — otherwise the very next screen re-reads from the
-    // backend to learn what we just sent.
-    const savedJson = JSON.stringify(employees);
-    localStorage.setItem('kmt_shared_employees', savedJson);
-    primeSharedRead('employees', savedJson);
-    clearEmployeeDraft();
-    closeEmployeeModal();
-
-    // The log is a record, not something the user is waiting on.
-    addActivityLog(isNew ? ('Added employee ' + name + ' (' + id + ')')
-                         : ('Updated employee record for ' + name)).catch(() => {});
-    // Anything cached that mentions employees is now out of date.
-    invalidateSharedRead('employees');
-    invalidateDashboardSnapshot();
-
-    await renderEmployeeList();
-    if(isNew) await jumpToGeneratorForNewEmployee(id);
+    saved = true;
   }catch(err){
     msg.textContent = 'Could not save: ' + (err && err.message ? err.message : 'the server did not respond') + '. Nothing was lost — press Save again.';
     msg.classList.add('error');
@@ -9295,6 +9293,70 @@ async function saveEmployeeForm(){
     employeeSaveInFlight = false;
     if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = saveBtn.dataset.label || 'Save employee'; }
   }
+  if(!saved) return;
+
+  // Past this line the record is on the server. Nothing below can un-save it,
+  // so nothing below is allowed to hold the form open or say the save failed.
+  // It used to be able to: the localStorage mirror sat inside the same try, and
+  // a full store — which iOS Safari reaches at about 5 MB, and private browsing
+  // reaches immediately — threw after the record had been written. The employee
+  // was saved, the form stayed open, and the message told the user nothing had
+  // been saved and to press Save again, which the duplicate-ID check then
+  // refused.
+  try{
+    // The saved array IS the current state, so prime the cache with it rather
+    // than dropping it — otherwise the very next screen re-reads from the
+    // backend to learn what we just sent.
+    const savedJson = JSON.stringify(employees);
+    localStorage.setItem('kmt_shared_employees', savedJson);
+    primeSharedRead('employees', savedJson);
+  }catch(e){
+    // A full or unavailable local store costs one re-read, not a save.
+  }
+  try{ clearEmployeeDraft(); }catch(e){}
+  closeEmployeeModal();
+  showSavedToast((isNew ? 'Added ' : 'Updated ') + name + ' (' + id + ')' +
+                 (isNew ? ' — opening their appointment letter' : ''));
+
+  // The log is a record, not something the user is waiting on.
+  addActivityLog(isNew ? ('Added employee ' + name + ' (' + id + ')')
+                       : ('Updated employee record for ' + name)).catch(() => {});
+  // Anything cached that mentions employees is now out of date.
+  invalidateSharedRead('employees');
+  invalidateDashboardSnapshot();
+
+  try{
+    await renderEmployeeList();
+    if(isNew) await jumpToGeneratorForNewEmployee(id);
+  }catch(e){
+    // Redrawing a screen is not part of saving. Failing here must not look
+    // like the record did not go in.
+  }
+}
+
+// Said once, on top of whatever screen the save lands on, and gone by itself.
+// A save that closes the form silently leaves people wondering whether it took
+// — which is what had them pressing Cancel to find out.
+let savedToastTimer = null;
+function showSavedToast(text){
+  let el = document.getElementById('kmtToast');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'kmtToast';
+    el.className = 'kmt-toast';
+    document.body.appendChild(el);
+  }
+  el.textContent = '✓ ' + text;
+  el.classList.remove('hidden');
+  // Restart the clock rather than stacking timers, so two saves in a row do not
+  // leave the first one's timeout hiding the second one's message.
+  void el.offsetWidth;
+  el.classList.add('show');
+  clearTimeout(savedToastTimer);
+  savedToastTimer = setTimeout(() => {
+    el.classList.remove('show');
+    savedToastTimer = setTimeout(() => el.classList.add('hidden'), 400);
+  }, 4000);
 }
 
 async function jumpToGeneratorForNewEmployee(employeeId){
