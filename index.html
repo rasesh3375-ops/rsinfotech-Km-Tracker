@@ -4067,8 +4067,11 @@ const LEAVE_POLICY = {
   },
   shortLeave: {
     durationHours: 2,
-    perMonth: 2,                      // more than 2 -> half day
-    compOffThreshold: 3,              // more than 3 -> compensatory off
+    perMonth: 2,                      // more than 2 in a month -> half day
+    // The policy says the third and any further short leave is adjusted as a
+    // half day. It used to say compensatory off beyond three, which was never
+    // what the written policy allowed and would have given time back instead
+    // of taking pay.
     carryForward: false,
     // These are the employee types the form actually stores. They previously
     // read 'full' and 'regular', which no record has ever carried, so short
@@ -4095,7 +4098,12 @@ const LEAVE_POLICY = {
     carryForward: false,
     encashable: true,
     usableInFirstYear: false,         // earned in year 1, usable from year 2
-    salaryBasis: { label: 'Basic + DA', grossPct: 0.70 }
+    // Encashment is paid on 70% of Basic + HRA. The policy gives the percentage
+    // and the components but not what a day is worth, so the divisor is config
+    // rather than a number buried in a sum: 30 is a standard month. Change it
+    // to 26 here if the working-days convention is meant instead, and every
+    // figure follows.
+    salaryBasis: { label: 'Basic + HRA', grossPct: 0.70, components: ['basic', 'hra'], daysInMonth: 30 }
   },
   leaveApplication: {
     formRequired: true,
@@ -4190,10 +4198,7 @@ function checkShortLeave(emp, atMin, usedThisMonth, P){
     }
   }
   const willBe = (usedThisMonth || 0) + 1;
-  if(willBe > S.compOffThreshold){
-    out.effect = 'compOff';
-    out.reasons.push('More than '+S.compOffThreshold+' short leaves — converted to compensatory off');
-  } else if(willBe > S.perMonth){
+  if(willBe > S.perMonth){
     out.effect = 'halfDay';
     out.reasons.push('Short Leave limit of '+S.perMonth+' per month exceeded — treated as Half Day');
   }
@@ -4245,6 +4250,40 @@ function leaveBalances(emp, used, P){
         ? ['More than '+P.privilegeLeave.maxPerMonth+' PL this month — the excess is deducted from salary'] : []
     )
   };
+}
+
+// ---- privilege leave encashment ----
+// Unused PL is paid out at the year end rather than carried into the next
+// year. The rate is 70% of Basic + HRA, from the salary heading and Rate of
+// Pay like everything else — never from a stored figure, so an employee whose
+// pay changed is encashed at what they are on now.
+//
+// One function, so the EL Calculation Sheet and anything else that ever needs
+// the figure cannot disagree about it.
+function plEncashmentRate(emp, P){
+  P = P || LEAVE_POLICY;
+  const B = P.privilegeLeave.salaryBasis;
+  const h = SALARY_HEADINGS[(emp || {}).salaryHeading] || SALARY_HEADINGS.managerial;
+  const rate = Number((emp || {}).ratePay) || 0;
+  // Basic and HRA as the heading splits them; a flat heading pays the whole
+  // rate as Basic, so its HRA is nil and the base is simply the rate.
+  const part = { basic: h.flat ? rate : rate * h.basicPct,
+                 hra:   h.flat ? 0    : rate * h.hraPct,
+                 lta:   h.flat ? 0    : rate * h.ltaPct };
+  const monthly = B.components.reduce((t, k) => t + (part[k] || 0), 0);
+  const basis = monthly * B.grossPct;
+  return {
+    monthly: Math.round(monthly * 100) / 100,
+    basis: Math.round(basis * 100) / 100,
+    perDay: Math.round((basis / B.daysInMonth) * 100) / 100,
+    label: B.label, pct: B.grossPct, daysInMonth: B.daysInMonth
+  };
+}
+
+function plEncashmentFor(emp, unusedDays, P){
+  const r = plEncashmentRate(emp, P);
+  const days = Math.max(0, Number(unusedDays) || 0);
+  return { ...r, days, amount: Math.round(r.perDay * days * 100) / 100 };
 }
 
 // ---- leave application ----
@@ -4311,8 +4350,8 @@ function policyRowsFor(employees, attByEmp, dateList){
       warn.push('Exhausted the ' + L.freeInstancesPerMonth + ' permissible late entries');
       if(hd > 0) warn.push(hd + ' half-day deduction(s) applicable');
     }
-    if(shortLeaves > S.compOffThreshold) warn.push('More than ' + S.compOffThreshold + ' short leaves — compensatory off applies');
-    else if(shortLeaves > S.perMonth) warn.push('Short Leave limit of ' + S.perMonth + ' exceeded — treated as Half Day');
+    if(shortLeaves > S.perMonth) warn.push('Short Leave limit of ' + S.perMonth + ' exceeded — ' +
+      (shortLeaves - S.perMonth) + ' adjusted as half day(s)');
     if(emp.employeeType === 'part' && shortLeaves > 0 && !P.partTime.shortLeaveAllowed)
       warn.push('Short Leave is not applicable for Part-Time employees');
     if(bal.sickExhausted) warn.push('Sick Leave exhausted — further sick leave becomes Leave Without Pay');
@@ -4352,7 +4391,7 @@ function buildPolicySummary(employees, attByEmp, dateList){
       grace to ${minToHHMM(LEAVE_POLICY.shift.startMin + L.graceMinutes)} ·
       late beyond ${L.shortLeaveAfterMinutes} min becomes Short Leave ·
       ${L.freeInstancesPerMonth} late entries allowed, then a half day per ${L.halfDayPerExtraInstances} ·
-      ${S.perMonth} Short Leaves a month, over ${S.compOffThreshold} becomes compensatory off.</p>
+      ${S.perMonth} Short Leaves a month; the third and any beyond it are adjusted as half days.</p>
     <div class="inc-scroll"><table class="inc-table">
       <thead><tr><th>Employee</th>
         <th class="num" title="Days arriving after the grace period">Late<br><span class="th-sub">arrivals</span></th>
@@ -10406,22 +10445,60 @@ async function renderElCalculationSheet(){
       else if(code === 'HEL') elUsed += 0.5;
     });
     const opening = Number(emp.elOpening) || 0;
-    const earned = Math.floor(presentDays / 25);
+    const earned = Math.floor(presentDays / LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays);
     const closing = opening + earned - elUsed;
-    rows.push({ id: emp.id, name: emp.name, opening, presentDays, earned, elUsed, closing });
+    // Unused PL is encashed, not carried, so the closing balance is a figure to
+    // pay rather than one to bring forward. A negative closing is leave taken
+    // beyond what was earned and is not an encashment of less than nothing.
+    const cash = plEncashmentFor(emp, Math.max(0, closing));
+    rows.push({ id: emp.id, name: emp.name, opening, presentDays, earned, elUsed, closing,
+                perDay: cash.perDay, amount: cash.amount });
   }
+  const totalEncash = Math.round(rows.reduce((t, r) => t + r.amount, 0) * 100) / 100;
+  const B = LEAVE_POLICY.privilegeLeave.salaryBasis;
 
-  saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'EL Calculation Sheet'), `EL Calculation Sheet - FY ${startYear}-${String(startYear+1).slice(2)}.csv`,
-    toCsv(['Name','Opening EL','Present days (FY)','EL earned','EL used','Closing EL'], rows.map(r => [r.name, r.opening, r.presentDays, r.earned, r.elUsed, r.closing])), 'text/csv');
+  saveFileToDrive(hrYearPath(fyEnd, 'Reports', 'EL Calculation Sheet'), `EL Calculation Sheet - FY ${startYear}-${String(startYear+1).slice(2)}.csv`,
+    toCsv(['Name','Opening EL','Present days (FY)','EL earned','EL used','Closing EL','Encashment per day','Encashment payable'],
+      rows.map(r => [r.name, r.opening, r.presentDays, r.earned, r.elUsed, r.closing, r.perDay, r.amount])
+        .concat([['GRAND TOTAL','','','','','','', totalEncash]])), 'text/csv');
 
   box.innerHTML = `
     <div style="overflow-x:auto;"><table>
-      <tr><th>Name</th><th class="num">Opening EL</th><th class="num">Present days (FY)</th><th class="num">EL earned</th><th class="num">EL used</th><th class="num">Closing EL</th></tr>
-      ${rows.map(r => `<tr><td>${escapeHtml(r.name)}</td><td class="num">${r.opening}</td><td class="num">${r.presentDays}</td><td class="num">${r.earned}</td><td class="num">${r.elUsed}</td><td class="num">${r.closing}</td></tr>`).join('')}
+      <tr><th>Name</th><th class="num">Opening EL</th><th class="num">Present days (FY)</th><th class="num">EL earned</th><th class="num">EL used</th><th class="num">Closing EL</th><th class="num">Per day</th><th class="num">Encashment</th></tr>
+      ${rows.map(r => `<tr><td>${escapeHtml(r.name)}</td><td class="num">${r.opening}</td><td class="num">${r.presentDays}</td><td class="num">${r.earned}</td><td class="num">${r.elUsed}</td><td class="num">${r.closing}</td><td class="num">₹${fmtMoney(r.perDay)}</td><td class="num"><strong>₹${fmtMoney(r.amount)}</strong></td></tr>`).join('')}
+      <tr class="sal-grandtotal"><td><strong>Grand Total</strong></td><td colspan="6"></td><td class="num"><strong>₹${fmtMoney(totalEncash)}</strong></td></tr>
     </table></div>
-    <p style="font-size:11px;color:var(--muted);margin:10px 0;">FY ${startYear}-${String(startYear+1).slice(2)}: ${fyStart} to ${fyEnd}. EL earned = 1 day per 25 days present (present includes EL/SL days and half-day equivalents), floored. Closing = Opening + Earned − Used.</p>
-    <button class="btn full" onclick='applyElClosingAsNextOpening(${JSON.stringify(rows.map(r=>({id:r.id,closing:r.closing})))})'>Apply closing balances as next year's EL opening balance</button>
+    <p style="font-size:11px;color:var(--muted);margin:10px 0;line-height:1.6;">FY ${startYear}-${String(startYear+1).slice(2)}: ${fyStart} to ${fyEnd}. EL earned = 1 day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} days present (present includes EL/SL days and half-day equivalents), floored. Closing = Opening + Earned − Used.
+      <br><strong style="color:var(--navy);">Encashment</strong> = closing days × ${headingPct(B.grossPct)} of ${escapeHtml(B.label)} ÷ ${B.daysInMonth}, worked out from each employee's Rate of Pay and salary heading. Policy is that unused PL is encashed at the year end and not carried forward, so the closing balance is a figure to pay.</p>
+    <div class="row-inline" style="margin-bottom:0;">
+      <button class="btn" style="flex:1;" onclick='encashAndResetEl(${JSON.stringify(rows.map(r=>({id:r.id,closing:r.closing,amount:r.amount})))})'>Encash and start next year at nil</button>
+      <button class="btn ghost" style="flex:1;" onclick='applyElClosingAsNextOpening(${JSON.stringify(rows.map(r=>({id:r.id,closing:r.closing})))})'>Carry forward instead</button>
+    </div>
+    <p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Carrying forward is kept for the years already run that way — the written policy says encash.</p>
   `;
+}
+
+// Pays out the balance and opens next year at nil, which is what "cannot be
+// carried forward" means. The amounts are logged, because an encashment that
+// leaves no record of what was paid is not a settlement.
+async function encashAndResetEl(list){
+  const total = Math.round(list.reduce((t, c) => t + (Number(c.amount) || 0), 0) * 100) / 100;
+  const paying = list.filter(c => (Number(c.amount) || 0) > 0).length;
+  if(!confirm('Encash unused PL for ' + paying + ' employee(s), ₹' + fmtMoney(total) + ' in total?\n\n' +
+    'Each of their EL opening balances is set to nil, so next year starts fresh. ' +
+    'The amounts are recorded in the activity log and the sheet above is saved to Drive — ' +
+    'pay them through your bank as you would the bonus.')) return;
+  const employees = await getEmployees();
+  list.forEach(c => {
+    const emp = employees.find(e => e.id === c.id);
+    if(emp){ emp.elOpening = 0; emp.leaveOpeningFrom = ''; }
+  });
+  await saveEmployees(employees);
+  await addActivityLog('Encashed unused PL for ' + paying + ' employee(s), ₹' + fmtMoney(total) +
+                       ' total, and reset EL opening balances to nil');
+  invalidateSharedRead('employees');
+  showSavedToast('Encashed ₹' + fmtMoney(total) + ' — EL opening balances reset to nil');
+  await renderElCalculationSheet();
 }
 
 async function applyElClosingAsNextOpening(closingList){
