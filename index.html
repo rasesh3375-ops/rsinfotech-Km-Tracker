@@ -1962,6 +1962,17 @@ function getCurrentFYStartYear(){
 // month. These two helpers replace it with a plain Month + Year select
 // pair, which works reliably everywhere.
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+// "2026-07" -> "July 2026", for report headings. A heading that read
+// "Attendance Sheet — 2026-07" sat directly above the header's date line, and
+// with that line unlabelled the two together read as an August report for July
+// data. Named months cannot be misread. File names keep the numeric form —
+// they sort correctly, and the Drive organiser reads the year out of them.
+// Parsed from the string, not through new Date(), which would shift the month
+// in a timezone behind UTC.
+function monthLabel(monthVal){
+  const m = /^(\d{4})-(\d{2})/.exec(String(monthVal || ''));
+  return m ? MONTH_NAMES[Number(m[2]) - 1] + ' ' + m[1] : String(monthVal || '');
+}
 function populateMonthYearSelects(monthSelId, yearSelId){
   const monthSel = document.getElementById(monthSelId);
   const yearSel = document.getElementById(yearSelId);
@@ -5012,7 +5023,7 @@ async function renderAttendanceSheet(){
 
   saveFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Attendance Sheet'), `Attendance Sheet - ${monthVal}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
 
-  box.innerHTML = `${reportLogoHeader('Attendance Sheet — ' + monthVal)}
+  box.innerHTML = `${reportLogoHeader('Attendance Sheet — ' + monthLabel(monthVal))}
     <div class="att-sheet-wrap"><table class="att-table">${headerRow}${bodyRows}</table></div>
     <div class="att-legend">
       <span><strong>P</strong> Present</span><span><strong>A</strong> Absent</span><span><strong>H</strong> Holiday</span>
@@ -5397,13 +5408,15 @@ function fmtMoney(n){ return (Math.round(n*100)/100).toLocaleString('en-IN'); }
 // Shared logo + current-date header for every report and generated document.
 function reportLogoHeader(title){
   const logoSrc = (document.querySelector('header.top .brand img') || {}).src || '';
-  const dateStr = new Date().toLocaleDateString(undefined, { day:'2-digit', month:'long', year:'numeric' });
+  // Pinned to en-IN so every report reads "11 August 2026" whatever locale the
+  // browser is set to, rather than the American "August 11, 2026".
+  const dateStr = new Date().toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' });
   return `<div class="report-logo-header">
     ${logoSrc ? `<img src="${logoSrc}" alt="R.S. Infotech logo">` : ''}
     <div class="report-logo-header-text">
       <div class="report-logo-company">R.S. Infotech</div>
       <div class="report-logo-title">${title}</div>
-      <div class="report-logo-date">${dateStr}</div>
+      <div class="report-logo-date">Generated ${dateStr}</div>
     </div>
   </div>`;
 }
@@ -5810,7 +5823,7 @@ async function renderSalarySheet(){
   saveFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Salary Sheet'), `Salary Sheet - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
 
   box.innerHTML = `<div class="sal-sheet-wrap print-isolate" id="salaryPrintArea">
-      ${reportLogoHeader('Salary Sheet — ' + monthVal)}
+      ${reportLogoHeader('Salary Sheet — ' + monthLabel(monthVal))}
       <table class="sal-table"><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr>${bodyRows}</table>
     </div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0;">PT = ₹200 if Gross &gt; ₹12,000, else ₹0. Leave Days = Absent + LP days for the month (EL/SL count as present, no deduction). PF, ESI, Advance are entered per employee in Employee Master. Apprentices and Contractors have no PF, ESI, or PT. R.S.IT Solution has no PF or ESI, but PT still applies. Retention is the monthly bond retention deduction, if configured.</p>
@@ -5933,7 +5946,7 @@ async function renderStatutoryReport(key, label){
                   pfTot.epf, pfTot.eps, pfTot.edli, pfTot.admin, pfTot.employee,
                   pfTot.epf + pfTot.eps + pfTot.edli + pfTot.admin, pfTot.total, '', '']]));
     saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'PF'), `PF Return - ${monthVal}.csv`, csv, 'text/csv');
-    box.innerHTML = `${reportLogoHeader('Provident Fund Return — ' + monthVal)}
+    box.innerHTML = `${reportLogoHeader('Provident Fund Return — ' + monthLabel(monthVal))}
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Charged on ${
         PF_RULES.wageComponents.map(k => ({ basic:'Basic', hra:'HRA', lta:'LTA' }[k] || k)).join(' + ')} ·
         employee ${headingPct(PF_RULES.employeePct)} · employer ${headingPct(0.0367)} EPF and ${headingPct(PF_RULES.epsPct)} EPS,
@@ -5981,7 +5994,7 @@ async function renderStatutoryReport(key, label){
         x.r.covered ? 'Covered' : 'Exempt', x.r.reason])
         .concat([['', 'TOTAL', '', esiTot.gross, esiTot.employee, esiTot.employer, esiTot.total, '', '']]));
     saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'ESI'), `ESI Return - ${monthVal}.csv`, csv, 'text/csv');
-    box.innerHTML = `${reportLogoHeader('ESI Contribution Return — ' + monthVal)}
+    box.innerHTML = `${reportLogoHeader('ESI Contribution Return — ' + monthLabel(monthVal))}
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Contribution period ${escapeHtml(period.label)} ·
         employee ${headingPct(ESI_RULES.employeePct)} · employer ${headingPct(ESI_RULES.employerPct)} ·
         ceiling ₹${fmtMoney(ESI_RULES.wageCeiling)} (₹${fmtMoney(ESI_RULES.disabledCeiling)} for persons with disability).
@@ -5999,13 +6012,13 @@ async function renderStatutoryReport(key, label){
   }
 
   if(!rows.length){
-    box.innerHTML = `${reportLogoHeader(label + ' — ' + monthVal)}<div class="empty">No employees have ${key.toUpperCase()} deductions for this month.</div>`;
+    box.innerHTML = `${reportLogoHeader(label + ' — ' + monthLabel(monthVal))}<div class="empty">No employees have ${key.toUpperCase()} deductions for this month.</div>`;
     return;
   }
 
   const tableRows = rows.map(r => `<tr><td>${r[0]}</td><td class="num">₹${fmtMoney(r[1])}</td></tr>`).join('');
   box.innerHTML = `<div class="print-isolate" id="statReportPrintArea_${key}">
-      ${reportLogoHeader(label + ' — ' + monthVal)}
+      ${reportLogoHeader(label + ' — ' + monthLabel(monthVal))}
       <table><tr><th>Name</th><th class="num">${key.toUpperCase()} Amount</th></tr>${tableRows}<tr class="sal-grandtotal"><td><strong>Grand Total</strong></td><td class="num"><strong>₹${fmtMoney(grandTotal)}</strong></td></tr></table>
     </div>
     <div class="row-inline" style="margin-top:10px;margin-bottom:0;">
@@ -6037,7 +6050,7 @@ async function renderApprenticeSalaryReport(){
 
   const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left' && (e.salaryHeading||'managerial') === 'apprentice');
   if(!employees.length){
-    box.innerHTML = `${reportLogoHeader('Apprentice Salary Report — ' + monthVal)}<div class="empty">No employees under the Apprentices heading yet.</div>`;
+    box.innerHTML = `${reportLogoHeader('Apprentice Salary Report — ' + monthLabel(monthVal))}<div class="empty">No employees under the Apprentices heading yet.</div>`;
     return;
   }
   const holidayMap = await getHolidayMap_local();
@@ -6068,7 +6081,7 @@ async function renderApprenticeSalaryReport(){
   csvRows.push(['Grand Total', grand.rate, '', grand.leaveAmount, grand.basic, grand.hra, grand.lta, grand.gross, grand.advanceTemp, grand.advance, grand.loanEmi, grand.retention, grand.totalDeduction, grand.conveyance, grand.netSalary]);
 
   box.innerHTML = `<div class="sal-sheet-wrap print-isolate" id="apprenticeReportPrintArea">
-      ${reportLogoHeader('Apprentice Salary Report — ' + monthVal)}
+      ${reportLogoHeader('Apprentice Salary Report — ' + monthLabel(monthVal))}
       <table class="sal-table"><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr>${bodyRows}</table>
     </div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0;">No PF, ESI, or PT — Apprentices are excluded from all three.</p>
@@ -6189,7 +6202,7 @@ async function renderFinalSalarySheet(){
   saveFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Final Salary Sheet'),
     `Final Salary Sheet - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
 
-  box.innerHTML = `${reportLogoHeader('Final Salary Sheet — ' + monthVal)}
+  box.innerHTML = `${reportLogoHeader('Final Salary Sheet — ' + monthLabel(monthVal))}
     <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by salary heading, sorted by bank. Final Payable is after every deduction, including anything paid directly to the account.</p>
     <div class="sal-sheet-wrap"><table class="sal-table">
       <thead><tr><th>SR</th><th>Employee Name</th><th>Bank Name</th><th>Account Number</th><th>IFSC</th><th class="num">Final Payable</th></tr></thead>
@@ -6373,7 +6386,7 @@ async function renderConsultantReport(){
   ).join('') + '</tr>').join('');
 
   box.innerHTML = `<div class="print-isolate" id="consultantReportPrintArea">
-      ${reportLogoHeader('Consultant Report — ' + monthVal)}
+      ${reportLogoHeader('Consultant Report — ' + monthLabel(monthVal))}
       <div style="overflow-x:auto;">
         <table style="min-width:1500px;font-size:11.5px;white-space:nowrap;">
           <tr>${head}</tr>${body}
@@ -11061,7 +11074,7 @@ async function renderOvertimeReport(){
       <tr><th>Name</th><th>Date</th><th class="num">Hours</th><th>Note</th><th></th></tr>
       ${log.map(o => `<tr><td>${escapeHtml(o.name)}</td><td>${o.date}</td><td class="num">${o.hours}</td><td>${o.note||''}</td><td><button class="btn ghost" style="font-size:11px;padding:5px 8px;" onclick="deleteOvertimeEntry('${o.id}')">Delete</button></td></tr>`).join('')}
     </table></div>
-    <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Total overtime hours for ${monthStr}: <strong>${totalHours}</strong></p>`;
+    <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Total overtime hours for ${monthLabel(monthStr)}: <strong>${totalHours}</strong></p>`;
 }
 
 let lastHolidayListText = '';
