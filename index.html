@@ -1476,6 +1476,17 @@
         </section>
 
         <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">Leave Encashment Report</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">What is owed for unused privilege leave at the year end, as at 31 March. Grouped by salary heading and sorted by bank with account numbers, so it can be paid the same way as the salary and the bonus. Resident Engineers are outside the EL scheme and do not appear.</p>
+          <label class="field">Financial year starting April of</label>
+          <input type="number" id="encashStartYear" placeholder="e.g. 2026 for FY 2026-27" />
+          <div style="height:14px"></div>
+          <button class="btn full" onclick="renderLeaveEncashmentReport()">Generate leave encashment report</button>
+          <div style="height:14px"></div>
+          <div id="encashBox"></div>
+        </section>
+
+        <section class="block">
           <h2 style="margin:0 0 4px;font-size:17px;">EL Calculation Sheet</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Earned Leave = 1 day per 25 days present, per the leave policy. Resident Engineers are excluded. This computes each employee's EL for the financial year you pick from the Attendance Sheet, and can carry the closing balance forward as next year's opening balance automatically.</p>
           <label class="field">Financial year starting April of</label>
@@ -10455,20 +10466,117 @@ async function renderHolidayList(){
 }
 
 // ---- EL calculation sheet ----
-async function renderElCalculationSheet(){
-  const box = document.getElementById('elCalcBox');
-  const yearInput = document.getElementById('elCalcStartYear');
+// What has to be paid out for unused privilege leave at the year end. The EL
+// Calculation Sheet shows how the balance was arrived at; this is the cheque
+// list — who, how much, and to which account — in the same shape as the Final
+// Salary Sheet and the bonus sheet so all three are paid the same way.
+async function renderLeaveEncashmentReport(){
+  const box = document.getElementById('encashBox');
+  const yearInput = document.getElementById('encashStartYear');
   if(!yearInput.value) yearInput.value = getCurrentFYStartYear();
   const startYear = parseInt(yearInput.value, 10);
-  const fyStart = startYear + '-04-01';
-  const fyEnd = (startYear + 1) + '-03-31';
+  const asAt = (startYear + 1) + '-03-31';
+  const fyLabel = startYear + '-' + String(startYear + 1).slice(2);
 
-  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left' && e.employeeType !== 'resident');
+  const employees = (await getEmployees())
+    .filter(e => e.employmentStatus !== 'left' && e.employeeType !== 'resident');
   if(!employees.length){
     box.innerHTML = '<div class="empty">No non-resident employees on file yet.</div>';
     return;
   }
+  box.innerHTML = '<p class="dash-muted">Working it out…</p>';
 
+  const B = LEAVE_POLICY.privilegeLeave.salaryBasis;
+  const rows = await elFyRows(employees, startYear);
+  const payable = rows.filter(r => r.pending > 0);
+  if(!payable.length){
+    box.innerHTML = `${reportLogoHeader('Leave Encashment — FY ' + fyLabel)}
+      <div class="empty">Nobody has unused privilege leave as at ${escapeHtml(asAt)}. Nothing to encash.</div>`;
+    return;
+  }
+
+  const money = v => '₹' + fmtMoney(v);
+  let bodyRows = '', csvRows = [], sr = 0, grandDays = 0, grandAmt = 0;
+  const noBank = [];
+
+  for(const headingKey of SALARY_HEADING_ORDER){
+    const group = payable.filter(r => (r.emp.salaryHeading || 'managerial') === headingKey);
+    if(!group.length) continue;
+    const label = SALARY_HEADINGS[headingKey].label;
+    group.sort((a, b) => (a.emp.bankName || '').localeCompare(b.emp.bankName || '')
+      || (a.name || '').localeCompare(b.name || ''));
+
+    let subDays = 0, subAmt = 0;
+    bodyRows += `<tr class="sal-heading"><td colspan="9">${escapeHtml(label)}</td></tr>`;
+    csvRows.push([label]);
+    group.forEach(r => {
+      sr++; subDays += r.pending; subAmt += r.amount; grandDays += r.pending; grandAmt += r.amount;
+      const missing = !r.emp.bankName || !r.emp.accountNumber;
+      if(missing) noBank.push(r.name || r.id);
+      bodyRows += `<tr${missing ? ' class="inc-overdue"' : ''}><td>${sr}</td>
+        <td>${escapeHtml(r.name)}</td>
+        <td>${r.emp.bankName ? escapeHtml(r.emp.bankName) : '<span class="pol-warn">not on file</span>'}</td>
+        <td>${r.emp.accountNumber ? escapeHtml(r.emp.accountNumber) : '<span class="pol-warn">not on file</span>'}</td>
+        <td class="num">${r.pending}</td>
+        <td class="num">${money(r.monthly)}</td>
+        <td class="num">${money(r.basis)}</td>
+        <td class="num">${money(r.perDay)}</td>
+        <td class="num"><strong>${money(r.amount)}</strong></td></tr>`;
+      csvRows.push([sr, r.name, r.emp.bankName || '', r.emp.accountNumber || '', r.emp.ifsc || '',
+                    r.pending, r.monthly, r.basis, r.perDay, r.amount]);
+    });
+    bodyRows += `<tr class="sal-subtotal"><td></td><td>${escapeHtml(label)} subtotal</td>
+      <td colspan="2">${group.length} employee(s)</td><td class="num">${subDays}</td>
+      <td colspan="3"></td><td class="num">${money(subAmt)}</td></tr>`;
+    csvRows.push(['', label + ' subtotal', group.length + ' employee(s)', '', '', subDays, '', '', '', Math.round(subAmt * 100) / 100]);
+  }
+
+  bodyRows += `<tr class="sal-grandtotal"><td></td><td>Grand Total</td>
+    <td colspan="2">${payable.length} employee(s)</td><td class="num">${grandDays}</td>
+    <td colspan="3"></td><td class="num">${money(grandAmt)}</td></tr>`;
+  csvRows.push(['', 'GRAND TOTAL', payable.length + ' employee(s)', '', '', grandDays, '', '', '', Math.round(grandAmt * 100) / 100]);
+
+  const cols = ['SR NO','Employee Name','Bank Name','Account Number','IFSC',
+                'Pending leave days', B.label + ' (monthly)',
+                'Basis at ' + Math.round(B.grossPct * 100) + '%', 'Per day', 'Encashment payable'];
+  saveFileToDrive(hrYearPath(asAt, 'Reports', 'Leave Encashment'),
+    `Leave Encashment - FY ${fyLabel}.csv`, toCsv(cols, csvRows), 'text/csv');
+
+  const nil = rows.length - payable.length;
+  box.innerHTML = `${reportLogoHeader('Leave Encashment — FY ' + fyLabel + ', as at ' + asAt)}
+    <p style="font-size:12px;color:var(--muted);margin:0 0 12px;line-height:1.6;">
+      Pending days are what is left of privilege leave at 31 March — opening balance plus what was
+      earned over the year, less what was taken. The policy is that it is encashed rather than
+      carried forward.
+      <br><strong style="color:var(--navy);">Amount</strong> = pending days ×
+      ${headingPct(B.grossPct)} of ${escapeHtml(B.label)} ÷ ${B.dayDivisor}. The monthly figure is
+      taken from each employee's Rate of Pay and salary heading, so it is what they are on now.
+      This payroll has no separate dearness allowance — HRA is the component that stands in for it,
+      and it is included.</p>
+    ${noBank.length ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${noBank.length} employee(s) have no bank details on file and cannot be paid by transfer: ${escapeHtml(noBank.join(', '))}.</p>` : ''}
+    <div class="sal-sheet-wrap"><table class="sal-table">
+      <thead><tr><th>SR</th><th>Employee Name</th><th>Bank Name</th><th>Account Number</th>
+        <th class="num">Pending<br><span class="th-sub">days</span></th>
+        <th class="num">${escapeHtml(B.label)}<br><span class="th-sub">monthly</span></th>
+        <th class="num">Basis<br><span class="th-sub">${headingPct(B.grossPct)}</span></th>
+        <th class="num">Per day<br><span class="th-sub">÷ ${B.dayDivisor}</span></th>
+        <th class="num">Payable</th></tr></thead>
+      <tbody>${bodyRows}</tbody></table></div>
+    ${nil ? `<p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">${nil} employee(s) have no leave left to encash and are not listed.</p>` : ''}
+    <div class="row-inline" style="margin-top:12px;">
+      <button class="btn ghost" style="flex:1;" onclick="openFullscreenView('Leave Encashment','encashBox')">⛶ Full screen</button>
+      <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
+    </div>
+    <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(asAt))} &gt; Reports &gt; Leave Encashment. Use <em>Encash and start next year at nil</em> on the EL Calculation Sheet once these have been paid.</p>`;
+}
+
+// Privilege leave earned, used and left for one financial year, with what the
+// remainder is worth. Shared by the EL Calculation Sheet and the Leave
+// Encashment Report — two reports that disagreed about how many days somebody
+// had pending would be worse than having only one of them.
+async function elFyRows(employees, startYear){
+  const fyStart = startYear + '-04-01';
+  const fyEnd = (startYear + 1) + '-03-31';
   const rows = [];
   // One request for everyone's attendance before the loop; each read below
   // then comes from the primed cache instead of its own round trip.
@@ -10491,9 +10599,28 @@ async function renderElCalculationSheet(){
     // pay rather than one to bring forward. A negative closing is leave taken
     // beyond what was earned and is not an encashment of less than nothing.
     const cash = plEncashmentFor(emp, Math.max(0, closing));
-    rows.push({ id: emp.id, name: emp.name, opening, presentDays, earned, elUsed, closing,
+    rows.push({ emp, id: emp.id, name: emp.name, opening, presentDays, earned, elUsed, closing,
+                pending: Math.max(0, closing), monthly: cash.monthly, basis: cash.basis,
                 perDay: cash.perDay, amount: cash.amount });
   }
+  return rows;
+}
+
+async function renderElCalculationSheet(){
+  const box = document.getElementById('elCalcBox');
+  const yearInput = document.getElementById('elCalcStartYear');
+  if(!yearInput.value) yearInput.value = getCurrentFYStartYear();
+  const startYear = parseInt(yearInput.value, 10);
+  const fyStart = startYear + '-04-01';
+  const fyEnd = (startYear + 1) + '-03-31';
+
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left' && e.employeeType !== 'resident');
+  if(!employees.length){
+    box.innerHTML = '<div class="empty">No non-resident employees on file yet.</div>';
+    return;
+  }
+
+  const rows = await elFyRows(employees, startYear);
   const totalEncash = Math.round(rows.reduce((t, r) => t + r.amount, 0) * 100) / 100;
   const B = LEAVE_POLICY.privilegeLeave.salaryBasis;
 
