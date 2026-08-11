@@ -4436,8 +4436,11 @@ function policyRowsFor(employees, attByEmp, dateList){
   });
 }
 
-function buildPolicySummary(employees, attByEmp, dateList){
-  const rows = policyRowsFor(employees, attByEmp, dateList);
+// `precomputed` lets the caller pass rows it has already worked out. The
+// Attendance Sheet needs the same rows for its CSV columns, and computing them
+// here as well ran the whole month over every employee a second time.
+function buildPolicySummary(employees, attByEmp, dateList, precomputed){
+  const rows = precomputed || policyRowsFor(employees, attByEmp, dateList);
   const body = rows.map(r => `
     <tr class="${r.warn.length ? 'pol-warn-row' : ''}">
       <td><strong>${escapeHtml(r.emp.name)}</strong>
@@ -4942,6 +4945,70 @@ function computeAttendanceSummary(att, employee, dateList, holidayMap){
   return { present, absent, elUsed, slUsed, lpDays, halfDays, shortCount, lateCount, holidays, paidDays };
 }
 
+// The dropdown in an attendance cell only ever varies by two things: whether
+// the person is a Resident Engineer (no SHORT) and which code is selected. That
+// is a couple of dozen possibilities, but the list was being rebuilt for every
+// cell — a dozen staff across a 31-day month meant ~370 cells and ~4,000 option
+// strings on every single month change. Built once per combination and reused.
+const attCodeOptionCache = new Map();
+function attCodeOptions(isResident, selectedCode){
+  const key = (isResident ? 'r|' : 'n|') + (selectedCode || '');
+  let html = attCodeOptionCache.get(key);
+  if(html === undefined){
+    html = (selectedCode ? '' : '<option value="" selected></option>') +
+      ATT_CODES.filter(c => !(isResident && c === 'SHORT'))
+        .map(c => `<option value="${c}"${c === selectedCode ? ' selected' : ''}>${c}</option>`).join('');
+    attCodeOptionCache.set(key, html);
+  }
+  return html;
+}
+
+// Only the cell's current code is put in the markup. The full list is ~4,000
+// extra nodes across a month's grid and most of the 220 KB the browser has to
+// parse before the sheet appears, which is what made changing month slow on a
+// phone. The rest arrives two ways, so a dropdown is never caught short:
+// on touch or focus, before the picker can open, and otherwise in small
+// batches once the sheet is on screen.
+function attCodeSelectedOnly(selectedCode){
+  return selectedCode
+    ? `<option value="${selectedCode}" selected>${selectedCode}</option>`
+    : '<option value="" selected></option>';
+}
+function fillAttCodes(sel){
+  if(!sel || sel.dataset.full === '1') return;
+  const current = sel.value;
+  sel.innerHTML = attCodeOptions(sel.dataset.res === '1', current);
+  sel.value = current;               // innerHTML resets it; put it back
+  sel.dataset.full = '1';
+}
+let attHydrateTimer = null;
+function hydrateAttCodeSelects(){
+  clearTimeout(attHydrateTimer);
+  const pending = Array.prototype.slice.call(
+    document.querySelectorAll('.att-code:not([data-full="1"])'));
+  let i = 0;
+  const step = () => {
+    const end = Math.min(i + 60, pending.length);
+    for(; i < end; i++) fillAttCodes(pending[i]);
+    if(i < pending.length) attHydrateTimer = setTimeout(step, 0);
+  };
+  if(pending.length) attHydrateTimer = setTimeout(step, 0);
+}
+
+// The Drive copy of the sheet used to be written on every render, so flipping
+// through months to find the one you wanted fired a Drive write per click.
+// Each of those takes the backend's script lock — the same lock Save
+// attendance needs — so browsing made saving slower. Waiting until the month
+// selection settles writes one file for the month actually being looked at.
+let attendanceDriveTimer = null;
+function queueAttendanceSheetToDrive(monthVal, csv){
+  clearTimeout(attendanceDriveTimer);
+  attendanceDriveTimer = setTimeout(() => {
+    saveFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Attendance Sheet'),
+      `Attendance Sheet - ${monthVal}.csv`, csv, 'text/csv');
+  }, 2500);
+}
+
 async function renderAttendanceSheet(){
   const box = document.getElementById('attendanceSheetBox');
   populateMonthYearSelects('attSheetMonthSel', 'attSheetYearSel');
@@ -4978,12 +5045,25 @@ async function renderAttendanceSheet(){
   const csvRows = [];
 
   let bodyRows = '';
-  // One request for everyone's attendance before the loop; each read below
-  // then comes from the primed cache instead of its own round trip.
+  // One request for everyone's attendance before the loop.
   const attByEmp = await getAttendanceMany(employees.map(e => e.id));
+  // Everything about a day that does not depend on who is being drawn — the
+  // weekday, whether it is a holiday, whether it has happened yet. Worked out
+  // once instead of once per employee per day, which for a dozen staff was
+  // ~370 Date objects and ~370 calls to todayStr() every time a month changed.
+  const today = todayStr();
+  const dayMeta = dateList.map(dateStr => ({
+    dateStr,
+    isSunday: new Date(dateStr).getDay() === 0,
+    isHoliday: !!holidayMap[dateStr],
+    isPast: dateStr <= today
+  }));
   for(let i=0; i<employees.length; i++){
     const emp = employees[i];
-    const stored = await getAttendance(emp.id);
+    // Straight from the batch above. This used to call getAttendance again,
+    // which re-parsed the employee's whole attendance history — every day they
+    // have ever worked, not just this month — a second time per render.
+    const stored = attByEmp[emp.id] || {};
     // The grid shows what is on screen, saved or not. Redrawing from the stored
     // record alone used to make unsaved edits vanish while the bar still
     // counted them — and after a part-failed save there was no way to see which
@@ -4997,14 +5077,12 @@ async function renderAttendanceSheet(){
     const isResident = emp.employeeType === 'resident';
     const summary = computeAttendanceSummary(att, emp, dateList, holidayMap);
     const dayCodes = [];
-    const dayCells = dateList.map(dateStr => {
-      const dow = new Date(dateStr).getDay();
+    const dayCells = dayMeta.map(meta => {
+      const dateStr = meta.dateStr;
       const entry = att[dateStr];
-      const defaultCode = entry ? entry.code : (holidayMap[dateStr] ? 'H' : (dow === 0 ? 'H' : (dateStr <= todayStr() ? 'A' : '')));
+      const defaultCode = entry ? entry.code : (meta.isHoliday ? 'H' : (meta.isSunday ? 'H' : (meta.isPast ? 'A' : '')));
       dayCodes.push(defaultCode || '');
-      const options = ATT_CODES.filter(c => !(isResident && c === 'SHORT'))
-        .map(c => `<option value="${c}" ${c===defaultCode?'selected':''}>${c}</option>`).join('');
-      const blankOpt = defaultCode ? '' : `<option value="" selected></option>`;
+      const options = attCodeSelectedOnly(defaultCode);
       const lateMark = entry && entry.lateFlag ? '<br><span class="att-late">late</span>' : '';
       const dirty = pendingAttendance[emp.id + '|' + dateStr] ? ' att-dirty' : '';
       // The in-time, and a way to enter one. Filling a month by hand leaves no
@@ -5014,31 +5092,25 @@ async function renderAttendanceSheet(){
       const timeChip = isResident ? '' :
         `<br><button class="att-time${inT ? ' has-time' : ''}" title="Set arrival and leaving time"
            onclick="openDayTimeEditor('${emp.id}','${dateStr}')">${inT || '+'}</button>`;
-      return `<td><select class="att-code code-${defaultCode||''}${dirty}" onchange="handleAttendanceCellChange('${emp.id}','${dateStr}',this)">${blankOpt}${options}</select>${lateMark}${timeChip}</td>`;
+      return `<td><select class="att-code code-${defaultCode||''}${dirty}" data-res="${isResident?1:0}"` +
+        ` onpointerdown="fillAttCodes(this)" onfocus="fillAttCodes(this)"` +
+        ` onchange="handleAttendanceCellChange('${emp.id}','${dateStr}',this)">${options}</select>${lateMark}${timeChip}</td>`;
     }).join('');
     bodyRows += `<tr><td>${i+1}</td><td class="att-name">${escapeHtml(emp.name)}${isResident?' <span style="color:var(--muted);font-size:10px;">(Resident)</span>':''}</td>${dayCells}` +
       `<td>${summary.present}</td><td>${summary.absent}</td><td>${summary.elUsed}</td><td>${summary.slUsed}</td><td>${summary.lpDays}</td><td>${summary.halfDays}</td><td>${summary.shortCount}</td><td>${summary.lateCount}</td></tr>`;
     csvRows.push([i+1, emp.name, ...dayCodes, summary.present, summary.absent, summary.elUsed, summary.slUsed, summary.lpDays, summary.halfDays, summary.shortCount, summary.lateCount]);
   }
 
-  saveFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Attendance Sheet'), `Attendance Sheet - ${monthVal}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
+  // Policy position for the month, computed once. It used to run twice — once
+  // inside buildPolicySummary for the panel and again below for the export —
+  // over every employee and every day of the month.
+  const policyRows = policyRowsFor(employees, attByEmp, dateList);
 
-  box.innerHTML = `${reportLogoHeader('Attendance Sheet — ' + monthLabel(monthVal))}
-    <div class="att-sheet-wrap"><table class="att-table">${headerRow}${bodyRows}</table></div>
-    <div class="att-legend">
-      <span><strong>P</strong> Present</span><span><strong>A</strong> Absent</span><span><strong>H</strong> Holiday</span>
-      <span><strong>EL</strong> Earned leave</span><span><strong>SL</strong> Sick leave</span><span><strong>LP</strong> Leave without pay</span>
-      <span><strong>HEL/HSL/HLP</strong> Half-day variants</span><span><strong>SHORT</strong> Short leave</span>
-    </div>
-    <button class="btn ghost full" style="margin-top:12px;" onclick="openFullscreenView('Attendance Sheet','attendanceSheetBox')">⛶ Full screen</button>`
-    // Policy position for the same month, from the same records already read.
-    + buildPolicySummary(employees, attByEmp, dateList);
-  renderPolicyOverrideLog();
-  if(restored) showSavedToast(restored + ' unsaved attendance change(s) recovered — press Save attendance to store them');
-
-  // Same computation again for the export, so a downloaded sheet and the panel
-  // on screen can never disagree about who breached what.
-  policyRowsFor(employees, attByEmp, dateList).forEach((r, i) => {
+  // The policy columns are appended before the file is written, not after.
+  // csvHeader has always declared them, but the Drive copy was written first,
+  // so every attendance CSV in Drive carried fourteen header columns with no
+  // data under them while the on-screen export had them filled in.
+  policyRows.forEach((r, i) => {
     if(!csvRows[i]) return;
     csvRows[i].push(
       r.emp.employeeType === 'part' ? 'Part-time' : 'Full-time',
@@ -5050,6 +5122,24 @@ async function renderAttendanceSheet(){
       r.warn.length ? r.warn.join('; ') : 'Within policy'
     );
   });
+  queueAttendanceSheetToDrive(monthVal, toCsv(csvHeader, csvRows));
+
+  box.innerHTML = `${reportLogoHeader('Attendance Sheet — ' + monthLabel(monthVal))}
+    <div class="att-sheet-wrap"><table class="att-table">${headerRow}${bodyRows}</table></div>
+    <div class="att-legend">
+      <span><strong>P</strong> Present</span><span><strong>A</strong> Absent</span><span><strong>H</strong> Holiday</span>
+      <span><strong>EL</strong> Earned leave</span><span><strong>SL</strong> Sick leave</span><span><strong>LP</strong> Leave without pay</span>
+      <span><strong>HEL/HSL/HLP</strong> Half-day variants</span><span><strong>SHORT</strong> Short leave</span>
+    </div>
+    <button class="btn ghost full" style="margin-top:12px;" onclick="openFullscreenView('Attendance Sheet','attendanceSheetBox')">⛶ Full screen</button>`
+    // Policy position for the same month, from the rows already computed — so
+    // the panel and the exported columns cannot disagree about who breached
+    // what, and neither pays for the calculation twice.
+    + buildPolicySummary(employees, attByEmp, dateList, policyRows);
+  renderPolicyOverrideLog();
+  // Now the sheet is on screen, fill in the dropdowns nobody has touched.
+  hydrateAttCodeSelects();
+  if(restored) showSavedToast(restored + ' unsaved attendance change(s) recovered — press Save attendance to store them');
 }
 
 // Edits are collected here and written when Save is pressed. Every change used
