@@ -2251,6 +2251,11 @@ const SHARED_READ_TTL_MS = 8000;
 const LONG_READ_TTL_MS = {
   employees: 120000,              // 2 minutes
   users: 120000,
+  // Long enough to carry the dashboard's read across to the Attendance Sheet
+  // and the reports, which is the common path and used to re-download every
+  // employee's whole history each time. Saving attendance clears the key, so
+  // your own edits are never hidden by this.
+  ATTENDANCE: 90000,
   holidays: 600000,               // 10 minutes
   office_payroll_docs: 600000,
   office_apprentice_docs: 600000,
@@ -2264,10 +2269,12 @@ const LONG_READ_TTL_MS = {
   reminder_email: 900000
 };
 function readTtlFor(key){
+  if(key && key.indexOf('attendance:') === 0) return LONG_READ_TTL_MS.ATTENDANCE;
   return LONG_READ_TTL_MS[key] || SHARED_READ_TTL_MS;
 }
 
 const sharedReadCache = new Map();
+const inFlightReads = new Map();
 function primeSharedRead(key, value){
   sharedReadCache.set(key, { value, until: Date.now() + readTtlFor(key) });
 }
@@ -2283,14 +2290,31 @@ async function safeGet(key, shared){
     }
     const hit = sharedReadCache.get(key);
     if(hit && Date.now() < hit.until) return hit.value;
-    const r = await remoteGet(key);
-    if(r && r.value !== undefined && r.value !== null){
-      sharedReadCache.set(key, { value: r.value, until: Date.now() + readTtlFor(key) });
-      return r.value;
-    }
-    // A failed read is never cached — the next attempt must reach the backend.
-    const local = localStorage.getItem('kmt_shared_' + key);
-    return local !== null ? local : null;
+    // Several builders on one screen ask for the same key at the same moment.
+    // The cache only fills once an answer comes back, so all of them missed and
+    // each opened its own request — opening the app fetched the km rate three
+    // times over. Whoever asks first makes the call; the rest wait on it.
+    if(inFlightReads.has(key)) return inFlightReads.get(key);
+    const request = (async () => {
+      const r = await remoteGet(key);
+      // remoteGet returns an object when the backend answered and null when the
+      // call itself failed. Only a failed call goes uncached: a key that has
+      // never been set answers with an empty value, and remembering that is the
+      // difference between asking once and asking on every screen. The km rate
+      // was being fetched three times over just for the dashboard.
+      if(r){
+        const remoteVal = (r.value === undefined || r.value === null) ? null : r.value;
+        const local = remoteVal === null ? localStorage.getItem('kmt_shared_' + key) : null;
+        const value = remoteVal !== null ? remoteVal : (local !== null ? local : null);
+        sharedReadCache.set(key, { value, until: Date.now() + readTtlFor(key) });
+        return value;
+      }
+      const local = localStorage.getItem('kmt_shared_' + key);
+      return local !== null ? local : null;
+    })();
+    inFlightReads.set(key, request);
+    try{ return await request; }
+    finally{ inFlightReads.delete(key); }
   }catch(e){ return null; }
 }
 async function safeSet(key, value, shared){
@@ -2342,6 +2366,21 @@ async function recordCheckin(name){
 async function getAttendanceMany(ids){
   const out = {};
   if(!ids.length) return out;
+  // This filled the cache but never looked in it, so the dashboard downloaded
+  // everybody's attendance to work out who is absent today and the Attendance
+  // Sheet downloaded the identical thing again a second later. Whatever is
+  // already held is used, and only the rest is asked for.
+  const missing = [];
+  ids.forEach(id => {
+    const hit = sharedReadCache.get('attendance:' + id);
+    if(hit && Date.now() < hit.until){
+      try{ out[id] = hit.value ? JSON.parse(hit.value) : {}; }catch(e){ out[id] = {}; }
+    } else {
+      missing.push(id);
+    }
+  });
+  if(!missing.length) return out;
+  ids = missing;
   const keys = ids.map(id => 'attendance:' + id);
   try{
     const res = await apiFetch(API_URL, {
@@ -2353,7 +2392,9 @@ async function getAttendanceMany(ids){
     if(data && data.batch && data.values){
       ids.forEach(id => {
         const raw = data.values['attendance:' + id];
-        if(raw !== null && raw !== undefined) primeSharedRead('attendance:' + id, raw);
+        // Primed even when empty, so a new employee with nothing recorded yet
+        // is not asked for again on every screen.
+        primeSharedRead('attendance:' + id, raw === undefined ? null : raw);
         try{ out[id] = raw ? JSON.parse(raw) : {}; }catch(e){ out[id] = {}; }
       });
       return out;
