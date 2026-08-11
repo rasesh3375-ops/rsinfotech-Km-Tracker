@@ -2070,6 +2070,11 @@ async function remoteSet(key, value){
       const data = JSON.parse(text);
       if(data && data.error === 'unauthorized'){ onSessionExpired(); return false; }
       if(!data || !data.ok){ lastBackendError = 'POST did not confirm ok (status ' + res.status + '): ' + text.slice(0, 200); return false; }
+      // Clear the cached copy here rather than leaving it to each caller. Most
+      // did remember, but safeSet was the only path that guaranteed it, and a
+      // key held for minutes instead of seconds turns one forgotten call into a
+      // save that appears not to have happened.
+      invalidateSharedRead(key);
       return true;
     }catch(parseErr){
       lastBackendError = 'POST returned non-JSON (status ' + res.status + '): ' + text.slice(0, 200);
@@ -2085,6 +2090,7 @@ async function remoteDelete(key){
       body: JSON.stringify({ action: 'delete', key, token: sessionToken })
     });
   }catch(e){}
+  invalidateSharedRead(key);
 }
 
 // Where a dated output belongs in Drive: HR Management / <financial year> /
@@ -2115,6 +2121,55 @@ async function saveFileToDrive(folderPath, fileName, content, mimeType){
     // Drive save is a bonus, not a requirement — the report already rendered fine either way
   }
 }
+// Every report writes its Drive copy as a side effect of being displayed, so
+// opening one — or stepping through months to find the right one — fired a
+// Drive write per view. Each of those takes the backend's script lock, the same
+// lock Save attendance and Save employee need, so browsing reports made saving
+// slower for whoever was doing it.
+//
+// Queued by destination: flipping between months replaces the pending write for
+// that report instead of adding another, while two different reports still each
+// get written. Explicit "generate" actions — a letter, the holiday list — keep
+// calling saveFileToDrive directly and go at once, because somebody who presses
+// Generate and closes the tab must still end up with the file.
+const pendingDriveWrites = new Map();
+const lastDriveWrite = new Map();
+let driveQueueTimer = null;
+const DRIVE_QUEUE_MS = 2500;
+
+function queueFileToDrive(folderPath, fileName, content, mimeType){
+  const dest = folderPath.join('/') + '/' + fileName;
+  // Looking at a report does not change it. Rewriting a file we have already
+  // written this session, byte for byte, costs a Drive round trip and produces
+  // an identical file — so going back to a month already viewed writes nothing.
+  if(lastDriveWrite.get(dest) === content){
+    pendingDriveWrites.delete(dest);
+    return;
+  }
+  pendingDriveWrites.set(dest, { dest, folderPath, fileName, content, mimeType });
+  clearTimeout(driveQueueTimer);
+  driveQueueTimer = setTimeout(flushQueuedDriveWrites, DRIVE_QUEUE_MS);
+}
+
+function flushQueuedDriveWrites(){
+  clearTimeout(driveQueueTimer);
+  driveQueueTimer = null;
+  if(!pendingDriveWrites.size) return;
+  const due = Array.from(pendingDriveWrites.values());
+  pendingDriveWrites.clear();
+  due.forEach(w => {
+    lastDriveWrite.set(w.dest, w.content);
+    saveFileToDrive(w.folderPath, w.fileName, w.content, w.mimeType);
+  });
+}
+
+// A tab going away must not take the queued copies with it. visibilitychange is
+// the event that fires when an iPhone home-screen app is backgrounded or closed;
+// beforeunload is not delivered reliably there.
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'hidden') flushQueuedDriveWrites();
+});
+
 // Uploads an actual file (PDF, scanned document, photo) to Drive — unlike
 // saveFileToDrive above, which only handles plain text/CSV report content.
 // Returns the Drive file URL on success, or null on failure.
@@ -2181,9 +2236,40 @@ async function testBackendConnection(){
 // Reads are held very briefly so one screen's repeated asks cost one call.
 // Short enough that nothing looks stale, and any write clears the key outright.
 const SHARED_READ_TTL_MS = 8000;
+
+// Some things barely change. The holiday list is set once a year, the company
+// profile and the km rate almost never, and re-reading them every eight seconds
+// meant a round trip to Apps Script on nearly every screen for data that had not
+// moved. These are held longer.
+//
+// Safe only because every write clears its own key — see remoteSet, remoteSetItem
+// and remoteDelete below, which now do it themselves rather than relying on each
+// caller to remember. The window that remains is another person's edit on another
+// device: up to two minutes for the employee list, longer for the settings below.
+// Anything that changes through the working day — attendance, leave and loan
+// requests, the activity log, sessions — deliberately stays on the short default.
+const LONG_READ_TTL_MS = {
+  employees: 120000,              // 2 minutes
+  users: 120000,
+  holidays: 600000,               // 10 minutes
+  office_payroll_docs: 600000,
+  office_apprentice_docs: 600000,
+  company_profile: 900000,        // 15 minutes
+  employee_handbook: 900000,
+  resident_policy_text: 900000,
+  rate_per_km: 900000,
+  geofences: 900000,
+  uniform_id_list: 900000,
+  workman_compensation: 900000,
+  reminder_email: 900000
+};
+function readTtlFor(key){
+  return LONG_READ_TTL_MS[key] || SHARED_READ_TTL_MS;
+}
+
 const sharedReadCache = new Map();
 function primeSharedRead(key, value){
-  sharedReadCache.set(key, { value, until: Date.now() + SHARED_READ_TTL_MS });
+  sharedReadCache.set(key, { value, until: Date.now() + readTtlFor(key) });
 }
 function invalidateSharedRead(key){
   if(key === undefined) sharedReadCache.clear(); else sharedReadCache.delete(key);
@@ -2199,7 +2285,7 @@ async function safeGet(key, shared){
     if(hit && Date.now() < hit.until) return hit.value;
     const r = await remoteGet(key);
     if(r && r.value !== undefined && r.value !== null){
-      sharedReadCache.set(key, { value: r.value, until: Date.now() + SHARED_READ_TTL_MS });
+      sharedReadCache.set(key, { value: r.value, until: Date.now() + readTtlFor(key) });
       return r.value;
     }
     // A failed read is never cached — the next attempt must reach the backend.
@@ -4995,20 +5081,6 @@ function hydrateAttCodeSelects(){
   if(pending.length) attHydrateTimer = setTimeout(step, 0);
 }
 
-// The Drive copy of the sheet used to be written on every render, so flipping
-// through months to find the one you wanted fired a Drive write per click.
-// Each of those takes the backend's script lock — the same lock Save
-// attendance needs — so browsing made saving slower. Waiting until the month
-// selection settles writes one file for the month actually being looked at.
-let attendanceDriveTimer = null;
-function queueAttendanceSheetToDrive(monthVal, csv){
-  clearTimeout(attendanceDriveTimer);
-  attendanceDriveTimer = setTimeout(() => {
-    saveFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Attendance Sheet'),
-      `Attendance Sheet - ${monthVal}.csv`, csv, 'text/csv');
-  }, 2500);
-}
-
 async function renderAttendanceSheet(){
   const box = document.getElementById('attendanceSheetBox');
   populateMonthYearSelects('attSheetMonthSel', 'attSheetYearSel');
@@ -5122,7 +5194,8 @@ async function renderAttendanceSheet(){
       r.warn.length ? r.warn.join('; ') : 'Within policy'
     );
   });
-  queueAttendanceSheetToDrive(monthVal, toCsv(csvHeader, csvRows));
+  queueFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Attendance Sheet'),
+    `Attendance Sheet - ${monthVal}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
 
   box.innerHTML = `${reportLogoHeader('Attendance Sheet — ' + monthLabel(monthVal))}
     <div class="att-sheet-wrap"><table class="att-table">${headerRow}${bodyRows}</table></div>
@@ -5910,7 +5983,7 @@ async function renderSalarySheet(){
     grand.directPaid, grand.netSalary, grand.pen, grand.employerPf, grand.pfAdmin, grand.edli, grand.esiEmployer, grand.employerCont, grand.ctc,
     grand.advanceBalance, grand.loanBalance, '', '']);
 
-  saveFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Salary Sheet'), `Salary Sheet - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
+  queueFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Salary Sheet'), `Salary Sheet - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
 
   box.innerHTML = `<div class="sal-sheet-wrap print-isolate" id="salaryPrintArea">
       ${reportLogoHeader('Salary Sheet — ' + monthLabel(monthVal))}
@@ -6035,7 +6108,7 @@ async function renderStatutoryReport(key, label){
         .concat([['', 'GRAND TOTAL', '', '', '', '', '', '', '', pfTot.wage, pfTot.employee,
                   pfTot.epf, pfTot.eps, pfTot.edli, pfTot.admin, pfTot.employee,
                   pfTot.epf + pfTot.eps + pfTot.edli + pfTot.admin, pfTot.total, '', '']]));
-    saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'PF'), `PF Return - ${monthVal}.csv`, csv, 'text/csv');
+    queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'PF'), `PF Return - ${monthVal}.csv`, csv, 'text/csv');
     box.innerHTML = `${reportLogoHeader('Provident Fund Return — ' + monthLabel(monthVal))}
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Charged on ${
         PF_RULES.wageComponents.map(k => ({ basic:'Basic', hra:'HRA', lta:'LTA' }[k] || k)).join(' + ')} ·
@@ -6083,7 +6156,7 @@ async function renderStatutoryReport(key, label){
         x.r.covered ? x.r.employee : 0, x.r.covered ? x.r.employer : 0, x.r.covered ? x.r.total : 0,
         x.r.covered ? 'Covered' : 'Exempt', x.r.reason])
         .concat([['', 'TOTAL', '', esiTot.gross, esiTot.employee, esiTot.employer, esiTot.total, '', '']]));
-    saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'ESI'), `ESI Return - ${monthVal}.csv`, csv, 'text/csv');
+    queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'ESI'), `ESI Return - ${monthVal}.csv`, csv, 'text/csv');
     box.innerHTML = `${reportLogoHeader('ESI Contribution Return — ' + monthLabel(monthVal))}
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Contribution period ${escapeHtml(period.label)} ·
         employee ${headingPct(ESI_RULES.employeePct)} · employer ${headingPct(ESI_RULES.employerPct)} ·
@@ -6118,7 +6191,7 @@ async function renderStatutoryReport(key, label){
 
   const csvRows = rows.map(r => [r[0], r[1]]);
   csvRows.push(['Grand Total', grandTotal]);
-  saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', cfg.folder), `${label} - ${monthVal}.csv`, toCsv(['Name', key.toUpperCase() + ' Amount'], csvRows), 'text/csv');
+  queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', cfg.folder), `${label} - ${monthVal}.csv`, toCsv(['Name', key.toUpperCase() + ' Amount'], csvRows), 'text/csv');
 }
 
 // Small local helper so these reports don't depend on load order of the holiday-map builder elsewhere
@@ -6180,7 +6253,7 @@ async function renderApprenticeSalaryReport(){
       <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
     </div>`;
 
-  saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Apprentice Salary Report'), `Apprentice Salary Report - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
+  queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Apprentice Salary Report'), `Apprentice Salary Report - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
 }
 
 // ---- Consultant Report ----
@@ -6289,7 +6362,7 @@ async function renderFinalSalarySheet(){
   csvRows.push(['', 'GRAND TOTAL', grandCount + ' employee(s)', '', '', Math.round(grand * 100) / 100]);
 
   const cols = ['SR NO','Employee Name','Bank Name','Account Number','IFSC','Final Payable Salary'];
-  saveFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Final Salary Sheet'),
+  queueFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Final Salary Sheet'),
     `Final Salary Sheet - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
 
   box.innerHTML = `${reportLogoHeader('Final Salary Sheet — ' + monthLabel(monthVal))}
@@ -6364,7 +6437,7 @@ async function renderBonusPaymentSheet(){
   csvRows.push(['', 'GRAND TOTAL', grandCount + ' employee(s)', '', '', Math.round(grand * 100) / 100]);
 
   const cols = ['SR NO','Employee Name','Bank Name','Account Number','IFSC','Bonus Payable'];
-  saveFileToDrive(hrYearPath(paidOn, 'Dashboard', 'Diwali Bonus Payment Sheet'),
+  queueFileToDrive(hrYearPath(paidOn, 'Dashboard', 'Diwali Bonus Payment Sheet'),
     `Diwali Bonus Payment Sheet - ${paidOn}.csv`, toCsv(cols, csvRows), 'text/csv');
 
   // Anyone left out is named rather than silently missing — "why is he not on
@@ -6489,7 +6562,7 @@ async function renderConsultantReport(){
       <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
     </div>`;
 
-  saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Consultant Report'), `Consultant Report - ${monthVal}.csv`,
+  queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Consultant Report'), `Consultant Report - ${monthVal}.csv`,
     toCsv(CONSULTANT_REPORT_COLS, rows), 'text/csv');
 }
 
@@ -6619,7 +6692,7 @@ async function renderSalaryComparisonReport(){
     ['Difference', '', Math.round(difference * 100) / 100],
     ['', '', '']
   ].concat(csvRows, [['Grand Total', '', Math.round(difference * 100) / 100]]);
-  saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Salary Comparison'),
+  queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Salary Comparison'),
     `Month-wise Salary Comparison - ${monthVal}.csv`, toCsv(csvHead, csvAll), 'text/csv');
 }
 
@@ -7471,6 +7544,7 @@ async function remoteSetItem(key, item, idField){
     });
     const data = await res.json();
     if(data && data.error === 'unauthorized'){ onSessionExpired(); return false; }
+    if(data && data.merged) invalidateSharedRead(key);
     return !!(data && data.merged);
   }catch(e){ return false; }
 }
@@ -8458,7 +8532,7 @@ async function renderIncrementReminders(){
   // A reminder list is a snapshot of today, so it is filed under today's
   // financial year. `monthVal` was never defined here, so this threw before
   // the panel below was written and the reminders never appeared at all.
-  saveFileToDrive(hrYearPath(todayStr(), 'Dashboard', 'Increment Reminders'), `Increment Reminders - ${todayStr()}.csv`,
+  queueFileToDrive(hrYearPath(todayStr(), 'Dashboard', 'Increment Reminders'), `Increment Reminders - ${todayStr()}.csv`,
     toCsv(['Name','Designation','Increment due','Days away'], upcoming.map(e => [e.name, e.designation||'', e.nextIncrement, Math.ceil((new Date(e.nextIncrement) - now) / 86400000)])), 'text/csv');
   box.innerHTML = reportLogoHeader('Increment Reminders') + upcoming.map(e => {
     const days = Math.ceil((new Date(e.nextIncrement) - now) / 86400000);
@@ -10891,7 +10965,7 @@ async function renderLeaveEncashmentReport(){
   const cols = ['SR NO','Employee Name','Bank Name','Account Number','IFSC',
                 'Pending leave days', B.label + ' (monthly)',
                 'Basis at ' + Math.round(B.grossPct * 100) + '%', 'Per day', 'Encashment payable'];
-  saveFileToDrive(hrYearPath(asAt, 'Reports', 'Leave Encashment'),
+  queueFileToDrive(hrYearPath(asAt, 'Reports', 'Leave Encashment'),
     `Leave Encashment - FY ${fyLabel}.csv`, toCsv(cols, csvRows), 'text/csv');
 
   const nil = rows.length - payable.length;
@@ -10976,7 +11050,7 @@ async function renderElCalculationSheet(){
   const totalEncash = Math.round(rows.reduce((t, r) => t + r.amount, 0) * 100) / 100;
   const B = LEAVE_POLICY.privilegeLeave.salaryBasis;
 
-  saveFileToDrive(hrYearPath(fyEnd, 'Reports', 'EL Calculation Sheet'), `EL Calculation Sheet - FY ${startYear}-${String(startYear+1).slice(2)}.csv`,
+  queueFileToDrive(hrYearPath(fyEnd, 'Reports', 'EL Calculation Sheet'), `EL Calculation Sheet - FY ${startYear}-${String(startYear+1).slice(2)}.csv`,
     toCsv(['Name','Opening EL','Present days (FY)','EL earned','EL used','Closing EL','Encashment per day','Encashment payable'],
       rows.map(r => [r.name, r.opening, r.presentDays, r.earned, r.elUsed, r.closing, r.perDay, r.amount])
         .concat([['GRAND TOTAL','','','','','','', totalEncash]])), 'text/csv');
@@ -11093,7 +11167,7 @@ async function renderMonthlyLeaveReport(){
   const csvHeader = header;
   const csvRows = rows.map(r => [r.name, ...r.monthTotals, r.yearTotal]);
   // Filed under the financial year the report covers.
-  saveFileToDrive(hrYearPath(fyOfStartYear(startYear).from, 'Reports', 'Monthly Leave Report'),
+  queueFileToDrive(hrYearPath(fyOfStartYear(startYear).from, 'Reports', 'Monthly Leave Report'),
     `Monthly Leave Report - FY ${fyOfStartYear(startYear).label}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
 }
 
@@ -11158,7 +11232,7 @@ async function renderOvertimeReport(){
   // The month being viewed decides the year. `monthVal` was never defined
   // here, so this threw before the table below was written and the Overtime
   // Report showed nothing whenever there was anything to show.
-  saveFileToDrive(hrYearPath(monthStr + '-01', 'Reports', 'Overtime Report'), `Overtime Report - ${monthStr}.csv`,
+  queueFileToDrive(hrYearPath(monthStr + '-01', 'Reports', 'Overtime Report'), `Overtime Report - ${monthStr}.csv`,
     toCsv(['Name','Date','Hours','Note'], log.map(o => [o.name, o.date, o.hours, o.note||''])), 'text/csv');
   box.innerHTML = `<div style="overflow-x:auto;"><table>
       <tr><th>Name</th><th>Date</th><th class="num">Hours</th><th>Note</th><th></th></tr>
@@ -11262,7 +11336,7 @@ async function viewReport(key, label){
       `${reportLogoHeader('Employee Assets — issued and outstanding')}
        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">${rows2.length} item(s) issued, <strong>${outCount} still outstanding</strong>. An Experience Letter cannot be generated while anything is outstanding.</p>
        <table><thead><tr><th>Employee</th><th>Item</th><th class="num">Qty</th><th>Issued</th><th>Returned</th></tr></thead><tbody>${rows}</tbody></table>${fsBtn}`;
-    saveFileToDrive(hrYearPath('', 'Reports', 'Assets'), `Employee Assets - ${todayStr()}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
+    queueFileToDrive(hrYearPath('', 'Reports', 'Assets'), `Employee Assets - ${todayStr()}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
     return;
   }
   if(key === 'contact'){
@@ -11404,7 +11478,7 @@ async function viewReport(key, label){
     // snapshot of today rather than of a chosen month, so there is no month to
     // take the year from — reaching for one threw a ReferenceError on the last
     // line of every report, which is why none of them ever reached Drive.
-    saveFileToDrive(hrYearPath('', 'Reports', label), `${label} - ${todayStr()}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
+    queueFileToDrive(hrYearPath('', 'Reports', label), `${label} - ${todayStr()}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
   }
 }
 
