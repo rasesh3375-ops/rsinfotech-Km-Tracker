@@ -4314,6 +4314,41 @@ function validateLeaveApplication(req, ctx, P){
 // panel changes with the policy and never disagrees with the engine.
 // One computation, used by both the Attendance Sheet panel and the dashboard
 // alerts, so the two can never report different violations for the same month.
+// Half days the policy imposes, as distinct from half days somebody marked on
+// the sheet. Two sources, both counted over the month being paid:
+//
+//   late coming   3 instances are free, then one half day per 2 further
+//   short leave   2 a month are allowed, the third and beyond are half days
+//
+// One function, because these now reduce pay: the Salary Sheet and the policy
+// panel disagreeing about how many half days somebody owes would be an
+// argument with an employee that nobody could settle.
+//
+// Resident Engineers sit outside both rules entirely and never accrue any.
+function policyHalfDaysFor(emp, att, dateList){
+  const P = LEAVE_POLICY, L = P.lateComing, S = P.shortLeave;
+  const out = { fromLate: 0, fromShortLeave: 0, total: 0, lateCount: 0, shortLeaves: 0, reasons: [] };
+  if((emp || {}).employeeType === 'resident') return out;
+  (dateList || []).forEach(d => {
+    const e = (att || {})[d];
+    if(!e) return;
+    if(e.lateFlag) out.lateCount++;
+    if(e.code === 'SHORT') out.shortLeaves++;
+  });
+  if(out.lateCount > L.freeInstancesPerMonth){
+    out.fromLate = Math.floor((out.lateCount - L.freeInstancesPerMonth) / L.halfDayPerExtraInstances);
+    if(out.fromLate) out.reasons.push(out.fromLate + ' half day(s) from ' + out.lateCount +
+      ' late arrivals — ' + L.freeInstancesPerMonth + ' free, then one per ' + L.halfDayPerExtraInstances);
+  }
+  if(out.shortLeaves > S.perMonth){
+    out.fromShortLeave = out.shortLeaves - S.perMonth;
+    out.reasons.push(out.fromShortLeave + ' half day(s) from ' + out.shortLeaves +
+      ' short leaves — ' + S.perMonth + ' allowed a month');
+  }
+  out.total = out.fromLate + out.fromShortLeave;
+  return out;
+}
+
 function policyRowsFor(employees, attByEmp, dateList){
   const P = LEAVE_POLICY;
   return employees.map(emp => {
@@ -4345,13 +4380,13 @@ function policyRowsFor(employees, attByEmp, dateList){
                               { sick: sickUsed, pl: plUsed, plThisMonth: plUsed, attendanceDays });
     const L = P.lateComing, S = P.shortLeave;
     const warn = [];
+    // The same call the Salary Sheet makes, so the warning and the deduction
+    // are one number seen twice rather than two numbers that might differ.
+    const policyHalf = policyHalfDaysFor(emp, att, dateList);
     if(lateCount > L.freeInstancesPerMonth){
-      const hd = Math.floor((lateCount - L.freeInstancesPerMonth) / L.halfDayPerExtraInstances);
       warn.push('Exhausted the ' + L.freeInstancesPerMonth + ' permissible late entries');
-      if(hd > 0) warn.push(hd + ' half-day deduction(s) applicable');
     }
-    if(shortLeaves > S.perMonth) warn.push('Short Leave limit of ' + S.perMonth + ' exceeded — ' +
-      (shortLeaves - S.perMonth) + ' adjusted as half day(s)');
+    policyHalf.reasons.forEach(r => warn.push(r + ' — deducted from this month\u2019s salary'));
     if(emp.employeeType === 'part' && shortLeaves > 0 && !P.partTime.shortLeaveAllowed)
       warn.push('Short Leave is not applicable for Part-Time employees');
     if(bal.sickExhausted) warn.push('Sick Leave exhausted — further sick leave becomes Leave Without Pay');
@@ -4360,7 +4395,7 @@ function policyRowsFor(employees, attByEmp, dateList){
     if(!bal.plUsable && bal.plEarned > 0) warn.push('PL earned this year is usable from the next financial year');
     if(earlyDays) warn.push(earlyDays + ' day(s) left before shift end (' + minToHHMM(P.shift.endMin) + ')');
     return { emp, lateCount, shortLeaves, sickUsed, plUsed, lwp, halfDays, attendanceDays,
-             otMinutes, earlyDays, bal, warn };
+             otMinutes, earlyDays, bal, warn, policyHalfDays: policyHalf.total };
   });
 }
 
@@ -5533,7 +5568,11 @@ function leaveUsedThisFinancialYear(att, upToDate, openingFrom){
 async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   const att = await getAttendance(emp.id);
   const summary = computeAttendanceSummary(att, emp, dateList, holidayMap);
-  const leaveDays = summary.absent + summary.lpDays; // EL/SL are paid (present); only Absent/LP reduce pay
+  // EL/SL are paid, so only Absent and LP reduce pay — plus the half days the
+  // policy imposes for late coming and excess short leave, which used to be
+  // warned about and then left for somebody to apply by hand. Half a day each.
+  const policyHalf = policyHalfDaysFor(emp, att, dateList);
+  const leaveDays = summary.absent + summary.lpDays + policyHalf.total * 0.5;
   const heading = SALARY_HEADINGS[emp.salaryHeading] || SALARY_HEADINGS.managerial;
   const rate = Number(emp.ratePay) || 0;
   const leaveAmount = monthDays ? (rate / monthDays * leaveDays) : 0;
@@ -5594,6 +5633,7 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   const fullDayLeaveBal = Math.max(0, (Number(emp.elOpening) || 0) - ytd.el);
   const halfDayLeaveBal = Math.max(0, (Number(emp.slOpening) || 0) - ytd.sl);
   return { rate, leaveDays, leaveAmount, basic, hra, lta, gross, pf, esi, pt, advanceTemp, advance,
+           policyHalfDays: policyHalf.total, policyHalfReasons: policyHalf.reasons,
            loanEmi, loanBalance,
            retention, totalDeduction, netSalary, pen, employerPf, pfAdmin, edli, employerCont, ctc,
            esiEmployer, advanceBalance, fullDayLeaveBal, halfDayLeaveBal,
@@ -5623,13 +5663,13 @@ async function renderSalarySheet(){
 
   // Employer columns follow Net Salary, never inside Total Deduction — they are
   // company cost, not money withheld from the employee.
-  const cols = ['SR NO','Name','Rate of Pay','Leave Days','Leave Amount','Basic','HRA','LTA','Gross',
+  const cols = ['SR NO','Name','Rate of Pay','Leave Days','Policy Half Days','Leave Amount','Basic','HRA','LTA','Gross',
     'PF','ESI','PT','Advance Temp','Advance','Loan EMI','Retention','Total Deduction','Net Before Direct','Paid Directly','Net Salary',
     'PEN','Employer PF','PF Admin','EDLI','ESI Employer','Employer Cont.','CTC',
     'Advance Balance','Loan Balance','Full Day Leave Bal','Half Day Leave Bal'];
   let bodyRows = '';
   let srNo = 1;
-  const grand = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, loanEmi:0, loanBalance:0, retention:0, totalDeduction:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0, directPaid:0, netBeforeDirect:0 };
+  const grand = { rate:0, leaveAmount:0, policyHalfDays:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, loanEmi:0, loanBalance:0, retention:0, totalDeduction:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0, directPaid:0, netBeforeDirect:0 };
   const csvRows = [];
 
   for(const headingKey of SALARY_HEADING_ORDER){
@@ -5637,10 +5677,10 @@ async function renderSalarySheet(){
     if(!group.length) continue;
     bodyRows += `<tr class="sal-heading"><td colspan="30">${SALARY_HEADINGS[headingKey].label}</td></tr>`;
     csvRows.push([SALARY_HEADINGS[headingKey].label]);
-    const sub = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, loanEmi:0, loanBalance:0, retention:0, totalDeduction:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0, directPaid:0, netBeforeDirect:0 };
+    const sub = { rate:0, leaveAmount:0, policyHalfDays:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, loanEmi:0, loanBalance:0, retention:0, totalDeduction:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0, directPaid:0, netBeforeDirect:0 };
     for(const emp of group){
       const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
-      bodyRows += `<tr><td>${srNo++}</td><td class="sal-name">${escapeHtml(emp.name)}</td><td>${fmtMoney(s.rate)}</td><td>${s.leaveDays}</td><td>${fmtMoney(s.leaveAmount)}</td>` +
+      bodyRows += `<tr><td>${srNo++}</td><td class="sal-name">${escapeHtml(emp.name)}</td><td>${fmtMoney(s.rate)}</td><td>${s.leaveDays}</td><td>${s.policyHalfDays ? '<span class="pol-warn">' + s.policyHalfDays + '</span>' : '—'}</td><td>${fmtMoney(s.leaveAmount)}</td>` +
         `<td>${fmtMoney(s.basic)}</td><td>${fmtMoney(s.hra)}</td><td>${fmtMoney(s.lta)}</td><td>${fmtMoney(s.gross)}</td>` +
         `<td>${fmtMoney(s.pf)}</td><td>${fmtMoney(s.esi)}</td><td>${fmtMoney(s.pt)}</td><td>${fmtMoney(s.advanceTemp)}</td><td>${fmtMoney(s.advance)}</td><td>${fmtMoney(s.loanEmi)}</td><td>${fmtMoney(s.retention)}</td>` +
         `<td>${fmtMoney(s.totalDeduction)}</td><td>${fmtMoney(s.netBeforeDirect)}</td>` +
@@ -5648,12 +5688,12 @@ async function renderSalarySheet(){
         `<td>${fmtMoney(s.pen)}</td><td>${fmtMoney(s.employerPf)}</td><td>${fmtMoney(s.pfAdmin)}</td>` +
         `<td>${fmtMoney(s.edli)}</td><td>${fmtMoney(s.esiEmployer)}</td><td>${fmtMoney(s.employerCont)}</td><td>${fmtMoney(s.ctc)}</td>` +
         `<td>${fmtMoney(s.advanceBalance)}</td><td>${fmtMoney(s.loanBalance)}</td><td>${s.fullDayLeaveBal}</td><td>${s.halfDayLeaveBal}</td></tr>`;
-      csvRows.push([srNo-1, emp.name, s.rate, s.leaveDays, s.leaveAmount, s.basic, s.hra, s.lta, s.gross, s.pf, s.esi, s.pt, s.advanceTemp, s.advance, s.loanEmi, s.retention, s.totalDeduction, s.netBeforeDirect, s.directPaid, s.netSalary,
+      csvRows.push([srNo-1, emp.name, s.rate, s.leaveDays, s.policyHalfDays, s.leaveAmount, s.basic, s.hra, s.lta, s.gross, s.pf, s.esi, s.pt, s.advanceTemp, s.advance, s.loanEmi, s.retention, s.totalDeduction, s.netBeforeDirect, s.directPaid, s.netSalary,
         s.pen, s.employerPf, s.pfAdmin, s.edli, s.esiEmployer, s.employerCont, s.ctc,
         s.advanceBalance, s.loanBalance, s.fullDayLeaveBal, s.halfDayLeaveBal]);
-      ['rate','leaveAmount','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','loanEmi','retention','totalDeduction','netSalary','pen','employerPf','pfAdmin','edli','employerCont','ctc','esiEmployer','advanceBalance','loanBalance','directPaid','netBeforeDirect'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; });
+      ['rate','leaveAmount','policyHalfDays','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','loanEmi','retention','totalDeduction','netSalary','pen','employerPf','pfAdmin','edli','employerCont','ctc','esiEmployer','advanceBalance','loanBalance','directPaid','netBeforeDirect'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; });
     }
-    bodyRows += `<tr class="sal-subtotal"><td></td><td>Subtotal</td><td>${fmtMoney(sub.rate)}</td><td></td><td>${fmtMoney(sub.leaveAmount)}</td>` +
+    bodyRows += `<tr class="sal-subtotal"><td></td><td>Subtotal</td><td>${fmtMoney(sub.rate)}</td><td></td><td>${sub.policyHalfDays || '—'}</td><td>${fmtMoney(sub.leaveAmount)}</td>` +
       `<td>${fmtMoney(sub.basic)}</td><td>${fmtMoney(sub.hra)}</td><td>${fmtMoney(sub.lta)}</td><td>${fmtMoney(sub.gross)}</td>` +
       `<td>${fmtMoney(sub.pf)}</td><td>${fmtMoney(sub.esi)}</td><td>${fmtMoney(sub.pt)}</td><td>${fmtMoney(sub.advanceTemp)}</td><td>${fmtMoney(sub.advance)}</td><td>${fmtMoney(sub.loanEmi)}</td><td>${fmtMoney(sub.retention)}</td>` +
       `<td>${fmtMoney(sub.totalDeduction)}</td><td>${fmtMoney(sub.netBeforeDirect)}</td>` +
@@ -5661,10 +5701,10 @@ async function renderSalarySheet(){
       `<td>${fmtMoney(sub.pen)}</td><td>${fmtMoney(sub.employerPf)}</td><td>${fmtMoney(sub.pfAdmin)}</td>` +
       `<td>${fmtMoney(sub.edli)}</td><td>${fmtMoney(sub.esiEmployer)}</td><td>${fmtMoney(sub.employerCont)}</td><td>${fmtMoney(sub.ctc)}</td>` +
       `<td>${fmtMoney(sub.advanceBalance)}</td><td>${fmtMoney(sub.loanBalance)}</td><td></td><td></td></tr>`;
-    csvRows.push(['', 'Subtotal', sub.rate, '', sub.leaveAmount, sub.basic, sub.hra, sub.lta, sub.gross, sub.pf, sub.esi, sub.pt, sub.advanceTemp, sub.advance, sub.loanEmi, sub.retention, sub.totalDeduction, sub.netSalary]);
+    csvRows.push(['', 'Subtotal', sub.rate, '', sub.policyHalfDays, sub.leaveAmount, sub.basic, sub.hra, sub.lta, sub.gross, sub.pf, sub.esi, sub.pt, sub.advanceTemp, sub.advance, sub.loanEmi, sub.retention, sub.totalDeduction, sub.netSalary]);
   }
 
-  bodyRows += `<tr class="sal-grandtotal"><td></td><td>Grand Total</td><td>${fmtMoney(grand.rate)}</td><td></td><td>${fmtMoney(grand.leaveAmount)}</td>` +
+  bodyRows += `<tr class="sal-grandtotal"><td></td><td>Grand Total</td><td>${fmtMoney(grand.rate)}</td><td></td><td>${grand.policyHalfDays || '—'}</td><td>${fmtMoney(grand.leaveAmount)}</td>` +
     `<td>${fmtMoney(grand.basic)}</td><td>${fmtMoney(grand.hra)}</td><td>${fmtMoney(grand.lta)}</td><td>${fmtMoney(grand.gross)}</td>` +
     `<td>${fmtMoney(grand.pf)}</td><td>${fmtMoney(grand.esi)}</td><td>${fmtMoney(grand.pt)}</td><td>${fmtMoney(grand.advanceTemp)}</td><td>${fmtMoney(grand.advance)}</td><td>${fmtMoney(grand.loanEmi)}</td><td>${fmtMoney(grand.retention)}</td>` +
     `<td>${fmtMoney(grand.totalDeduction)}</td><td>${fmtMoney(grand.netBeforeDirect)}</td>` +
@@ -5672,7 +5712,7 @@ async function renderSalarySheet(){
     `<td>${fmtMoney(grand.pen)}</td><td>${fmtMoney(grand.employerPf)}</td><td>${fmtMoney(grand.pfAdmin)}</td>` +
     `<td>${fmtMoney(grand.edli)}</td><td>${fmtMoney(grand.esiEmployer)}</td><td>${fmtMoney(grand.employerCont)}</td><td>${fmtMoney(grand.ctc)}</td>` +
     `<td>${fmtMoney(grand.advanceBalance)}</td><td>${fmtMoney(grand.loanBalance)}</td><td></td><td></td></tr>`;
-  csvRows.push(['', 'Grand Total', grand.rate, '', grand.leaveAmount, grand.basic, grand.hra, grand.lta, grand.gross, grand.pf, grand.esi, grand.pt, grand.advanceTemp, grand.advance, grand.loanEmi, grand.retention, grand.totalDeduction, grand.netBeforeDirect,
+  csvRows.push(['', 'Grand Total', grand.rate, '', grand.policyHalfDays, grand.leaveAmount, grand.basic, grand.hra, grand.lta, grand.gross, grand.pf, grand.esi, grand.pt, grand.advanceTemp, grand.advance, grand.loanEmi, grand.retention, grand.totalDeduction, grand.netBeforeDirect,
     grand.directPaid, grand.netSalary, grand.pen, grand.employerPf, grand.pfAdmin, grand.edli, grand.esiEmployer, grand.employerCont, grand.ctc,
     grand.advanceBalance, grand.loanBalance, '', '']);
 
