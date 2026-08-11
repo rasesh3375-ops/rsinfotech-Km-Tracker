@@ -8539,21 +8539,7 @@ function employeeModalHtml(emp){
         <div style="height:14px"></div>
         <label class="field">Rate of pay (monthly)</label>
         <input type="number" id="f_ratePay" placeholder="0" value="${emp.ratePay||''}" oninput="renderPayrollBreakdown()">
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;">
-          <strong style="color:var(--navy);">This is the gross, not take-home.</strong>
-          Rate of Pay is the whole monthly figure agreed with the employee, and it already
-          includes the employee's own PF (12%), ESI (0.75%) and Professional Tax — those come
-          <em>out</em> of it, so Net Salary is lower. It also splits into Basic, HRA and LTA by
-          the salary heading; nothing is added on top of it.
-          <br><br>
-          <strong style="color:var(--navy);">The employer's side is separate.</strong>
-          The company's PF (12%, split into pension and EPF), ESI (3.25%), PF admin (0.5%) and
-          EDLI (0.5%) are <em>not</em> inside this figure — they are paid over and above it, and
-          appear as Employer Contribution and CTC in the breakdown below.
-          <br><br>
-          So when agreeing a figure with a candidate: quote this as gross, tell them take-home is
-          less, and remember CTC to the company is more.
-        </p>
+        <div id="ratePayNote" style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;"></div>
         <div id="directPayWrap" class="hidden">
           <div style="height:12px"></div>
           <label class="field">Paid directly to the employee's account?</label>
@@ -9009,6 +8995,7 @@ function toggleStatutoryFieldsForHeading(){
   renderPayrollBreakdown();
   try{ toggleDirectPay(); }catch(e){}
   try{ toggleFamilyFields(); }catch(e){}
+  try{ renderRatePayNote(); }catch(e){}
 }
 
 let editingEmployeeDraft = null;
@@ -9119,6 +9106,77 @@ function payrollBlockingErrors(){
   const rate = Number((document.getElementById('f_ratePay') || {}).value) || 0;
   const headingKey = (document.getElementById('f_salaryHeading') || {}).value || 'managerial';
   return validatePayrollComponents(computePayrollComponents(rate, headingKey, {}));
+}
+
+// What Rate of Pay means for the heading actually chosen. It used to be one
+// fixed paragraph saying the figure includes the employee's PF, ESI and
+// Professional Tax — true for the R.S. Infotech headings, and wrong for the
+// three that attract none of them. An Apprentice or Contractor has nothing
+// statutory taken out at all, and R.S.IT Solution has only Professional Tax,
+// so the paragraph was telling HR the opposite of what the Salary Sheet does.
+//
+// Written from the heading's own flags rather than three paragraphs kept in
+// step by hand, so a heading whose treatment changes explains itself correctly
+// without anybody remembering this text exists.
+function renderRatePayNote(){
+  const box = document.getElementById('ratePayNote');
+  if(!box) return;
+  const key = (document.getElementById('f_salaryHeading') || {}).value || 'managerial';
+  const h = SALARY_HEADINGS[key] || SALARY_HEADINGS.managerial;
+  const label = escapeHtml(h.label);
+
+  // "a, b and c" rather than "a, b, c" or "a and b and c".
+  const andList = a => a.length < 2 ? (a[0] || '')
+    : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1];
+
+  const taken = [];
+  if(h.pf)  taken.push("the employee's own PF (" + headingPct(PF_RULES.employeePct) + ')');
+  if(h.esi) taken.push('ESI (' + headingPct(ESI_RULES.employeePct) + ')');
+  if(h.pt)  taken.push('Professional Tax');
+
+  const split = h.flat
+    ? 'The whole figure is paid as Basic — this heading has no HRA or LTA split.'
+    : 'It splits into Basic, HRA and LTA by the salary heading; nothing is added on top of it.';
+
+  // What comes out of it
+  let para1;
+  if(taken.length){
+    para1 = '<strong style="color:var(--navy);">This is the gross, not take-home.</strong> ' +
+      'Rate of Pay is the whole monthly figure agreed with the employee, and it already includes ' +
+      andList(taken) + ' — ' +
+      (taken.length > 1 ? 'those come' : 'that comes') + ' <em>out</em> of it, so Net Salary is lower. ' + split;
+  } else {
+    para1 = '<strong style="color:var(--navy);">Nothing statutory comes out of this.</strong> ' +
+      label + ' attract no PF, no ESI and no Professional Tax, so the whole Rate of Pay is what ' +
+      'the employee earns before anything the company is recovering. ' + split;
+  }
+
+  // What the company pays on top
+  const employer = [];
+  if(h.pf){
+    employer.push('PF (' + headingPct(PF_RULES.employerPct) + ', split into pension and EPF)');
+    employer.push('PF admin (' + headingPct(PF_RULES.adminPct) + ')');
+    employer.push('EDLI (' + headingPct(PF_RULES.edliPct) + ')');
+  }
+  if(h.esi) employer.push('ESI (' + headingPct(ESI_RULES.employerPct) + ')');
+  const para2 = employer.length
+    ? '<strong style="color:var(--navy);">The employer\'s side is separate.</strong> The company\'s ' +
+      andList(employer) + ' are <em>not</em> inside this figure — they are paid over and above it, ' +
+      'and appear as Employer Contribution and CTC in the breakdown below.'
+    : '<strong style="color:var(--navy);">There is no employer contribution.</strong> With no PF and no ESI ' +
+      'on this heading, the company pays nothing over and above this figure, so the cost to the company ' +
+      'is the Rate of Pay itself.';
+
+  // What still reduces take-home whatever the heading
+  const alsoOut = ['unpaid leave', 'any advance or loan instalment being recovered', 'retention money if a bond is running']
+    .concat(key === 'apprentice' ? ['anything paid directly to their account'] : []);
+  const para3 = taken.length
+    ? 'So when agreeing a figure with a candidate: quote this as gross, tell them take-home is less, and ' +
+      'remember CTC to the company is more.'
+    : 'So when agreeing a figure: quote this as the whole monthly amount. Take-home is only reduced by ' +
+      andList(alsoOut) + '.';
+
+  box.innerHTML = para1 + '<br><br>' + para2 + '<br><br>' + para3;
 }
 
 function renderPayrollBreakdown(){
