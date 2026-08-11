@@ -4863,7 +4863,7 @@ function buildHeadingExplainer(key){
     `<div class="calc-line"><strong>Net = ₹${fmtMoney(ex.net)}</strong> <span class="calc-note">(PF, ESI, advances and retention taken as 0 here — those come from the employee's own figures)</span></div>`;
 
   return `
-    <details class="calc-card fold-card">
+    <details class="calc-card fold-card" open>
       <summary class="calc-head">${h.label} — how this is calculated</summary>
 
       <div class="calc-sec"><div class="calc-label">Formula Used</div>${formulaRows}</div>
@@ -9304,7 +9304,9 @@ function renderPayrollBreakdown(){
   // The bonus is a month of this gross, so it moves with the same inputs.
   try{ updateBonusPreview(); }catch(e){}
   if(!rate){
-    box.innerHTML = '<p class="calc-empty">Enter a Rate of Pay to see the full salary breakdown.</p>';
+    box.innerHTML = '<p class="calc-empty">Enter a Rate of Pay above and this fills in with every line of ' +
+      'their salary — Basic, HRA, LTA, PF, ESI, PT, the employer\'s side and CTC. The formula and a worked ' +
+      'example are in the <strong>how this is calculated</strong> card under the Heading dropdown.</p>';
     return;
   }
   const auto = '<span class="pay-auto" title="Calculated automatically from the configured payroll formula.">🧮</span>';
