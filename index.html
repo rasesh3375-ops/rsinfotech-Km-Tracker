@@ -1401,7 +1401,7 @@
           <h2 style="margin:0 0 4px;font-size:17px;">Open a new leave year</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Sets each employee's opening EL from what they earned last year — one day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} attendance days — and their SL to the yearly allowance. Resident Engineers and Work From Home staff are skipped, their policies being different, as are non-R.S. Infotech headings. Run once, in April.</p>
           <label class="field">Year starts</label>
-          <input class="field-input" type="date" id="rolloverFy" value="2027-04-01">
+          <input class="field-input" type="date" id="rolloverFy">
           <div style="height:12px"></div>
           <button class="btn full" onclick="rollOverLeaveYear()">Open leave year</button>
           <div id="rolloverBox" style="margin-top:10px;"></div>
@@ -1955,8 +1955,7 @@ function todayStr(d){
 // starting calendar year of the FY we're currently in (e.g. Feb 2027 is
 // still FY 2026-27, so this returns 2026).
 function getCurrentFYStartYear(){
-  const d = new Date();
-  return d.getMonth() < 3 ? d.getFullYear() - 1 : d.getFullYear();
+  return fyStartYearOf(todayStr());
 }
 // input type="month" degrades to a plain text field on some browsers
 // (notably iOS Safari), silently failing to let people pick a different
@@ -2798,7 +2797,11 @@ async function compressImageFile(file){
         const scale = Math.max(size / img.width, size / img.height);
         const w = img.width * scale, h = img.height * scale;
         ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
-        resolve(canvas.toDataURL('image/jpeg', qualityOverride || 0.55));
+        // Same quality as the createImageBitmap path above. `qualityOverride`
+        // was never a parameter of this function, so on a browser without
+        // createImageBitmap this threw inside the handler and the promise
+        // neither resolved nor rejected — the selfie upload hung.
+        resolve(canvas.toDataURL('image/jpeg', 0.55));
       };
       img.onerror = reject;
       img.src = reader.result;
@@ -3027,7 +3030,19 @@ async function enterHrMain(){
   // starts without .hidden — under a "Dashboard" title.
   document.body.classList.add('hr-shell');
   const dateEl = document.getElementById('hrTopDate');
-  if(dateEl) dateEl.textContent = 'Today, ' + new Date().toLocaleDateString('en-IN', { day:'numeric', month:'long', year:'numeric' });
+  // The financial year sits next to the date because so much of the app is
+  // scoped to it — Drive folders, leave balances, EL encashment, the PT cap.
+  // Shown rather than assumed, so a year that has rolled over on 1 April is
+  // obvious at a glance instead of being discovered in a report.
+  if(dateEl){
+    dateEl.textContent = 'Today, ' + new Date().toLocaleDateString('en-IN', { day:'numeric', month:'long', year:'numeric' }) +
+      '  ·  FY ' + financialYearLabel();
+    dateEl.title = 'Financial year ' + financialYearLabel() + ': ' + financialYearRangeText() +
+      '. Rolls over automatically on 1 April.';
+  }
+  // Defaults to the next 1 April rather than a date fixed in the page.
+  const rollEl = document.getElementById('rolloverFy');
+  if(rollEl && !rollEl.value) rollEl.value = nextFinancialYearStart();
   renderHrSideNav();
   restoreHrSidebar();
   hrNavigate('dashboard');
@@ -5525,32 +5540,90 @@ function computeRetentionForMonth(emp, year, month){
   return Math.round((money / months) * 100) / 100;
 }
 
-// The financial year runs April to March, so a date in January belongs to the
-// year that began the previous April.
-// "2026-27" for anything between April 2026 and March 2027. Used to file Drive
-// output by year, so each year's sheets sit in their own folder instead of
-// piling into one.
+// ================= the company's financial year =================
+// 1 April to 31 March. FY 2026-27 runs 1 April 2026 to 31 March 2027, FY
+// 2027-28 from 1 April 2027, and so on.
+//
+// Everything measured by year goes through the four functions below and
+// nothing works the year out for itself: Drive filing, EL and leave balances,
+// the encashment sheet, the holiday list, the leave report and the PT annual
+// cap. Change the two numbers here and the whole app moves with them.
+const FINANCIAL_YEAR = { startMonth: 4, startDay: 1 };   // 1 April
+
+// The starting calendar year of the financial year a date falls in — 2026 for
+// anything from 1 April 2026 to 31 March 2027 inclusive.
+//
+// The day is read straight out of the YYYY-MM-DD text rather than through
+// `new Date()`. A date-only string is parsed as UTC midnight, so on a device
+// whose timezone is behind UTC "2026-04-01" reads back as 31 March locally and
+// the whole of 1 April would be filed under the previous financial year.
+// Comparing the numbers in the string cannot drift, whatever the device clock
+// is set to. Anything that is not a plain date falls back to the local day.
+function fyStartYearOf(dateStr){
+  let y, m, day;
+  const iso = /^(\d{4})-(\d{2})(?:-(\d{2}))?/.exec(typeof dateStr === 'string' ? dateStr.trim() : '');
+  if(iso){
+    y = +iso[1]; m = +iso[2]; day = iso[3] ? +iso[3] : 1;
+  } else {
+    const d = dateStr ? new Date(dateStr) : new Date();
+    const t = isNaN(d.getTime()) ? new Date() : d;
+    y = t.getFullYear(); m = t.getMonth() + 1; day = t.getDate();
+  }
+  const beforeYearStart = m < FINANCIAL_YEAR.startMonth ||
+    (m === FINANCIAL_YEAR.startMonth && day < FINANCIAL_YEAR.startDay);
+  return beforeYearStart ? y - 1 : y;
+}
+
+// "2026-27" for anything between 1 April 2026 and 31 March 2027. Used to file
+// Drive output by year, so each year's sheets sit in their own folder instead
+// of piling into one.
 function financialYearLabel(dateStr){
-  const d = dateStr ? new Date(dateStr) : new Date();
-  const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+  const y = fyStartYearOf(dateStr);
   return y + '-' + String((y + 1) % 100).padStart(2, '0');
 }
 
-// The last day of the financial year a date falls in. Leave balances are
-// measured to here rather than to today, so leave already approved for a date
-// in the future is counted as spent. Measured to today it would not be, and
-// somebody could book the same days twice over by applying for them one block
-// at a time.
-function financialYearEnd(dateStr){
-  const d = dateStr ? new Date(dateStr) : new Date();
-  const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
-  return (y + 1) + '-03-31';
+// The first day of the financial year a date falls in — "2026-04-01".
+function financialYearStart(dateStr){
+  const y = fyStartYearOf(dateStr);
+  return y + '-' + String(FINANCIAL_YEAR.startMonth).padStart(2, '0') +
+             '-' + String(FINANCIAL_YEAR.startDay).padStart(2, '0');
 }
 
-function financialYearStart(dateStr){
-  const d = new Date(dateStr);
-  const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
-  return y + '-04-01';
+// The last day of the financial year a date falls in — "2027-03-31" — worked
+// out as the day before the next year starts, so it stays right if the start
+// date above is ever moved. Leave balances are measured to here rather than to
+// today, so leave already approved for a date in the future is counted as
+// spent. Measured to today it would not be, and somebody could book the same
+// days twice over by applying for them one block at a time.
+function financialYearEnd(dateStr){
+  const nextStart = Date.UTC(fyStartYearOf(dateStr) + 1,
+                             FINANCIAL_YEAR.startMonth - 1, FINANCIAL_YEAR.startDay);
+  return new Date(nextStart - 86400000).toISOString().slice(0, 10);
+}
+
+// The four year-scoped reports ask for a plain start year — HR types 2026 and
+// means FY 2026-27. This turns that number into the year's first day, last day
+// and label, so no screen writes "-04-01" or "-03-31" for itself.
+function fyOfStartYear(startYear){
+  const from = startYear + '-' + String(FINANCIAL_YEAR.startMonth).padStart(2, '0') +
+                          '-' + String(FINANCIAL_YEAR.startDay).padStart(2, '0');
+  return { from, to: financialYearEnd(from), label: financialYearLabel(from) };
+}
+
+// The day the next financial year opens — 1 April 2027 while we are in
+// 2026-27. The leave-year rollover defaults to it, so the button is right in
+// April every year instead of holding whatever date was typed into the page
+// when it was written.
+function nextFinancialYearStart(dateStr){
+  return fyOfStartYear(fyStartYearOf(dateStr) + 1).from;
+}
+
+// "1 April 2026 – 31 March 2027", for showing HR which year they are working
+// in rather than making them infer it from a folder name.
+function financialYearRangeText(dateStr){
+  const nice = iso => new Date(iso + 'T12:00:00').toLocaleDateString('en-IN',
+    { day: 'numeric', month: 'long', year: 'numeric' });
+  return nice(financialYearStart(dateStr)) + ' – ' + nice(financialYearEnd(dateStr));
 }
 
 // Leave used from 1 April up to and including the month being paid. Half days
@@ -8279,7 +8352,10 @@ async function renderIncrementReminders(){
     return;
   }
   const email = await getReminderEmail();
-  saveFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Increment Reminders'), `Increment Reminders - ${todayStr()}.csv`,
+  // A reminder list is a snapshot of today, so it is filed under today's
+  // financial year. `monthVal` was never defined here, so this threw before
+  // the panel below was written and the reminders never appeared at all.
+  saveFileToDrive(hrYearPath(todayStr(), 'Dashboard', 'Increment Reminders'), `Increment Reminders - ${todayStr()}.csv`,
     toCsv(['Name','Designation','Increment due','Days away'], upcoming.map(e => [e.name, e.designation||'', e.nextIncrement, Math.ceil((new Date(e.nextIncrement) - now) / 86400000)])), 'text/csv');
   box.innerHTML = reportLogoHeader('Increment Reminders') + upcoming.map(e => {
     const days = Math.ceil((new Date(e.nextIncrement) - now) / 86400000);
@@ -10270,10 +10346,11 @@ async function migrateDocumentsToDrive(){
 // closing balance, because the policy says unused leave is not carried forward.
 async function rollOverLeaveYear(){
   const box = document.getElementById('rolloverBox');
-  const fyStart = (document.getElementById('rolloverFy') || {}).value || '2027-04-01';
+  const fyStart = (document.getElementById('rolloverFy') || {}).value || nextFinancialYearStart();
   const label = financialYearLabel(fyStart);
-  const prevStart = financialYearStart(new Date(new Date(fyStart) - 86400000).toISOString().slice(0,10));
-  const prevEnd = fyStart.slice(0,4) + '-03-31';
+  // The year that is closing: the one containing the day before this one opens.
+  const prevEnd = new Date(new Date(fyStart + 'T12:00:00Z') - 86400000).toISOString().slice(0,10);
+  const prevStart = financialYearStart(prevEnd);
 
   const employees = await getEmployees();
   // Resident Engineers and Work From Home run on different policies, so they
@@ -10646,8 +10723,9 @@ async function renderLeaveEncashmentReport(){
   const yearInput = document.getElementById('encashStartYear');
   if(!yearInput.value) yearInput.value = getCurrentFYStartYear();
   const startYear = parseInt(yearInput.value, 10);
-  const asAt = (startYear + 1) + '-03-31';
-  const fyLabel = startYear + '-' + String(startYear + 1).slice(2);
+  const fy = fyOfStartYear(startYear);
+  const asAt = fy.to;
+  const fyLabel = fy.label;
 
   const employees = (await getEmployees())
     .filter(e => e.employmentStatus !== 'left' && e.employeeType !== 'resident');
@@ -10746,8 +10824,8 @@ async function renderLeaveEncashmentReport(){
 // Encashment Report — two reports that disagreed about how many days somebody
 // had pending would be worse than having only one of them.
 async function elFyRows(employees, startYear){
-  const fyStart = startYear + '-04-01';
-  const fyEnd = (startYear + 1) + '-03-31';
+  const fyStart = fyOfStartYear(startYear).from;
+  const fyEnd = fyOfStartYear(startYear).to;
   const rows = [];
   // One request for everyone's attendance before the loop; each read below
   // then comes from the primed cache instead of its own round trip.
@@ -10782,8 +10860,8 @@ async function renderElCalculationSheet(){
   const yearInput = document.getElementById('elCalcStartYear');
   if(!yearInput.value) yearInput.value = getCurrentFYStartYear();
   const startYear = parseInt(yearInput.value, 10);
-  const fyStart = startYear + '-04-01';
-  const fyEnd = (startYear + 1) + '-03-31';
+  const fyStart = fyOfStartYear(startYear).from;
+  const fyEnd = fyOfStartYear(startYear).to;
 
   const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left' && e.employeeType !== 'resident');
   if(!employees.length){
@@ -10911,7 +10989,9 @@ async function renderMonthlyLeaveReport(){
 
   const csvHeader = header;
   const csvRows = rows.map(r => [r.name, ...r.monthTotals, r.yearTotal]);
-  saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Monthly Leave Report'), `Monthly Leave Report - FY ${startYear}-${String(startYear+1).slice(2)}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
+  // Filed under the financial year the report covers.
+  saveFileToDrive(hrYearPath(fyOfStartYear(startYear).from, 'Reports', 'Monthly Leave Report'),
+    `Monthly Leave Report - FY ${fyOfStartYear(startYear).label}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
 }
 
 // ---- overtime report ----
@@ -10972,7 +11052,10 @@ async function renderOvertimeReport(){
     return;
   }
   const totalHours = log.reduce((sum,o) => sum + Number(o.hours), 0);
-  saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Overtime Report'), `Overtime Report - ${monthStr}.csv`,
+  // The month being viewed decides the year. `monthVal` was never defined
+  // here, so this threw before the table below was written and the Overtime
+  // Report showed nothing whenever there was anything to show.
+  saveFileToDrive(hrYearPath(monthStr + '-01', 'Reports', 'Overtime Report'), `Overtime Report - ${monthStr}.csv`,
     toCsv(['Name','Date','Hours','Note'], log.map(o => [o.name, o.date, o.hours, o.note||''])), 'text/csv');
   box.innerHTML = `<div style="overflow-x:auto;"><table>
       <tr><th>Name</th><th>Date</th><th class="num">Hours</th><th>Note</th><th></th></tr>
@@ -10986,9 +11069,9 @@ let lastHolidayListText = '';
 async function generateHolidayListDoc(){
   const startYear = parseInt(document.getElementById('holidayListYear').value, 10) || getCurrentFYStartYear();
   document.getElementById('holidayListYear').value = startYear;
-  const fyStart = startYear + '-04-01';
-  const fyEnd = (startYear + 1) + '-03-31';
-  const fyLabel = 'FY ' + startYear + '-' + String(startYear + 1).slice(2);
+  const fy = fyOfStartYear(startYear);
+  const fyStart = fy.from, fyEnd = fy.to;
+  const fyLabel = 'FY ' + fy.label;
   const holidays = (await getHolidays())
     .filter(h => h.date >= fyStart && h.date <= fyEnd)
     .sort((a,b) => a.date.localeCompare(b.date));
@@ -11027,7 +11110,11 @@ async function generateHolidayListDoc(){
         }).join('\n')
       : 'No holidays added for ' + fyLabel + ' yet.');
 
-  saveFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Holiday List'), `Holiday List - ${fyLabel}.txt`, lastHolidayListText, 'text/plain');
+  // Filed under the year the list covers, not the year it was printed in — a
+  // 2027-28 list produced in March 2027 belongs in 2027-28. `monthVal` was
+  // never defined in this function, so this line threw and the Drive copy was
+  // never written at all.
+  saveFileToDrive(hrYearPath(fyStart, 'Reports', 'Holiday List'), `Holiday List - ${fyLabel}.txt`, lastHolidayListText, 'text/plain');
 }
 
 function emailHolidayList(){
