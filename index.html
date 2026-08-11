@@ -11119,14 +11119,19 @@ async function viewReport(key, label){
     box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">The bonus is the amount entered against each employee — nothing is worked out from the Rate of Pay, which is shown only for comparison. Nothing is deducted from a bonus and nothing is added to one: no PF, ESI or Professional Tax, no advance, loan or retention, and no reduction for leave taken during the year.</p>
       ${unsetCount ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${unsetCount} eligible employee(s) have no bonus amount set, so nothing will be paid to them. Open each record and fill in Diwali bonus amount — the form suggests one month's pay if that is what you want.</p>` : ''}<table><tr><th>Name</th><th>Eligible</th><th class="num">Rate of Pay</th><th class="num">Bonus</th><th>Status</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'salary'){
-    csvHeader = ['Name','Gross','Deductions','Net'];
+    // Conveyance gets its own column. Without it the row did not add up —
+    // gross 30,000 less deductions 200 showing a net of 32,800 — and a row that
+    // does not add up is read as a mistake even when the net is right.
+    csvHeader = ['Name','Gross','Conveyance','Deductions','Net'];
     rows = employees.map(e => {
       const p = monthlyPayFor(e);
-      const gross = p.gross, deductions = p.deductions, net = p.net;
-      csvRows.push([e.name, gross, deductions, net]);
-      return `<tr><td>${escapeHtml(e.name)}</td><td class="num">₹${gross.toFixed(0)}</td><td class="num">₹${deductions.toFixed(0)}</td><td class="num">₹${net.toFixed(0)}</td></tr>`;
+      const gross = p.gross, deductions = p.deductions, net = p.net, conv = p.conveyance;
+      csvRows.push([e.name, gross, conv, deductions, net]);
+      return `<tr><td>${escapeHtml(e.name)}</td><td class="num">₹${gross.toFixed(0)}</td>` +
+        `<td class="num">${conv ? '+₹' + conv.toFixed(0) : '—'}</td>` +
+        `<td class="num">−₹${deductions.toFixed(0)}</td><td class="num"><strong>₹${net.toFixed(0)}</strong></td></tr>`;
     }).join('');
-    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th class="num">Gross</th><th class="num">Deductions</th><th class="num">Net</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
+    box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">Net = Gross + Conveyance − Deductions. Conveyance is paid on top of the salary, so it is added rather than taken off; deductions cover PF, ESI, PT and anything being recovered — advance, loan instalment and retention.</p><table><tr><th>Name</th><th class="num">Gross</th><th class="num">Conveyance</th><th class="num">Deductions</th><th class="num">Net</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
   } else if(key === 'ctc'){
     csvHeader = ['Name','Monthly gross','Annual gross','Diwali bonus','Annual CTC'];
     rows = employees.map(e => {
