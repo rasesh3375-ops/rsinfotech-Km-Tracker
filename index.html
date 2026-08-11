@@ -6764,7 +6764,17 @@ const PAYROLL_MASTER = [
   { key:'esi',   label:'ESI — employee (0.75%)', group:'deduction', source:'esiEmployee', flag:'esi' },
   { key:'esiEmployer', label:'ESI — employer (3.25%)', group:'employer', source:'esiEmployer', flag:'esi' },
   { key:'pt',    label:'Professional Tax (PT)', group:'deduction', source:'ptRule', flag:'pt' },
-  { key:'totalDeduction', label:'Total Deductions', group:'total', source:'sum', of:['pf','esi','pt'] },
+  // Money being recovered from the employee. Not statutory, and not worked out
+  // from the Rate of Pay — they are figures on the employee's own record — but
+  // they come out of the same net, so they belong in the same total. Leaving
+  // them out is what had this breakdown showing a net ₹7,500 above the Salary
+  // Sheet for anybody repaying anything.
+  { key:'advanceTemp', label:'Advance for temporary', group:'deduction', source:'recovery' },
+  { key:'advance',     label:'Advance',               group:'deduction', source:'recovery' },
+  { key:'loanEmi',     label:'Loan instalment',       group:'deduction', source:'recovery' },
+  { key:'retention',   label:'Retention money',       group:'deduction', source:'recovery' },
+  { key:'totalDeduction', label:'Total Deductions', group:'total', source:'sum',
+    of:['pf','esi','pt','advanceTemp','advance','loanEmi','retention'] },
   { key:'net',   label:'Net Salary', group:'total', source:'diff', from:'gross', minus:['totalDeduction'] },
   // The employer side is a cost, never a deduction from pay — kept out of
   // Total Deductions and Net so neither is understated.
@@ -6870,6 +6880,14 @@ function computePayrollComponents(rate, headingKey, manual, ctx){
       value = monthlyPtFor(gross, 0);
       formula = 'Nil up to ₹' + fmtMoney(PT_GROSS_THRESHOLD) + ' gross; ₹' + fmtMoney(PT_AMOUNT) +
                 ' a month above it, capped at ₹' + fmtMoney(PT_ANNUAL_CAP) + ' a year';
+    } else if(def.source === 'recovery'){
+      value = Number((c.recovery || {})[def.key]) || 0;
+      formula = ({
+        advanceTemp: 'Temporary advance being recovered this month, from the employee record',
+        advance:     'Advance being recovered this month, from the employee record',
+        loanEmi:     'This month\'s instalment on the loans recorded against this employee',
+        retention:   'Retention money withheld this month under the bond'
+      })[def.key] || 'From the employee record';
     } else if(def.source === 'sum'){
       value = def.of.reduce((s, k) => s + val(k), 0);
       formula = def.of.map(k => (PAYROLL_MASTER.find(x => x.key === k) || {}).label || k).join(' + ');
@@ -9049,6 +9067,19 @@ function payrollExclusionInputs(){
   };
 }
 
+// What is being recovered from this employee this month. Loan and retention are
+// month-dependent, so the figure shown on a form is this month's — the same one
+// the Salary Sheet will use when that month is run.
+function payrollRecoveryFrom(src){
+  const now = new Date(), y = now.getFullYear(), m = now.getMonth() + 1;
+  return {
+    advanceTemp: Number(src.advanceTemp) || 0,
+    advance: Number(src.advance) || 0,
+    loanEmi: computeLoanEmiForMonth(src, y, m),
+    retention: computeRetentionForMonth(src, y, m)
+  };
+}
+
 // The four per-person answers, read from the open form.
 function payrollFormContext(){
   return {
@@ -9057,7 +9088,17 @@ function payrollFormContext(){
     pfEligible: (document.getElementById('f_pfEligible') || {}).value || '',
     pfContributionType: (document.getElementById('f_pfContributionType') || {}).value || '',
     isDisabled: (document.getElementById('f_esiDisabled') || {}).value === 'yes',
-    coveredAtPeriodStart: (document.getElementById('f_esiCovered') || {}).value === 'yes'
+    coveredAtPeriodStart: (document.getElementById('f_esiCovered') || {}).value === 'yes',
+    // Built from the form as it stands, including any loan rows typed but not
+    // yet saved, so the breakdown answers for what is on screen.
+    recovery: payrollRecoveryFrom({
+      advanceTemp: (document.getElementById('f_advanceTemp') || {}).value,
+      advance: (document.getElementById('f_advance') || {}).value,
+      loans: (typeof editingEmployeeDraft === 'object' && editingEmployeeDraft && editingEmployeeDraft.loans) || [],
+      retentionMoney: (document.getElementById('f_retentionMoney') || {}).value,
+      retentionMonths: (document.getElementById('f_retentionMonths') || {}).value,
+      bondStart: (document.getElementById('f_bondStart') || {}).value
+    })
   };
 }
 
@@ -9070,7 +9111,8 @@ function payrollRecordContext(emp){
     pfEligible: e.pfEligible || '',
     pfContributionType: e.pfContributionType || '',
     isDisabled: e.esiDisabled === 'yes',
-    coveredAtPeriodStart: e.esiCoveredAtPeriodStart === 'yes'
+    coveredAtPeriodStart: e.esiCoveredAtPeriodStart === 'yes',
+    recovery: payrollRecoveryFrom(e)
   };
 }
 
@@ -9113,8 +9155,13 @@ function monthlyPayFor(emp, asOfYear, asOfMonth){
   // Paid on top and outside gross, so it lifts what is handed over without
   // touching PF, ESI, PT or the bonus.
   const conveyance = Number(emp.conveyance) || 0;
-  const emi = computeLoanEmiForMonth(emp, y, m);
+  // The same four the Salary Sheet takes off, not just the loan. Advance,
+  // temporary advance and retention were missing here, so the Salary Report and
+  // the payslip showed a net above what the sheet pays.
+  const rec = payrollRecoveryFrom(emp);
+  const emi = rec.loanEmi;
   const statutory = pfCalc.employee + esiCalc.employee + pt;
+  const recovered = rec.advanceTemp + rec.advance + rec.loanEmi + rec.retention;
   return {
     basic, hra, lta,
     salaryGross,                       // Basic + HRA + LTA — what PF, ESI and PT are read against
@@ -9125,8 +9172,10 @@ function monthlyPayFor(emp, asOfYear, asOfMonth){
     pfReason: pfCalc.reason,
     esiEmployer: esiCalc.employer, employerTotal: pfCalc.employerTotal + esiCalc.employer,
     emi, statutory, conveyance,
-    deductions: statutory + emi,
-    net: salaryGross + other + conveyance - statutory - emi
+    advanceTemp: rec.advanceTemp, advance: rec.advance, retention: rec.retention,
+    recovered,
+    deductions: statutory + recovered,
+    net: salaryGross + other + conveyance - statutory - recovered
   };
 }
 
@@ -12262,7 +12311,7 @@ function letterTemplate(type, f){
         `Management approval: ${line}`;
     }
     case 'Salary Slip':
-      return `${company}\n\nSALARY SLIP — ${issueDate}\n\nEmployee name: ${name}\nDesignation: ${designation}\nDepartment: ${department}\n\nEARNINGS\nBasic: ${f.basic||0}\nHRA: ${f.hra||0}\nLTA: ${f.lta||0}\nOther allowances: ${f.other||0}\nGross: ${f.gross||0}\n${f.conveyance ? 'Conveyance / petrol (paid on top): ' + f.conveyance + '\n' : ''}\nDEDUCTIONS\nPF: ${f.pf||0}\nESI: ${f.esiDeduction||0}\nPT: ${f.pt||0}\nEMI (if applicable): ${f.emi||0}\n\nNET PAY: ${f.net||0}`;
+      return `${company}\n\nSALARY SLIP — ${issueDate}\n\nEmployee name: ${name}\nDesignation: ${designation}\nDepartment: ${department}\n\nEARNINGS\nBasic: ${f.basic||0}\nHRA: ${f.hra||0}\nLTA: ${f.lta||0}\nOther allowances: ${f.other||0}\nGross: ${f.gross||0}\n${f.conveyance ? 'Conveyance / petrol (paid on top): ' + f.conveyance + '\n' : ''}\nDEDUCTIONS\nPF: ${f.pf||0}\nESI: ${f.esiDeduction||0}\nPT: ${f.pt||0}\n${f.advanceTemp ? 'Advance for temporary: ' + f.advanceTemp + '\n' : ''}${f.advance ? 'Advance: ' + f.advance + '\n' : ''}${f.emi ? 'Loan instalment: ' + f.emi + '\n' : ''}${f.retention ? 'Retention money: ' + f.retention + '\n' : ''}\nNET PAY: ${f.net||0}`;
     default:
       return `${company}\n\nDate: ${issueDate}\n\n${name}`;
   }
@@ -12369,6 +12418,8 @@ async function generateLetter(){
     f.other = p.other; f.gross = Math.round(p.gross); f.conveyance = Math.round(p.conveyance);
     f.pf = Math.round(p.pf); f.esiDeduction = Math.round(p.esi); f.pt = Math.round(p.pt);
     f.emi = p.emi;
+    f.advanceTemp = Math.round(p.advanceTemp); f.advance = Math.round(p.advance);
+    f.retention = Math.round(p.retention);
     f.net = Math.round(p.net);
   }
   const text = letterTemplate(type, f);
