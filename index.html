@@ -4085,8 +4085,9 @@ const LEAVE_POLICY = {
     ]
   },
   sickLeave: {
-    // Keyed by employee type. Work From Home gets 4 per the policy; Field and
-    // Office Staff get the full 7.
+    // Keyed by employee type. Seven a year is the headline figure; Work From
+    // Home is four, confirmed by HR and kept deliberately when the policy was
+    // restated as "7 days" without qualification.
     perYear: { full: 7, part: 4, field: 7, office: 7, wfh: 4 },
     medicalCertificateRequired: true,
     carryForward: false,
@@ -4098,12 +4099,11 @@ const LEAVE_POLICY = {
     carryForward: false,
     encashable: true,
     usableInFirstYear: false,         // earned in year 1, usable from year 2
-    // Encashment is paid on 70% of Basic + HRA. The policy gives the percentage
-    // and the components but not what a day is worth, so the divisor is config
-    // rather than a number buried in a sum: 30 is a standard month. Change it
-    // to 26 here if the working-days convention is meant instead, and every
-    // figure follows.
-    salaryBasis: { label: 'Basic + HRA', grossPct: 0.70, components: ['basic', 'hra'], daysInMonth: 30 }
+    // Encashment is paid on 70% of Basic + HRA, and a day of it is worth a
+    // twenty-fifth of that — confirmed by HR, and the same twenty-five that
+    // earns the leave in the first place. Kept as config rather than a number
+    // buried in a sum, so the two can be seen to agree.
+    salaryBasis: { label: 'Basic + HRA', grossPct: 0.70, components: ['basic', 'hra'], dayDivisor: 25 }
   },
   leaveApplication: {
     formRequired: true,
@@ -4275,8 +4275,8 @@ function plEncashmentRate(emp, P){
   return {
     monthly: Math.round(monthly * 100) / 100,
     basis: Math.round(basis * 100) / 100,
-    perDay: Math.round((basis / B.daysInMonth) * 100) / 100,
-    label: B.label, pct: B.grossPct, daysInMonth: B.daysInMonth
+    perDay: Math.round((basis / B.dayDivisor) * 100) / 100,
+    label: B.label, pct: B.grossPct, dayDivisor: B.dayDivisor
   };
 }
 
@@ -10469,7 +10469,7 @@ async function renderElCalculationSheet(){
       <tr class="sal-grandtotal"><td><strong>Grand Total</strong></td><td colspan="6"></td><td class="num"><strong>₹${fmtMoney(totalEncash)}</strong></td></tr>
     </table></div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0;line-height:1.6;">FY ${startYear}-${String(startYear+1).slice(2)}: ${fyStart} to ${fyEnd}. EL earned = 1 day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} days present (present includes EL/SL days and half-day equivalents), floored. Closing = Opening + Earned − Used.
-      <br><strong style="color:var(--navy);">Encashment</strong> = closing days × ${headingPct(B.grossPct)} of ${escapeHtml(B.label)} ÷ ${B.daysInMonth}, worked out from each employee's Rate of Pay and salary heading. Policy is that unused PL is encashed at the year end and not carried forward, so the closing balance is a figure to pay.</p>
+      <br><strong style="color:var(--navy);">Encashment</strong> = closing days × ${headingPct(B.grossPct)} of ${escapeHtml(B.label)} ÷ ${B.dayDivisor}, worked out from each employee's Rate of Pay and salary heading. The ${B.dayDivisor} is the same figure that earns the leave — one day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} days of attendance. Policy is that unused PL is encashed at the year end and not carried forward, so the closing balance is a figure to pay.</p>
     <div class="row-inline" style="margin-bottom:0;">
       <button class="btn" style="flex:1;" onclick='encashAndResetEl(${JSON.stringify(rows.map(r=>({id:r.id,closing:r.closing,amount:r.amount})))})'>Encash and start next year at nil</button>
       <button class="btn ghost" style="flex:1;" onclick='applyElClosingAsNextOpening(${JSON.stringify(rows.map(r=>({id:r.id,closing:r.closing})))})'>Carry forward instead</button>
