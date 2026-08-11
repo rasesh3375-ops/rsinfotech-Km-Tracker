@@ -6752,6 +6752,8 @@ const PAYROLL_MASTER = [
   { key:'pf',    label:'PF — employee (12%)', group:'deduction', source:'pfEmployee', flag:'pf' },
   { key:'pfEmployerEps', label:'PF — employer to EPS (8.33%)', group:'employer', source:'pfEps', flag:'pf' },
   { key:'pfEmployerEpf', label:'PF — employer to EPF (3.67%)', group:'employer', source:'pfEpf', flag:'pf' },
+  { key:'pfAdmin', label:'PF admin (0.5%)', group:'employer', source:'pfAdmin', flag:'pf' },
+  { key:'pfEdli',  label:'EDLI (0.5%)',     group:'employer', source:'pfEdli',  flag:'pf' },
   { key:'esi',   label:'ESI — employee (0.75%)', group:'deduction', source:'esiEmployee', flag:'esi' },
   { key:'esiEmployer', label:'ESI — employer (3.25%)', group:'employer', source:'esiEmployer', flag:'esi' },
   { key:'pt',    label:'Professional Tax (PT)', group:'deduction', source:'ptRule', flag:'pt' },
@@ -6759,8 +6761,12 @@ const PAYROLL_MASTER = [
   { key:'net',   label:'Net Salary', group:'total', source:'diff', from:'gross', minus:['totalDeduction'] },
   // The employer side is a cost, never a deduction from pay — kept out of
   // Total Deductions and Net so neither is understated.
+  // Everything the company pays on top, matching what the Salary Sheet totals.
+  // It summed only the two PF halves, leaving out the employer's ESI, PF admin
+  // and EDLI — so the CTC on the form came out lower than the CTC on the sheet
+  // for the same employee.
   { key:'employerTotal', label:'Employer Contribution', group:'total', source:'sum',
-    of:['pfEmployerEps','pfEmployerEpf'] },
+    of:['pfEmployerEps','pfEmployerEpf','pfAdmin','pfEdli','esiEmployer'] },
   { key:'ctc', label:'Cost to Company', group:'total', source:'sum', of:['gross','employerTotal'] }
 ];
 
@@ -6799,34 +6805,51 @@ function computePayrollComponents(rate, headingKey, manual, ctx){
       const base = def.of === 'rate' ? r : val(def.of);
       if(typeof def.pct !== 'number'){ missing = true; formula = 'No rate configured'; }
       else { value = base * def.pct; formula = (def.of === 'rate' ? 'Rate of Pay' : def.of) + ' × ' + headingPct(def.pct); }
-    } else if(def.source === 'pfEmployee' || def.source === 'pfEps' || def.source === 'pfEpf'){
+    } else if(def.source === 'pfEmployee' || def.source === 'pfEps' || def.source === 'pfEpf'
+              || def.source === 'pfAdmin' || def.source === 'pfEdli'){
+      // Through calculatePfFor, the same call the Salary Sheet makes. This
+      // branch used to apply the percentages itself, checking only the heading
+      // and the statutory exclusion — so an employee marked PF Eligible: No
+      // still had PF, an employer share and a CTC worked out in the breakdown,
+      // while the PF box six lines above correctly read nil. The flat ₹1,800
+      // option was ignored here for the same reason.
       const pfWage = pfWageOf(out);
-      const excl = pfExclusionStatus({ hasPriorUan: c.hasPriorUan, form11Submitted: c.form11Submitted }, pfWage);
-      const pf = excl.excluded
-        ? { employee:0, employerEps:0, employerEpf:0, employerTotal:0, wage:pfWage, capApplied:false }
-        : computePf(pfWage);
-      if(excl.excluded){
-        out.push = out.push;   // no-op, keeps the shape below unchanged
-      }
+      const probe = { salaryHeading: headingKey,
+                      pfEligible: c.pfEligible, pfContributionType: c.pfContributionType,
+                      hasPriorUan: c.hasPriorUan, form11Submitted: c.form11Submitted };
+      const pf = calculatePfFor(probe, pfWage);
       value = def.source === 'pfEmployee' ? pf.employee
-            : def.source === 'pfEps'      ? pf.employerEps : pf.employerEpf;
+            : def.source === 'pfEps'      ? pf.employerEps
+            : def.source === 'pfEpf'      ? pf.employerEpf
+            : def.source === 'pfAdmin'    ? pf.admin : pf.edli;
       const base = PF_RULES.wageComponents
         .map(k => (PAYROLL_MASTER.find(x => x.key === k) || {}).label || k)
-        .join(' + ') + ' (₹' + fmtMoney(pf.wage) + ')';
-      if(excl.excluded){
-        formula = 'Excluded employee — no prior UAN, Form 11 submitted, and Basic above ₹' +
-                  fmtMoney(PF_RULES.exclusion.wageAbove) + '. No PF is deducted.';
-        out.push({ ...def, applies:true, auto:true, value, formula, missing:false });
+        .join(' + ') + ' (₹' + fmtMoney(pfWage) + ')';
+      if(!pf.applicable){
+        // Not configured is a gap to fill, not a settled nil, so it is flagged
+        // as missing and the save refuses until somebody answers it.
+        out.push({ ...def, applies:true, auto:true, value:0,
+                   formula: pf.reason, missing: !!pf.notConfigured });
         return;
       }
-      formula = def.source === 'pfEmployee'
-        ? headingPct(PF_RULES.employeePct) + ' of ' + base
-        : def.source === 'pfEps'
-          ? headingPct(PF_RULES.epsPct) + ' of ' + base +
-            (pf.capApplied ? ', capped at ₹' + fmtMoney(PF_RULES.epsMonthlyCap) +
-              ' because the wage is above ₹' + fmtMoney(PF_RULES.epsWageCeiling) : '')
-          : headingPct(PF_RULES.employerPct) + ' of ' + base + ' less the EPS share' +
-            (pf.capApplied ? ' — more than ' + headingPct(0.0367) + ' here, since EPS is capped' : '');
+      if(pf.type === 'fixed'){
+        formula = 'Fixed ₹' + fmtMoney(PF_RULES.fixedAmount) + ' each side — not a percentage of anything' +
+                  (def.source === 'pfEps' ? ', and the EPS split does not apply' : '') +
+                  ((def.source === 'pfAdmin' || def.source === 'pfEdli') ? ', and no admin or EDLI is charged' : '');
+      } else if(def.source === 'pfAdmin' || def.source === 'pfEdli'){
+        formula = headingPct(def.source === 'pfAdmin' ? PF_RULES.adminPct : PF_RULES.edliPct) +
+                  ' of ' + base + ' — employer only, over and above the 12% share';
+      } else {
+        const capped = pfWage >= PF_RULES.epsWageCeiling;
+        formula = def.source === 'pfEmployee'
+          ? headingPct(PF_RULES.employeePct) + ' of ' + base
+          : def.source === 'pfEps'
+            ? headingPct(PF_RULES.epsPct) + ' of ' + base +
+              (capped ? ', capped at ₹' + fmtMoney(PF_RULES.epsMonthlyCap) +
+                ' because the wage is above ₹' + fmtMoney(PF_RULES.epsWageCeiling) : '')
+            : headingPct(PF_RULES.employerPct) + ' of ' + base + ' less the EPS share' +
+              (capped ? ' — more than ' + headingPct(0.0367) + ' here, since EPS is capped' : '');
+      }
     } else if(def.source === 'esiEmployee' || def.source === 'esiEmployer'){
       const gr = out.find(x => x.key === 'gross');
       const r = computeEsi(gr ? gr.value : 0, {
@@ -9020,6 +9043,8 @@ function payrollFormContext(){
   return {
     hasPriorUan: (document.getElementById('f_hasPriorUan') || {}).value || '',
     form11Submitted: (document.getElementById('f_form11') || {}).value || '',
+    pfEligible: (document.getElementById('f_pfEligible') || {}).value || '',
+    pfContributionType: (document.getElementById('f_pfContributionType') || {}).value || '',
     isDisabled: (document.getElementById('f_esiDisabled') || {}).value === 'yes',
     coveredAtPeriodStart: (document.getElementById('f_esiCovered') || {}).value === 'yes'
   };
@@ -9031,6 +9056,8 @@ function payrollRecordContext(emp){
   return {
     hasPriorUan: e.hasPriorUan || '',
     form11Submitted: e.form11Submitted || '',
+    pfEligible: e.pfEligible || '',
+    pfContributionType: e.pfContributionType || '',
     isDisabled: e.esiDisabled === 'yes',
     coveredAtPeriodStart: e.esiCoveredAtPeriodStart === 'yes'
   };
@@ -9106,6 +9133,26 @@ function payrollBlockingErrors(){
   const rate = Number((document.getElementById('f_ratePay') || {}).value) || 0;
   const headingKey = (document.getElementById('f_salaryHeading') || {}).value || 'managerial';
   return validatePayrollComponents(computePayrollComponents(rate, headingKey, {}));
+}
+
+// An unanswered question is not a broken formula, and telling somebody to
+// "correct the payroll master" when all they need to do is pick Yes or No sends
+// them looking in the wrong place. PF is the only thing that can be unanswered,
+// so it is worth naming exactly.
+function payrollBlockingMessage(){
+  const cfg = pfConfigStatus({
+    pfEligible: (document.getElementById('f_pfEligible') || {}).value,
+    pfContributionType: (document.getElementById('f_pfContributionType') || {}).value
+  });
+  if(!cfg.configured){
+    return cfg.eligible
+      ? 'Choose a PF Contribution Type — Percentage or the fixed ₹' + fmtMoney(PF_RULES.fixedAmount) +
+        ' — before saving. Until it is set, PF cannot be worked out for this employee.'
+      : 'Answer PF Eligible — Yes or No — before saving. Leaving it unset is not the same as No: ' +
+        'the Salary Sheet would show nil PF without anybody having decided that.';
+  }
+  return 'Payroll formula missing or invalid for: ' + payrollBlockingErrors().join(', ') +
+         '. Correct the payroll master before saving this employee.';
 }
 
 // What Rate of Pay means for the heading actually chosen. It used to be one
@@ -9663,8 +9710,7 @@ async function saveEmployeeForm(){
 
   const payrollErrors = payrollBlockingErrors();
   if(payrollErrors.length){
-    msg.textContent = 'Payroll formula missing or invalid for: ' + payrollErrors.join(', ') +
-      '. Correct the payroll master before saving this employee.';
+    msg.textContent = payrollBlockingMessage();
     msg.classList.add('error');
     return;
   }
