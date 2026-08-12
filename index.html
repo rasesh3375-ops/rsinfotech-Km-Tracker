@@ -2082,6 +2082,19 @@ async function remoteSet(key, value){
     }
   }catch(e){ lastBackendError = 'POST network error: ' + e.message; return false; }
 }
+// Several keys in one request. Returns the set of keys the backend confirmed,
+// or null if it does not know the action — the caller then writes them one at
+// a time as before. Saving a month of attendance is one write per employee,
+// and doing those one after another meant a dozen sequential round trips, each
+// paying Apps Script's start-up cost and each queueing for the script lock.
+async function remoteSetMany(entries){
+  const keys = Object.keys(entries);
+  if(!keys.length) return new Set();
+  const data = await backendAction({ action: 'setMany', entries });
+  if(!data || !data.many) return null;
+  keys.forEach(invalidateSharedRead);
+  return new Set(data.saved || []);
+}
 async function remoteDelete(key){
   try{
     await apiFetch(API_URL, {
@@ -2414,10 +2427,29 @@ const attRangeCache = new Map();
 async function getAttendanceRange(ids, from, to){
   const out = {};
   if(!ids.length) return out;
+  const now = Date.now();
+  // A window already held that CONTAINS the one being asked for answers it —
+  // the month is fetched to draw the sheet, so opening the time editor for one
+  // day of that month costs nothing rather than another round trip.
+  const containedIn = id => {
+    for(const entry of attRangeCache.values()){
+      if(entry.id !== id || now >= entry.until) continue;
+      if(entry.from <= from && entry.to >= to) return entry;
+    }
+    return null;
+  };
   const missing = [];
   ids.forEach(id => {
-    const hit = attRangeCache.get(id + '|' + from + '|' + to);
-    if(hit && Date.now() < hit.until) out[id] = hit.value; else missing.push(id);
+    const exact = attRangeCache.get(id + '|' + from + '|' + to);
+    if(exact && now < exact.until){ out[id] = exact.value; return; }
+    const wider = containedIn(id);
+    if(wider){
+      const slice = {};
+      Object.keys(wider.value).forEach(d => { if(d >= from && d <= to) slice[d] = wider.value[d]; });
+      out[id] = slice;
+      return;
+    }
+    missing.push(id);
   });
   if(!missing.length) return out;
 
@@ -2426,7 +2458,7 @@ async function getAttendanceRange(ids, from, to){
     missing.forEach(id => {
       const v = data.values[id] || {};
       attRangeCache.set(id + '|' + from + '|' + to,
-        { value: v, until: Date.now() + readTtlFor('attendance:' + id) });
+        { id, from, to, value: v, until: Date.now() + readTtlFor('attendance:' + id) });
       out[id] = v;
     });
     return out;
@@ -5426,7 +5458,11 @@ async function openDayTimeEditor(employeeId, dateStr){
   const employees = await getEmployees();
   const emp = employees.find(e => e.id === employeeId);
   if(!emp) return;
-  const att = await getAttendance(employeeId);
+  // Just the one day. This used to read the employee's entire attendance
+  // history — every day they have ever worked — to fill in two time boxes, and
+  // it did it on every tap of a time chip. The month is almost always already
+  // held from drawing the sheet, so usually this costs nothing at all.
+  const att = (await getAttendanceRange([employeeId], dateStr, dateStr))[employeeId] || {};
   const pend = pendingAttendance[employeeId + '|' + dateStr];
   const entry = Object.assign({}, att[dateStr] || {}, (pend && pend.extra) || {});
   dayTimeEditorFor = { employeeId, dateStr, currentCode: (pend && pend.code) || entry.code || '' };
@@ -5571,8 +5607,10 @@ async function saveAttendanceChanges(){
 
   let savedCells = 0, failedCells = 0;
   const stillPending = {};
-  let done = 0;
-  for(const empId of ids){
+
+  // Merge every employee's edits into their record first, then write the lot.
+  const payload = {};
+  ids.forEach(empId => {
     const att = attByEmp[empId] || {};
     byEmployee[empId].forEach(it => {
       // Everything already known about that day is kept and only the code
@@ -5580,24 +5618,45 @@ async function saveAttendanceChanges(){
       // from. The old version copied two fields across and dropped the rest.
       att[it.dateStr] = Object.assign({}, att[it.dateStr] || {}, { code: it.code }, it.extra || {});
     });
-    const json = JSON.stringify(att);
+    payload['attendance:' + empId] = JSON.stringify(att);
+  });
+
+  const settle = (empId, ok) => {
     const key = 'attendance:' + empId;
-    // remoteSet reports whether the backend actually confirmed the write.
-    // safeSet cannot: it returns nothing and swallows the error.
-    let ok = false;
-    try{ ok = await remoteSet(key, json); }catch(e){ ok = false; }
     if(ok){
       savedCells += byEmployee[empId].length;
-      try{ localStorage.setItem('kmt_shared_' + key, json); }catch(e){}
-      primeSharedRead(key, json);
+      try{ localStorage.setItem('kmt_shared_' + key, payload[key]); }catch(e){}
+      primeSharedRead(key, payload[key]);
     } else {
       failedCells += byEmployee[empId].length;
       // Kept exactly as they were, so nothing typed is lost and Save can be
       // pressed again for just the ones that did not go in.
       byEmployee[empId].forEach(it => { stillPending[it.employeeId + '|' + it.dateStr] = it; });
     }
-    done++;
-    if(btn) btn.textContent = 'Saving… ' + done + ' of ' + ids.length;
+  };
+
+  if(btn) btn.textContent = 'Saving…';
+  // One request for everybody. A dozen employees used to be a dozen sequential
+  // round trips, each one waiting on the last.
+  let confirmed = null;
+  try{ confirmed = await remoteSetMany(payload); }catch(e){ confirmed = null; }
+
+  if(confirmed){
+    ids.forEach(empId => settle(empId, confirmed.has('attendance:' + empId)));
+  } else {
+    // Backend without setMany — one at a time, exactly as before, so a save
+    // still works while the Apps Script side is being updated.
+    let done = 0;
+    for(const empId of ids){
+      const key = 'attendance:' + empId;
+      let ok = false;
+      // remoteSet reports whether the backend actually confirmed the write.
+      // safeSet cannot: it returns nothing and swallows the error.
+      try{ ok = await remoteSet(key, payload[key]); }catch(e){ ok = false; }
+      settle(empId, ok);
+      done++;
+      if(btn) btn.textContent = 'Saving… ' + done + ' of ' + ids.length;
+    }
   }
 
   invalidateDashboardSnapshot();

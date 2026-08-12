@@ -588,6 +588,11 @@ function doPost(e) {
   if (isEngineer) {
     if (body.action === 'set' || body.action === 'delete') {
       if (!engineerMayWrite_(body.key, auth.username)) return forbidden_();
+    } else if (body.action === 'setMany') {
+      var many = body.entries || {};
+      for (var mk in many) {
+        if (!engineerMayWrite_(mk, auth.username)) return forbidden_();
+      }
     } else if (body.action === 'setItem') {
       if (body.key !== 'leave_requests') return forbidden_();
     } else if (body.action === 'saveFile') {
@@ -635,6 +640,23 @@ function doPost(e) {
       // the client falls back to sending the whole array, so an app running
       // against an older deployment keeps working.
       return jsonOut_({ ok: true, merged: true, count: list.length });
+    } else if (body.action === 'setMany') {
+      // Many keys, one request and one lock. Saving a month of attendance is
+      // one write per employee, and the client sent them one at a time — a
+      // dozen round trips to Apps Script, each paying script start-up and each
+      // queueing for this lock. The sheet is read once here and written once.
+      var sheetM = getSheet_();
+      var dataM = sheetM.getDataRange().getValues();
+      var indexM = {};
+      for (var mi = 1; mi < dataM.length; mi++) indexM[dataM[mi][0]] = mi + 1;
+      var entries = body.entries || {};
+      var savedKeys = [];
+      for (var k in entries) {
+        if (indexM[k]) sheetM.getRange(indexM[k], 2).setValue(entries[k]);
+        else sheetM.appendRow([k, entries[k]]);
+        savedKeys.push(k);
+      }
+      return jsonOut_({ ok: true, many: true, saved: savedKeys });
     } else if (body.action === 'saveFile') {
       saveFile_(body.folderPath, body.fileName, body.content, body.mimeType);
     }
