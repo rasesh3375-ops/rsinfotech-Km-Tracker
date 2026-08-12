@@ -2279,7 +2279,20 @@ function primeSharedRead(key, value){
   sharedReadCache.set(key, { value, until: Date.now() + readTtlFor(key) });
 }
 function invalidateSharedRead(key){
-  if(key === undefined) sharedReadCache.clear(); else sharedReadCache.delete(key);
+  if(key === undefined){
+    sharedReadCache.clear();
+    if(typeof attRangeCache !== 'undefined') attRangeCache.clear();
+    return;
+  }
+  sharedReadCache.delete(key);
+  // Saving somebody's attendance has to drop the date-range slices of it too,
+  // or the Attendance Sheet would redraw the month from before the save.
+  if(key.indexOf('attendance:') === 0 && typeof attRangeCache !== 'undefined'){
+    const id = key.slice('attendance:'.length);
+    Array.from(attRangeCache.keys()).forEach(k => {
+      if(k.indexOf(id + '|') === 0) attRangeCache.delete(k);
+    });
+  }
 }
 
 async function safeGet(key, shared){
@@ -2363,6 +2376,73 @@ async function recordCheckin(name){
 // at a time when the deployed backend does not answer with `batch`, so this is
 // safe before the Apps Script is redeployed. Results are seeded into the shared
 // read cache, so anything asking for a single employee afterwards is free.
+// Calls a backend action and hands back the parsed reply, or null when the
+// call failed or the deployed backend does not know the action. Callers treat
+// null as "do it the old way", which is what lets this file ship to Vercel
+// before the Apps Script side has been pasted in — nothing breaks in between.
+async function backendAction(payload){
+  try{
+    const res = await apiFetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(Object.assign({ token: sessionToken }, payload))
+    });
+    const data = JSON.parse(await res.text());
+    if(data && data.error === 'unauthorized'){ onSessionExpired(); return null; }
+    if(data && data.error) return null;
+    return data || null;
+  }catch(e){ return null; }
+}
+
+// The engineer's own employee record and whether their login is still enabled.
+// Six fields, from the backend, instead of downloading the employees list —
+// which carries every salary, PAN and bank detail in the company.
+let myProfileCache = null;
+function clearMyProfile(){ myProfileCache = null; }
+async function getMyProfile(){
+  if(myProfileCache) return myProfileCache;
+  const data = await backendAction({ action: 'getMyProfile' });
+  if(data && data.ok){ myProfileCache = data; return data; }
+  return null;
+}
+
+// Attendance for a window of dates rather than an employee's whole history.
+// The dashboard wants today; the Attendance Sheet wants one month. Both used to
+// pull every day anybody had ever worked — about 620 KB for a dozen staff with
+// two years behind them, on every screen that asked.
+const attRangeCache = new Map();
+async function getAttendanceRange(ids, from, to){
+  const out = {};
+  if(!ids.length) return out;
+  const missing = [];
+  ids.forEach(id => {
+    const hit = attRangeCache.get(id + '|' + from + '|' + to);
+    if(hit && Date.now() < hit.until) out[id] = hit.value; else missing.push(id);
+  });
+  if(!missing.length) return out;
+
+  const data = await backendAction({ action: 'getAttendanceRange', ids: missing, from, to });
+  if(data && data.range && data.values){
+    missing.forEach(id => {
+      const v = data.values[id] || {};
+      attRangeCache.set(id + '|' + from + '|' + to,
+        { value: v, until: Date.now() + readTtlFor('attendance:' + id) });
+      out[id] = v;
+    });
+    return out;
+  }
+
+  // Backend without the range action: fetch whole records and cut them here.
+  // Same answer, same cost as before — no screen breaks waiting for the paste.
+  const full = await getAttendanceMany(missing);
+  missing.forEach(id => {
+    const all = full[id] || {}, slice = {};
+    Object.keys(all).forEach(d => { if(d >= from && d <= to) slice[d] = all[d]; });
+    out[id] = slice;
+  });
+  return out;
+}
+
 async function getAttendanceMany(ids){
   const out = {};
   if(!ids.length) return out;
@@ -2427,6 +2507,15 @@ async function setAttendanceDay(employeeId, dateStr, code, extra){
   await safeSet('attendance:' + employeeId, JSON.stringify(att), true);
 }
 async function findEmployeeByTrackingUsername(username){
+  // An engineer asks the backend for their own record. HR keeps reading the
+  // full list, because HR needs it. Before this, the tracking app downloaded
+  // every employee's salary and bank details in order to find six fields about
+  // the person holding the phone.
+  if(sessionRole === 'engineer' && username === engineerName){
+    const profile = await getMyProfile();
+    if(profile) return profile.employee || null;
+    // Backend without getMyProfile — the old path still answers correctly.
+  }
   const employees = await getEmployees();
   return employees.find(e => e.trackingUsername === username) || null;
 }
@@ -2973,14 +3062,21 @@ async function selectRole(role){
     const savedUser = await safeGet('my_username', false);
     const hasValidLocalSession = !!(sessionToken && sessionRole === 'engineer');
     if(savedUser && hasValidLocalSession){
-      const user = await findUser(savedUser);
-      if(user && user.enabled !== false){
-        engineerName = user.username;
-        engineerDisplayName = user.displayName || user.username;
+      // Ask the backend whether this login is still switched on. It used to
+      // answer that by reading the whole users list — which carries every
+      // engineer's password salt and hash — from the engineer's own phone.
+      engineerName = savedUser;
+      const profile = await getMyProfile();
+      const user = profile ? null : await findUser(savedUser);   // older backend
+      const enabled = profile ? profile.enabled : !!(user && user.enabled !== false);
+      if(enabled){
+        engineerDisplayName = (profile && profile.displayName) ||
+          (user && (user.displayName || user.username)) || savedUser;
         await enterEngineerMain();
         armExitGuard();
         return;
       }
+      engineerName = '';
       // saved session is no longer valid (disabled or removed) — clear it and ask them to log in again
       await safeSet('my_username', '', false);
     }
@@ -5158,8 +5254,11 @@ async function renderAttendanceSheet(){
   const csvRows = [];
 
   let bodyRows = '';
-  // One request for everyone's attendance before the loop.
-  const attByEmp = await getAttendanceMany(employees.map(e => e.id));
+  // One request for everyone's attendance before the loop — this month only.
+  // The whole record used to come back, every day anybody had ever worked, to
+  // draw thirty-one columns.
+  const attByEmp = await getAttendanceRange(employees.map(e => e.id),
+                                            dateList[0], dateList[dateList.length - 1]);
   // Everything about a day that does not depend on who is being drawn — the
   // weekday, whether it is a holiday, whether it has happened yet. Worked out
   // once instead of once per employee per day, which for a dozen staff was
@@ -8239,8 +8338,15 @@ async function loadDashboardAbsentToday(onRoll){
     Promise.resolve(p).catch(() => null),
     new Promise(r => setTimeout(() => r(null), ms))
   ]);
+  // Today only. Asking for whole records here is what made opening the app
+  // download every day everybody has ever worked, in order to answer "who is
+  // absent today" — and the same month is what the policy panel and the
+  // Attendance Sheet want next, so the read is shared with them.
+  const monthStart = today.slice(0, 8) + '01';
+  const monthEnd = today.slice(0, 8) +
+    String(new Date(Number(today.slice(0,4)), Number(today.slice(5,7)), 0).getDate()).padStart(2, '0');
   const byId = await Promise.race([
-    getAttendanceMany(onRoll.map(e => e.id)),
+    getAttendanceRange(onRoll.map(e => e.id), monthStart, monthEnd),
     new Promise(r => setTimeout(() => r({}), ms))
   ]);
   const atts = onRoll.map(e => byId[e.id] || null);

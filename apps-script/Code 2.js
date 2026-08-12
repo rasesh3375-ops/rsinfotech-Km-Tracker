@@ -329,6 +329,141 @@ function organiseReportsByYear() {
   return organiseDriveByYear();
 }
 
+// ===== who may touch what =====
+// validateSession_ has always returned {role, username}. Nothing ever read the
+// role, so every request only proved you were logged in as SOMEBODY. A field
+// engineer's tracking login could therefore read the whole payroll — and write
+// the hr_password key, replacing HR's password with one of their own choosing.
+//
+// The rule below is deliberately a whitelist. A key nobody has thought about is
+// refused to engineers rather than allowed, so adding a new payroll key cannot
+// quietly open it up.
+
+// Shared reference data. Policy and configuration, nothing about anybody's pay.
+var ENGINEER_SHARED_READ = ['holidays', 'geofences', 'rate_per_km',
+  'company_profile', 'employee_handbook', 'resident_policy_text'];
+
+// Keys belonging to one engineer, addressed by their own username.
+function engineerScopedKeys_(username) {
+  return ['trips:' + username, 'checkins:' + username, 'active:' + username];
+}
+
+// An engineer's own employee id, so they can read their own attendance and
+// nobody else's. Cached briefly: this is on the path of every request they
+// make, and it is a whole-sheet read otherwise.
+function employeeIdForTrackingUser_(username) {
+  if (!username) return null;
+  var cache = CacheService.getScriptCache();
+  var hit = cache.get('empid_' + username);
+  if (hit) return hit === '-' ? null : hit;
+  var sheet = getSheet_();
+  var row = findRow_(sheet, 'employees');
+  var id = null;
+  if (row !== -1) {
+    try {
+      var list = JSON.parse(sheet.getRange(row, 2).getValue() || '[]');
+      for (var i = 0; i < list.length; i++) {
+        if (list[i] && list[i].trackingUsername === username) { id = list[i].id; break; }
+      }
+    } catch (e) { id = null; }
+  }
+  cache.put('empid_' + username, id || '-', 300);
+  return id;
+}
+
+function engineerMayRead_(key, username) {
+  if (!key) return false;
+  if (ENGINEER_SHARED_READ.indexOf(key) !== -1) return true;
+  if (engineerScopedKeys_(username).indexOf(key) !== -1) return true;
+  // Leave applications are one shared list, so an engineer reading their own
+  // sees colleagues' too. Accepted: it is not pay data, and splitting the list
+  // per person is a larger change than this one. Revisit if it matters.
+  if (key === 'leave_requests') return true;
+  var empId = employeeIdForTrackingUser_(username);
+  if (empId && key === 'attendance:' + empId) return true;
+  return false;
+}
+
+function engineerMayWrite_(key, username) {
+  if (!key) return false;
+  return engineerScopedKeys_(username).indexOf(key) !== -1;
+}
+
+function forbidden_() {
+  return jsonOut_({ error: 'forbidden' });
+}
+
+// What the engineer app needs to know about its own employee record, and
+// nothing else. It used to fetch the entire employees list — every salary, PAN
+// and bank detail in the company — to find these six fields.
+function doGetMyProfile_(auth) {
+  var sheet = getSheet_();
+  var row = findRow_(sheet, 'employees');
+  var emp = null;
+  if (row !== -1) {
+    try {
+      var list = JSON.parse(sheet.getRange(row, 2).getValue() || '[]');
+      for (var i = 0; i < list.length; i++) {
+        if (list[i] && list[i].trackingUsername === auth.username) {
+          emp = {
+            id: list[i].id,
+            name: list[i].name || '',
+            employeeType: list[i].employeeType || '',
+            elOpening: list[i].elOpening,
+            slOpening: list[i].slOpening,
+            leaveOpeningFrom: list[i].leaveOpeningFrom || ''
+          };
+          break;
+        }
+      }
+    } catch (e) { emp = null; }
+  }
+  // Whether the tracking login is still switched on. The app used to answer
+  // this by reading the whole users list, which carries everyone's password
+  // salt and hash.
+  var enabled = true, displayName = '';
+  var urow = findRow_(sheet, 'users');
+  if (urow !== -1) {
+    try {
+      var users = JSON.parse(sheet.getRange(urow, 2).getValue() || '[]');
+      for (var j = 0; j < users.length; j++) {
+        if (users[j] && users[j].username === auth.username) {
+          enabled = users[j].enabled !== false;
+          displayName = users[j].displayName || '';
+          break;
+        }
+      }
+    } catch (e) {}
+  }
+  return { ok: true, enabled: enabled, displayName: displayName, employee: emp };
+}
+
+// ===== attendance for a date range =====
+// Attendance is one value per employee holding every day they have ever
+// worked. Drawing one month, or working out who is absent today, meant
+// downloading all of it — around 620 KB for a dozen staff with two years of
+// history, on every screen that asked. The record is parsed here and only the
+// days in range are sent back.
+function doGetAttendanceRange_(body) {
+  var sheet = getSheet_();
+  var rows = sheet.getDataRange().getValues();
+  var map = {};
+  for (var i = 0; i < rows.length; i++) map[rows[i][0]] = rows[i][1];
+  var from = String(body.from || ''), to = String(body.to || '');
+  var ids = body.ids || [];
+  var out = {};
+  for (var j = 0; j < ids.length; j++) {
+    var raw = map['attendance:' + ids[j]];
+    var all = {};
+    if (raw) { try { all = JSON.parse(raw); } catch (e) { all = {}; } }
+    var slice = {};
+    // Dates are YYYY-MM-DD, so a string comparison is a date comparison.
+    for (var d in all) { if (d >= from && d <= to) slice[d] = all[d]; }
+    out[ids[j]] = slice;
+  }
+  return { ok: true, range: true, from: from, to: to, values: out };
+}
+
 function jsonOut_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
@@ -351,6 +486,7 @@ function doGet(e) {
   if (action === 'get') {
     const auth = validateSession_(token);
     if (!auth) return jsonOut_({ error: 'unauthorized' });
+    if (auth.role === 'engineer' && !engineerMayRead_(key, auth.username)) return forbidden_();
     const sheet = getSheet_();
     const row = findRow_(sheet, key);
     const value = row === -1 ? null : sheet.getRange(row, 2).getValue();
@@ -381,8 +517,23 @@ function doPost(e) {
   // Everything else requires a valid, unexpired session token.
   const auth = validateSession_(body.token);
   if (!auth) return jsonOut_({ error: 'unauthorized' });
+  const isEngineer = auth.role === 'engineer';
+
+  // The engineer app's own record, six fields, instead of the employees list.
+  if (body.action === 'getMyProfile') return jsonOut_(doGetMyProfile_(auth));
+
+  if (body.action === 'getAttendanceRange') {
+    if (isEngineer) {
+      // Only ever their own, whatever they ask for.
+      var ownId = employeeIdForTrackingUser_(auth.username);
+      var asked = body.ids || [];
+      if (!ownId || asked.length !== 1 || asked[0] !== ownId) return forbidden_();
+    }
+    return jsonOut_(doGetAttendanceRange_(body));
+  }
 
   if (body.action === 'moveEmployeeFolder') {
+    if (isEngineer) return forbidden_();
     // Files a leaver's document folder under Employee Documents > Left
     // Employees. The folder is moved, not copied and not deleted: documents may
     // still be wanted for a statutory return or a reference years later.
@@ -397,6 +548,14 @@ function doPost(e) {
   }
 
   if (body.action === 'getBatch') {
+    // One refused key refuses the whole call rather than quietly returning a
+    // hole, so a screen that should not have asked fails loudly.
+    if (isEngineer) {
+      var wanted = body.keys || [];
+      for (var g = 0; g < wanted.length; g++) {
+        if (!engineerMayRead_(wanted[g], auth.username)) return forbidden_();
+      }
+    }
     // Many keys, one request. The client used to fetch attendance one employee
     // at a time, so a twenty-person report meant twenty round trips; the sheet
     // is read once here and every requested key answered from it.
@@ -413,7 +572,27 @@ function doPost(e) {
   }
 
   if (body.action === 'uploadDocument') {
+    // An engineer uploads exactly one kind of thing: the medical certificate
+    // that a sick leave application needs. Anywhere else in Drive is HR's.
+    if (isEngineer && (body.folderPath || []).indexOf('Medical Certificates') === -1) {
+      return forbidden_();
+    }
     return jsonOut_(doUploadDocument_(body));
+  }
+
+  // Writes. An engineer may write their own trip, check-in and live-tracking
+  // keys, and may add a leave application through setItem — which merges one
+  // record server-side, so they cannot overwrite anybody else's. A wholesale
+  // 'set' of leave_requests is refused: that would let one person replace the
+  // entire queue. Everything else, including hr_password and employees, is HR.
+  if (isEngineer) {
+    if (body.action === 'set' || body.action === 'delete') {
+      if (!engineerMayWrite_(body.key, auth.username)) return forbidden_();
+    } else if (body.action === 'setItem') {
+      if (body.key !== 'leave_requests') return forbidden_();
+    } else if (body.action === 'saveFile') {
+      return forbidden_();
+    }
   }
 
   const lock = LockService.getScriptLock();
