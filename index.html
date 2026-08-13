@@ -11779,6 +11779,30 @@ async function archiveEmployeeDocuments(emp){
   }catch(e){}   // never block leaving or deleting because Drive was unreachable
 }
 
+// A permanent, complete copy of the record — every field, exactly as
+// stored — written to Drive before a delete removes it from the app.
+// Unlike saveFileToDrive elsewhere, a failure here must stop the delete
+// rather than being swallowed silently: this backup is the only thing
+// that will exist once the record itself is gone, so deleteEmployee below
+// refuses to proceed unless it comes back true.
+async function archiveEmployeeRecordToDrive(emp){
+  const folderName = (emp.name ? emp.name + ' ' : '') + '(' + emp.id + ')';
+  const fileName = (emp.name || emp.id) + ' - Employee Record - ' + todayStr() + '.json';
+  try{
+    const res = await apiFetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'saveFile', token: sessionToken,
+        folderPath: ['HR Management', 'Employee Documents', 'Left Employees', folderName],
+        fileName, content: JSON.stringify(emp, null, 2), mimeType: 'application/json'
+      })
+    });
+    const data = JSON.parse(await res.text());
+    return !!(data && data.ok);
+  }catch(e){ return false; }
+}
+
 // Deleting means gone. The record used to be dropped from the employee list
 // while everything keyed off it stayed behind — attendance for every month, the
 // tracking login, trip and check-in history, live position, letters issued — so
@@ -11793,8 +11817,16 @@ async function deleteEmployee(id){
     .concat(uname ? ['the km-tracking login @' + uname, 'trip and check-in history'] : [])
     .concat(['issued-asset records', 'loan and advance requests', 'entries in the letters log']);
   if(!confirm('Permanently delete ' + (emp.name || id) + '?\n\nThis removes ' + what.join(', ') +
-    '.\n\nIt cannot be undone. If they have simply left the job, use "Mark as left" instead — that keeps ' +
+    ' from the app. A complete copy of the record is saved to Google Drive first, under ' +
+    'HR Management > Employee Documents > Left Employees, so nothing is truly lost.\n\n' +
+    'The app-side removal cannot be undone. If they have simply left the job, use "Mark as left" instead — that keeps ' +
     'the record and history and still takes them out of the active reports.')) return;
+
+  if(!await archiveEmployeeRecordToDrive(emp)){
+    alert('Could not save a backup of ' + (emp.name || id) + ' to Google Drive, so nothing was deleted. ' +
+      'Check the connection and try again — the record is unchanged.');
+    return;
+  }
 
   // Every key that hangs off this employee, cleared before the record itself so
   // nothing is left pointing at an id that no longer exists.
@@ -11825,7 +11857,8 @@ async function deleteEmployee(id){
   // of who deleted what, and erasing that alongside the data would leave no
   // record that the person ever existed.
   await addActivityLog('Permanently deleted employee ' + (emp.name || '') + ' (' + id + ') — record, attendance' +
-    (uname ? ', tracking login @' + uname + ', trip history' : '') + ' and letters log entries removed');
+    (uname ? ', tracking login @' + uname + ', trip history' : '') + ' and letters log entries removed from the app; ' +
+    'a full backup was saved to Drive under Left Employees first');
   ['employees', 'users', 'letters_log', 'loan_requests', 'attendance:' + id].forEach(invalidateSharedRead);
   invalidateDashboardSnapshot();
   await renderEmployeeList();
@@ -11921,13 +11954,15 @@ function openLeftEmployeesModal(){
     document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeLeftEmployeesModal()">
       <div class="modal-box">
         <h2>Left employees</h2>
-        <p class="hint">Their full record is kept on file — view details, or reactivate if they rejoin.</p>
+        <p class="hint">Their full record is kept on file — view details, reactivate if they rejoin, or delete permanently once there is no further reason to keep them on file. A complete backup is saved to Drive before a delete goes through.</p>
         ${left.map(e => `<div class="emp-row">
           <div class="head"><strong>${escapeHtml(e.name)}</strong><span class="id">${e.id}</span></div>
           <div class="sub">${escapeHtml(e.designation || '—')} · left ${e.leftDate || 'date not recorded'}</div>
           <div class="actions">
             <button class="btn ghost" onclick="closeLeftEmployeesModal();openAddEmployeeModal('${e.id}')">View details</button>
             <button class="btn ghost" onclick="reactivateEmployee('${e.id}')">Reactivate</button>
+            <button class="btn ghost btn-danger" onclick="deleteEmployee('${e.id}').then(openLeftEmployeesModal)"
+                    title="Saves a complete backup to Drive, then permanently removes the record, attendance, tracking login and history from the app.">Delete</button>
           </div>
         </div>`).join('')}
         <div class="modal-actions"><button class="btn ghost full" onclick="closeLeftEmployeesModal()">Close</button></div>
