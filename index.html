@@ -1344,7 +1344,6 @@
         <button onclick="switchHrSub('master')" id="hrSubBtnMaster">Employee Master</button>
         <button onclick="switchHrSub('reports')" id="hrSubBtnReports">Reports</button>
         <button onclick="switchHrSub('generator')" id="hrSubBtnGenerator">Generator</button>
-        <button onclick="switchHrSub('docs')" id="hrSubBtnDocs">Office Documents</button>
       </div>
 
       <!-- ===== Dashboard ===== -->
@@ -1708,6 +1707,12 @@
               <p>Address, phone, email and website printed on every generated report.</p>
               <span class="btn full">Open</span>
             </button>
+            <button type="button" class="gen-card" onclick="openGeneratorCard('genSecOfficeDocuments')">
+              <div class="gen-card-icon t4">🗂️</div>
+              <h3>Office Documents</h3>
+              <p>Payroll, apprentice and company documents, uniform &amp; ID tracking, the employee handbook.</p>
+              <span class="btn full">Open</span>
+            </button>
           </div>
         </div>
 
@@ -1921,11 +1926,8 @@
           <div class="letter-paper" id="letterPaper"></div>
         </div>
         </div>
-      </div>
-
-      <!-- ===== Office Documents ===== -->
-      <div id="hrSubDocs" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="hrNavigate('dashboard')">← Back to Dashboard</button>
+        <div id="genSecOfficeDocuments" class="hidden">
+        <button type="button" class="gen-back-btn" onclick="showGeneratorLanding()">← Back to Generator</button>
 
         <section class="block">
           <h2 style="margin:0 0 4px;">1. Payroll Documents (monthly)</h2>
@@ -2043,6 +2045,8 @@
           <button class="btn full" onclick="withBusy(this,'Saving…',saveResidentPolicyFromForm)">Save resident policy text</button>
           <div class="msg" id="residentPolicyMsg"></div>
         </section>
+
+      </div>
 
       </div>
     </div><!-- /hrTabMgmt -->
@@ -8601,7 +8605,7 @@ async function getReminderEmail(){
 // — every existing element id and render function is left exactly as it was, so
 // nothing downstream had to change.
 const HR_PANELS = ['hrPageDashboard','hrTabTracking','hrTabMgmt','hrSubDash','hrSubMaster','hrSubReports',
-  'hrSubGenerator','hrSubDocs','dashSubAttendance','dashSubSalary','dashSubReminders','dashSubExpiry',
+  'hrSubGenerator','dashSubAttendance','dashSubSalary','dashSubReminders','dashSubExpiry',
   'dashSubActivity','secManageTeam','secExpenseRate','secLiveTracking','secGeofence','secDocStorage','secTeamOverview',
   'secDailySummary','secByCompany','secBackendConn'];
 
@@ -8609,7 +8613,7 @@ const HR_PANELS = ['hrPageDashboard','hrTabTracking','hrTabMgmt','hrSubDash','hr
 // its own, then everything under the Tracking tab together, then everything
 // under HR Management together, then Settings last — so the sidebar reads as
 // three sections instead of interleaving Team Overview and Daily Summary
-// (Tracking-side) after Reports and Office Documents (HR Management-side).
+// (Tracking-side) after Reports and Generator (HR Management-side).
 const HR_ROUTES = {
   dashboard:  { label:'Dashboard',           icon:'🏠', show:['hrPageDashboard'], run:() => renderHrDashboardHome() },
   tracking:   { label:'Tracking',            icon:'📍', show:['hrTabTracking','secManageTeam','secLiveTracking','secByCompany'],
@@ -8624,7 +8628,6 @@ const HR_ROUTES = {
   activity:   { label:'Activity Log',        icon:'🕘', show:['hrTabMgmt','hrSubDash','dashSubActivity'], run:() => renderActivityLogList() },
   reports:    { label:'Reports',             icon:'📊', show:['hrTabMgmt','hrSubReports'], run:() => renderReportsTab() },
   generator:  { label:'Generator',           icon:'✉️', show:['hrTabMgmt','hrSubGenerator'], run:() => renderGeneratorTab() },
-  docs:       { label:'Office Documents',    icon:'🗂️', show:['hrTabMgmt','hrSubDocs'], run:() => renderOfficeDocumentsTab() },
   settings:   { label:'Settings',            icon:'⚙️', show:['hrTabTracking','secExpenseRate','secGeofence','secDocStorage','secBackendConn'],
                 run: async () => {
                   const el = document.getElementById('rateInput');
@@ -8728,7 +8731,7 @@ function hrNavigate(route){
 // Kept so existing callers elsewhere keep working — they now just pick a route.
 function switchHrTab(tab){ hrNavigate(tab === 'tracking' ? 'tracking' : 'dashboard'); }
 function switchHrSub(sub){
-  hrNavigate({ dash:'dashboard', master:'employees', reports:'reports', generator:'generator', docs:'docs' }[sub] || 'dashboard');
+  hrNavigate({ dash:'dashboard', master:'employees', reports:'reports', generator:'generator' }[sub] || 'dashboard');
 }
 function switchDashSub(sub){
   hrNavigate({ attendance:'attendance', salary:'salary', reminders:'reminders', expiry:'expiry', activity:'activity' }[sub] || 'attendance');
@@ -12972,7 +12975,7 @@ function clearGeneratorEmployeeFields(){
 // toggles which of these wrapper divs is visible — no new report, letter or
 // calculation, only how you get to the ones that already existed.
 const GENERATOR_SECTIONS = ['genSecRoleReports','genSecLetterhead','genSecHolidayList',
-  'genSecLeaveEncashment','genSecElCalc','genSecChecklists','genSecLetters'];
+  'genSecLeaveEncashment','genSecElCalc','genSecChecklists','genSecLetters','genSecOfficeDocuments'];
 function showGeneratorLanding(){
   document.getElementById('genLanding').classList.remove('hidden');
   GENERATOR_SECTIONS.forEach(id => document.getElementById(id).classList.add('hidden'));
@@ -13022,6 +13025,9 @@ async function renderGeneratorTab(){
   // first, empty if this card is opened straight from the Generator landing.
   await populateRoleReportPickers();
   await populateGeneratorEmployees();
+  // Office Documents moved here too — same reasoning: its uploads and lists
+  // need to be ready the moment that card opens, not fetched then.
+  await renderOfficeDocumentsTab();
 
   document.getElementById('genIssueDate').value = document.getElementById('genIssueDate').value || todayStr();
   document.getElementById('letterOutput').classList.remove('show');
