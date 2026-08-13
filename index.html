@@ -9721,18 +9721,6 @@ function employeeModalHtml(emp){
         </select>
         <details style="margin:8px 0 0;"><summary style="font-size:12px;color:var(--muted);cursor:pointer;">What this decides</summary>
         <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">This decides which leave rules apply. Field Engineers and Office Staff get the full policy — 7 sick leaves a year, short leave, late-coming and sandwich-leave rules — with overtime for those who record trips. Work From Home gets 4 sick leaves a year and no short leave. Resident Engineers are excluded entirely from SL/EL balances, overtime, short leave, late-coming and sandwich-leave rules.</p></details>
-        <div id="leaveOpeningFields" class="${emp.employeeType==='resident'?'hidden':''}" style="margin-top:14px;">
-          <label class="field">SL opening balance (this year)</label>
-          <input type="number" id="f_slOpening" placeholder="0" value="${emp.slOpening??''}">
-          <div style="height:12px"></div>
-          <label class="field">EL opening balance (this year)</label>
-          <input type="number" id="f_elOpening" placeholder="0" value="${emp.elOpening??''}">
-          <div style="height:10px"></div>
-          <label class="field">These balances are as at (month)</label>
-          <input type="month" class="field-input" id="f_leaveOpeningFrom" value="${emp.leaveOpeningFrom || ''}">
-          <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Leave taken from this month onward is deducted from the balances above. Leave it blank and the financial year start is used.</p>
-          <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Enter manually for this year only. From next year onward, the EL Calculation Sheet report carries the closing balance forward automatically.</p>
-        </div>
         <div id="residentFields" class="${emp.employeeType==='resident'?'':'hidden'}" style="margin-top:14px;">
           <label class="field">Work location (client site)</label>
           <input type="text" id="f_workLocation" placeholder="e.g. Reliance, Jamnagar — Plant 2" value="${escapeHtml(emp.workLocation||'')}">
@@ -9765,75 +9753,14 @@ function employeeModalHtml(emp){
       </div>
 
       <div class="field-group">
-        <div class="sec-title">Salary sheet heading</div>
-        <label class="field">Heading</label>
-        <select class="field-input" id="f_salaryHeading" onchange="toggleStatutoryFieldsForHeading()" ${hasIncrementHistory ? 'disabled' : ''}>
-          ${Object.keys(SALARY_HEADINGS).map(k => `<option value="${k}" ${(curPay.salaryHeading===k)?'selected':''}>${SALARY_HEADINGS[k].label}</option>`).join('')}
-        </select>
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Picks which Basic/HRA/LTA split formula applies to this employee on the Salary Sheet, and which of PF/ESI/PT apply at all — set once here, applied automatically every month.</p>
-        <div id="headingCalcBox"></div>
-        <div style="height:14px"></div>
-        <label class="field">Diwali bonus amount</label>
-        <input type="number" id="f_diwaliBonusAmount" placeholder="Leave blank for one month's pay" value="${emp.diwaliBonusAmount||''}" oninput="updateBonusPreview()">
-        <details style="margin:8px 0 0;"><summary style="font-size:12px;color:var(--muted);cursor:pointer;">What this figure is used for</summary>
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;">The figure this employee is actually paid at Diwali, used exactly as entered — the Diwali Bonus Report, the payment sheet and the CTC all take it from here, and nothing is ever deducted from it. <strong style="color:var(--amber-dark);">Left blank, no bonus is paid</strong> and they will not appear on the payment sheet; the box below the eligibility question offers one month's pay if that is the figure you want. It is only paid at all if the eligibility below says Yes.</p></details>
-        <div style="height:14px"></div>
-        <label class="field">Rate of pay (monthly)</label>
-        <input type="number" id="f_ratePay" placeholder="0" value="${curPay.ratePay||''}" oninput="renderPayrollBreakdown()" ${hasIncrementHistory ? 'readonly' : ''}>
-        <div id="ratePayNote" style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;"></div>
-        ${hasIncrementHistory ? `<p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Current since ${salHist.slice().sort((a,b)=>(a.from||'').localeCompare(b.from||'')).slice(-1)[0].from || 'before increments were tracked'}. Rate of Pay and heading now change only through Record Increment below, so a raise is never confused with an ordinary edit to the rest of this record.</p>` : ''}
-        <div style="height:10px"></div>
-        <button type="button" class="btn ghost full" onclick="openIncrementModal('${emp.id}')">📈 Record Increment</button>
-        ${salHist.length > 1 || hasIncrementHistory ? `
-        <div style="height:10px"></div>
-        <details><summary style="font-size:12.5px;color:var(--muted);cursor:pointer;">Salary history (${salHist.length})</summary>
-          <div style="font-size:12.5px;color:var(--muted);margin-top:6px;">
-            ${salHist.slice().sort((a,b)=>(a.from||'').localeCompare(b.from||'')).map(h => `<div style="padding:4px 0;border-bottom:1px solid var(--border,#e5e5e5);">${h.from ? escapeHtml(h.from) : 'Before increments were tracked'} — ₹${fmtMoney(Number(h.ratePay)||0)}, ${escapeHtml((SALARY_HEADINGS[h.salaryHeading]||{}).label || h.salaryHeading || '')}</div>`).join('')}
-          </div>
-        </details>` : ''}
-        <div id="directPayWrap" class="hidden">
-          <div style="height:12px"></div>
-          <label class="field">Paid directly to the employee's account?</label>
-          <select class="field-input" id="f_directPaid" onchange="toggleDirectPay()">
-            <option value="no" ${emp.directPaid==='yes'?'':'selected'}>No</option>
-            <option value="yes" ${emp.directPaid==='yes'?'selected':''}>Yes — deduct from net payable</option>
-          </select>
-          <div id="directPayAmountWrap" class="hidden">
-            <div style="height:10px"></div>
-            <label class="field">Amount paid directly (per month)</label>
-            <input type="number" class="field-input" id="f_directPaidAmount" placeholder="0" value="${emp.directPaidAmount||''}" oninput="renderPayrollBreakdown()">
-            <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Money already in their account, so it comes off Net Payable and shows as its own line on the Salary Sheet. Everything above it — Gross, PF, ESI, PT — is untouched.</p>
-          </div>
-        </div>
-        <div id="payrollBreakdownBox"></div>
-        <div style="height:12px"></div>
-        <label class="field">Advance for temporary</label>
-        <input type="number" id="f_advanceTemp" placeholder="0" value="${emp.advanceTemp||''}">
-        <div style="height:12px"></div>
-        <label class="field">Advance</label>
-        <input type="number" id="f_advance" placeholder="0" value="${emp.advance||''}">
-        <div style="height:12px"></div>
-        <label class="field">Advance balance brought forward</label>
-        <input type="number" id="f_advanceOpening" placeholder="0" value="${emp.advanceOpening??''}">
-        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Enter the outstanding advance as it stands today, once. The Salary Sheet then carries it forward each month, less what is recovered, so it does not need entering again.</p>
+        <div class="sec-title">Assets issued (at joining)</div>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">What was handed over when this employee joined — uniform, laptop, phone, tools. Shows on the Employee Assets report and has to be returned before an Experience Letter can be issued.</p>
+        <div id="assetRowsBox"></div>
+        <a href="#" onclick="addAssetRow();return false;" style="font-size:13px;color:var(--amber-dark);font-weight:600;">+ Add an item</a>
       </div>
 
       <div class="field-group">
-        <div class="sec-title">Diwali bonus eligibility</div>
-        <label class="field">Eligible this year?</label>
-        <select class="field-input" id="f_diwaliEligible" onchange="updateBonusPreview()">
-          <option value="yes" ${emp.diwaliEligible==='yes'?'selected':''}>Yes</option>
-          <option value="no" ${emp.diwaliEligible==='no'?'selected':''}>No</option>
-        </select>
-        <div class="bonus-callout" id="bonusPreview" style="margin-top:12px;">Calculated Diwali bonus: Rs. ${diwaliBonusFor(emp)}</div>
-        <details style="margin-top:8px;"><summary style="font-size:12px;color:var(--muted);cursor:pointer;">How this is worked out</summary>
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;">Worked out automatically — nothing to enter by hand. It is one whole month at the Rate of Pay: Basic plus HRA plus LTA, with <strong>no PF, ESI, Professional Tax, advance, loan instalment or retention taken off</strong>, and no reduction for leave taken during the year. Other allowances, dress and mobile are separate from the Rate of Pay and are not added in.</p></details>
-      </div>
-
-      <div class="field-group">
-        <div class="sec-title">Salary structure (for salary slip)</div>
-        <details style="margin:0 0 12px;"><summary style="font-size:12px;color:var(--muted);cursor:pointer;">Why Basic and HRA aren't typed here</summary>
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Basic and HRA are worked out from Rate of Pay and the salary heading — they are shown in the breakdown above and are no longer typed here, because the Salary Sheet has always derived them and ignored anything entered by hand.</p></details>
+        <div class="sec-title">Allowances</div>
         <label class="field">Other allowances</label>
         <input type="number" id="f_otherAllowances" placeholder="0" value="${emp.otherAllowances||''}">
         <div style="height:12px"></div>
@@ -9846,121 +9773,8 @@ function employeeModalHtml(emp){
         <label class="field">Conveyance / petrol allowance (monthly)</label>
         <input type="number" id="f_conveyance" placeholder="0" value="${emp.conveyance||''}" oninput="renderPayrollBreakdown()">
         <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;line-height:1.55;">Paid <strong>on top of</strong> the Rate of Pay, and the only allowance here that reaches the Salary Sheet — it gets its own column and is added to Net Salary. Because it sits outside Gross it changes nothing else: not PF, not ESI, not Professional Tax, and not the Diwali bonus. It is not reduced for leave, so lower it here for a month that warrants less.</p>
-        <div style="height:12px"></div>
-        <div id="esiQuestionsWrap">
-        <label class="field">Person with disability? (raises the ESI ceiling)</label>
-        <select class="field-input" id="f_esiDisabled" onchange="toggleStatutoryFieldsForHeading()">
-          <option value="no" ${emp.esiDisabled!=='yes'?'selected':''}>No</option>
-          <option value="yes" ${emp.esiDisabled==='yes'?'selected':''}>Yes — ceiling ₹25,000</option>
-        </select>
-        <div style="height:10px"></div>
-        <label class="field">Was already contributing to ESI when this half-year began?</label>
-        <select class="field-input" id="f_esiCovered" onchange="toggleStatutoryFieldsForHeading()">
-          <option value="no" ${emp.esiCoveredAtPeriodStart!=='yes'?'selected':''}>No — new joiner, or was above the ceiling</option>
-          <option value="yes" ${emp.esiCoveredAtPeriodStart==='yes'?'selected':''}>Yes — keep deducting to period end even if pay rises</option>
-        </select>
-        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Only matters once someone's gross goes above the ceiling. Answer No for a new employee — they were not contributing before they joined. Change it to Yes for an existing member whose pay rises past the ceiling mid half-year, so deductions carry on to 30 September or 31 March as the rules require.</p>
-        <div style="height:10px"></div>
-        </div>
-        <div id="pfQuestionsWrap">
-        <label class="field">Had a UAN or EPF account before?</label>
-        <select class="field-input" id="f_hasPriorUan" onchange="toggleStatutoryFieldsForHeading()">
-          <option value="yes" ${emp.hasPriorUan!=='no'?'selected':''}>Yes — has a prior UAN</option>
-          <option value="no" ${emp.hasPriorUan==='no'?'selected':''}>No — first-time member</option>
-        </select>
-        <div style="height:10px"></div>
-        <label class="field">Form 11 declaration submitted?</label>
-        <select class="field-input" id="f_form11" onchange="toggleStatutoryFieldsForHeading()">
-          <option value="no" ${emp.form11Submitted!=='yes'?'selected':''}>No</option>
-          <option value="yes" ${emp.form11Submitted==='yes'?'selected':''}>Yes — opted out of PF</option>
-        </select>
-        <div style="height:10px"></div>
-        </div>
-        <div id="pfWrap">
-        <label class="field">PF Eligible</label>
-        <select class="field-input" id="f_pfEligible" onchange="toggleStatutoryFieldsForHeading()">
-          <option value="" ${!['yes','no'].includes(emp.pfEligible)?'selected':''}>— Not configured —</option>
-          <option value="yes" ${emp.pfEligible==='yes'?'selected':''}>Yes</option>
-          <option value="no" ${emp.pfEligible==='no'?'selected':''}>No</option>
-        </select>
-        <div style="height:10px"></div>
-        <label class="field">PF Contribution Type</label>
-        <select class="field-input" id="f_pfContributionType" onchange="toggleStatutoryFieldsForHeading()">
-          <option value="" ${!['percent','fixed'].includes(emp.pfContributionType)?'selected':''}>— Select —</option>
-          <option value="percent" ${emp.pfContributionType==='percent'?'selected':''}>Percentage / Actual</option>
-          <option value="fixed" ${emp.pfContributionType==='fixed'?'selected':''}>Fixed ₹1,800</option>
-        </select>
-        <div style="height:10px"></div>
-        <label class="field" id="f_pf_label">PF (provident fund)</label>
-        <input type="number" id="f_pf" value="${emp.pf||''}" readonly
-               title="Calculated automatically from the configured payroll formula."
-               style="background:#F1F4FA;cursor:not-allowed;">
-        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;" id="pfRuleNote"></p>
-        <div style="height:12px"></div>
-        </div>
-        <div id="esiWrap">
-        <label class="field" id="f_esiDeduction_label">ESI</label>
-        <input type="number" id="f_esiDeduction" value="${emp.esiDeduction||''}" readonly
-               title="Calculated automatically from the configured payroll formula."
-               style="background:#F1F4FA;cursor:not-allowed;">
-        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;" id="esiRuleNote"></p>
-        <div style="height:12px"></div>
-        </div>
-        <div id="ptWrap">
-        <label class="field" id="f_pt_label">PT (professional tax)</label>
-        <input type="number" id="f_pt" value="${emp.pt||''}" readonly
-               title="Calculated automatically from the configured payroll formula."
-               style="background:#F1F4FA;cursor:not-allowed;">
-        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;" id="ptRuleNote"></p>
-        </div>
-        <p style="font-size:11.5px;color:var(--muted);margin:8px 0 0;" id="statutoryHint"></p>
-      </div>
-
-      <div class="field-group">
-        <div class="sec-title">Statutory &amp; bank details</div>
-        <label class="field">Cancelled cheque</label>
-        <input type="file" accept="image/*" id="f_chequeFile" onchange="handleChequeUpload(event)">
-        <div id="chequePreview">${!emp.chequeImg ? '' :
-          (/^https?:/.test(emp.chequeImg)
-            ? docCardHtml(emp.chequeImg)
-            : `<img class="cheque-img" src="${emp.chequeImg}" alt="Cancelled cheque">`)}</div>
-        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 12px;">The cheque stays on screen while you fill in the fields below, so the account number and IFSC are copied from the document rather than from memory. The IFSC is checked against the bank name as you type.</p>
-        <label class="field">PAN number</label>
-        <input type="text" id="f_pan" placeholder="ABCDE1234F" value="${emp.pan}">
-        <div style="height:12px"></div>
-        <label class="field">Aadhaar number</label>
-        <input type="text" id="f_aadhaar" placeholder="XXXX XXXX XXXX" value="${emp.aadhaar}">
-        <div style="height:12px"></div>
-        <div id="uanWrap">
-          <label class="field">UAN (PF number)</label>
-          <input type="text" id="f_uan" placeholder="10-digit UAN" value="${emp.uan}">
-          <div style="height:12px"></div>
-        </div>
-        <div id="esiNumberWrap">
-          <label class="field">ESI number</label>
-          <input type="text" id="f_esiNumber" placeholder="ESI number" value="${emp.esiNumber}">
-          <div style="height:12px"></div>
-        </div>
-        <label class="field">Bank name</label>
-        <input type="text" oninput="checkBankFieldsLive()" id="f_bankName" placeholder="e.g. HDFC Bank" value="${emp.bankName}">
-        <div style="height:12px"></div>
-        <label class="field">IFSC code</label>
-        <input type="text" oninput="checkBankFieldsLive()" id="f_ifsc" placeholder="e.g. HDFC0001234" value="${emp.ifsc}">
-        <div style="height:12px"></div>
-        <label class="field">Bank account number</label>
-        <input type="text" id="f_accountNumber" placeholder="Account number" value="${emp.accountNumber}">
-      </div>
-
-      <div class="field-group">
-        <div class="sec-title">Loans &amp; advances</div>
-        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;line-height:1.55;">
-          An employee can be repaying more than one at a time — each is recovered on its own
-          schedule and they all come off the Salary Sheet together. Recovery runs from the month
-          set against it and stops on its own once the whole amount is back; the last instalment
-          is whatever is left, so it never overshoots.
-        </p>
-        <div id="loanRowsBox"></div>
-        <a href="#" onclick="addLoanRow();return false;" style="font-size:13px;color:var(--amber-dark);font-weight:600;">+ Add a loan or advance</a>
+        <details style="margin:8px 0 0;"><summary style="font-size:12px;color:var(--muted);cursor:pointer;">Why Basic and HRA aren't typed here</summary>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Basic and HRA are worked out from Rate of Pay and the salary heading — they are shown in the breakdown further down and are no longer typed here, because the Salary Sheet has always derived them and ignored anything entered by hand.</p></details>
       </div>
 
       <div class="field-group">
@@ -10032,15 +9846,214 @@ function employeeModalHtml(emp){
       </div>
 
       <div class="field-group">
-        <div class="sec-title">Assets issued (at joining)</div>
-        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">What was handed over when this employee joined — uniform, laptop, phone, tools. Shows on the Employee Assets report and has to be returned before an Experience Letter can be issued.</p>
-        <div id="assetRowsBox"></div>
-        <a href="#" onclick="addAssetRow();return false;" style="font-size:13px;color:var(--amber-dark);font-weight:600;">+ Add an item</a>
+        <div class="sec-title">Rate of pay &amp; advances</div>
+        <label class="field">Rate of pay (monthly)</label>
+        <input type="number" id="f_ratePay" placeholder="0" value="${curPay.ratePay||''}" oninput="renderPayrollBreakdown()" ${hasIncrementHistory ? 'readonly' : ''}>
+        <div id="ratePayNote" style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;"></div>
+        ${hasIncrementHistory ? `<p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Current since ${salHist.slice().sort((a,b)=>(a.from||'').localeCompare(b.from||'')).slice(-1)[0].from || 'before increments were tracked'}. Rate of Pay and heading now change only through Record Increment further down, so a raise is never confused with an ordinary edit to the rest of this record.</p>` : ''}
+        <div id="directPayWrap" class="hidden">
+          <div style="height:12px"></div>
+          <label class="field">Paid directly to the employee's account?</label>
+          <select class="field-input" id="f_directPaid" onchange="toggleDirectPay()">
+            <option value="no" ${emp.directPaid==='yes'?'':'selected'}>No</option>
+            <option value="yes" ${emp.directPaid==='yes'?'selected':''}>Yes — deduct from net payable</option>
+          </select>
+          <div id="directPayAmountWrap" class="hidden">
+            <div style="height:10px"></div>
+            <label class="field">Amount paid directly (per month)</label>
+            <input type="number" class="field-input" id="f_directPaidAmount" placeholder="0" value="${emp.directPaidAmount||''}" oninput="renderPayrollBreakdown()">
+            <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Money already in their account, so it comes off Net Payable and shows as its own line on the Salary Sheet. Everything above it — Gross, PF, ESI, PT — is untouched.</p>
+          </div>
+        </div>
+        <div style="height:12px"></div>
+        <div id="payrollBreakdownBox"></div>
+        <div style="height:12px"></div>
+        <label class="field">Advance for temporary</label>
+        <input type="number" id="f_advanceTemp" placeholder="0" value="${emp.advanceTemp||''}">
+        <div style="height:12px"></div>
+        <label class="field">Advance</label>
+        <input type="number" id="f_advance" placeholder="0" value="${emp.advance||''}">
+        <div style="height:12px"></div>
+        <label class="field">Advance balance brought forward</label>
+        <input type="number" id="f_advanceOpening" placeholder="0" value="${emp.advanceOpening??''}">
+        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Enter the outstanding advance as it stands today, once. The Salary Sheet then carries it forward each month, less what is recovered, so it does not need entering again.</p>
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Loans &amp; advances</div>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;line-height:1.55;">
+          An employee can be repaying more than one at a time — each is recovered on its own
+          schedule and they all come off the Salary Sheet together. Recovery runs from the month
+          set against it and stops on its own once the whole amount is back; the last instalment
+          is whatever is left, so it never overshoots.
+        </p>
+        <div id="loanRowsBox"></div>
+        <a href="#" onclick="addLoanRow();return false;" style="font-size:13px;color:var(--amber-dark);font-weight:600;">+ Add a loan or advance</a>
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Salary sheet heading</div>
+        <label class="field">Heading</label>
+        <select class="field-input" id="f_salaryHeading" onchange="toggleStatutoryFieldsForHeading()" ${hasIncrementHistory ? 'disabled' : ''}>
+          ${Object.keys(SALARY_HEADINGS).map(k => `<option value="${k}" ${(curPay.salaryHeading===k)?'selected':''}>${SALARY_HEADINGS[k].label}</option>`).join('')}
+        </select>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Picks which Basic/HRA/LTA split formula applies to this employee on the Salary Sheet, and which of PF/ESI/PT apply at all — set once here, applied automatically every month.</p>
+        <div id="headingCalcBox"></div>
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">PF, ESI &amp; PT</div>
+        <div id="pfQuestionsWrap">
+        <label class="field">Had a UAN or EPF account before?</label>
+        <select class="field-input" id="f_hasPriorUan" onchange="toggleStatutoryFieldsForHeading()">
+          <option value="yes" ${emp.hasPriorUan!=='no'?'selected':''}>Yes — has a prior UAN</option>
+          <option value="no" ${emp.hasPriorUan==='no'?'selected':''}>No — first-time member</option>
+        </select>
+        <div style="height:10px"></div>
+        <label class="field">Form 11 declaration submitted?</label>
+        <select class="field-input" id="f_form11" onchange="toggleStatutoryFieldsForHeading()">
+          <option value="no" ${emp.form11Submitted!=='yes'?'selected':''}>No</option>
+          <option value="yes" ${emp.form11Submitted==='yes'?'selected':''}>Yes — opted out of PF</option>
+        </select>
+        <div style="height:10px"></div>
+        </div>
+        <div id="pfWrap">
+        <label class="field">PF Eligible</label>
+        <select class="field-input" id="f_pfEligible" onchange="toggleStatutoryFieldsForHeading()">
+          <option value="" ${!['yes','no'].includes(emp.pfEligible)?'selected':''}>— Not configured —</option>
+          <option value="yes" ${emp.pfEligible==='yes'?'selected':''}>Yes</option>
+          <option value="no" ${emp.pfEligible==='no'?'selected':''}>No</option>
+        </select>
+        <div style="height:10px"></div>
+        <label class="field">PF Contribution Type</label>
+        <select class="field-input" id="f_pfContributionType" onchange="toggleStatutoryFieldsForHeading()">
+          <option value="" ${!['percent','fixed'].includes(emp.pfContributionType)?'selected':''}>— Select —</option>
+          <option value="percent" ${emp.pfContributionType==='percent'?'selected':''}>Percentage / Actual</option>
+          <option value="fixed" ${emp.pfContributionType==='fixed'?'selected':''}>Fixed ₹1,800</option>
+        </select>
+        <div style="height:10px"></div>
+        <label class="field" id="f_pf_label">PF (provident fund)</label>
+        <input type="number" id="f_pf" value="${emp.pf||''}" readonly
+               title="Calculated automatically from the configured payroll formula."
+               style="background:#F1F4FA;cursor:not-allowed;">
+        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;" id="pfRuleNote"></p>
+        <div style="height:12px"></div>
+        </div>
+        <div id="esiQuestionsWrap">
+        <label class="field">Person with disability? (raises the ESI ceiling)</label>
+        <select class="field-input" id="f_esiDisabled" onchange="toggleStatutoryFieldsForHeading()">
+          <option value="no" ${emp.esiDisabled!=='yes'?'selected':''}>No</option>
+          <option value="yes" ${emp.esiDisabled==='yes'?'selected':''}>Yes — ceiling ₹25,000</option>
+        </select>
+        <div style="height:10px"></div>
+        <label class="field">Was already contributing to ESI when this half-year began?</label>
+        <select class="field-input" id="f_esiCovered" onchange="toggleStatutoryFieldsForHeading()">
+          <option value="no" ${emp.esiCoveredAtPeriodStart!=='yes'?'selected':''}>No — new joiner, or was above the ceiling</option>
+          <option value="yes" ${emp.esiCoveredAtPeriodStart==='yes'?'selected':''}>Yes — keep deducting to period end even if pay rises</option>
+        </select>
+        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Only matters once someone's gross goes above the ceiling. Answer No for a new employee — they were not contributing before they joined. Change it to Yes for an existing member whose pay rises past the ceiling mid half-year, so deductions carry on to 30 September or 31 March as the rules require.</p>
+        <div style="height:10px"></div>
+        </div>
+        <div id="esiWrap">
+        <label class="field" id="f_esiDeduction_label">ESI</label>
+        <input type="number" id="f_esiDeduction" value="${emp.esiDeduction||''}" readonly
+               title="Calculated automatically from the configured payroll formula."
+               style="background:#F1F4FA;cursor:not-allowed;">
+        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;" id="esiRuleNote"></p>
+        <div style="height:12px"></div>
+        </div>
+        <div id="ptWrap">
+        <label class="field" id="f_pt_label">PT (professional tax)</label>
+        <input type="number" id="f_pt" value="${emp.pt||''}" readonly
+               title="Calculated automatically from the configured payroll formula."
+               style="background:#F1F4FA;cursor:not-allowed;">
+        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;" id="ptRuleNote"></p>
+        </div>
+        <p style="font-size:11.5px;color:var(--muted);margin:8px 0 0;" id="statutoryHint"></p>
+        <div style="height:10px"></div>
+        <button type="button" class="btn ghost full" onclick="openIncrementModal('${emp.id}')">📈 Record Increment</button>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Adds a new Rate of Pay effective from a chosen date — this is the only way Rate of Pay and salary heading change once the first increment has been recorded, so a raise is never confused with an ordinary edit to the rest of this record.</p>
+        ${salHist.length > 1 || hasIncrementHistory ? `
+        <div style="height:10px"></div>
+        <details><summary style="font-size:12.5px;color:var(--muted);cursor:pointer;">Salary history (${salHist.length})</summary>
+          <div style="font-size:12.5px;color:var(--muted);margin-top:6px;">
+            ${salHist.slice().sort((a,b)=>(a.from||'').localeCompare(b.from||'')).map(h => `<div style="padding:4px 0;border-bottom:1px solid var(--border,#e5e5e5);">${h.from ? escapeHtml(h.from) : 'Before increments were tracked'} — ₹${fmtMoney(Number(h.ratePay)||0)}, ${escapeHtml((SALARY_HEADINGS[h.salaryHeading]||{}).label || h.salaryHeading || '')}</div>`).join('')}
+          </div>
+        </details>` : ''}
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Leave opening balances</div>
+        <div id="leaveOpeningFields" class="${emp.employeeType==='resident'?'hidden':''}">
+          <label class="field">SL opening balance (this year)</label>
+          <input type="number" id="f_slOpening" placeholder="0" value="${emp.slOpening??''}">
+          <div style="height:12px"></div>
+          <label class="field">EL opening balance (this year)</label>
+          <input type="number" id="f_elOpening" placeholder="0" value="${emp.elOpening??''}">
+          <div style="height:10px"></div>
+          <label class="field">These balances are as at (month)</label>
+          <input type="month" class="field-input" id="f_leaveOpeningFrom" value="${emp.leaveOpeningFrom || ''}">
+          <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Leave taken from this month onward is deducted from the balances above. Leave it blank and the financial year start is used.</p>
+          <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Enter manually for this year only. From next year onward, the EL Calculation Sheet report carries the closing balance forward automatically.</p>
+        </div>
+        <p class="${emp.employeeType==='resident'?'':'hidden'}" id="residentLeaveNote" style="font-size:12px;color:var(--muted);margin:0;">Resident Engineers are outside the SL/EL leave scheme, so there is no opening balance to enter.</p>
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Diwali bonus eligibility</div>
+        <label class="field">Eligible this year?</label>
+        <select class="field-input" id="f_diwaliEligible" onchange="updateBonusPreview()">
+          <option value="yes" ${emp.diwaliEligible==='yes'?'selected':''}>Yes</option>
+          <option value="no" ${emp.diwaliEligible==='no'?'selected':''}>No</option>
+        </select>
+        <div class="bonus-callout" id="bonusPreview" style="margin-top:12px;">Calculated Diwali bonus: Rs. ${diwaliBonusFor(emp)}</div>
+        <details style="margin-top:8px;"><summary style="font-size:12px;color:var(--muted);cursor:pointer;">How this is worked out</summary>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;">Worked out automatically — nothing to enter by hand. It is one whole month at the Rate of Pay: Basic plus HRA plus LTA, with <strong>no PF, ESI, Professional Tax, advance, loan instalment or retention taken off</strong>, and no reduction for leave taken during the year. Other allowances, dress and mobile are separate from the Rate of Pay and are not added in.</p></details>
+        <div style="height:14px"></div>
+        <label class="field">Diwali bonus amount</label>
+        <input type="number" id="f_diwaliBonusAmount" placeholder="Leave blank for one month's pay" value="${emp.diwaliBonusAmount||''}" oninput="updateBonusPreview()">
+        <details style="margin:8px 0 0;"><summary style="font-size:12px;color:var(--muted);cursor:pointer;">What this figure is used for</summary>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;">The figure this employee is actually paid at Diwali, used exactly as entered — the Diwali Bonus Report, the payment sheet and the CTC all take it from here, and nothing is ever deducted from it. <strong style="color:var(--amber-dark);">Left blank, no bonus is paid</strong> and they will not appear on the payment sheet; the box above offers one month's pay if that is the figure you want. It is only paid at all if the eligibility above says Yes.</p></details>
       </div>
 
       <div class="field-group">
         <div class="sec-title">Special remarks</div>
         <textarea class="field-input" id="f_specialRemarks" rows="4" placeholder="Anything else worth noting about this employee">${escapeHtml(emp.specialRemarks||'')}</textarea>
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Statutory &amp; bank details</div>
+        <label class="field">Cancelled cheque</label>
+        <input type="file" accept="image/*" id="f_chequeFile" onchange="handleChequeUpload(event)">
+        <div id="chequePreview">${!emp.chequeImg ? '' :
+          (/^https?:/.test(emp.chequeImg)
+            ? docCardHtml(emp.chequeImg)
+            : `<img class="cheque-img" src="${emp.chequeImg}" alt="Cancelled cheque">`)}</div>
+        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 12px;">The cheque stays on screen while you fill in the fields below, so the account number and IFSC are copied from the document rather than from memory. The IFSC is checked against the bank name as you type.</p>
+        <label class="field">PAN number</label>
+        <input type="text" id="f_pan" placeholder="ABCDE1234F" value="${emp.pan}">
+        <div style="height:12px"></div>
+        <label class="field">Aadhaar number</label>
+        <input type="text" id="f_aadhaar" placeholder="XXXX XXXX XXXX" value="${emp.aadhaar}">
+        <div style="height:12px"></div>
+        <div id="uanWrap">
+          <label class="field">UAN (PF number)</label>
+          <input type="text" id="f_uan" placeholder="10-digit UAN" value="${emp.uan}">
+          <div style="height:12px"></div>
+        </div>
+        <div id="esiNumberWrap">
+          <label class="field">ESI number</label>
+          <input type="text" id="f_esiNumber" placeholder="ESI number" value="${emp.esiNumber}">
+          <div style="height:12px"></div>
+        </div>
+        <label class="field">Bank name</label>
+        <input type="text" oninput="checkBankFieldsLive()" id="f_bankName" placeholder="e.g. HDFC Bank" value="${emp.bankName}">
+        <div style="height:12px"></div>
+        <label class="field">IFSC code</label>
+        <input type="text" oninput="checkBankFieldsLive()" id="f_ifsc" placeholder="e.g. HDFC0001234" value="${emp.ifsc}">
+        <div style="height:12px"></div>
+        <label class="field">Bank account number</label>
+        <input type="text" id="f_accountNumber" placeholder="Account number" value="${emp.accountNumber}">
       </div>
 
       <div class="field-group">
@@ -10166,6 +10179,8 @@ function toggleGpaFields(){
 function toggleLeaveFieldsForType(){
   const isResident = document.getElementById('f_employeeType').value === 'resident';
   document.getElementById('leaveOpeningFields').classList.toggle('hidden', isResident);
+  const leaveNote = document.getElementById('residentLeaveNote');
+  if(leaveNote) leaveNote.classList.toggle('hidden', !isResident);
   const resBox = document.getElementById('residentFields');
   if(resBox){
     resBox.classList.toggle('hidden', !isResident);
