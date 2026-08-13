@@ -6160,11 +6160,29 @@ let fullscreenOriginalNextSibling = null;
 function openFullscreenView(title, sourceId){
   const el = document.getElementById(sourceId);
   if(!el) return;
+  const fsBody = document.getElementById('fullscreenBody');
+  // A different report is already showing full screen — restore it to its
+  // own place first. Every report now auto-opens full screen on generate,
+  // so generating a second report before closing the first used to just
+  // overwrite fullscreenActiveId and append the new box on top, leaving the
+  // previous report's whole box (header, table, action bar) still sitting
+  // inside #fullscreenBody underneath the new one — reports stacked on top
+  // of each other instead of replacing one another.
+  if(fullscreenActiveId && fullscreenActiveId !== sourceId) closeFullscreenView();
+  // Only remember where this box truly lives the first time it's moved.
+  // Calling this again for the SAME box while it is already inside
+  // #fullscreenBody — regenerating the same report for a different month
+  // without leaving full screen — would otherwise overwrite
+  // fullscreenOriginalParent with #fullscreenBody itself, and closing full
+  // screen afterward would leave the box trapped inside it instead of back
+  // on its own tab.
+  if(el.parentElement !== fsBody){
+    fullscreenOriginalParent = el.parentElement;
+    fullscreenOriginalNextSibling = el.nextSibling;
+  }
   fullscreenActiveId = sourceId;
-  fullscreenOriginalParent = el.parentElement;
-  fullscreenOriginalNextSibling = el.nextSibling;
   document.getElementById('fullscreenTitle').textContent = title;
-  document.getElementById('fullscreenBody').appendChild(el);
+  fsBody.appendChild(el);
   document.getElementById('fullscreenSheetRoot').classList.remove('hidden');
   document.body.style.overflow = 'hidden';
   try{
