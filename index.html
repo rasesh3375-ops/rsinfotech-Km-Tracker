@@ -5359,7 +5359,7 @@ function buildHeadingExplainer(key){
     `<div class="calc-line"><strong>Net = ₹${fmtMoney(ex.net)}</strong> <span class="calc-note">(PF, ESI, advances and retention taken as 0 here — those come from the employee's own figures)</span></div>`;
 
   return `
-    <details class="calc-card fold-card" open>
+    <details class="calc-card fold-card">
       <summary class="calc-head">${h.label} — how this is calculated</summary>
 
       <div class="calc-sec"><div class="calc-label">Formula Used</div>${formulaRows}</div>
@@ -9318,7 +9318,11 @@ function emptyEmployee(){
     fatherName:'', motherName:'',
     bondStart:'', bondEnd:'', retentionMoney:0, retentionMonths:0,
     aadhaarCardImg:'', panCardImg:'', educationCertImg:'', signatureImg:'', otherDocs:[],
-    checklists:{ joining:{}, exit:{} }
+    checklists:{ joining:{}, exit:{} },
+    assets:[],
+    wcApplicable:'no', wcPolicyNumber:'', wcProvider:'', wcSumInsured:'', wcExpiryDate:'',
+    gpaApplicable:'no', gpaPolicyNumber:'', gpaProvider:'', gpaSumInsured:'', gpaExpiryDate:'',
+    specialRemarks:''
   };
 }
 
@@ -9468,7 +9472,8 @@ function employeeModalHtml(emp){
           <option value="wfh" ${emp.employeeType==='wfh'?'selected':''}>Work From Home</option>
           <option value="resident" ${emp.employeeType==='resident'?'selected':''}>Resident Engineer</option>
         </select>
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">This decides which leave rules apply. Field Engineers and Office Staff get the full policy — 7 sick leaves a year, short leave, late-coming and sandwich-leave rules — with overtime for those who record trips. Work From Home gets 4 sick leaves a year and no short leave. Resident Engineers are excluded entirely from SL/EL balances, overtime, short leave, late-coming and sandwich-leave rules.</p>
+        <details style="margin:8px 0 0;"><summary style="font-size:12px;color:var(--muted);cursor:pointer;">What this decides</summary>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">This decides which leave rules apply. Field Engineers and Office Staff get the full policy — 7 sick leaves a year, short leave, late-coming and sandwich-leave rules — with overtime for those who record trips. Work From Home gets 4 sick leaves a year and no short leave. Resident Engineers are excluded entirely from SL/EL balances, overtime, short leave, late-coming and sandwich-leave rules.</p></details>
         <div id="leaveOpeningFields" class="${emp.employeeType==='resident'?'hidden':''}" style="margin-top:14px;">
           <label class="field">SL opening balance (this year)</label>
           <input type="number" id="f_slOpening" placeholder="0" value="${emp.slOpening??''}">
@@ -9523,7 +9528,8 @@ function employeeModalHtml(emp){
         <div style="height:14px"></div>
         <label class="field">Diwali bonus amount</label>
         <input type="number" id="f_diwaliBonusAmount" placeholder="Leave blank for one month's pay" value="${emp.diwaliBonusAmount||''}" oninput="updateBonusPreview()">
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;">The figure this employee is actually paid at Diwali, used exactly as entered — the Diwali Bonus Report, the payment sheet and the CTC all take it from here, and nothing is ever deducted from it. <strong style="color:var(--amber-dark);">Left blank, no bonus is paid</strong> and they will not appear on the payment sheet; the box below the eligibility question offers one month's pay if that is the figure you want. It is only paid at all if the eligibility below says Yes.</p>
+        <details style="margin:8px 0 0;"><summary style="font-size:12px;color:var(--muted);cursor:pointer;">What this figure is used for</summary>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;">The figure this employee is actually paid at Diwali, used exactly as entered — the Diwali Bonus Report, the payment sheet and the CTC all take it from here, and nothing is ever deducted from it. <strong style="color:var(--amber-dark);">Left blank, no bonus is paid</strong> and they will not appear on the payment sheet; the box below the eligibility question offers one month's pay if that is the figure you want. It is only paid at all if the eligibility below says Yes.</p></details>
         <div style="height:14px"></div>
         <label class="field">Rate of pay (monthly)</label>
         <input type="number" id="f_ratePay" placeholder="0" value="${curPay.ratePay||''}" oninput="renderPayrollBreakdown()" ${hasIncrementHistory ? 'readonly' : ''}>
@@ -9577,7 +9583,8 @@ function employeeModalHtml(emp){
 
       <div class="field-group">
         <div class="sec-title">Salary structure (for salary slip)</div>
-        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Basic and HRA are worked out from Rate of Pay and the salary heading — they are shown in the breakdown above and are no longer typed here, because the Salary Sheet has always derived them and ignored anything entered by hand.</p>
+        <details style="margin:0 0 12px;"><summary style="font-size:12px;color:var(--muted);cursor:pointer;">Why Basic and HRA aren't typed here</summary>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Basic and HRA are worked out from Rate of Pay and the salary heading — they are shown in the breakdown above and are no longer typed here, because the Salary Sheet has always derived them and ignored anything entered by hand.</p></details>
         <label class="field">Other allowances</label>
         <input type="number" id="f_otherAllowances" placeholder="0" value="${emp.otherAllowances||''}">
         <div style="height:12px"></div>
@@ -9739,7 +9746,64 @@ function employeeModalHtml(emp){
           <option value="no" ${emp.diwaliEligible==='no'?'selected':''}>No</option>
         </select>
         <div class="bonus-callout" id="bonusPreview" style="margin-top:12px;">Calculated Diwali bonus: Rs. ${diwaliBonusFor(emp)}</div>
-        <p style="font-size:12px;color:var(--muted);margin:0;line-height:1.55;">Worked out automatically — nothing to enter by hand. It is one whole month at the Rate of Pay: Basic plus HRA plus LTA, with <strong>no PF, ESI, Professional Tax, advance, loan instalment or retention taken off</strong>, and no reduction for leave taken during the year. Other allowances, dress and mobile are separate from the Rate of Pay and are not added in.</p>
+        <details style="margin-top:8px;"><summary style="font-size:12px;color:var(--muted);cursor:pointer;">How this is worked out</summary>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;">Worked out automatically — nothing to enter by hand. It is one whole month at the Rate of Pay: Basic plus HRA plus LTA, with <strong>no PF, ESI, Professional Tax, advance, loan instalment or retention taken off</strong>, and no reduction for leave taken during the year. Other allowances, dress and mobile are separate from the Rate of Pay and are not added in.</p></details>
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Assets issued (at joining)</div>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">What was handed over when this employee joined — uniform, laptop, phone, tools. Shows on the Employee Assets report and has to be returned before an Experience Letter can be issued.</p>
+        <div id="assetRowsBox"></div>
+        <a href="#" onclick="addAssetRow();return false;" style="font-size:13px;color:var(--amber-dark);font-weight:600;">+ Add an item</a>
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Workman Compensation (WC)</div>
+        <label class="field">Covered under Workman Compensation insurance?</label>
+        <select class="field-input" id="f_wcApplicable" onchange="toggleWcFields()">
+          <option value="no" ${emp.wcApplicable==='yes'?'':'selected'}>No</option>
+          <option value="yes" ${emp.wcApplicable==='yes'?'selected':''}>Yes</option>
+        </select>
+        <div id="wcFields" class="${emp.wcApplicable==='yes'?'':'hidden'}" style="margin-top:12px;">
+          <label class="field">Policy number</label>
+          <input type="text" id="f_wcPolicyNumber" placeholder="Policy number" value="${escapeHtml(emp.wcPolicyNumber||'')}">
+          <div style="height:10px"></div>
+          <label class="field">Insurance provider</label>
+          <input type="text" id="f_wcProvider" placeholder="e.g. New India Assurance" value="${escapeHtml(emp.wcProvider||'')}">
+          <div style="height:10px"></div>
+          <label class="field">Sum insured</label>
+          <input type="text" id="f_wcSumInsured" placeholder="e.g. ₹9,00,000" value="${escapeHtml(emp.wcSumInsured||'')}">
+          <div style="height:10px"></div>
+          <label class="field">Policy expiry date</label>
+          <input type="date" id="f_wcExpiryDate" value="${emp.wcExpiryDate||''}">
+        </div>
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Group Personal Accident (GPA)</div>
+        <label class="field">Covered under Group Personal Accident insurance?</label>
+        <select class="field-input" id="f_gpaApplicable" onchange="toggleGpaFields()">
+          <option value="no" ${emp.gpaApplicable==='yes'?'':'selected'}>No</option>
+          <option value="yes" ${emp.gpaApplicable==='yes'?'selected':''}>Yes</option>
+        </select>
+        <div id="gpaFields" class="${emp.gpaApplicable==='yes'?'':'hidden'}" style="margin-top:12px;">
+          <label class="field">Policy number</label>
+          <input type="text" id="f_gpaPolicyNumber" placeholder="Policy number" value="${escapeHtml(emp.gpaPolicyNumber||'')}">
+          <div style="height:10px"></div>
+          <label class="field">Insurance provider</label>
+          <input type="text" id="f_gpaProvider" placeholder="e.g. ICICI Lombard" value="${escapeHtml(emp.gpaProvider||'')}">
+          <div style="height:10px"></div>
+          <label class="field">Sum insured</label>
+          <input type="text" id="f_gpaSumInsured" placeholder="e.g. ₹5,00,000" value="${escapeHtml(emp.gpaSumInsured||'')}">
+          <div style="height:10px"></div>
+          <label class="field">Policy expiry date</label>
+          <input type="date" id="f_gpaExpiryDate" value="${emp.gpaExpiryDate||''}">
+        </div>
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Special remarks</div>
+        <textarea class="field-input" id="f_specialRemarks" rows="4" placeholder="Anything else worth noting about this employee">${escapeHtml(emp.specialRemarks||'')}</textarea>
       </div>
 
       <div class="field-group">
@@ -9828,6 +9892,30 @@ function toggleBondFields(){
   // leave a retention amount behind that the Salary Sheet would keep deducting.
   if(!on){
     ['f_bondStart','f_bondEnd','f_retentionMoney','f_retentionMonths'].forEach(id => {
+      const el = document.getElementById(id);
+      if(el) el.value = '';
+    });
+  }
+}
+
+function toggleWcFields(){
+  const on = (document.getElementById('f_wcApplicable') || {}).value === 'yes';
+  const box = document.getElementById('wcFields');
+  if(box) box.classList.toggle('hidden', !on);
+  if(!on){
+    ['f_wcPolicyNumber','f_wcProvider','f_wcSumInsured','f_wcExpiryDate'].forEach(id => {
+      const el = document.getElementById(id);
+      if(el) el.value = '';
+    });
+  }
+}
+
+function toggleGpaFields(){
+  const on = (document.getElementById('f_gpaApplicable') || {}).value === 'yes';
+  const box = document.getElementById('gpaFields');
+  if(box) box.classList.toggle('hidden', !on);
+  if(!on){
+    ['f_gpaPolicyNumber','f_gpaProvider','f_gpaSumInsured','f_gpaExpiryDate'].forEach(id => {
       const el = document.getElementById(id);
       if(el) el.value = '';
     });
@@ -10242,7 +10330,9 @@ function renderRatePayNote(){
     : 'So when agreeing a figure: quote this as the whole monthly amount. Take-home is only reduced by ' +
       andList(alsoOut) + '.';
 
-  box.innerHTML = para1 + '<br><br>' + para2 + '<br><br>' + para3;
+  box.innerHTML = `<details><summary style="font-size:12px;color:var(--muted);cursor:pointer;">What Rate of Pay means for this heading</summary>
+    <div style="font-size:12px;color:var(--muted);line-height:1.55;margin-top:8px;">${para1}<br><br>${para2}<br><br>${para3}</div>
+  </details>`;
 }
 
 function renderPayrollBreakdown(){
@@ -10526,6 +10616,71 @@ function collectLoanRows(){
   return out;
 }
 
+// Same shape as the Joining Kit's assets (item, qty, issuedOn, returnedOn), so
+// an item added here shows up there too and vice versa — one list, followed by
+// the employee, not two that can disagree.
+function renderAssetRows(){
+  const box = document.getElementById('assetRowsBox');
+  if(!box) return;
+  const assets = editingEmployeeDraft.assets || [];
+  if(!assets.length){
+    box.innerHTML = '<p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;">Nothing issued yet.</p>';
+    return;
+  }
+  box.innerHTML = assets.map((a, i) => `
+    <div class="emp-row" style="margin-bottom:12px;">
+      <div class="head">
+        <strong>${escapeHtml(a.item || 'Item ' + (i + 1))}</strong>
+        <a href="#" onclick="removeAssetRow(${i});return false;" style="font-size:12px;color:var(--muted);">Remove</a>
+      </div>
+      <div style="height:8px"></div>
+      <label class="field">Item</label>
+      <input type="text" id="asset_item_${i}" placeholder="e.g. Uniform, Laptop" value="${escapeHtml(a.item || '')}">
+      <div style="height:10px"></div>
+      <label class="field">Quantity</label>
+      <input type="number" id="asset_qty_${i}" placeholder="1" value="${a.qty || ''}">
+      <div style="height:10px"></div>
+      <label class="field">Issued on</label>
+      <input type="date" id="asset_issued_${i}" value="${a.issuedOn || ''}">
+      <div style="height:10px"></div>
+      <label class="field">Returned on (if applicable)</label>
+      <input type="date" id="asset_returned_${i}" value="${a.returnedOn || ''}">
+    </div>`).join('');
+}
+
+function addAssetRow(){
+  if(!Array.isArray(editingEmployeeDraft.assets)) editingEmployeeDraft.assets = [];
+  editingEmployeeDraft.assets.push({ item:'', qty:1, issuedOn: todayStr(), returnedOn:'' });
+  renderAssetRows();
+}
+
+function removeAssetRow(i){
+  const assets = editingEmployeeDraft.assets || [];
+  const a = assets[i];
+  if(a && a.item && !a.returnedOn &&
+     !confirm('Remove "' + a.item + '" from the issued list?\n\nIt has not been marked returned — if it is simply back, set a Returned on date instead so the record shows it came back.')) return;
+  assets.splice(i, 1);
+  renderAssetRows();
+}
+
+// Reads the rows back out of the form. Rows left with no item name are dropped
+// rather than saved as a blank asset.
+function collectAssetRows(){
+  const out = [];
+  const assets = editingEmployeeDraft.assets || [];
+  assets.forEach((a, i) => {
+    const item = ((document.getElementById('asset_item_' + i) || {}).value || '').trim();
+    if(!item) return;
+    out.push({
+      item,
+      qty: Number((document.getElementById('asset_qty_' + i) || {}).value) || 0,
+      issuedOn: (document.getElementById('asset_issued_' + i) || {}).value || a.issuedOn || todayStr(),
+      returnedOn: (document.getElementById('asset_returned_' + i) || {}).value || ''
+    });
+  });
+  return out;
+}
+
 function addOtherDocSlot(){
   const box = document.getElementById('otherDocsBox');
   const idx = box.children.length;
@@ -10630,9 +10785,14 @@ async function openAddEmployeeModal(id){
   // A record still holding one loan in the old flat fields is shown as a
   // one-entry ledger. Saving the form is what writes it back in the new shape.
   if(!Array.isArray(editingEmployeeDraft.loans)) editingEmployeeDraft.loans = loansOf(editingEmployeeDraft);
+  // The Joining Kit pads unused slots with null so slot numbers stay stable
+  // there; this list only ever shows real items, so those padding slots are
+  // dropped rather than rendered as blank rows.
+  editingEmployeeDraft.assets = (editingEmployeeDraft.assets || []).filter(a => a && a.item);
   document.getElementById('employeeModalRoot').innerHTML = employeeModalHtml(editingEmployeeDraft);
   toggleStatutoryFieldsForHeading();
   renderLoanRows();
+  renderAssetRows();
 
   // Offer the draft back only when it belongs to this form — a half-finished
   // new employee must never be poured into someone else's record.
@@ -10925,7 +11085,19 @@ async function saveEmployeeForm(){
     salaryHeading: document.getElementById('f_salaryHeading').value,
     ratePay: Number(document.getElementById('f_ratePay').value)||0,
     advanceTemp: Number(document.getElementById('f_advanceTemp').value)||0,
-    advance: Number(document.getElementById('f_advance').value)||0
+    advance: Number(document.getElementById('f_advance').value)||0,
+    assets: collectAssetRows(),
+    wcApplicable: (document.getElementById('f_wcApplicable') || {}).value || 'no',
+    wcPolicyNumber: ((document.getElementById('f_wcPolicyNumber') || {}).value || '').trim(),
+    wcProvider: ((document.getElementById('f_wcProvider') || {}).value || '').trim(),
+    wcSumInsured: ((document.getElementById('f_wcSumInsured') || {}).value || '').trim(),
+    wcExpiryDate: (document.getElementById('f_wcExpiryDate') || {}).value || '',
+    gpaApplicable: (document.getElementById('f_gpaApplicable') || {}).value || 'no',
+    gpaPolicyNumber: ((document.getElementById('f_gpaPolicyNumber') || {}).value || '').trim(),
+    gpaProvider: ((document.getElementById('f_gpaProvider') || {}).value || '').trim(),
+    gpaSumInsured: ((document.getElementById('f_gpaSumInsured') || {}).value || '').trim(),
+    gpaExpiryDate: (document.getElementById('f_gpaExpiryDate') || {}).value || '',
+    specialRemarks: ((document.getElementById('f_specialRemarks') || {}).value || '').trim()
   });
   // Validation is done; from here on the write must not be entered twice.
   employeeSaveInFlight = true;
