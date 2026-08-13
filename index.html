@@ -11775,14 +11775,23 @@ async function renderReportsTab(){
     {key:'assets', label:'Employee Assets'},
     {key:'insurance', label:'Employee Insurance Details'}
   ];
+  // Birthday and Increment recur every year on the same month regardless of
+  // which year it falls in, so the filter here is month-only — no year — and
+  // "All months" (the default) keeps today's full-list behaviour.
+  const MONTH_FILTER_REPORTS = { birthday:1, increment:1 };
   document.getElementById('reportCardsBox').innerHTML = reports.map(r => {
     // Count only the people the report will actually show, so the card does
     // not promise rows that are then filtered out.
     const withData = employees.filter(e => e.employmentStatus !== 'left' && reportHasData(r.key, e)).length;
+    const monthPicker = MONTH_FILTER_REPORTS[r.key] ? `<select class="field-input" id="reportMonthSel_${r.key}" style="margin-bottom:10px;">
+        <option value="">All months</option>
+        ${MONTH_NAMES.map((m, i) => `<option value="${String(i+1).padStart(2,'0')}">${m}</option>`).join('')}
+      </select>` : '';
     return `<section class="block">
       <h2 style="margin:0 0 4px;">${r.label}</h2>
       <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">${withData} employees with data</p>
-      <button class="btn full" onclick="withBusy(this,'Loading…',()=>viewReport('${r.key}','${r.label}'))">View report</button>
+      ${monthPicker}
+      <button class="btn full" onclick="withBusy(this,'Loading…',()=>viewReport('${r.key}','${r.label}',(document.getElementById('reportMonthSel_${r.key}')||{}).value||''))">View report</button>
       <div id="reportBox_${r.key}"></div>
     </section>`;
   }).join('');
@@ -12593,13 +12602,17 @@ function closeHolidayListOutput(){
   document.getElementById('holidayListOutput').classList.add('hidden');
 }
 
-async function viewReport(key, label){
+async function viewReport(key, label, monthFilter){
   // Every one of these reports is about current staff — contact details,
   // birthdays, increments due, bonus, salary, CTC, loans and retention. A
   // leaver belongs in the Left Employees report, not in a bonus list somebody
   // pays from.
   const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
   const box = document.getElementById('reportBox_' + key);
+  // Birthday and Increment carry an optional month-only filter (see
+  // renderReportsTab) — folded into the title everywhere the report's name
+  // appears, so a shared/printed copy says which month it is, not just "Due".
+  label = monthFilter ? label + ' — ' + MONTH_NAMES[Number(monthFilter) - 1] : label;
   // Lives inside a card on the Reports tab, not its own nav tab, so Close
   // clears the card rather than navigating away from the whole tab.
   const fsBtn = reportActionBar(label, 'reportBox_' + key, `clearReportBox('reportBox_${key}')`);
@@ -12644,15 +12657,21 @@ async function viewReport(key, label){
     rows = employees.map(e => `<tr><td class="sal-name">${escapeHtml(e.name)}</td><td>${escapeHtml(e.designation||'')}</td><td>${escapeHtml(e.phone||'')}</td><td>${escapeHtml(e.email||'')}</td></tr>`).join('');
     box.innerHTML = `<div class="sal-sheet-wrap print-isolate" id="reportPrintArea_contact">${reportLogoHeader(label)}<table class="sal-table"><tr><th>Name</th><th>Designation</th><th>Phone</th><th>Email</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table></div>${fsBtn}`;
   } else if(key === 'birthday'){
+    // dob is a plain "YYYY-MM-DD" date-input value — the month is read by
+    // string slice, not new Date().getMonth(), which would shift it a day in
+    // a timezone behind UTC (see CLAUDE.md).
+    const birthdayList = employees.filter(e => e.dob && (!monthFilter || e.dob.slice(5,7) === monthFilter));
     csvHeader = ['Name','Date of birth'];
-    csvRows = employees.filter(e=>e.dob).map(e => [e.name, e.dob]);
-    rows = employees.filter(e=>e.dob).map(e => `<tr><td class="sal-name">${escapeHtml(e.name)}</td><td>${e.dob}</td></tr>`).join('');
+    csvRows = birthdayList.map(e => [e.name, e.dob]);
+    rows = birthdayList.map(e => `<tr><td class="sal-name">${escapeHtml(e.name)}</td><td>${e.dob}</td></tr>`).join('');
     box.innerHTML = `<div class="sal-sheet-wrap print-isolate" id="reportPrintArea_birthday">${reportLogoHeader(label)}<table class="sal-table"><tr><th>Name</th><th>Date of birth</th></tr>${rows || '<tr><td colspan="2" class="empty">No data yet</td></tr>'}</table></div>${fsBtn}`;
   } else if(key === 'increment'){
     csvHeader = ['Name','Increment month','Increment date','Last salary (gross)','Status','Next increment date'];
-    rows = employees.filter(e=>e.nextIncrement).map(e => {
-      const d = new Date(e.nextIncrement);
-      const monthName = d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+    rows = employees.filter(e => e.nextIncrement && (!monthFilter || e.nextIncrement.slice(5,7) === monthFilter)).map(e => {
+      // Month name read from the stored "YYYY-MM-DD" string, not new
+      // Date().getMonth() — a date-only string parses as UTC midnight, so in
+      // a timezone behind UTC it can land in the wrong month (see CLAUDE.md).
+      const monthName = MONTH_NAMES[Number(e.nextIncrement.slice(5,7)) - 1] + ' ' + e.nextIncrement.slice(0,4);
       const lastSalary = monthlyPayFor(e).gross;
       // Done means the Salary Sheet already has a rate on file effective on
       // or after the due date — read through the same salaryHistory every
