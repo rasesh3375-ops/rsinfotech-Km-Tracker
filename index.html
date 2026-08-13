@@ -6505,38 +6505,80 @@ function recordIncrement(emp, opts){
   return emp;
 }
 
-// One loan's instalment for one month. How many months it runs is not stored:
-// it is however many instalments the amount needs, so the schedule cannot
-// disagree with itself, and the last one is the remainder so recovery stops
-// exactly at the loan.
+// A loan's EMI history, as a dated list, whatever shape the record is in —
+// same idea as salaryHistoryOf. A loan with no emiHistory yet is a single
+// implicit entry built from the flat instalment field, effective from the
+// month recovery starts, so nothing already shown on any report moves until
+// an EMI change is actually recorded (see recordLoanEmiChange).
+function loanEmiHistoryOf(loan){
+  if(!loan) return [];
+  if(Array.isArray(loan.emiHistory) && loan.emiHistory.length) return loan.emiHistory;
+  return [{ from: loan.startMonth || null, instalment: Number(loan.instalment) || 0 }];
+}
+
+// The EMI rate in force on one month — the entry with the latest `from` on
+// or before it, same resolution rule as ratePayAsOf.
+function loanEmiRateAsOf(loan, ym){
+  const hist = loanEmiHistoryOf(loan);
+  let chosen = null;
+  hist.forEach(h => {
+    if(h.from && h.from > ym) return;
+    if(!chosen || (h.from || '') > (chosen.from || '')) chosen = h;
+  });
+  if(!chosen) chosen = hist.slice().sort((a, b) => (a.from || '').localeCompare(b.from || ''))[0];
+  return Number(chosen.instalment) || 0;
+}
+
+// Walks a loan's schedule month by month from recovery start through the
+// given month, so the EMI can change partway through (loanEmiHistoryOf) and a
+// specific month can be skipped (loan.skipMonths — the balance just carries
+// over, unreduced, and the payoff date moves a month later) without either
+// one disagreeing with what was actually recovered before it. How many
+// months it runs is still not stored: it is however many the amount needs
+// once skips are accounted for, and the last one charged is the remainder,
+// so recovery stops exactly at the loan and never overshoots it.
 //
-// A loan with no recovery month deducts nothing — see the note on the employee
-// form. Nothing comes out of a salary until somebody says when.
-function loanEmiForMonth(loan, year, month){
-  if(!loan || loan.status !== 'active') return 0;
+// A loan with no recovery month deducts nothing — see the note on the
+// employee form. Nothing comes out of a salary until somebody says when.
+function loanScheduleThrough(loan, year, month){
+  // A closed loan (or no loan, or nothing borrowed) has no outstanding
+  // balance to report, whether or not it ever started — matches the two
+  // functions this replaces, and the sort in the Loan & Advance Report relies
+  // on a closed loan sorting as zero, not as its original amount.
+  if(!loan || loan.status !== 'active') return { charged: 0, balanceAfter: 0 };
   const amount = Number(loan.amount) || 0;
-  const emi = Number(loan.instalment) || 0;
-  if(!amount || !emi || !loan.startMonth) return 0;
+  if(!amount) return { charged: 0, balanceAfter: 0 };
+  // Active but not yet started (or not due to start until after the month
+  // asked about) — the whole amount is still owed, nothing recovered yet.
+  if(!loan.startMonth) return { charged: 0, balanceAfter: amount };
   const [sy, sm] = String(loan.startMonth).split('-').map(Number);
-  if(!sy || !sm) return 0;
-  const offset = (year * 12 + (month - 1)) - (sy * 12 + (sm - 1));
-  if(offset < 0) return 0;
-  const remaining = Math.round((amount - Math.min(amount, emi * offset)) * 100) / 100;
-  return remaining <= 0 ? 0 : Math.min(emi, remaining);
+  if(!sy || !sm) return { charged: 0, balanceAfter: amount };
+  const startIdx = sy * 12 + (sm - 1);
+  const targetIdx = year * 12 + (month - 1);
+  if(targetIdx < startIdx) return { charged: 0, balanceAfter: amount };
+  const skip = new Set(loan.skipMonths || []);
+  let balance = amount, charged = 0;
+  for(let idx = startIdx; idx <= targetIdx; idx++){
+    if(balance <= 0){ charged = 0; continue; }
+    const y = Math.floor(idx / 12), mo = (idx % 12) + 1;
+    const ym = y + '-' + String(mo).padStart(2, '0');
+    if(skip.has(ym)){ charged = 0; continue; }
+    const rate = loanEmiRateAsOf(loan, ym);
+    const take = Math.min(rate, balance);
+    balance = Math.round((balance - take) * 100) / 100;
+    charged = take;
+  }
+  return { charged, balanceAfter: Math.max(0, balance) };
+}
+
+// One loan's instalment for one month.
+function loanEmiForMonth(loan, year, month){
+  return loanScheduleThrough(loan, year, month).charged;
 }
 
 // What is still owed on one loan once the given month's instalment is taken.
 function loanBalanceAfter(loan, year, month){
-  if(!loan || loan.status !== 'active') return 0;
-  const amount = Number(loan.amount) || 0;
-  if(!amount) return 0;
-  if(!loan.startMonth) return amount;
-  const [sy, sm] = String(loan.startMonth).split('-').map(Number);
-  if(!sy || !sm) return amount;
-  const offset = (year * 12 + (month - 1)) - (sy * 12 + (sm - 1));
-  if(offset < 0) return amount;
-  const emi = Number(loan.instalment) || 0;
-  return Math.max(0, Math.round((amount - Math.min(amount, emi * (offset + 1))) * 100) / 100);
+  return loanScheduleThrough(loan, year, month).balanceAfter;
 }
 
 // Everything being recovered from this employee this month, across every loan
@@ -10900,11 +10942,21 @@ function renderLoanRows(){
     return;
   }
   const now = new Date(), y = now.getFullYear(), m = now.getMonth() + 1;
+  const thisYm = y + '-' + String(m).padStart(2, '0');
   box.innerHTML = loans.map((l, i) => {
     const amount = Number(l.amount) || 0;
     const bal = loanBalanceAfter(l, y, m);
     const recovered = Math.max(0, Math.round((amount - bal) * 100) / 100);
     const warn = l.status === 'active' && !l.startMonth;
+    // The top field only edits the ORIGINAL EMI. Once a change has actually
+    // been recorded below, it goes read-only and shows the current rate —
+    // same reasoning, and the same pattern, as Rate of Pay locking once an
+    // increment exists: editing "the EMI" here would otherwise be ambiguous
+    // about which one it means.
+    const emiHist = loanEmiHistoryOf(l);
+    const hasEmiChanges = emiHist.length > 1;
+    const currentEmi = loanEmiRateAsOf(l, thisYm);
+    const skipMonths = (l.skipMonths || []).slice().sort();
     return `<div class="emp-row" style="margin-bottom:12px;">
       <div class="head">
         <strong>${l.reason ? escapeHtml(l.reason) : 'Loan / advance ' + (i + 1)}</strong>
@@ -10914,8 +10966,9 @@ function renderLoanRows(){
       <label class="field">Amount</label>
       <input type="number" id="loan_amount_${i}" placeholder="0" value="${amount || ''}" oninput="syncLoanRow(${i})">
       <div style="height:10px"></div>
-      <label class="field">Monthly instalment</label>
-      <input type="number" id="loan_emi_${i}" placeholder="0" value="${Number(l.instalment) || ''}" oninput="syncLoanRow(${i})">
+      <label class="field">Monthly instalment${hasEmiChanges ? ' (original)' : ''}</label>
+      <input type="number" id="loan_emi_${i}" placeholder="0" value="${hasEmiChanges ? currentEmi : (Number(l.instalment) || '')}" oninput="syncLoanRow(${i})" ${hasEmiChanges ? 'readonly' : ''}>
+      ${hasEmiChanges ? `<p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Current EMI is ₹${fmtMoney(currentEmi)}. It now changes only through "Change EMI from a month" below, so a rate change is never confused with correcting the original figure.</p>` : ''}
       <div style="height:10px"></div>
       <label class="field">Recovery starts from (month)</label>
       <input type="month" class="field-input" id="loan_start_${i}" value="${escapeHtml(l.startMonth || '')}" onchange="syncLoanRow(${i})">
@@ -10930,8 +10983,38 @@ function renderLoanRows(){
           ? 'No recovery month set, so nothing is being deducted for this one.'
           : l.status === 'closed'
             ? 'Closed — nothing is deducted.'
-            : 'Recovered so far ₹' + fmtMoney(recovered) + ' · balance ₹' + fmtMoney(bal)}
+            : 'Recovered so far ₹' + fmtMoney(recovered) + ' · balance ₹' + fmtMoney(bal) +
+              (skipMonths.length ? ' · ' + skipMonths.length + ' month(s) skipped, so payoff runs that much later' : '')}
       </p>
+
+      <div style="height:12px"></div>
+      <div style="border-top:1px solid var(--line);padding-top:10px;">
+        <label class="field">Change EMI from a month — a raise or cut that holds from then on</label>
+        ${hasEmiChanges ? emiHist.slice().sort((a,b)=>(a.from||'').localeCompare(b.from||'')).map((h, hi) => `
+          <div class="row-inline" style="margin:0 0 6px;align-items:center;">
+            <span style="font-size:12.5px;flex:1;">${escapeHtml(h.from || '—')}: ₹${fmtMoney(Number(h.instalment) || 0)}${hi === 0 ? ' (original)' : ''}</span>
+            ${hi > 0 ? `<a href="#" onclick="removeLoanEmiChange(${i},${hi});return false;" style="font-size:12px;color:var(--muted);">Remove</a>` : ''}
+          </div>`).join('') : ''}
+        <div class="row-inline" style="align-items:flex-end;">
+          <div><label class="field">From month</label><input type="month" class="field-input" id="loan_emichange_month_${i}"></div>
+          <div><label class="field">New EMI</label><input type="number" class="field-input" id="loan_emichange_amount_${i}" placeholder="0"></div>
+        </div>
+        <a href="#" onclick="addLoanEmiChange(${i});return false;" style="font-size:13px;color:var(--amber-dark);font-weight:600;">+ Add EMI change</a>
+      </div>
+
+      <div style="height:12px"></div>
+      <div style="border-top:1px solid var(--line);padding-top:10px;">
+        <label class="field">Skip a month — recover nothing that month, payoff moves a month later</label>
+        ${skipMonths.length ? skipMonths.map(ym => `
+          <div class="row-inline" style="margin:0 0 6px;align-items:center;">
+            <span style="font-size:12.5px;flex:1;">${escapeHtml(ym)}</span>
+            <a href="#" onclick="removeLoanSkipMonth(${i},'${ym}');return false;" style="font-size:12px;color:var(--muted);">Remove</a>
+          </div>`).join('') : ''}
+        <div class="row-inline" style="align-items:flex-end;">
+          <div><label class="field">Month to skip</label><input type="month" class="field-input" id="loan_skip_month_${i}"></div>
+        </div>
+        <a href="#" onclick="addLoanSkipMonth(${i});return false;" style="font-size:13px;color:var(--amber-dark);font-weight:600;">+ Skip a month</a>
+      </div>
     </div>`;
   }).join('');
 }
@@ -10942,9 +11025,61 @@ function syncLoanRow(i){
   const l = (editingEmployeeDraft.loans || [])[i];
   if(!l) return;
   l.amount = Number((document.getElementById('loan_amount_' + i) || {}).value) || 0;
-  l.instalment = Number((document.getElementById('loan_emi_' + i) || {}).value) || 0;
+  // Once EMI changes exist the field is read-only (see renderLoanRows), so
+  // this only ever writes the original rate back.
+  if(!(Array.isArray(l.emiHistory) && l.emiHistory.length > 1)){
+    l.instalment = Number((document.getElementById('loan_emi_' + i) || {}).value) || 0;
+  }
   l.startMonth = (document.getElementById('loan_start_' + i) || {}).value || '';
   l.status = (document.getElementById('loan_status_' + i) || {}).value || 'active';
+}
+
+// The first EMI change on a loan seeds its history from the flat fields —
+// same lazy-migration idea as loansOf/salaryHistoryOf, so a loan nobody has
+// ever changed the rate on still reads exactly as it always has.
+function addLoanEmiChange(i){
+  const l = (editingEmployeeDraft.loans || [])[i];
+  if(!l) return;
+  const monthEl = document.getElementById('loan_emichange_month_' + i);
+  const amountEl = document.getElementById('loan_emichange_amount_' + i);
+  const from = (monthEl || {}).value || '';
+  const instalment = Number((amountEl || {}).value) || 0;
+  if(!from || instalment <= 0){ alert('Enter both a month and a new EMI amount greater than 0.'); return; }
+  if(!Array.isArray(l.emiHistory) || !l.emiHistory.length){
+    l.emiHistory = [{ from: l.startMonth || null, instalment: Number(l.instalment) || 0 }];
+  }
+  l.emiHistory = l.emiHistory.filter(h => h.from !== from);
+  l.emiHistory.push({ from, instalment });
+  renderLoanRows();
+}
+
+function removeLoanEmiChange(i, hi){
+  const l = (editingEmployeeDraft.loans || [])[i];
+  if(!l || !Array.isArray(l.emiHistory)) return;
+  if(hi <= 0) return; // the earliest-dated entry is the original rate and cannot be removed this way
+  const sorted = l.emiHistory.slice().sort((a, b) => (a.from || '').localeCompare(b.from || ''));
+  const target = sorted[hi];
+  if(!target) return;
+  l.emiHistory = l.emiHistory.filter(h => h !== target);
+  renderLoanRows();
+}
+
+function addLoanSkipMonth(i){
+  const l = (editingEmployeeDraft.loans || [])[i];
+  if(!l) return;
+  const monthEl = document.getElementById('loan_skip_month_' + i);
+  const ym = (monthEl || {}).value || '';
+  if(!ym){ alert('Pick the month to skip.'); return; }
+  if(!Array.isArray(l.skipMonths)) l.skipMonths = [];
+  if(!l.skipMonths.includes(ym)) l.skipMonths.push(ym);
+  renderLoanRows();
+}
+
+function removeLoanSkipMonth(i, ym){
+  const l = (editingEmployeeDraft.loans || [])[i];
+  if(!l || !Array.isArray(l.skipMonths)) return;
+  l.skipMonths = l.skipMonths.filter(x => x !== ym);
+  renderLoanRows();
 }
 
 function addLoanRow(){
@@ -10980,14 +11115,20 @@ function collectLoanRows(){
   loans.forEach((l, i) => {
     const amount = Number((document.getElementById('loan_amount_' + i) || {}).value) || 0;
     if(!amount) return;
+    const hasEmiChanges = Array.isArray(l.emiHistory) && l.emiHistory.length > 1;
     out.push({
       id: l.id || ('L-' + Date.now() + '-' + i),
       amount,
-      instalment: Number((document.getElementById('loan_emi_' + i) || {}).value) || 0,
+      // Once EMI changes exist the field is read-only and shows the CURRENT
+      // rate, not the original one — read the original back from the draft
+      // instead of the DOM, or saving would overwrite it with today's rate.
+      instalment: hasEmiChanges ? (Number(l.instalment) || 0) : (Number((document.getElementById('loan_emi_' + i) || {}).value) || 0),
       startMonth: (document.getElementById('loan_start_' + i) || {}).value || '',
       status: (document.getElementById('loan_status_' + i) || {}).value || 'active',
       reason: l.reason || '',
-      approvedOn: l.approvedOn || ''
+      approvedOn: l.approvedOn || '',
+      emiHistory: Array.isArray(l.emiHistory) ? l.emiHistory : [],
+      skipMonths: Array.isArray(l.skipMonths) ? l.skipMonths : []
     });
   });
   return out;
@@ -12747,7 +12888,8 @@ async function viewReport(key, label, monthFilter){
     // out from the start month rather than stored, so they cannot go stale
     // between months.
     const nowD = new Date(), nowY = nowD.getFullYear(), nowM = nowD.getMonth() + 1;
-    csvHeader = ['Name','Loan','Amount','EMI','Recovery from','Recovered so far','Balance','Status'];
+    const nowYm = nowY + '-' + String(nowM).padStart(2, '0');
+    csvHeader = ['Name','Loan','Amount','Current EMI','Recovery from','Recovered so far','Balance','Status'];
     const ledger = [];
     employees.forEach(e => loansOf(e).forEach((l, i) => ledger.push({ e, l, i })));
     // Anything still being recovered first, biggest balance at the top: the
@@ -12763,16 +12905,20 @@ async function viewReport(key, label, monthFilter){
       const recovered = l.status === 'active' ? Math.max(0, Math.round((amount - bal) * 100) / 100) : amount;
       const started = l.startMonth || '';
       const stalled = l.status === 'active' && !started;
+      const skippedThisMonth = l.status === 'active' && (l.skipMonths || []).includes(nowYm);
       const note = l.status !== 'active' ? 'closed'
-                 : stalled ? 'active — no recovery month set, nothing is being deducted' : 'active';
+                 : stalled ? 'active — no recovery month set, nothing is being deducted'
+                 : skippedThisMonth ? 'active — this month skipped'
+                 : 'active';
+      const currentEmi = loanEmiRateAsOf(l, nowYm);
       const what = l.reason ? l.reason : 'Loan ' + (i + 1);
-      csvRows.push([e.name, what, Math.round(amount), Math.round(Number(l.instalment) || 0), started || '—',
+      csvRows.push([e.name, what, Math.round(amount), Math.round(currentEmi), started || '—',
                     Math.round(l.status === 'active' ? recovered : amount),
                     Math.round(l.status === 'active' ? bal : 0), note]);
-      return `<tr${stalled ? ' class="inc-overdue"' : ''}>
+      return `<tr${stalled || skippedThisMonth ? ' class="inc-overdue"' : ''}>
         <td class="sal-name">${escapeHtml(e.name)}<span class="inc-sub">${escapeHtml(what)}</span></td>
         <td class="num">${rupees(amount)}</td>
-        <td class="num">${rupees(Number(l.instalment) || 0)}</td>
+        <td class="num">${rupees(currentEmi)}</td>
         <td>${started ? escapeHtml(started) : '<span class="pol-warn">not set</span>'}</td>
         <td class="num">${rupees(l.status === 'active' ? recovered : amount)}</td>
         <td class="num">${rupees(l.status === 'active' ? bal : 0)}</td>
@@ -12786,7 +12932,7 @@ async function viewReport(key, label, monthFilter){
     box.innerHTML = `${fsBtn}<div class="print-isolate" id="reportPrintArea_loan" style="margin-top:12px;">${reportLogoHeader(label)}
       <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;">${rupees(outstanding)} outstanding across ${ledger.length} loan(s); ${rupees(monthly)} coming off this month's Salary Sheet.${multi ? ' ' + multi + ' employee(s) are repaying more than one at a time.' : ''}</p>
       ${stalledCount ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${stalledCount} active loan(s) have no recovery month set, so no instalment is coming off the Salary Sheet for them. Set one on the employee record to start recovery.</p>` : ''}
-      <div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th class="num">Amount</th><th class="num">EMI</th><th>Recovery from</th><th class="num">Recovered so far</th><th class="num">Balance</th><th>Status</th></tr>${rows || '<tr><td colspan="7" class="empty">No data yet</td></tr>'}</table></div></div>`;
+      <div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th class="num">Amount</th><th class="num">Current EMI</th><th>Recovery from</th><th class="num">Recovered so far</th><th class="num">Balance</th><th>Status</th></tr>${rows || '<tr><td colspan="7" class="empty">No data yet</td></tr>'}</table></div></div>`;
   } else if(key === 'insurance'){
     // A checkmark, not the policy detail — WC and GPA already carry their own
     // policy number/provider/sum insured/expiry on the employee record; this
