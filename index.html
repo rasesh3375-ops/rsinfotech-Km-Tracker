@@ -9906,16 +9906,6 @@ function employeeModalHtml(emp){
         <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Blood group and policy details are the two things needed fastest in an emergency — kept here so they are with the contact who would be called.</p>
       </div>
 
-      <div class="field-group ${emp.salaryHeading==='apprentice'?'':'hidden'}" id="familyFields">
-        <div class="sec-title">Family information</div>
-        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Required for apprentices — the apprenticeship registration and the NAPS/board records ask for parents' names in full.</p>
-        <label class="field">Father's full name</label>
-        <input type="text" id="f_fatherName" placeholder="Full name as on records" value="${escapeHtml(emp.fatherName||'')}">
-        <div style="height:12px"></div>
-        <label class="field">Mother's full name</label>
-        <input type="text" id="f_motherName" placeholder="Full name as on records" value="${escapeHtml(emp.motherName||'')}">
-      </div>
-
       <div class="field-group">
         <div class="sec-title">Employment dates</div>
         <label class="field">Date of joining</label>
@@ -10135,6 +10125,16 @@ function employeeModalHtml(emp){
         </select>
         <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Picks which Basic/HRA/LTA split formula applies to this employee on the Salary Sheet, and which of PF/ESI/PT apply at all — set once here, applied automatically every month.</p>
         <div id="headingCalcBox"></div>
+      </div>
+
+      <div class="field-group ${emp.salaryHeading==='apprentice'?'':'hidden'}" id="familyFields">
+        <div class="sec-title">Family information</div>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Required for apprentices — the apprenticeship registration and the NAPS/board records ask for parents' names in full.</p>
+        <label class="field">Father's full name</label>
+        <input type="text" id="f_fatherName" placeholder="Full name as on records" value="${escapeHtml(emp.fatherName||'')}">
+        <div style="height:12px"></div>
+        <label class="field">Mother's full name</label>
+        <input type="text" id="f_motherName" placeholder="Full name as on records" value="${escapeHtml(emp.motherName||'')}">
       </div>
 
       <div class="field-group">
