@@ -444,6 +444,19 @@
     #hrContent .rpt-close-btn{width:40px;height:40px;}
   }
 
+  @media (max-width: 760px){
+    /* An A4 page (210mm, ~794px) is wider than almost any phone. Left at its
+       true width, .rpt-wrap's overflow-x:auto just makes it scroll sideways
+       — fine for a wide table, where that is expected, but a letter is
+       prose: scrolling sideways to read a paragraph is not a reading
+       experience, it is the bug this fixes. Font size and layout stay
+       exactly as authored; only the page's own width and margins give way
+       so it fills the screen instead of overflowing it. Scoped to full
+       screen, where every letter and report already opens. */
+    #fullscreenBody .rpt-wrap{overflow-x:visible;padding:0;}
+    #fullscreenBody .rpt-page{width:100%;min-height:0;padding:18px 14px;margin:0;box-sizing:border-box;}
+  }
+
   /* ---- breadcrumb ---- */
   #hrPageTitle{display:flex;align-items:center;gap:7px;font-size:15px;font-weight:700;}
   .crumb-up{background:none;border:none;padding:0;font:inherit;font-weight:600;
@@ -6573,12 +6586,20 @@ function reportActionBar(title, sourceId, closeAttr, opts){
   opts = opts || {};
   const safeTitle = String(title).replace(/'/g, "\\'");
   const close = closeAttr || `closeReportView('${sourceId}')`;
+  // topClose:false hides (not removes) the small standalone ✕ here — kept in
+  // the DOM, just out of sight, for content that always opens straight into
+  // full screen (letters): the full-screen header's own Close button already
+  // covers it via closeFullscreenHeaderButton()'s box.querySelector('.rpt-close-btn')
+  // delegation, so showing both was two close buttons for one action.
+  // fullscreenBtn:false drops the "Full screen" toggle for the same reason —
+  // content that is already full screen the moment it appears has nothing
+  // for that button to do.
   return `<div class="rpt-actions">
-    <div class="rpt-actions-top">
+    <div class="rpt-actions-top"${opts.topClose === false ? ' style="display:none"' : ''}>
       <button class="rpt-close-btn" onclick="${close}" title="Close" aria-label="Close">✕</button>
     </div>
     <div class="rpt-actions-row">
-      <button class="rpt-icon-btn" onclick="openFullscreenView('${safeTitle}','${sourceId}')" title="Full screen"><span class="ic">⛶</span><span class="lbl">Full screen</span></button>
+      ${opts.fullscreenBtn === false ? '' : `<button class="rpt-icon-btn" onclick="openFullscreenView('${safeTitle}','${sourceId}')" title="Full screen"><span class="ic">⛶</span><span class="lbl">Full screen</span></button>`}
       ${opts.print === false ? '' : `<button class="rpt-icon-btn" onclick="window.print()" title="Print / Save PDF"><span class="ic">📄</span><span class="lbl">PDF</span></button>`}
       <button class="rpt-icon-btn" onclick="shareCurrentReport('email')" title="Email"><span class="ic">✉️</span><span class="lbl">Email</span></button>
       <button class="rpt-icon-btn" onclick="shareCurrentReport('whatsapp')" title="WhatsApp"><span class="ic">📱</span><span class="lbl">WhatsApp</span></button>
@@ -14718,8 +14739,12 @@ async function generateLetter(){
   </div></div>`;
   document.getElementById('letterOutput').classList.add('show');
   document.getElementById('letterActionsBox').classList.remove('hidden');
+  // A letter always opens straight into full screen below, so its action bar
+  // skips the "Full screen" toggle (nothing for it to do) and the small
+  // standalone ✕ (the full-screen header's own Close already covers it) —
+  // just Print, Email and WhatsApp alongside the header's title and Close.
   document.getElementById('letterActionsBox').innerHTML =
-    reportActionBar(type + ' — ' + name, 'letterOutput', `closeLetterOutput()`);
+    reportActionBar(type + ' — ' + name, 'letterOutput', `closeLetterOutput()`, { fullscreenBtn:false, topClose:false });
 
   // A generated leave form with dates on it is an application somebody has to
   // answer, so it is filed as one. A blank form printed to be filled in by hand
