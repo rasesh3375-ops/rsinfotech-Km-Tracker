@@ -875,11 +875,18 @@
   .checklist-row input{width:auto;}
 
   /* ===== Attendance sheet grid ===== */
-  .att-sheet-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  /* Bounded height with its own scrollbars, same reasoning — and the same
+     70vh figure — as .sal-sheet-wrap below: reaching day 31 is a scroll of
+     the table itself, not the whole page, and the header row above stays
+     put while it does (see the sticky th rule two lines down). */
+  .att-sheet-wrap{overflow-x:auto;overflow-y:auto;max-height:70vh;-webkit-overflow-scrolling:touch;}
+  @media print{ .att-sheet-wrap{max-height:none;overflow:visible;} }
+  #fullscreenBody .att-sheet-wrap{max-height:none;}
   table.att-table{border-collapse:collapse;font-size:12px;white-space:nowrap;}
   table.att-table th, table.att-table td{border:1px solid var(--line);padding:4px 3px;text-align:center;}
-  table.att-table th{background:var(--navy);color:#fff;font-size:10.5px;text-transform:uppercase;}
-  table.att-table td.att-name{text-align:left;font-weight:600;min-width:120px;position:sticky;left:0;background:var(--paper);}
+  table.att-table th{background:var(--navy);color:#fff;font-size:10.5px;text-transform:uppercase;position:sticky;top:0;z-index:2;}
+  table.att-table td.att-name{text-align:left;font-weight:600;min-width:120px;position:sticky;left:0;background:var(--paper);z-index:1;}
+  table.att-table th.att-name-h{text-align:left;position:sticky;left:0;z-index:3;}
   table.att-table select.att-code{width:52px;font-size:11px;padding:3px 2px;border:1px solid var(--line);border-radius:4px;background:var(--paper);}
   table.att-table select.att-code.code-P{background:#E7F4EC;}
   table.att-table select.att-code.code-A{background:#FDECEA;}
@@ -914,7 +921,16 @@
   table.sal-table{border-collapse:collapse;font-size:12px;white-space:nowrap;width:100%;}
   table.sal-table th, table.sal-table td{border:1px solid var(--line);padding:5px 7px;text-align:right;}
   table.sal-table th{background:var(--navy);color:#fff;font-size:10.5px;text-transform:uppercase;text-align:center;position:sticky;top:0;z-index:2;}
-  table.sal-table td.sal-name{text-align:left;font-weight:600;}
+  /* Same sticky-name-column treatment .att-table already had — the row you
+     scrolled right to find is worthless if you can no longer see whose row
+     it is. Given its own background per row type (paper for a person, the
+     subtotal/grand-total tint for those rows) so the sticky cell matches the
+     row it belongs to instead of always showing plain white through it. */
+  table.sal-table td.sal-name{text-align:left;font-weight:600;position:sticky;left:0;background:var(--paper);z-index:1;}
+  table.sal-table th.sal-name-h{text-align:left;position:sticky;left:0;z-index:3;}
+  table.sal-table tr.sal-subtotal td.sal-name{background:var(--cream);}
+  table.sal-table tr.sal-grandtotal td.sal-name{background:var(--navy);color:#fff;}
+  table.sal-table tr.sal-new-emp td.sal-name{background:#DDF3E4;}
   table.sal-table tr.sal-heading td{background:#92D050;color:#16213E;font-weight:800;text-align:left;font-size:13px;text-transform:uppercase;letter-spacing:.3px;}
   table.sal-table tr.sal-subtotal td{background:var(--cream);font-weight:700;}
   table.sal-table tr.sal-grandtotal td{background:var(--navy);color:#fff;font-weight:800;}
@@ -931,6 +947,66 @@
   table.sal-table td.cell-changed{background:#FDECC8;box-shadow:inset 0 0 0 1px var(--amber-dark);font-weight:700;}
   table.sal-table tr.sal-new-emp td{background:#DDF3E4;}
   .pill.new{background:#DDF3E4;color:var(--green);}
+
+  /* ===== Attendance & Salary sheets: tablet and mobile ===== */
+  /* Tablet: same table, tighter — a little less padding and a smaller font
+     buys back enough width that the sideways scroll most columns still need
+     is short, without shrinking text to the point it is hard to read. */
+  @media (min-width: 761px) and (max-width: 1024px){
+    table.att-table, table.sal-table{font-size:11px;}
+    table.att-table th, table.att-table td{padding:3px 2px;}
+    table.sal-table th, table.sal-table td{padding:4px 5px;}
+    table.att-table select.att-code{width:44px;font-size:10px;}
+  }
+
+  /* Mobile: renderAttendanceSheet()/renderSalarySheet() build this card list
+     directly instead of the table below 760px — see isCompactSheetView() —
+     rather than shipping both and hiding one, which for a few dozen
+     employees would mean rendering the day grid's ~30 <select> elements
+     twice over for nothing. Same figures either way: every number here comes
+     from the identical computeAttendanceSummary/computeSalaryForEmployee
+     call the table branch uses, just laid out for a narrow screen instead of
+     a row. */
+  .hr-sheet-cards{display:flex;flex-direction:column;gap:10px;}
+  .hr-sheet-card{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--paper);}
+  .hr-sheet-card.is-new{background:#DDF3E4;}
+  .hr-sheet-card .head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}
+  .hr-sheet-card .head strong{font-size:14.5px;color:var(--navy);}
+  .hr-sheet-card .head .id{font-size:11px;color:var(--muted);white-space:nowrap;}
+  .hr-sheet-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px;}
+  .hr-sheet-chip{display:inline-flex;align-items:baseline;gap:4px;font-size:11.5px;font-weight:700;
+    padding:3px 9px;border-radius:20px;background:#EEF1F7;color:var(--navy);}
+  .hr-sheet-chip .k{color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase;}
+  .hr-sheet-net{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);
+    display:flex;justify-content:space-between;align-items:center;font-weight:800;color:var(--navy);font-size:15px;}
+  .hr-sheet-card.sal-grand-card .hr-sheet-net{color:#fff;border-top-color:rgba(255,255,255,.3);}
+  .hr-sheet-more{margin-top:10px;}
+  .hr-sheet-more summary{cursor:pointer;font-size:12.5px;font-weight:700;color:var(--amber-dark);list-style:none;}
+  .hr-sheet-more summary::-webkit-details-marker{display:none;}
+  .hr-sheet-more summary::after{content:'▾';margin-left:5px;font-size:10px;display:inline-block;transition:transform .15s ease;}
+  .hr-sheet-more[open] summary::after{transform:rotate(180deg);}
+  /* The day-by-day grid, reflowed from 31 table columns into a wrapping grid
+     of small squares — same select, same onchange, same editing behaviour,
+     just not 31-wide. */
+  .hr-sheet-daygrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(62px,1fr));gap:6px;margin-top:10px;}
+  .hr-sheet-daycell{border:1px solid var(--line);border-radius:8px;padding:5px 4px;text-align:center;background:var(--cream);}
+  .hr-sheet-daycell .d{font-size:10px;color:var(--muted);font-weight:700;margin-bottom:2px;}
+  .hr-sheet-daycell select.att-code{width:100%;}
+  .hr-sheet-group{margin-top:10px;}
+  .hr-sheet-group h4{margin:0 0 6px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);}
+  .hr-sheet-card.sal-grand-card .hr-sheet-group h4{color:rgba(255,255,255,.7);}
+  .hr-sheet-row{display:flex;justify-content:space-between;gap:8px;padding:3px 0;font-size:12.5px;border-bottom:1px dashed var(--line);}
+  .hr-sheet-row:last-child{border-bottom:none;}
+  .hr-sheet-row .v{font-weight:600;color:var(--navy);}
+  .hr-sheet-card.sal-grand-card .hr-sheet-row{border-bottom-color:rgba(255,255,255,.25);}
+  .hr-sheet-card.sal-grand-card .hr-sheet-row .v{color:#fff;}
+  /* Section-heading and subtotal cards match the table rows they stand in
+     for — same green banner, same cream/navy totals — so the two views read
+     as one report rather than two different designs. */
+  .hr-sheet-card.sal-heading-card{background:#92D050;color:#16213E;font-weight:800;text-transform:uppercase;
+    letter-spacing:.3px;font-size:13px;padding:10px 14px;}
+  .hr-sheet-card.sal-total-card{background:var(--cream);}
+  .hr-sheet-card.sal-grand-card{background:var(--navy);color:#fff;border-color:var(--navy);}
 
   /* ===== Professional polish pass ===== */
   body{background:linear-gradient(180deg, #FBFAF7 0%, var(--cream) 220px);}
@@ -5806,6 +5882,57 @@ function hydrateAttCodeSelects(){
   if(pending.length) attHydrateTimer = setTimeout(step, 0);
 }
 
+// ---- Attendance/Salary sheets: compact (card) view below the app's usual
+// mobile breakpoint ----
+// Read once at the top of each render, deciding whether that render builds
+// a <table> or a stack of cards — never both, so a month with thirty
+// employees never pays for thirty rows of interactive day-cells twice over.
+function isCompactSheetView(){
+  return window.matchMedia('(max-width: 760px)').matches;
+}
+
+// Reacts only to the view actually flipping between table and card — not
+// every pixel of a drag-resize, and not the address-bar show/hide "resize"
+// iOS fires on ordinary scrolling — and only for whichever of the two
+// sheets is currently on screen with something in it, so rotating a phone
+// while looking at Employee Master does nothing at all.
+let hrSheetCompactLast = isCompactSheetView();
+let hrSheetResizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(hrSheetResizeTimer);
+  hrSheetResizeTimer = setTimeout(() => {
+    const now = isCompactSheetView();
+    if(now === hrSheetCompactLast) return;
+    hrSheetCompactLast = now;
+    const attBox = document.getElementById('attendanceSheetBox');
+    if(attBox && attBox.innerHTML.trim()) renderAttendanceSheet();
+    const salBox = document.getElementById('salarySheetBox');
+    if(salBox && salBox.innerHTML.trim()) renderSalarySheet();
+  }, 300);
+});
+
+// One employee's compact-view row: name and the same eight totals the table
+// shows in its own last eight columns, up front; the 31 day cells (the same
+// <select> markup the table uses, just reflowed into a small grid) sit
+// behind a tap so a month of edits is still reachable without turning the
+// phone sideways to scroll through them all first.
+function attendanceMobileCard(idx, emp, isResident, summary, dayCellsHtml){
+  const chips = [
+    ['P', summary.present], ['A', summary.absent], ['EL', summary.elUsed], ['SL', summary.slUsed],
+    ['LP', summary.lpDays], ['Half', summary.halfDays], ['Short', summary.shortCount], ['Late', summary.lateCount]
+  ].map(([k, v]) => `<span class="hr-sheet-chip"><span class="k">${k}</span>${v}</span>`).join('');
+  return `<div class="hr-sheet-card">
+    <div class="head">
+      <strong>${escapeHtml(emp.name)}${isResident ? ' <span style="color:var(--muted);font-size:10px;font-weight:600;">(Resident)</span>' : ''}</strong>
+      <span class="id">#${idx + 1}</span>
+    </div>
+    <div class="hr-sheet-chips">${chips}</div>
+    <details class="hr-sheet-more"><summary>Daily attendance</summary>
+      <div class="hr-sheet-daygrid">${dayCellsHtml}</div>
+    </details>
+  </div>`;
+}
+
 async function renderAttendanceSheet(){
   const box = document.getElementById('attendanceSheetBox');
   populateMonthYearSelects('attSheetMonthSel', 'attSheetYearSel');
@@ -5828,8 +5955,9 @@ async function renderAttendanceSheet(){
   // the copy kept on the device if the tab was closed before Save was pressed.
   const restored = restorePendingAttendance(monthVal);
   updateAttendanceSaveBar();
+  const isCompact = isCompactSheetView();
 
-  let headerRow = '<tr><th>S.No</th><th style="text-align:left;">Name</th>' +
+  let headerRow = '<tr><th>S.No</th><th class="att-name-h">Name</th>' +
     dateList.map(d => `<th>${parseInt(d.slice(8),10)}</th>`).join('') +
     '<th>Present</th><th>Absent</th><th>EL</th><th>SL</th><th>LP</th><th>Half</th><th>Short</th><th>Late</th></tr>';
   // Policy columns follow the day grid, so the export carries the same
@@ -5892,12 +6020,23 @@ async function renderAttendanceSheet(){
       const timeChip = isResident ? '' :
         `<br><button class="att-time${inT ? ' has-time' : ''}" title="Set arrival and leaving time"
            onclick="openDayTimeEditor('${emp.id}','${dateStr}')">${inT || '+'}</button>`;
-      return `<td><select class="att-code code-${defaultCode||''}${dirty}" data-res="${isResident?1:0}"` +
+      // Same <select>, same handlers, either way — only the wrapper differs,
+      // a table <td> on a normal screen or a small labelled box in the
+      // compact view's expandable day grid. Editing works identically either
+      // way; only the container changes.
+      const core = `<select class="att-code code-${defaultCode||''}${dirty}" data-res="${isResident?1:0}"` +
         ` onpointerdown="fillAttCodes(this)" onfocus="fillAttCodes(this)"` +
-        ` onchange="handleAttendanceCellChange('${emp.id}','${dateStr}',this)">${options}</select>${lateMark}${timeChip}</td>`;
+        ` onchange="handleAttendanceCellChange('${emp.id}','${dateStr}',this)">${options}</select>${lateMark}${timeChip}`;
+      return isCompact
+        ? `<div class="hr-sheet-daycell"><div class="d">${parseInt(dateStr.slice(8),10)}</div>${core}</div>`
+        : `<td>${core}</td>`;
     }).join('');
-    bodyRows += `<tr><td>${i+1}</td><td class="att-name">${escapeHtml(emp.name)}${isResident?' <span style="color:var(--muted);font-size:10px;">(Resident)</span>':''}</td>${dayCells}` +
-      `<td>${summary.present}</td><td>${summary.absent}</td><td>${summary.elUsed}</td><td>${summary.slUsed}</td><td>${summary.lpDays}</td><td>${summary.halfDays}</td><td>${summary.shortCount}</td><td>${summary.lateCount}</td></tr>`;
+    if(isCompact){
+      bodyRows += attendanceMobileCard(i, emp, isResident, summary, dayCells);
+    } else {
+      bodyRows += `<tr><td>${i+1}</td><td class="att-name">${escapeHtml(emp.name)}${isResident?' <span style="color:var(--muted);font-size:10px;">(Resident)</span>':''}</td>${dayCells}` +
+        `<td>${summary.present}</td><td>${summary.absent}</td><td>${summary.elUsed}</td><td>${summary.slUsed}</td><td>${summary.lpDays}</td><td>${summary.halfDays}</td><td>${summary.shortCount}</td><td>${summary.lateCount}</td></tr>`;
+    }
     csvRows.push([i+1, emp.name, ...dayCodes, summary.present, summary.absent, summary.elUsed, summary.slUsed, summary.lpDays, summary.halfDays, summary.shortCount, summary.lateCount]);
   }
 
@@ -5930,8 +6069,11 @@ async function renderAttendanceSheet(){
       'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Dashboard > Attendance Sheet');
   }
 
+  const attSheetInner = isCompact
+    ? `<div class="hr-sheet-cards">${bodyRows}</div>`
+    : `<table class="att-table">${headerRow}${bodyRows}</table>`;
   box.innerHTML = `${reportActionBar('Attendance Sheet — ' + monthLabel(monthVal), 'attendanceSheetBox', null, { print: false })}
-    <div class="att-sheet-wrap print-isolate" id="attendanceSheetPrintArea">${reportLogoHeader('Attendance Sheet — ' + monthLabel(monthVal))}<table class="att-table">${headerRow}${bodyRows}</table></div>
+    <div class="att-sheet-wrap print-isolate" id="attendanceSheetPrintArea">${reportLogoHeader('Attendance Sheet — ' + monthLabel(monthVal))}${attSheetInner}</div>
     <div class="att-legend">
       <span><strong>P</strong> Present</span><span><strong>A</strong> Absent</span><span><strong>H</strong> Holiday</span>
       <span><strong>EL</strong> Earned leave</span><span><strong>SL</strong> Sick leave</span><span><strong>LP</strong> Leave without pay</span>
@@ -7024,6 +7166,80 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
            pfGrandTotal: pfCalc.grandTotal };
 }
 
+// The grouped section markup shared by an employee row, a heading's
+// subtotal and the sheet's grand total on the compact view — same field
+// names either way (computeSalaryForEmployee's own s.*, or the sub/grand
+// accumulators built from it), just a different label on the card. Salary
+// stays visible up front; Deductions, Employer Contribution and the balance
+// columns — the same ones the table shows after Net Salary, never counted
+// inside Total Deduction since they are the company's cost, not money held
+// back from the employee — sit behind one tap, and Net Salary anchors the
+// bottom of the card exactly where it sits at the right-hand edge of the row.
+function salaryCardGroups(s){
+  const row = (label, val) => `<div class="hr-sheet-row"><span>${label}</span><span class="v">${val}</span></div>`;
+  const hasBalCols = s.fullDayLeaveBal !== undefined;
+  return `<div class="hr-sheet-group">
+      <h4>Salary</h4>
+      ${row('Rate of Pay', fmtMoney(s.rate))}
+      ${row('Leave Days', (s.leaveDays ?? '—') + (s.sandwichDays ? ' <span class="pol-warn" title="' + escapeHtml((s.sandwichDates||[]).join(', ')) + ' — sandwiched between two unpaid-absence days">(incl. ' + s.sandwichDays + ' sandwich)</span>' : ''))}
+      ${row('Policy Half Days', s.policyHalfDays ? '<span class="pol-warn">' + s.policyHalfDays + '</span>' : '—')}
+      ${row('Leave Amount', fmtMoney(s.leaveAmount))}
+      ${row('Basic', fmtMoney(s.basic))}
+      ${row('HRA', fmtMoney(s.hra))}
+      ${row('LTA', fmtMoney(s.lta))}
+      ${row('Gross', fmtMoney(s.gross))}
+      ${row('Conveyance', s.conveyance ? '+' + fmtMoney(s.conveyance) : '—')}
+    </div>
+    <details class="hr-sheet-more"><summary>Deductions, employer cost &amp; balances</summary>
+      <div class="hr-sheet-group">
+        <h4>Deductions</h4>
+        ${row('PF', fmtMoney(s.pf))}
+        ${row('ESI', fmtMoney(s.esi))}
+        ${row('PT', fmtMoney(s.pt))}
+        ${row('Advance Temp', fmtMoney(s.advanceTemp))}
+        ${row('Advance', fmtMoney(s.advance))}
+        ${row('Loan EMI', fmtMoney(s.loanEmi))}
+        ${row('Retention', fmtMoney(s.retention))}
+        ${row('Total Deduction', fmtMoney(s.totalDeduction))}
+        ${row('Net Before Direct', fmtMoney(s.netBeforeDirect))}
+        ${row('Paid Directly', s.directPaid ? fmtMoney(s.directPaid) : '—')}
+      </div>
+      <div class="hr-sheet-group">
+        <h4>Employer Contribution</h4>
+        ${row('PEN', fmtMoney(s.pen))}
+        ${row('Employer PF', fmtMoney(s.employerPf))}
+        ${row('PF Admin', fmtMoney(s.pfAdmin))}
+        ${row('EDLI', fmtMoney(s.edli))}
+        ${row('ESI Employer', fmtMoney(s.esiEmployer))}
+        ${row('Employer Cont.', fmtMoney(s.employerCont))}
+        ${row('CTC', fmtMoney(s.ctc))}
+      </div>
+      <div class="hr-sheet-group">
+        <h4>Balances</h4>
+        ${row('Advance Balance', fmtMoney(s.advanceBalance))}
+        ${row('Loan Balance', fmtMoney(s.loanBalance))}
+        ${row('Full Day Leave Bal', hasBalCols ? s.fullDayLeaveBal : '—')}
+        ${row('Half Day Leave Bal', hasBalCols ? s.halfDayLeaveBal : '—')}
+      </div>
+    </details>
+    <div class="hr-sheet-net"><span>Net Salary</span><span>${fmtMoney(s.netSalary)}</span></div>`;
+}
+function salaryMobileCard(srNo, emp, s, isNewThisMonth, rateChanged){
+  return `<div class="hr-sheet-card${isNewThisMonth ? ' is-new' : ''}">
+    <div class="head">
+      <strong>${escapeHtml(emp.name)}${isNewThisMonth ? ' <span class="pill new">new</span>' : ''}${rateChanged ? ' <span class="pill warn" title="Rate of Pay changed since last month">rate changed</span>' : ''}</strong>
+      <span class="id">#${srNo}</span>
+    </div>
+    ${salaryCardGroups(s)}
+  </div>`;
+}
+function salaryMobileTotalsCard(label, t, cssClass){
+  return `<div class="hr-sheet-card ${cssClass}">
+    <div class="head"><strong>${escapeHtml(label)}</strong></div>
+    ${salaryCardGroups(t)}
+  </div>`;
+}
+
 async function renderSalarySheet(){
   const box = document.getElementById('salarySheetBox');
   populateMonthYearSelects('salSheetMonthSel', 'salSheetYearSel');
@@ -7055,6 +7271,7 @@ async function renderSalarySheet(){
     'PF','ESI','PT','Advance Temp','Advance','Loan EMI','Retention','Total Deduction','Conveyance','Net Before Direct','Paid Directly','Net Salary',
     'PEN','Employer PF','PF Admin','EDLI','ESI Employer','Employer Cont.','CTC',
     'Advance Balance','Loan Balance','Full Day Leave Bal','Half Day Leave Bal'];
+  const isCompact = isCompactSheetView();
   let bodyRows = '';
   let srNo = 1;
   const grand = { rate:0, leaveAmount:0, policyHalfDays:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, loanEmi:0, loanBalance:0, retention:0, totalDeduction:0, conveyance:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0, directPaid:0, netBeforeDirect:0 };
@@ -7069,7 +7286,9 @@ async function renderSalarySheet(){
     // recorded since must not move which group a past month's row sits in.
     const group = employees.filter(e => ratePayAsOf(e, dateList[0]).salaryHeading === headingKey);
     if(!group.length) continue;
-    bodyRows += `<tr class="sal-heading"><td colspan="30">${SALARY_HEADINGS[headingKey].label}</td></tr>`;
+    bodyRows += isCompact
+      ? `<div class="hr-sheet-card sal-heading-card">${SALARY_HEADINGS[headingKey].label}</div>`
+      : `<tr class="sal-heading"><td colspan="30">${SALARY_HEADINGS[headingKey].label}</td></tr>`;
     csvRows.push([SALARY_HEADINGS[headingKey].label]);
     const sub = { rate:0, leaveAmount:0, policyHalfDays:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, loanEmi:0, loanBalance:0, retention:0, totalDeduction:0, conveyance:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0, directPaid:0, netBeforeDirect:0 };
     for(const emp of group){
@@ -7086,20 +7305,24 @@ async function renderSalarySheet(){
       const rowCls = isNewThisMonth ? ' class="sal-new-emp"' : '';
       const rateCellCls = rateChanged ? 'cell-changed' : '';
 
-      bodyRows += `<tr${rowCls}><td>${srNo++}</td><td class="sal-name">${escapeHtml(emp.name)}${isNewThisMonth ? ' <span class="pill new">new</span>' : ''}</td><td class="${rateCellCls}">${fmtMoney(s.rate)}</td><td>${s.leaveDays}${s.sandwichDays ? ' <span class="pol-warn" title="' + escapeHtml(s.sandwichDates.join(', ')) + ' — sandwiched between two unpaid-absence days">(incl. ' + s.sandwichDays + ' sandwich)</span>' : ''}</td><td>${s.policyHalfDays ? '<span class="pol-warn">' + s.policyHalfDays + '</span>' : '—'}</td><td>${fmtMoney(s.leaveAmount)}</td>` +
-        `<td>${fmtMoney(s.basic)}</td><td>${fmtMoney(s.hra)}</td><td>${fmtMoney(s.lta)}</td><td>${fmtMoney(s.gross)}</td>` +
-        `<td>${fmtMoney(s.pf)}</td><td>${fmtMoney(s.esi)}</td><td>${fmtMoney(s.pt)}</td><td>${fmtMoney(s.advanceTemp)}</td><td>${fmtMoney(s.advance)}</td><td>${fmtMoney(s.loanEmi)}</td><td>${fmtMoney(s.retention)}</td>` +
-        `<td>${fmtMoney(s.totalDeduction)}</td><td>${s.conveyance ? '+' + fmtMoney(s.conveyance) : '—'}</td><td>${fmtMoney(s.netBeforeDirect)}</td>` +
-        `<td>${s.directPaid ? fmtMoney(s.directPaid) : '—'}</td><td><strong>${fmtMoney(s.netSalary)}</strong></td>` +
-        `<td>${fmtMoney(s.pen)}</td><td>${fmtMoney(s.employerPf)}</td><td>${fmtMoney(s.pfAdmin)}</td>` +
-        `<td>${fmtMoney(s.edli)}</td><td>${fmtMoney(s.esiEmployer)}</td><td>${fmtMoney(s.employerCont)}</td><td>${fmtMoney(s.ctc)}</td>` +
-        `<td>${fmtMoney(s.advanceBalance)}</td><td>${fmtMoney(s.loanBalance)}</td><td>${s.fullDayLeaveBal}</td><td>${s.halfDayLeaveBal}</td></tr>`;
+      if(isCompact){
+        bodyRows += salaryMobileCard(srNo++, emp, s, isNewThisMonth, rateChanged);
+      } else {
+        bodyRows += `<tr${rowCls}><td>${srNo++}</td><td class="sal-name">${escapeHtml(emp.name)}${isNewThisMonth ? ' <span class="pill new">new</span>' : ''}</td><td class="${rateCellCls}">${fmtMoney(s.rate)}</td><td>${s.leaveDays}${s.sandwichDays ? ' <span class="pol-warn" title="' + escapeHtml(s.sandwichDates.join(', ')) + ' — sandwiched between two unpaid-absence days">(incl. ' + s.sandwichDays + ' sandwich)</span>' : ''}</td><td>${s.policyHalfDays ? '<span class="pol-warn">' + s.policyHalfDays + '</span>' : '—'}</td><td>${fmtMoney(s.leaveAmount)}</td>` +
+          `<td>${fmtMoney(s.basic)}</td><td>${fmtMoney(s.hra)}</td><td>${fmtMoney(s.lta)}</td><td>${fmtMoney(s.gross)}</td>` +
+          `<td>${fmtMoney(s.pf)}</td><td>${fmtMoney(s.esi)}</td><td>${fmtMoney(s.pt)}</td><td>${fmtMoney(s.advanceTemp)}</td><td>${fmtMoney(s.advance)}</td><td>${fmtMoney(s.loanEmi)}</td><td>${fmtMoney(s.retention)}</td>` +
+          `<td>${fmtMoney(s.totalDeduction)}</td><td>${s.conveyance ? '+' + fmtMoney(s.conveyance) : '—'}</td><td>${fmtMoney(s.netBeforeDirect)}</td>` +
+          `<td>${s.directPaid ? fmtMoney(s.directPaid) : '—'}</td><td><strong>${fmtMoney(s.netSalary)}</strong></td>` +
+          `<td>${fmtMoney(s.pen)}</td><td>${fmtMoney(s.employerPf)}</td><td>${fmtMoney(s.pfAdmin)}</td>` +
+          `<td>${fmtMoney(s.edli)}</td><td>${fmtMoney(s.esiEmployer)}</td><td>${fmtMoney(s.employerCont)}</td><td>${fmtMoney(s.ctc)}</td>` +
+          `<td>${fmtMoney(s.advanceBalance)}</td><td>${fmtMoney(s.loanBalance)}</td><td>${s.fullDayLeaveBal}</td><td>${s.halfDayLeaveBal}</td></tr>`;
+      }
       csvRows.push([srNo-1, emp.name, R(s.rate), s.leaveDays, s.policyHalfDays, R(s.leaveAmount), R(s.basic), R(s.hra), R(s.lta), R(s.gross), R(s.pf), R(s.esi), R(s.pt), R(s.advanceTemp), R(s.advance), R(s.loanEmi), R(s.retention), R(s.totalDeduction), R(s.conveyance), R(s.netBeforeDirect), R(s.directPaid), R(s.netSalary),
         R(s.pen), R(s.employerPf), R(s.pfAdmin), R(s.edli), R(s.esiEmployer), R(s.employerCont), R(s.ctc),
         R(s.advanceBalance), R(s.loanBalance), s.fullDayLeaveBal, s.halfDayLeaveBal]);
       ['rate','leaveAmount','policyHalfDays','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','loanEmi','retention','totalDeduction','conveyance','netSalary','pen','employerPf','pfAdmin','edli','employerCont','ctc','esiEmployer','advanceBalance','loanBalance','directPaid','netBeforeDirect'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; });
     }
-    bodyRows += `<tr class="sal-subtotal"><td></td><td>Subtotal</td><td>${fmtMoney(sub.rate)}</td><td></td><td>${sub.policyHalfDays || '—'}</td><td>${fmtMoney(sub.leaveAmount)}</td>` +
+    bodyRows += isCompact ? salaryMobileTotalsCard('Subtotal', sub, 'sal-total-card') : `<tr class="sal-subtotal"><td></td><td class="sal-name">Subtotal</td><td>${fmtMoney(sub.rate)}</td><td></td><td>${sub.policyHalfDays || '—'}</td><td>${fmtMoney(sub.leaveAmount)}</td>` +
       `<td>${fmtMoney(sub.basic)}</td><td>${fmtMoney(sub.hra)}</td><td>${fmtMoney(sub.lta)}</td><td>${fmtMoney(sub.gross)}</td>` +
       `<td>${fmtMoney(sub.pf)}</td><td>${fmtMoney(sub.esi)}</td><td>${fmtMoney(sub.pt)}</td><td>${fmtMoney(sub.advanceTemp)}</td><td>${fmtMoney(sub.advance)}</td><td>${fmtMoney(sub.loanEmi)}</td><td>${fmtMoney(sub.retention)}</td>` +
       `<td>${fmtMoney(sub.totalDeduction)}</td><td>${sub.conveyance ? '+' + fmtMoney(sub.conveyance) : '—'}</td><td>${fmtMoney(sub.netBeforeDirect)}</td>` +
@@ -7110,7 +7333,7 @@ async function renderSalarySheet(){
     csvRows.push(['', 'Subtotal', R(sub.rate), '', sub.policyHalfDays, R(sub.leaveAmount), R(sub.basic), R(sub.hra), R(sub.lta), R(sub.gross), R(sub.pf), R(sub.esi), R(sub.pt), R(sub.advanceTemp), R(sub.advance), R(sub.loanEmi), R(sub.retention), R(sub.totalDeduction), R(sub.conveyance), R(sub.netSalary)]);
   }
 
-  bodyRows += `<tr class="sal-grandtotal"><td></td><td>Grand Total</td><td>${fmtMoney(grand.rate)}</td><td></td><td>${grand.policyHalfDays || '—'}</td><td>${fmtMoney(grand.leaveAmount)}</td>` +
+  bodyRows += isCompact ? salaryMobileTotalsCard('Grand Total', grand, 'sal-grand-card') : `<tr class="sal-grandtotal"><td></td><td class="sal-name">Grand Total</td><td>${fmtMoney(grand.rate)}</td><td></td><td>${grand.policyHalfDays || '—'}</td><td>${fmtMoney(grand.leaveAmount)}</td>` +
     `<td>${fmtMoney(grand.basic)}</td><td>${fmtMoney(grand.hra)}</td><td>${fmtMoney(grand.lta)}</td><td>${fmtMoney(grand.gross)}</td>` +
     `<td>${fmtMoney(grand.pf)}</td><td>${fmtMoney(grand.esi)}</td><td>${fmtMoney(grand.pt)}</td><td>${fmtMoney(grand.advanceTemp)}</td><td>${fmtMoney(grand.advance)}</td><td>${fmtMoney(grand.loanEmi)}</td><td>${fmtMoney(grand.retention)}</td>` +
     `<td>${fmtMoney(grand.totalDeduction)}</td><td>${grand.conveyance ? '+' + fmtMoney(grand.conveyance) : '—'}</td><td>${fmtMoney(grand.netBeforeDirect)}</td>` +
@@ -7130,13 +7353,16 @@ async function renderSalarySheet(){
       'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Dashboard > Salary Sheet');
   }
 
+  const salSheetInner = isCompact
+    ? `<div class="hr-sheet-cards">${bodyRows}</div>`
+    : `<table class="sal-table"><tr>${cols.map((c,i)=>i===1?`<th class="sal-name-h">${c}</th>`:`<th>${c}</th>`).join('')}</tr>${bodyRows}</table>`;
   box.innerHTML = `<div class="row-inline" style="margin-bottom:10px;">
       <button class="btn ghost full" onclick="confirmCloseSalarySheet()">✕ Close</button>
     </div>
     <div class="sal-sheet-wrap print-isolate" id="salaryPrintArea">
       ${reportLogoHeader('Salary Sheet — ' + monthLabel(monthVal))}
       <p style="font-size:11px;margin:0 0 8px;"><span class="pill new" style="margin-right:6px;">new</span>joined this month &nbsp; <span style="display:inline-block;width:11px;height:11px;background:#FDECC8;box-shadow:inset 0 0 0 1px var(--amber-dark);vertical-align:middle;margin-right:5px;"></span>Rate of Pay changed since last month</p>
-      <table class="sal-table"><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr>${bodyRows}</table>
+      ${salSheetInner}
     </div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0;">PT = ₹200 if Gross &gt; ₹12,000, else ₹0. Leave Days = Absent + LP days for the month (EL/SL count as present, no deduction). PF, ESI, Advance are entered per employee in Employee Master. Apprentices and Contractors have no PF, ESI, or PT. R.S.IT Solution has no PF or ESI, but PT still applies. Retention is the monthly bond retention deduction, if configured.</p>
     <div class="row-inline" style="margin-bottom:0;">
