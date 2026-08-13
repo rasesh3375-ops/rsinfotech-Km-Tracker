@@ -535,6 +535,11 @@
      with .inc-table. */
   .inc-table tr.pay-total{cursor:default;}
   .inc-table tr.pay-total td{background:var(--navy);color:#fff;font-weight:800;border-bottom-color:var(--navy);}
+  /* Salary-heading group rows (PF/ESI reports, grouped like the Final Salary
+     Sheet) — same reason as .pay-total above: table.sal-table's rule doesn't
+     reach a table styled with .inc-table. */
+  .inc-table tr.sal-heading{cursor:default;}
+  .inc-table tr.sal-heading td{background:#92D050;color:#16213E;font-weight:800;text-align:left;font-size:13px;text-transform:uppercase;letter-spacing:.3px;}
   .inc-sub{display:block;font-size:11px;color:var(--muted);margin-top:2px;}
   /* Band colour carried on a left rule rather than a full wash, so several
      rows can sit together without the card turning into a block of colour. */
@@ -6798,19 +6803,24 @@ async function renderStatutoryReport(key, label){
   const pfTot = { wage:0, employee:0, epf:0, eps:0, admin:0, edli:0, total:0 };
   for(const emp of employees){
     const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
+    // The heading each employee was under THIS month, same reasoning as the
+    // Salary Sheet — a promotion recorded since must not move which group a
+    // past month's row sits in. Grouped by heading below, same as the Final
+    // Salary Sheet.
+    const headingKey = ratePayAsOf(emp, dateList[0]).salaryHeading || 'managerial';
     const amount = s[cfg.field];
     if(amount > 0){
-      rows.push([emp.name, amount]);
+      rows.push([emp.name, amount, headingKey]);
       grandTotal += amount;
     }
     if(key === 'pf'){
-      const heading = SALARY_HEADINGS[ratePayAsOf(emp, dateList[0]).salaryHeading] || SALARY_HEADINGS.managerial;
+      const heading = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
       if(heading.pf){
         // The Salary Sheet has already run the central calculation for this
         // employee and month; the report reads its result rather than working
         // it out again, so the two cannot disagree.
         const cfg = pfConfigStatus(emp);
-        pfRows.push({ emp, wage: s.pfWage, applicable: s.pfApplicable,
+        pfRows.push({ emp, headingKey, wage: s.pfWage, applicable: s.pfApplicable,
           notConfigured: !cfg.configured,
           eligible: cfg.configured ? (cfg.eligible ? 'Yes' : 'No') : 'Not configured',
           pfType: s.pfType === 'fixed' ? 'Fixed ₹' + fmtMoney(PF_RULES.fixedAmount)
@@ -6828,14 +6838,14 @@ async function renderStatutoryReport(key, label){
       }
     }
     if(key === 'esi'){
-      const heading = SALARY_HEADINGS[ratePayAsOf(emp, dateList[0]).salaryHeading] || SALARY_HEADINGS.managerial;
+      const heading = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
       if(!heading.esi) continue;                    // not an ESI establishment heading
       const r = computeEsi(s.gross, {
         isDisabled: emp.esiDisabled === 'yes',
         coveredAtPeriodStart: emp.esiCoveredAtPeriodStart === 'yes',
         asOf: dateList[0]
       });
-      esiRows.push({ emp, s, r });
+      esiRows.push({ emp, headingKey, s, r });
       if(r.covered){
         esiTot.gross += s.gross; esiTot.employee += r.employee;
         esiTot.employer += r.employer; esiTot.total += r.total;
@@ -6845,9 +6855,19 @@ async function renderStatutoryReport(key, label){
 
   if(key === 'pf' && pfRows.length){
     const money = rupees;
-    const body = pfRows.map((x, i) => `
+    let body = '';
+    const csvBody = [];
+    let sr = 0;
+    SALARY_HEADING_ORDER.forEach(hk => {
+      const group = pfRows.filter(x => x.headingKey === hk);
+      if(!group.length) return;
+      body += `<tr class="sal-heading"><td colspan="13">${escapeHtml(SALARY_HEADINGS[hk].label)}</td></tr>`;
+      csvBody.push([SALARY_HEADINGS[hk].label]);
+      group.forEach(x => {
+        sr++;
+        body += `
       <tr class="${x.applicable ? '' : 'inc-overdue'}">
-        <td>${i + 1}</td><td>${escapeHtml(x.emp.name)}<span class="inc-sub">${escapeHtml(x.emp.id)}</span></td>
+        <td>${sr}</td><td>${escapeHtml(x.emp.name)}<span class="inc-sub">${escapeHtml(x.emp.id)}</span></td>
         <td>${escapeHtml(x.eligible)}<span class="inc-sub">${escapeHtml(x.pfType)}</span></td>
         <td class="num">${x.leaveDays || 0}<span class="inc-sub">${money(x.leaveAmount)}</span></td>
         <td class="num">${money(x.wage)}</td>
@@ -6860,19 +6880,21 @@ async function renderStatutoryReport(key, label){
         <td class="num"><strong>${x.applicable ? money(x.total) : '—'}</strong></td>
         <td>${x.applicable ? 'Contributing' : (x.notConfigured ? 'Not configured' : 'PF Not Applicable')}
           <span class="inc-sub">${escapeHtml(x.reason)}</span></td>
-      </tr>`).join('');
+      </tr>`;
+        csvBody.push([sr, x.emp.name, x.emp.id, x.emp.uan || '', x.eligible, x.pfType,
+          Math.round(x.wage + (x.leaveAmount || 0)), x.leaveDays || 0, Math.round(x.leaveAmount || 0), Math.round(x.wage),
+          x.applicable ? Math.round(x.employee) : 0, x.applicable ? Math.round(x.epf) : 0, x.applicable ? Math.round(x.eps) : 0,
+          x.applicable ? Math.round(x.edli) : 0, x.applicable ? Math.round(x.admin) : 0,
+          x.applicable ? Math.round(x.employeeTotal) : 0, x.applicable ? Math.round(x.employerTotal) : 0,
+          x.applicable ? Math.round(x.total) : 0,
+          x.applicable ? 'Contributing' : (x.notConfigured ? 'Not configured' : 'PF Not Applicable'), x.reason]);
+      });
+    });
     const csv = toCsv(
       ['SR NO','Employee','Employee Code','UAN','PF Eligible','PF Type','Basic Salary','Leave/LOP Days',
        'Leave/LOP Deduction','Final Payable Basic','Employee EPF','Employer EPF','Employer EPS',
        'EDLI','Admin Charges','Employee Total','Employer Total','Grand Total','Status','Rule Applied'],
-      pfRows.map((x, i) => [i + 1, x.emp.name, x.emp.id, x.emp.uan || '', x.eligible, x.pfType,
-        Math.round(x.wage + (x.leaveAmount || 0)), x.leaveDays || 0, Math.round(x.leaveAmount || 0), Math.round(x.wage),
-        x.applicable ? Math.round(x.employee) : 0, x.applicable ? Math.round(x.epf) : 0, x.applicable ? Math.round(x.eps) : 0,
-        x.applicable ? Math.round(x.edli) : 0, x.applicable ? Math.round(x.admin) : 0,
-        x.applicable ? Math.round(x.employeeTotal) : 0, x.applicable ? Math.round(x.employerTotal) : 0,
-        x.applicable ? Math.round(x.total) : 0,
-        x.applicable ? 'Contributing' : (x.notConfigured ? 'Not configured' : 'PF Not Applicable'), x.reason])
-        .concat([['', 'GRAND TOTAL', '', '', '', '', '', '', '', Math.round(pfTot.wage), Math.round(pfTot.employee),
+      csvBody.concat([['', 'GRAND TOTAL', '', '', '', '', '', '', '', Math.round(pfTot.wage), Math.round(pfTot.employee),
                   Math.round(pfTot.epf), Math.round(pfTot.eps), Math.round(pfTot.edli), Math.round(pfTot.admin), Math.round(pfTot.employee),
                   Math.round(pfTot.epf + pfTot.eps + pfTot.edli + pfTot.admin), Math.round(pfTot.total), '', '']]));
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'PF'), `PF Return - ${monthVal}.csv`, csv, 'text/csv');
@@ -6911,22 +6933,34 @@ async function renderStatutoryReport(key, label){
   if(key === 'esi' && esiRows.length){
     const period = esiContributionPeriod(dateList[0]);
     const money = rupees;
-    const body = esiRows.map((x, i) => `
+    let body = '';
+    const csvBody = [];
+    let sr = 0;
+    SALARY_HEADING_ORDER.forEach(hk => {
+      const group = esiRows.filter(x => x.headingKey === hk);
+      if(!group.length) return;
+      body += `<tr class="sal-heading"><td colspan="8">${escapeHtml(SALARY_HEADINGS[hk].label)}</td></tr>`;
+      csvBody.push([SALARY_HEADINGS[hk].label]);
+      group.forEach(x => {
+        sr++;
+        body += `
       <tr class="${x.r.covered ? '' : 'inc-overdue'}">
-        <td>${i + 1}</td><td>${escapeHtml(x.emp.name)}</td>
+        <td>${sr}</td><td>${escapeHtml(x.emp.name)}</td>
         <td>${escapeHtml(x.emp.esiNumber || '—')}</td>
         <td class="num">${money(x.s.gross)}</td>
         <td class="num">${x.r.covered ? money(x.r.employee) : '—'}</td>
         <td class="num">${x.r.covered ? money(x.r.employer) : '—'}</td>
         <td class="num">${x.r.covered ? money(x.r.total) : '—'}</td>
         <td>${x.r.covered ? 'Covered' : 'Exempt'}<span class="inc-sub">${escapeHtml(x.r.reason)}</span></td>
-      </tr>`).join('');
+      </tr>`;
+        csvBody.push([sr, x.emp.name, x.emp.esiNumber || '', Math.round(x.s.gross),
+          x.r.covered ? Math.round(x.r.employee) : 0, x.r.covered ? Math.round(x.r.employer) : 0, x.r.covered ? Math.round(x.r.total) : 0,
+          x.r.covered ? 'Covered' : 'Exempt', x.r.reason]);
+      });
+    });
     const csv = toCsv(
       ['SR NO','Name','ESI Number','Gross Wages','Employee 0.75%','Employer 3.25%','Total','Status','Rule Applied'],
-      esiRows.map((x, i) => [i + 1, x.emp.name, x.emp.esiNumber || '', Math.round(x.s.gross),
-        x.r.covered ? Math.round(x.r.employee) : 0, x.r.covered ? Math.round(x.r.employer) : 0, x.r.covered ? Math.round(x.r.total) : 0,
-        x.r.covered ? 'Covered' : 'Exempt', x.r.reason])
-        .concat([['', 'TOTAL', '', Math.round(esiTot.gross), Math.round(esiTot.employee), Math.round(esiTot.employer), Math.round(esiTot.total), '', '']]));
+      csvBody.concat([['', 'TOTAL', '', Math.round(esiTot.gross), Math.round(esiTot.employee), Math.round(esiTot.employer), Math.round(esiTot.total), '', '']]));
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'ESI'), `ESI Return - ${monthVal}.csv`, csv, 'text/csv');
     box.innerHTML = `${reportLogoHeader('ESI Contribution Return — ' + monthLabel(monthVal))}
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Contribution period ${escapeHtml(period.label)} ·
@@ -6954,14 +6988,24 @@ async function renderStatutoryReport(key, label){
     return;
   }
 
-  const tableRows = rows.map(r => `<tr><td class="sal-name">${r[0]}</td><td class="num">${rupees(r[1])}</td></tr>`).join('');
+  let tableRows = '';
+  const csvRows = [];
+  SALARY_HEADING_ORDER.forEach(hk => {
+    const group = rows.filter(r => r[2] === hk);
+    if(!group.length) return;
+    tableRows += `<tr class="sal-heading"><td colspan="2">${escapeHtml(SALARY_HEADINGS[hk].label)}</td></tr>`;
+    csvRows.push([SALARY_HEADINGS[hk].label]);
+    group.forEach(r => {
+      tableRows += `<tr><td class="sal-name">${r[0]}</td><td class="num">${rupees(r[1])}</td></tr>`;
+      csvRows.push([r[0], Math.round(r[1])]);
+    });
+  });
   box.innerHTML = `${reportActionBar(label + ' — ' + monthLabel(monthVal), cfg.box)}
     <div class="sal-sheet-wrap print-isolate" id="statReportPrintArea_${key}">
       ${reportLogoHeader(label + ' — ' + monthLabel(monthVal))}
       <table class="sal-table"><tr><th>Name</th><th class="num">${key.toUpperCase()} Amount</th></tr>${tableRows}<tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total</strong></td><td class="num"><strong>${rupees(grandTotal)}</strong></td></tr></table>
     </div>`;
 
-  const csvRows = rows.map(r => [r[0], Math.round(r[1])]);
   csvRows.push(['Grand Total', Math.round(grandTotal)]);
   const fileName = `${label} - ${monthVal}.csv`;
   const content = toCsv(['Name', key.toUpperCase() + ' Amount'], csvRows);
