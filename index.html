@@ -895,12 +895,13 @@
      inc-overdue while living inside a sal-table, not an inc-table — without
      this the flag was applied but never rendered. */
   table.sal-table tr.inc-overdue td:first-child{box-shadow:inset 3px 0 0 var(--red);}
-  /* Salary Sheet month-over-month comparison — amber for a cell that changed
-     from last month, green for a row that is new this month. Kept off the
-     heading/subtotal/grandtotal rows, which never carry these classes. */
+  /* Salary Sheet month-over-month comparison — amber on Rate of Pay when it
+     changed since last month, green for a row that is new this month (the
+     two never coincide, since a new joiner has no prior month to compare
+     against). Kept off the heading/subtotal/grandtotal rows, which never
+     carry these classes. */
   table.sal-table td.cell-changed{background:#FDECC8;box-shadow:inset 0 0 0 1px var(--amber-dark);font-weight:700;}
   table.sal-table tr.sal-new-emp td{background:#DDF3E4;}
-  table.sal-table tr.sal-new-emp td.cell-changed{background:#BFE8CC;box-shadow:inset 0 0 0 1px var(--green);}
   .pill.new{background:#DDF3E4;color:var(--green);}
 
   /* ===== Professional polish pass ===== */
@@ -6781,15 +6782,12 @@ async function renderSalarySheet(){
   const holidayMap = {};
   holidays.forEach(h => { holidayMap[h.date] = h.name; });
 
-  // Previous month's dates, for the change-highlight comparison below — plain
+  // Previous month's first date, for the Rate of Pay comparison below — plain
   // integer month math, not a Date object, so there is no UTC-midnight rollover
-  // (see CLAUDE.md on new Date(dateStr).getMonth()). getHolidays() above already
-  // returned the whole holiday list, so holidayMap already covers these dates.
+  // (see CLAUDE.md on new Date(dateStr).getMonth()).
   let prevYear = year, prevMonth = month - 1;
   if(prevMonth === 0){ prevMonth = 12; prevYear -= 1; }
-  const prevMonthDays = new Date(prevYear, prevMonth, 0).getDate();
-  const prevDateList = [];
-  for(let d=1; d<=prevMonthDays; d++) prevDateList.push(prevYear + '-' + String(prevMonth).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
+  const prevMonthStart = prevYear + '-' + String(prevMonth).padStart(2,'0') + '-01';
 
   // Employer columns follow Net Salary, never inside Total Deduction — they are
   // company cost, not money withheld from the employee.
@@ -6817,48 +6815,24 @@ async function renderSalarySheet(){
     for(const emp of group){
       const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
 
-      // Compare against last month so a real change — a raise, a heading
-      // move, a loan/retention schedule change, PT crossing the ₹12,000
-      // gross line, an ESI ceiling crossing, or the two bottom-line figures —
-      // catches HR's eye. Left out on purpose: Leave Days/Leave Amount/leave
-      // balances (attendance, expected to move every month) and Advance/
-      // Advance Temp/Conveyance/PF eligibility (stored as one current value
-      // on the employee record with no month-by-month history, so re-running
-      // this month's formula on last month's dates would just read today's
-      // same figure back and never show a change even when one really
-      // happened — recomputing them here would be a false "unchanged").
-      // A joiner this month has no real prior month to compare against —
-      // ratePayAsOf falls back to their first entry regardless of date, so
-      // recomputing "last month" for them would silently show their current
-      // pay as if they had already been employed, not a genuine comparison.
+      // Compare against last month on exactly two things: Rate of Pay
+      // changing (a raise or a heading move — ratePayAsOf carries both) and
+      // an employee being new this month. A joiner this month has no real
+      // prior month to compare against — ratePayAsOf falls back to their
+      // first entry regardless of date, so comparing them would silently
+      // show their current pay as if they had already been employed.
       const isNewThisMonth = !!(emp.doj && emp.doj >= dateList[0] && emp.doj <= dateList[dateList.length - 1]);
-      let chg = {};
-      if(!isNewThisMonth){
-        const prevS = await computeSalaryForEmployee(emp, prevDateList, prevMonthDays, holidayMap);
-        const diff = (a, b) => Math.round(Number(a) || 0) !== Math.round(Number(b) || 0);
-        chg = {
-          rate: diff(s.rate, prevS.rate),
-          basic: diff(s.basic, prevS.basic),
-          hra: diff(s.hra, prevS.hra),
-          lta: diff(s.lta, prevS.lta),
-          pt: diff(s.pt, prevS.pt),
-          esi: (s.esiEmployer > 0) !== (prevS.esiEmployer > 0),
-          loanEmi: diff(s.loanEmi, prevS.loanEmi),
-          retention: diff(s.retention, prevS.retention),
-          netSalary: diff(s.netSalary, prevS.netSalary),
-          ctc: diff(s.ctc, prevS.ctc)
-        };
-      }
-      const cc = k => chg[k] ? 'cell-changed' : '';
+      const rateChanged = !isNewThisMonth && Math.round(s.rate) !== Math.round(ratePayAsOf(emp, prevMonthStart).ratePay);
       const rowCls = isNewThisMonth ? ' class="sal-new-emp"' : '';
+      const rateCellCls = rateChanged ? 'cell-changed' : '';
 
-      bodyRows += `<tr${rowCls}><td>${srNo++}</td><td class="sal-name">${escapeHtml(emp.name)}${isNewThisMonth ? ' <span class="pill new">new</span>' : ''}</td><td class="${cc('rate')}">${fmtMoney(s.rate)}</td><td>${s.leaveDays}${s.sandwichDays ? ' <span class="pol-warn" title="' + escapeHtml(s.sandwichDates.join(', ')) + ' — sandwiched between two unpaid-absence days">(incl. ' + s.sandwichDays + ' sandwich)</span>' : ''}</td><td>${s.policyHalfDays ? '<span class="pol-warn">' + s.policyHalfDays + '</span>' : '—'}</td><td>${fmtMoney(s.leaveAmount)}</td>` +
-        `<td class="${cc('basic')}">${fmtMoney(s.basic)}</td><td class="${cc('hra')}">${fmtMoney(s.hra)}</td><td class="${cc('lta')}">${fmtMoney(s.lta)}</td><td>${fmtMoney(s.gross)}</td>` +
-        `<td>${fmtMoney(s.pf)}</td><td class="${cc('esi')}">${fmtMoney(s.esi)}</td><td class="${cc('pt')}">${fmtMoney(s.pt)}</td><td>${fmtMoney(s.advanceTemp)}</td><td>${fmtMoney(s.advance)}</td><td class="${cc('loanEmi')}">${fmtMoney(s.loanEmi)}</td><td class="${cc('retention')}">${fmtMoney(s.retention)}</td>` +
+      bodyRows += `<tr${rowCls}><td>${srNo++}</td><td class="sal-name">${escapeHtml(emp.name)}${isNewThisMonth ? ' <span class="pill new">new</span>' : ''}</td><td class="${rateCellCls}">${fmtMoney(s.rate)}</td><td>${s.leaveDays}${s.sandwichDays ? ' <span class="pol-warn" title="' + escapeHtml(s.sandwichDates.join(', ')) + ' — sandwiched between two unpaid-absence days">(incl. ' + s.sandwichDays + ' sandwich)</span>' : ''}</td><td>${s.policyHalfDays ? '<span class="pol-warn">' + s.policyHalfDays + '</span>' : '—'}</td><td>${fmtMoney(s.leaveAmount)}</td>` +
+        `<td>${fmtMoney(s.basic)}</td><td>${fmtMoney(s.hra)}</td><td>${fmtMoney(s.lta)}</td><td>${fmtMoney(s.gross)}</td>` +
+        `<td>${fmtMoney(s.pf)}</td><td>${fmtMoney(s.esi)}</td><td>${fmtMoney(s.pt)}</td><td>${fmtMoney(s.advanceTemp)}</td><td>${fmtMoney(s.advance)}</td><td>${fmtMoney(s.loanEmi)}</td><td>${fmtMoney(s.retention)}</td>` +
         `<td>${fmtMoney(s.totalDeduction)}</td><td>${s.conveyance ? '+' + fmtMoney(s.conveyance) : '—'}</td><td>${fmtMoney(s.netBeforeDirect)}</td>` +
-        `<td>${s.directPaid ? fmtMoney(s.directPaid) : '—'}</td><td class="${cc('netSalary')}"><strong>${fmtMoney(s.netSalary)}</strong></td>` +
+        `<td>${s.directPaid ? fmtMoney(s.directPaid) : '—'}</td><td><strong>${fmtMoney(s.netSalary)}</strong></td>` +
         `<td>${fmtMoney(s.pen)}</td><td>${fmtMoney(s.employerPf)}</td><td>${fmtMoney(s.pfAdmin)}</td>` +
-        `<td>${fmtMoney(s.edli)}</td><td>${fmtMoney(s.esiEmployer)}</td><td>${fmtMoney(s.employerCont)}</td><td class="${cc('ctc')}">${fmtMoney(s.ctc)}</td>` +
+        `<td>${fmtMoney(s.edli)}</td><td>${fmtMoney(s.esiEmployer)}</td><td>${fmtMoney(s.employerCont)}</td><td>${fmtMoney(s.ctc)}</td>` +
         `<td>${fmtMoney(s.advanceBalance)}</td><td>${fmtMoney(s.loanBalance)}</td><td>${s.fullDayLeaveBal}</td><td>${s.halfDayLeaveBal}</td></tr>`;
       csvRows.push([srNo-1, emp.name, R(s.rate), s.leaveDays, s.policyHalfDays, R(s.leaveAmount), R(s.basic), R(s.hra), R(s.lta), R(s.gross), R(s.pf), R(s.esi), R(s.pt), R(s.advanceTemp), R(s.advance), R(s.loanEmi), R(s.retention), R(s.totalDeduction), R(s.conveyance), R(s.netBeforeDirect), R(s.directPaid), R(s.netSalary),
         R(s.pen), R(s.employerPf), R(s.pfAdmin), R(s.edli), R(s.esiEmployer), R(s.employerCont), R(s.ctc),
@@ -6901,7 +6875,7 @@ async function renderSalarySheet(){
     </div>
     <div class="sal-sheet-wrap print-isolate" id="salaryPrintArea">
       ${reportLogoHeader('Salary Sheet — ' + monthLabel(monthVal))}
-      <p style="font-size:11px;margin:0 0 8px;"><span class="pill new" style="margin-right:6px;">new</span>joined this month &nbsp; <span style="display:inline-block;width:11px;height:11px;background:#FDECC8;box-shadow:inset 0 0 0 1px var(--amber-dark);vertical-align:middle;margin-right:5px;"></span>changed from last month's Rate of Pay, Basic, HRA, LTA, PT, ESI coverage, Loan EMI, Retention, Net Salary or CTC</p>
+      <p style="font-size:11px;margin:0 0 8px;"><span class="pill new" style="margin-right:6px;">new</span>joined this month &nbsp; <span style="display:inline-block;width:11px;height:11px;background:#FDECC8;box-shadow:inset 0 0 0 1px var(--amber-dark);vertical-align:middle;margin-right:5px;"></span>Rate of Pay changed since last month</p>
       <table class="sal-table"><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr>${bodyRows}</table>
     </div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0;">PT = ₹200 if Gross &gt; ₹12,000, else ₹0. Leave Days = Absent + LP days for the month (EL/SL count as present, no deduction). PF, ESI, Advance are entered per employee in Employee Master. Apprentices and Contractors have no PF, ESI, or PT. R.S.IT Solution has no PF or ESI, but PT still applies. Retention is the monthly bond retention deduction, if configured.</p>
