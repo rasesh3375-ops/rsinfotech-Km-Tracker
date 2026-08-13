@@ -5709,8 +5709,7 @@ async function renderAttendanceSheet(){
   }
 
   box.innerHTML = `${reportActionBar('Attendance Sheet — ' + monthLabel(monthVal), 'attendanceSheetBox', null, { print: false })}
-    ${reportLogoHeader('Attendance Sheet — ' + monthLabel(monthVal))}
-    <div class="att-sheet-wrap print-isolate" id="attendanceSheetPrintArea"><table class="att-table">${headerRow}${bodyRows}</table></div>
+    <div class="att-sheet-wrap print-isolate" id="attendanceSheetPrintArea">${reportLogoHeader('Attendance Sheet — ' + monthLabel(monthVal))}<table class="att-table">${headerRow}${bodyRows}</table></div>
     <div class="att-legend">
       <span><strong>P</strong> Present</span><span><strong>A</strong> Absent</span><span><strong>H</strong> Holiday</span>
       <span><strong>EL</strong> Earned leave</span><span><strong>SL</strong> Sick leave</span><span><strong>LP</strong> Leave without pay</span>
@@ -6251,9 +6250,26 @@ function closeSalarySheetAction(save){
 // mostly phones and some desktop browsers) the real file is attached through
 // that instead; everywhere else this falls back to a text summary naming
 // where the file already is in Drive.
+// Every shared file or message names the company and the report, with the
+// date it was generated — a WhatsApp/email recipient used to get a bare CSV
+// or plain-text file with nothing saying what report it was or that it came
+// from R.S. Infotech. A logo can only travel inside an actual image or PDF —
+// Print/PDF already carries the real company logo through
+// reportLogoHeader(), once a report is correctly print-isolated — so CSV and
+// plain-text shares carry the company name and date as text instead, the
+// closest either format can get to the same thing.
 let currentReportShare = null;
 function stashReportShare(title, fileName, content, mimeType, folderLabel){
-  currentReportShare = { title, fileName, content, mimeType: mimeType || 'text/csv', folderLabel };
+  const dateStr = new Date().toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' });
+  const headerLines = ['R.S. Infotech', title, 'Generated ' + dateStr];
+  const type = mimeType || 'text/csv';
+  // A blank CSV row between the header and the real column headers is
+  // harmless to every spreadsheet app that opens the file, and the header
+  // lines are still escaped the same way any other CSV cell would be.
+  const shareContent = type === 'text/csv'
+    ? headerLines.map(csvEscape).join('\n') + '\n\n' + content
+    : headerLines.join('\n') + '\n\n' + content;
+  currentReportShare = { title, fileName, content: shareContent, mimeType: type, folderLabel, headerLines };
 }
 // sourceId is the report's own box element — the same one openFullscreenView
 // relocates, so this works whether the report is being viewed full screen or
@@ -6283,11 +6299,11 @@ async function shareCurrentReport(via){
     const blob = new Blob([s.content], { type: s.mimeType });
     file = new File([blob], s.fileName, { type: s.mimeType });
   }catch(e){}
+  const summary = s.headerLines.join('\n') + (s.folderLabel ? '\nSaved to Drive: ' + s.folderLabel : '');
   if(file && navigator.canShare && navigator.canShare({ files: [file] })){
-    try{ await navigator.share({ files: [file], title: s.title, text: s.title }); return; }
+    try{ await navigator.share({ files: [file], title: s.title, text: summary }); return; }
     catch(e){ if(e && e.name === 'AbortError') return; } // cancelled from the share sheet — not a failure to fall back on
   }
-  const summary = s.title + (s.folderLabel ? '\nSaved to Drive: ' + s.folderLabel : '');
   if(via === 'whatsapp') window.open('https://wa.me/?text=' + encodeURIComponent(summary), '_blank');
   else window.location.href = 'mailto:?subject=' + encodeURIComponent(s.title) + '&body=' + encodeURIComponent(summary);
 }
@@ -6916,7 +6932,8 @@ async function renderStatutoryReport(key, label){
                   Math.round(pfTot.epf), Math.round(pfTot.eps), Math.round(pfTot.edli), Math.round(pfTot.admin), Math.round(pfTot.employee),
                   Math.round(pfTot.epf + pfTot.eps + pfTot.edli + pfTot.admin), Math.round(pfTot.total), '', '']]));
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'PF'), `PF Return - ${monthVal}.csv`, csv, 'text/csv');
-    box.innerHTML = `${reportLogoHeader('Provident Fund Return — ' + monthLabel(monthVal))}
+    box.innerHTML = `<div class="print-isolate" id="pfReportPrintArea">
+      ${reportLogoHeader('Provident Fund Return — ' + monthLabel(monthVal))}
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Charged on ${
         PF_RULES.wageComponents.map(k => ({ basic:'Basic', hra:'HRA', lta:'LTA' }[k] || k)).join(' + ')} ·
         employee ${headingPct(PF_RULES.employeePct)} · employer ${headingPct(0.0367)} EPF and ${headingPct(PF_RULES.epsPct)} EPS,
@@ -6941,6 +6958,7 @@ async function renderStatutoryReport(key, label){
       <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Employee share ${money(pfTot.employee)} ·
         employer share ${money(pfTot.epf + pfTot.eps + pfTot.admin + pfTot.edli)} ·
         total remittance <strong>${money(pfTot.total)}</strong>. Saved to Drive under HR Management &gt; Reports &gt; PF.</p>
+      </div>
       ${reportActionBar('Provident Fund Return — ' + monthLabel(monthVal), cfg.box)}`;
     stashReportShare('Provident Fund Return — ' + monthLabel(monthVal), `PF Return - ${monthVal}.csv`, csv, 'text/csv',
       'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > PF');
@@ -6980,7 +6998,8 @@ async function renderStatutoryReport(key, label){
       ['SR NO','Name','ESI Number','Gross Wages','Employee 0.75%','Employer 3.25%','Total','Status','Rule Applied'],
       csvBody.concat([['', 'TOTAL', '', Math.round(esiTot.gross), Math.round(esiTot.employee), Math.round(esiTot.employer), Math.round(esiTot.total), '', '']]));
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'ESI'), `ESI Return - ${monthVal}.csv`, csv, 'text/csv');
-    box.innerHTML = `${reportLogoHeader('ESI Contribution Return — ' + monthLabel(monthVal))}
+    box.innerHTML = `<div class="print-isolate" id="esiReportPrintArea">
+      ${reportLogoHeader('ESI Contribution Return — ' + monthLabel(monthVal))}
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Contribution period ${escapeHtml(period.label)} ·
         employee ${headingPct(ESI_RULES.employeePct)} · employer ${headingPct(ESI_RULES.employerPct)} ·
         ceiling ₹${fmtMoney(ESI_RULES.wageCeiling)} (₹${fmtMoney(ESI_RULES.disabledCeiling)} for persons with disability).
@@ -6994,6 +7013,7 @@ async function renderStatutoryReport(key, label){
             <td class="num">${money(esiTot.employer)}</td><td class="num">${money(esiTot.total)}</td><td></td></tr>
         </tbody></table></div>
       <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; Reports &gt; ESI.</p>
+      </div>
       ${reportActionBar('ESI Contribution Return — ' + monthLabel(monthVal), cfg.box)}`;
     stashReportShare('ESI Contribution Return — ' + monthLabel(monthVal), `ESI Return - ${monthVal}.csv`, csv, 'text/csv',
       'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > ESI');
@@ -7220,9 +7240,10 @@ async function renderFinalSalarySheet(){
   }
 
   box.innerHTML = `${reportActionBar('Final Salary Sheet — ' + monthLabel(monthVal), 'finalSalaryBox')}
-    ${reportLogoHeader('Final Salary Sheet — ' + monthLabel(monthVal))}
-    <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by salary heading, sorted by bank. Final Payable is after every deduction, including anything paid directly to the account.</p>
-    <div class="sal-sheet-wrap print-isolate" id="finalSalaryPrintArea"><table class="sal-table">
+    <div class="sal-sheet-wrap print-isolate" id="finalSalaryPrintArea">
+      ${reportLogoHeader('Final Salary Sheet — ' + monthLabel(monthVal))}
+      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by salary heading, sorted by bank. Final Payable is after every deduction, including anything paid directly to the account.</p>
+      <table class="sal-table">
       <thead><tr><th>SR</th><th>Employee Name</th><th>Bank Name</th><th>Account Number</th><th>IFSC</th><th class="num">Final Payable</th></tr></thead>
       <tbody>${bodyRows}</tbody></table></div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(monthVal + '-01'))} &gt; Dashboard &gt; Final Salary Sheet.</p>`;
@@ -7306,13 +7327,15 @@ async function renderBonusPaymentSheet(){
   const noAmount = onRoll.filter(e => diwaliBonusSource(e) === 'unset');
 
   box.innerHTML = `${reportActionBar('Diwali Bonus Payment Sheet — paid ' + paidOn, 'bonusPaymentBox')}
+    <div class="sal-sheet-wrap print-isolate" id="bonusPaymentPrintArea">
     ${reportLogoHeader('Diwali Bonus Payment Sheet — paid ' + paidOn)}
     <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by salary heading, sorted by bank. Each figure is the Diwali bonus amount set on that employee's record — nothing is taken off it: no PF, no ESI, no Professional Tax, no loan instalment, no advance, no retention money, and no reduction for leave taken, however many days were lost that year.</p>
     ${noAmount.length ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${noAmount.length} eligible employee(s) are missing from this sheet because no bonus amount has been set for them: ${escapeHtml(noAmount.map(e => e.name || e.id).join(', '))}. Set an amount on each record, then generate the sheet again.</p>` : ''}
     ${noBank.length ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${noBank.length} employee(s) have no bank details on file and cannot be paid by transfer: ${escapeHtml(noBank.join(', '))}.</p>` : ''}
-    <div class="sal-sheet-wrap print-isolate" id="bonusPaymentPrintArea"><table class="sal-table">
+    <table class="sal-table">
       <thead><tr><th>SR</th><th>Employee Name</th><th>Bank Name</th><th>Account Number</th><th>IFSC</th><th class="num">Bonus Payable</th></tr></thead>
-      <tbody>${bodyRows}</tbody></table></div>
+      <tbody>${bodyRows}</tbody></table>
+    </div>
     ${notEligible.length ? `<p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">Not on this sheet: ${notEligible.length} marked not eligible.</p>` : ''}
     <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(paidOn))} &gt; Dashboard &gt; Diwali Bonus Payment Sheet.</p>`;
   openFullscreenView('Diwali Bonus Payment Sheet — paid ' + paidOn, 'bonusPaymentBox');
@@ -12016,6 +12039,7 @@ async function renderLeaveEncashmentReport(){
 
   const nil = rows.length - payable.length;
   box.innerHTML = `${reportActionBar('Leave Encashment — FY ' + fyLabel, 'encashBox')}
+    <div class="sal-sheet-wrap print-isolate" id="encashPrintArea">
     ${reportLogoHeader('Leave Encashment — FY ' + fyLabel + ', as at ' + asAt)}
     <p style="font-size:12px;color:var(--muted);margin:0 0 12px;line-height:1.6;">
       Pending days are what is left of privilege leave at 31 March — opening balance plus what was
@@ -12027,14 +12051,15 @@ async function renderLeaveEncashmentReport(){
       This payroll has no separate dearness allowance — HRA is the component that stands in for it,
       and it is included.</p>
     ${noBank.length ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${noBank.length} employee(s) have no bank details on file and cannot be paid by transfer: ${escapeHtml(noBank.join(', '))}.</p>` : ''}
-    <div class="sal-sheet-wrap"><table class="sal-table">
+    <table class="sal-table">
       <thead><tr><th>SR</th><th>Employee Name</th><th>Bank Name</th><th>Account Number</th>
         <th class="num">Pending<br><span class="th-sub">days</span></th>
         <th class="num">${escapeHtml(B.label)}<br><span class="th-sub">monthly</span></th>
         <th class="num">Basis<br><span class="th-sub">${headingPct(B.grossPct)}</span></th>
         <th class="num">Per day<br><span class="th-sub">÷ ${B.dayDivisor}</span></th>
         <th class="num">Payable</th></tr></thead>
-      <tbody>${bodyRows}</tbody></table></div>
+      <tbody>${bodyRows}</tbody></table>
+    </div>
     ${nil ? `<p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">${nil} employee(s) have no leave left to encash and are not listed.</p>` : ''}
     <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(asAt))} &gt; Reports &gt; Leave Encashment. Use <em>Encash and start next year at nil</em> on the EL Calculation Sheet once these have been paid.</p>`;
   openFullscreenView('Leave Encashment — FY ' + fyLabel, 'encashBox');
@@ -12107,11 +12132,14 @@ async function renderElCalculationSheet(){
 
   box.innerHTML = `
     ${reportActionBar(elReportTitle, 'elCalcBox')}
-    <div class="sal-sheet-wrap print-isolate" id="elCalcPrintArea"><table class="sal-table">
+    <div class="sal-sheet-wrap print-isolate" id="elCalcPrintArea">
+    ${reportLogoHeader(elReportTitle)}
+    <table class="sal-table">
       <tr><th>Name</th><th class="num">Opening EL</th><th class="num">Present days (FY)</th><th class="num">EL earned</th><th class="num">EL used</th><th class="num">Closing EL</th><th class="num">Per day</th><th class="num">Encashment</th></tr>
       ${rows.map(r => `<tr><td class="sal-name">${escapeHtml(r.name)}</td><td class="num">${r.opening}</td><td class="num">${r.presentDays}</td><td class="num">${r.earned}</td><td class="num">${r.elUsed}</td><td class="num">${r.closing}</td><td class="num">₹${fmtMoney(r.perDay)}</td><td class="num"><strong>₹${fmtMoney(r.amount)}</strong></td></tr>`).join('')}
       <tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total</strong></td><td colspan="6"></td><td class="num"><strong>₹${fmtMoney(totalEncash)}</strong></td></tr>
-    </table></div>
+    </table>
+    </div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0;line-height:1.6;">FY ${startYear}-${String(startYear+1).slice(2)}: ${fyStart} to ${fyEnd}. EL earned = 1 day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} days present (present includes EL/SL days and half-day equivalents), floored. Closing = Opening + Earned − Used.
       <br><strong style="color:var(--navy);">Encashment</strong> = closing days × ${headingPct(B.grossPct)} of ${escapeHtml(B.label)} ÷ ${B.dayDivisor}, worked out from each employee's Rate of Pay and salary heading. The ${B.dayDivisor} is the same figure that earns the leave — one day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} days of attendance. Policy is that unused PL is encashed at the year end and not carried forward, so the closing balance is a figure to pay.</p>
     <div class="row-inline" style="margin-bottom:0;">
@@ -12208,8 +12236,8 @@ async function renderMonthlyLeaveReport(){
 
   const reportTitle = 'Monthly Leave Report — FY ' + startYear + '-' + String(startYear+1).slice(2);
   box.innerHTML = `${reportActionBar(reportTitle, 'monthlyLeaveReportBox')}
-    ${reportLogoHeader(reportTitle)}
     <div class="sal-sheet-wrap print-isolate" id="leaveReportPrintArea">
+      ${reportLogoHeader(reportTitle)}
       <table class="sal-table"><tr>${header.map(h=>`<th>${h}</th>`).join('')}</tr>${tableRows}</table>
     </div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0;">Each number is EL + SL + LP days that month (half-day codes count as 0.5). Absent and Short Leave are not counted here — see the Attendance Sheet for the complete picture.</p>`;
@@ -12297,10 +12325,13 @@ async function renderOvertimeReport(){
       'HR Management > ' + financialYearLabel(monthStr + '-01') + ' > Reports > Overtime Report');
   }
   box.innerHTML = `${reportActionBar(reportTitle, 'overtimeReportBox')}
-    <div class="sal-sheet-wrap print-isolate" id="overtimeReportPrintArea"><table class="sal-table">
+    <div class="sal-sheet-wrap print-isolate" id="overtimeReportPrintArea">
+    ${reportLogoHeader(reportTitle)}
+    <table class="sal-table">
       <tr><th>Name</th><th>Date</th><th class="num">Hours</th><th>Note</th><th></th></tr>
       ${log.map(o => `<tr><td class="sal-name">${escapeHtml(o.name)}</td><td>${o.date}</td><td class="num">${o.hours}</td><td>${o.note||''}</td><td><button class="btn ghost" style="font-size:11.5px;padding:6px 10px;" onclick="deleteOvertimeEntry('${o.id}')">Delete</button></td></tr>`).join('')}
-    </table></div>
+    </table>
+    </div>
     <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Total overtime hours for ${monthLabel(monthStr)}: <strong>${totalHours}</strong></p>`;
 }
 
@@ -12410,9 +12441,11 @@ async function viewReport(key, label){
         <td>${escapeHtml(r.a.issuedOn || '—')}</td>
         <td>${r.out ? '<span class="pol-warn">Not returned</span>' : escapeHtml(r.a.returnedOn)}</td></tr>`).join('');
     document.getElementById('reportBox_assets').innerHTML =
-      `${reportLogoHeader('Employee Assets — issued and outstanding')}
+      `<div class="sal-sheet-wrap print-isolate" id="reportPrintArea_assets">
+       ${reportLogoHeader('Employee Assets — issued and outstanding')}
        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">${rows2.length} item(s) issued, <strong>${outCount} still outstanding</strong>. An Experience Letter cannot be generated while anything is outstanding.</p>
-       <div class="sal-sheet-wrap print-isolate" id="reportPrintArea_assets"><table class="sal-table"><thead><tr><th>Employee</th><th>Item</th><th class="num">Qty</th><th>Issued</th><th>Returned</th></tr></thead><tbody>${rows}</tbody></table></div>${fsBtn}`;
+       <table class="sal-table"><thead><tr><th>Employee</th><th>Item</th><th class="num">Qty</th><th>Issued</th><th>Returned</th></tr></thead><tbody>${rows}</tbody></table>
+       </div>${fsBtn}`;
     {
       const fileName = `Employee Assets - ${todayStr()}.csv`;
       const content = toCsv(csvHeader, csvRows);
@@ -12466,8 +12499,8 @@ async function viewReport(key, label){
             : '<span style="color:var(--muted);">Not eligible</span>'}</td></tr>`;
     }).join('');
     const unsetCount = employees.filter(e => diwaliBonusSource(e) === 'unset').length;
-    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">The bonus is the amount entered against each employee — nothing is worked out from the Rate of Pay, which is shown only for comparison. Nothing is deducted from a bonus and nothing is added to one: no PF, ESI or Professional Tax, no advance, loan or retention, and no reduction for leave taken during the year.</p>
-      ${unsetCount ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${unsetCount} eligible employee(s) have no bonus amount set, so nothing will be paid to them. Open each record and fill in Diwali bonus amount — the form suggests one month's pay if that is what you want.</p>` : ''}<div class="sal-sheet-wrap print-isolate" id="reportPrintArea_diwali"><table class="sal-table"><tr><th>Name</th><th>Eligible</th><th class="num">Rate of Pay</th><th class="num">Bonus</th><th>Status</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table></div></div>${fsBtn}`;
+    box.innerHTML = `<div class="print-isolate" id="reportPrintArea_diwali" style="margin-top:12px;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">The bonus is the amount entered against each employee — nothing is worked out from the Rate of Pay, which is shown only for comparison. Nothing is deducted from a bonus and nothing is added to one: no PF, ESI or Professional Tax, no advance, loan or retention, and no reduction for leave taken during the year.</p>
+      ${unsetCount ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${unsetCount} eligible employee(s) have no bonus amount set, so nothing will be paid to them. Open each record and fill in Diwali bonus amount — the form suggests one month's pay if that is what you want.</p>` : ''}<div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th>Eligible</th><th class="num">Rate of Pay</th><th class="num">Bonus</th><th>Status</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table></div></div>${fsBtn}`;
   } else if(key === 'salary'){
     // Conveyance gets its own column. Without it the row did not add up —
     // gross 30,000 less deductions 200 showing a net of 32,800 — and a row that
@@ -12481,7 +12514,7 @@ async function viewReport(key, label){
         `<td class="num">${conv ? '+' + rupees(conv) : '—'}</td>` +
         `<td class="num">−${rupees(deductions)}</td><td class="num"><strong>${rupees(net)}</strong></td></tr>`;
     }).join('');
-    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">Net = Gross + Conveyance − Deductions. Conveyance is paid on top of the salary, so it is added rather than taken off; deductions cover PF, ESI, PT and anything being recovered — advance, loan instalment and retention.</p><div class="sal-sheet-wrap print-isolate" id="reportPrintArea_salary"><table class="sal-table"><tr><th>Name</th><th class="num">Gross</th><th class="num">Conveyance</th><th class="num">Deductions</th><th class="num">Net</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table></div></div>${fsBtn}`;
+    box.innerHTML = `<div class="print-isolate" id="reportPrintArea_salary" style="margin-top:12px;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">Net = Gross + Conveyance − Deductions. Conveyance is paid on top of the salary, so it is added rather than taken off; deductions cover PF, ESI, PT and anything being recovered — advance, loan instalment and retention.</p><div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th class="num">Gross</th><th class="num">Conveyance</th><th class="num">Deductions</th><th class="num">Net</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table></div></div>${fsBtn}`;
   } else if(key === 'ctc'){
     csvHeader = ['Name','Monthly gross','Annual gross','Diwali bonus','Annual CTC'];
     rows = employees.map(e => {
@@ -12492,7 +12525,7 @@ async function viewReport(key, label){
       csvRows.push([e.name, Math.round(monthlyGross), Math.round(annualGross), Math.round(bonus), Math.round(annualCtc)]);
       return `<tr><td class="sal-name">${escapeHtml(e.name)}</td><td class="num">${rupees(monthlyGross)}</td><td class="num">${rupees(annualGross)}</td><td class="num">${rupees(bonus)}</td><td class="num">${rupees(annualCtc)}</td></tr>`;
     }).join('');
-    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<div class="sal-sheet-wrap print-isolate" id="reportPrintArea_ctc"><table class="sal-table"><tr><th>Name</th><th class="num">Monthly gross</th><th class="num">Annual gross</th><th class="num">Diwali bonus</th><th class="num">Annual CTC</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table></div><p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Annual CTC = (Rate of Pay + Other allowances + Dress allowance + Mobile expense + Conveyance) × 12 + Diwali bonus. Rate of Pay is the whole Basic + HRA + LTA gross. PF, ESI and PT come out of it, so they are not added again. The employer's own PF and ESI are not included here either.</p></div>${fsBtn}`;
+    box.innerHTML = `<div class="print-isolate" id="reportPrintArea_ctc" style="margin-top:12px;">${reportLogoHeader(label)}<div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th class="num">Monthly gross</th><th class="num">Annual gross</th><th class="num">Diwali bonus</th><th class="num">Annual CTC</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table></div><p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Annual CTC = (Rate of Pay + Other allowances + Dress allowance + Mobile expense + Conveyance) × 12 + Diwali bonus. Rate of Pay is the whole Basic + HRA + LTA gross. PF, ESI and PT come out of it, so they are not added again. The employer's own PF and ESI are not included here either.</p></div>${fsBtn}`;
   } else if(key === 'loan'){
     // One row per loan, not per employee — somebody repaying two shows twice,
     // which is the point of the ledger. Recovered-so-far and balance are worked
@@ -12535,10 +12568,10 @@ async function viewReport(key, label){
     const outstanding = ledger.reduce((t, { l }) => t + loanBalanceAfter(l, nowY, nowM), 0);
     const monthly = ledger.reduce((t, { l }) => t + loanEmiForMonth(l, nowY, nowM), 0);
     const multi = employees.filter(e => loansOf(e).filter(l => l.status === 'active').length > 1).length;
-    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}
+    box.innerHTML = `<div class="print-isolate" id="reportPrintArea_loan" style="margin-top:12px;">${reportLogoHeader(label)}
       <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;">${rupees(outstanding)} outstanding across ${ledger.length} loan(s); ${rupees(monthly)} coming off this month's Salary Sheet.${multi ? ' ' + multi + ' employee(s) are repaying more than one at a time.' : ''}</p>
       ${stalledCount ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${stalledCount} active loan(s) have no recovery month set, so no instalment is coming off the Salary Sheet for them. Set one on the employee record to start recovery.</p>` : ''}
-      <div class="sal-sheet-wrap print-isolate" id="reportPrintArea_loan"><table class="sal-table"><tr><th>Name</th><th class="num">Amount</th><th class="num">EMI</th><th>Recovery from</th><th class="num">Recovered so far</th><th class="num">Balance</th><th>Status</th></tr>${rows || '<tr><td colspan="7" class="empty">No data yet</td></tr>'}</table></div></div>${fsBtn}`;
+      <div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th class="num">Amount</th><th class="num">EMI</th><th>Recovery from</th><th class="num">Recovered so far</th><th class="num">Balance</th><th>Status</th></tr>${rows || '<tr><td colspan="7" class="empty">No data yet</td></tr>'}</table></div></div>${fsBtn}`;
   }
   if(csvHeader.length){
     // Filed under the financial year this is being run in. These reports are a
