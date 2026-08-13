@@ -1425,6 +1425,10 @@
         <div id="dashSubActivity" class="hidden">
           <section class="block">
             <p style="font-size:12.5px;color:var(--muted);margin:0 0 14px;" id="activitySummaryLine"></p>
+            <div class="row-inline" style="margin-bottom:14px;">
+              <button class="btn ghost" style="flex:1;" onclick="withBusy(this,'Working…',deleteOldActivityLog)">Delete entries older than 30 days</button>
+              <button class="btn ghost" style="flex:1;" onclick="withBusy(this,'Working…',clearActivityLog)">Clear log</button>
+            </div>
             <div id="activityLogList"></div>
           </section>
           <section class="block" id="secBackendConn">
@@ -9658,6 +9662,33 @@ async function renderActivityLogList(){
     return;
   }
   box.innerHTML = log.map(l => `<div class="emp-row"><div class="sub" style="margin-top:0;">${new Date(l.ts).toLocaleString()}</div><div style="font-size:13.5px;margin-top:2px;">${escapeHtml(l.text)}</div></div>`).join('');
+}
+
+async function saveActivityLog(list){
+  await safeSet('activity_log', JSON.stringify(list), true);
+}
+
+async function clearActivityLog(){
+  const log = await getActivityLog();
+  if(!log.length){ alert('The activity log is already empty.'); return; }
+  if(!confirm('Clear the entire activity log — all ' + log.length + ' entr' + (log.length === 1 ? 'y' : 'ies') + '? This cannot be undone.')) return;
+  await saveActivityLog([]);
+  // Logged after clearing, not before — the one thing worth keeping through
+  // a clear is a record that it happened, same as every other action here.
+  await addActivityLog('Cleared the activity log (' + log.length + ' entr' + (log.length === 1 ? 'y' : 'ies') + ' removed)');
+  await renderActivityLogList();
+}
+
+async function deleteOldActivityLog(){
+  const log = await getActivityLog();
+  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const keep = log.filter(l => new Date(l.ts).getTime() >= cutoff);
+  const removed = log.length - keep.length;
+  if(!removed){ alert('Nothing older than 30 days to remove.'); return; }
+  if(!confirm('Delete ' + removed + ' entr' + (removed === 1 ? 'y' : 'ies') + ' older than 30 days? This cannot be undone.')) return;
+  await saveActivityLog(keep);
+  await addActivityLog('Deleted ' + removed + ' activity log entr' + (removed === 1 ? 'y' : 'ies') + ' older than 30 days');
+  await renderActivityLogList();
 }
 
 // ---- employee master ----
