@@ -623,6 +623,11 @@
     body.hr-nav-open #hrSidebar, #hrSidebar.open{left:0;}
     #hrNavScrim{position:fixed;inset:0;background:rgba(22,33,62,.42);z-index:50;}
     body.hr-nav-open #hrNavScrim{display:block;}
+    /* The drawer sliding over the page was never enough on its own — the
+       page underneath still scrolled with it, which on a touch screen meant
+       a swipe meant for the menu just as often scrolled the dashboard behind
+       it instead. */
+    body.hr-nav-open{overflow:hidden;}
     #hrBurger{display:block;}
     #hrContent{padding:14px;}
     .dash-2col{grid-template-columns:1fr;}
@@ -678,6 +683,24 @@
   .modal-box .hint{font-size:12.5px;color:var(--muted);margin:0 0 18px;}
   .field-group{margin-bottom:16px;}
   .field-group .sec-title{font-size:11.5px;font-weight:700;color:var(--amber-dark);text-transform:uppercase;letter-spacing:.5px;margin:18px 0 12px;padding-top:14px;border-top:1px dashed var(--line);}
+
+  /* Add Employee: on a screen wide enough to make use of it, related sections
+     sit two to a row instead of one long single-column scroll — the same 22
+     sections, same fields, same order, just using the width a tablet or
+     desktop actually has. Below 761px this rule never applies at all, so
+     mobile is byte-for-byte the single-column layout it always was. Sections
+     with a table or an image gallery inside (Assets, Loans, PF/ESI/PT, Rate
+     of pay, Identity documents) span both columns — halving those would have
+     squeezed their rows rather than helped anyone. */
+  #employeeModalOverlay .modal-box{transition:max-width .15s ease;}
+  @media (min-width: 761px){
+    #employeeModalOverlay .modal-box{max-width:760px;}
+    .emp-form-grid{display:grid;grid-template-columns:1fr 1fr;column-gap:24px;align-items:start;}
+    .field-group-wide{grid-column:1 / -1;}
+  }
+  @media (min-width: 1024px){
+    #employeeModalOverlay .modal-box{max-width:920px;}
+  }
 
   /* Calculation card under the Heading dropdown — guidance only, so it reads
      as a note rather than another set of inputs. */
@@ -1012,7 +1035,11 @@
   body{background:linear-gradient(180deg, #FBFAF7 0%, var(--cream) 220px);}
   header.top{padding-bottom:16px;}
   header.top .brand img{border-radius:8px;box-shadow:0 1px 3px rgba(22,33,62,.15);}
-  section.block, .rolecard, .emp-row, .letter-choice{
+  /* One resting shadow for every card-shaped surface in the app — Dashboard,
+     Reports, Generator and the compact Attendance/Salary cards included —
+     so they read as the same design system rather than section.block's
+     having a subtle lift the newer card types never picked up. */
+  section.block, .rolecard, .emp-row, .letter-choice, .dash-card, .kpi, .gen-card, .hr-sheet-card{
     box-shadow:0 1px 2px rgba(22,33,62,.04), 0 1px 8px rgba(22,33,62,.05);
   }
   section.block{transition:box-shadow .15s ease;}
@@ -10234,6 +10261,7 @@ function employeeModalHtml(emp){
       </div>
       <p class="hint">This information is stored once and auto-fills letters and payslips for this employee — no need to retype it each time. Close it at any point with the × above — anything typed is kept on this device and offered back next time.</p>
 
+      <div class="emp-form-grid">
             <div class="field-group">
         <div class="sec-title">Basic details</div>
         <label class="field">Employee ID</label>
@@ -10350,7 +10378,7 @@ function employeeModalHtml(emp){
         </div>
       </div>
 
-      <div class="field-group">
+      <div class="field-group field-group-wide">
         <div class="sec-title">Assets issued (at joining)</div>
         <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">What was handed over when this employee joined — uniform, laptop, phone, tools. Shows on the Employee Assets report and has to be returned before an Experience Letter can be issued.</p>
         <div id="assetRowsBox"></div>
@@ -10461,7 +10489,7 @@ function employeeModalHtml(emp){
         </select>
       </div>
 
-      <div class="field-group">
+      <div class="field-group field-group-wide">
         <div class="sec-title">Rate of pay &amp; advances</div>
         <label class="field">Rate of pay (monthly)</label>
         <input type="number" id="f_ratePay" placeholder="0" value="${curPay.ratePay||''}" oninput="renderPayrollBreakdown()" ${hasIncrementHistory ? 'readonly' : ''}>
@@ -10495,7 +10523,7 @@ function employeeModalHtml(emp){
         <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Enter the outstanding advance as it stands today, once. The Salary Sheet then carries it forward each month, less what is recovered, so it does not need entering again.</p>
       </div>
 
-      <div class="field-group">
+      <div class="field-group field-group-wide">
         <div class="sec-title">Loans &amp; advances</div>
         <p style="font-size:12px;color:var(--muted);margin:0 0 12px;line-height:1.55;">
           An employee can be repaying more than one at a time — each is recovered on its own
@@ -10527,7 +10555,7 @@ function employeeModalHtml(emp){
         <input type="text" id="f_motherName" placeholder="Full name as on records" value="${escapeHtml(emp.motherName||'')}">
       </div>
 
-      <div class="field-group">
+      <div class="field-group field-group-wide">
         <div class="sec-title">PF, ESI &amp; PT</div>
         <div id="pfQuestionsWrap">
         <label class="field">Had a UAN or EPF account before?</label>
@@ -10682,7 +10710,7 @@ function employeeModalHtml(emp){
         <input type="text" id="f_accountNumber" placeholder="Account number" value="${emp.accountNumber}">
       </div>
 
-      <div class="field-group">
+      <div class="field-group field-group-wide">
         <div class="sec-title">Identity documents</div>
         <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Tap to scan with your camera or choose a file from your gallery. Documents are saved as soon as you upload them.</p>
         <label class="field">Aadhaar card</label>
@@ -10717,6 +10745,7 @@ function employeeModalHtml(emp){
         <label class="field">Other documents</label>
         <a href="#" onclick="addOtherDocSlot();return false;" style="font-size:13px;color:var(--amber-dark);font-weight:600;">+ Add another document</a>
         <div id="otherDocsBox"></div>
+      </div>
       </div>
 
       <div class="modal-actions">
