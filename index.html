@@ -1915,6 +1915,11 @@
 
   <div id="checklistModalRoot"></div>
   <div id="employeeModalRoot"></div>
+  <!-- After employeeModalRoot on purpose: Record Increment opens from a
+       button inside the employee edit form, and a later sibling paints over
+       an earlier one at the same z-index — before this, it rendered behind
+       the still-open edit form and was invisible. -->
+  <div id="incrementModalRoot"></div>
 
   <div id="fullscreenSheetRoot" class="hidden">
     <div class="fullscreen-header">
@@ -10400,6 +10405,7 @@ function employeeModalEscHandler(e){
   if(!document.getElementById('employeeModalOverlay')) return;
   // Not while a picker or another modal is on top of it.
   if(document.getElementById('checklistModalRoot').innerHTML) return;
+  if(document.getElementById('incrementModalRoot').innerHTML) return;
   closeEmployeeModal();
 }
 
@@ -10414,7 +10420,7 @@ async function openIncrementModal(id){
   const emp = employees.find(e => e.id === id);
   if(!emp) return;
   const cur = currentRatePay(emp);
-  document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeIncrementModal()">
+  document.getElementById('incrementModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeIncrementModal()">
     <div class="modal-box">
       <h2>Record Increment — ${escapeHtml(emp.name || emp.id)}</h2>
       <p class="hint">Adds a new Rate of Pay effective from the date you choose. Every report dated before that day keeps showing ₹${fmtMoney(cur.ratePay)} — nothing already generated moves.</p>
@@ -10438,7 +10444,7 @@ async function openIncrementModal(id){
 }
 
 function closeIncrementModal(){
-  document.getElementById('checklistModalRoot').innerHTML = '';
+  document.getElementById('incrementModalRoot').innerHTML = '';
 }
 
 async function saveIncrement(id){
