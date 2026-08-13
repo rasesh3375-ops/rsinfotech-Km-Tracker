@@ -1546,7 +1546,7 @@
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;">Final Salary Sheet</h2>
+          <h2 style="margin:0 0 4px;">Final Salary Sheet for Accountant</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The payment list: every employee grouped by salary heading, sorted by bank within each heading, with account number and the final amount payable after all deductions. Built for handing to the bank — one block per heading, subtotalled, with a grand total at the end.</p>
           <div class="row-inline">
             <div><label class="field">Month</label><select class="field-input" id="finalSalMonthSel"></select></div>
@@ -1636,7 +1636,7 @@
         <div id="reportCardsBox"></div>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;">Open a new leave year</h2>
+          <h2 style="margin:0 0 4px;">Leave Balance Generator for New Year</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Sets each employee's opening EL from what they earned last year — one day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} attendance days — and their SL to the yearly allowance. Resident Engineers and Work From Home staff are skipped, their policies being different, as are non-R.S. Infotech headings. Run once, in April.</p>
           <label class="field">Year starts</label>
           <input class="field-input" type="date" id="rolloverFy">
@@ -7318,23 +7318,27 @@ async function renderFinalSalarySheet(){
   csvRows.push(['', 'GRAND TOTAL', grandCount + ' employee(s)', '', '', Math.round(grand)]);
 
   const cols = ['SR NO','Employee Name','Bank Name','Account Number','IFSC','Final Payable Salary'];
+  // Display name only — the Drive folder itself stays "Final Salary Sheet" so
+  // months already filed there are not orphaned from the ones filed after
+  // this rename.
+  const rptTitle = 'Final Salary Sheet for Accountant';
   {
-    const fileName = `Final Salary Sheet - ${monthVal}.csv`;
+    const fileName = `${rptTitle} - ${monthVal}.csv`;
     const content = toCsv(cols, csvRows);
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Final Salary Sheet'), fileName, content, 'text/csv');
-    stashReportShare('Final Salary Sheet — ' + monthLabel(monthVal), fileName, content, 'text/csv',
+    stashReportShare(rptTitle + ' — ' + monthLabel(monthVal), fileName, content, 'text/csv',
       'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Dashboard > Final Salary Sheet');
   }
 
-  box.innerHTML = `${reportActionBar('Final Salary Sheet — ' + monthLabel(monthVal), 'finalSalaryBox')}
+  box.innerHTML = `${reportActionBar(rptTitle + ' — ' + monthLabel(monthVal), 'finalSalaryBox')}
     <div class="sal-sheet-wrap print-isolate" id="finalSalaryPrintArea">
-      ${reportLogoHeader('Final Salary Sheet — ' + monthLabel(monthVal))}
+      ${reportLogoHeader(rptTitle + ' — ' + monthLabel(monthVal))}
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by salary heading, sorted by bank. Final Payable is after every deduction, including anything paid directly to the account.</p>
       <table class="sal-table">
       <thead><tr><th>SR</th><th>Employee Name</th><th>Bank Name</th><th>Account Number</th><th>IFSC</th><th class="num">Final Payable</th></tr></thead>
       <tbody>${bodyRows}</tbody></table></div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(monthVal + '-01'))} &gt; Dashboard &gt; Final Salary Sheet.</p>`;
-  openFullscreenView('Final Salary Sheet — ' + monthLabel(monthVal), 'finalSalaryBox');
+  openFullscreenView(rptTitle + ' — ' + monthLabel(monthVal), 'finalSalaryBox');
 }
 
 // The bonus payment list. Same shape as the Final Salary Sheet so it can be
