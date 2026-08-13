@@ -8434,7 +8434,7 @@ function roleReportFooter(company, page, total){
     <div class="rpt-foot-r">
       <span>System Generated</span>
       <span>© ${new Date().getFullYear()} ${escapeHtml(company.name)}</span>
-      <span class="rpt-page">Page ${page} of ${total}</span>
+      <span class="rpt-page-num">Page ${page} of ${total}</span>
     </div>
   </div>`;
 }
@@ -13496,6 +13496,14 @@ async function uploadUniformDoc(employeeId, employeeName, event){
   await renderUniformIdList(employees.filter(e => e.employmentStatus !== 'left'));
 }
 
+// These need nothing beyond what is already on the employee record —
+// designation, department, dates — auto-filled the moment an employee is
+// picked. Offer Letter needs a typed candidate name and terms, and
+// Leave/Loan need the specific request details, so those still wait for the
+// Generate button; everything else would otherwise make HR press it a
+// second time for information the form already has.
+const AUTO_GENERATE_LETTERS = ['Appointment Letter', 'Experience Letter', 'Relieving Letter', 'Exit Letter',
+                               'No Dues Letter', 'Full & Final Settlement Letter', 'Salary Slip'];
 async function autoFillGeneratorFromEmployee(){
   const empId = document.getElementById('genEmpSelect').value;
   if(!empId) return;
@@ -13509,22 +13517,30 @@ async function autoFillGeneratorFromEmployee(){
   // one person's last working day would end up on the next person's relieving
   // letter — a wrong date on a document that goes outside the company.
   document.getElementById('genLwd').value = emp.leftDate || '';
-  if(LETTER_TYPES[selectedLetterIdx] === 'Loan/Advance Request Form') showLoanStanding();
-  if(LETTER_TYPES[selectedLetterIdx] === 'Leave Application Form') renderLeaveRequestHint();
+  const type = LETTER_TYPES[selectedLetterIdx];
+  if(type === 'Loan/Advance Request Form') showLoanStanding();
+  if(type === 'Leave Application Form') renderLeaveRequestHint();
+  if(AUTO_GENERATE_LETTERS.indexOf(type) !== -1) generateLetter();
 }
-function selectLetterType(idx){
+async function selectLetterType(idx){
   selectedLetterIdx = idx;
   // Scoped to this list only — #roleRptTypeList has its own .letter-choice
   // items above, and a global query here would toggle "active" on those by
   // the same numeric index instead.
   document.querySelectorAll('#letterChoiceList .letter-choice').forEach((el,i) => el.classList.toggle('active', i===idx));
-  toggleGeneratorFieldsForType();
+  await toggleGeneratorFieldsForType();
+  // Switching letter type for an employee already picked — Experience to
+  // Relieving, say — should show the new letter immediately rather than
+  // making HR press Generate again for the same person.
+  const type = LETTER_TYPES[idx];
+  const empId = (document.getElementById('genEmpSelect') || {}).value;
+  if(empId && AUTO_GENERATE_LETTERS.indexOf(type) !== -1) generateLetter();
 }
 function selectRoleReportType(idx){
   selectedRoleReportIdx = idx;
   document.querySelectorAll('#roleRptTypeList .letter-choice').forEach((el,i) => el.classList.toggle('active', i===idx));
 }
-function toggleGeneratorFieldsForType(){
+async function toggleGeneratorFieldsForType(){
   const type = LETTER_TYPES[selectedLetterIdx];
   const isOffer = type === 'Offer Letter';
   const isLoan = type === 'Loan/Advance Request Form';
@@ -13547,7 +13563,7 @@ function toggleGeneratorFieldsForType(){
     const el = document.getElementById(id);
     if(el) el.classList.toggle('hidden', !on);
   });
-  populateGeneratorEmployees();
+  await populateGeneratorEmployees();
   const loanWrap = document.getElementById('genLoanFieldsWrap');
   if(loanWrap){
     loanWrap.classList.toggle('hidden', !isLoan);
@@ -13934,48 +13950,107 @@ async function showLoanStanding(){
     : '<p style="font-size:12.5px;color:var(--muted);margin:0 0 12px;">Nothing outstanding on record for this employee.</p>';
 }
 
+// Reused by every "certificate" letter (Experience, No Dues) that speaks
+// about the employee in the third person rather than addressing them.
+function pronounsFor_(salutation){
+  if(salutation === 'Mr.') return { subject: 'he', subjectCap: 'He', object: 'him', possessive: 'his', was: 'was' };
+  if(salutation === 'Ms.' || salutation === 'Mrs.') return { subject: 'she', subjectCap: 'She', object: 'her', possessive: 'her', was: 'was' };
+  return { subject: 'they', subjectCap: 'They', object: 'them', possessive: 'their', was: 'were' };
+}
+function niceDate_(isoStr){
+  if(!isoStr) return '';
+  const d = new Date(isoStr);
+  if(isNaN(d)) return isoStr;
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
+}
+
+// The same A4 letterhead treatment Role Reports already use — logo, company
+// name, address and contact block, title and date — reusing its CSS classes
+// (.rpt-head/.rpt-logo/.rpt-company/...) rather than the compact strip every
+// day-to-day report shares, since a signed letter reads as a document, not a
+// dashboard printout.
+function letterHeader(company, title, dateStr){
+  const logo = (document.querySelector('header.top .brand img') || {}).src || '';
+  const contact = [
+    company.phone ? 'Tel: ' + escapeHtml(company.phone) : '',
+    company.email ? escapeHtml(company.email) : '',
+    company.website ? escapeHtml(company.website) : ''
+  ].filter(Boolean).join(' · ');
+  return `<div class="rpt-head">
+    <div class="rpt-head-top">
+      ${logo ? `<img class="rpt-logo" src="${logo}" alt="${escapeHtml(company.name)} logo">` : '<div></div>'}
+      <div class="rpt-head-mid">
+        <div class="rpt-company">${escapeHtml(company.name)}</div>
+        ${company.address ? `<div class="rpt-addr">${escapeHtml(company.address)}</div>` : ''}
+        ${contact ? `<div class="rpt-addr">${contact}</div>` : ''}
+      </div>
+      <div class="rpt-head-right">
+        <div class="rpt-title">${escapeHtml(title)}</div>
+        <div class="rpt-when">${escapeHtml(dateStr)}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// A ruled signature block, same component Role Reports already use
+// (.rpt-sign-tbl/.rpt-sign-line). Offer and Appointment need the employee's
+// own acceptance alongside the company's; every other formal letter here is
+// issued unilaterally (a certificate, a confirmation), so only the company
+// side signs. Leave/Loan forms and the Salary Slip build their own
+// signature and approval lines into the body instead, since those already
+// need more than one box (HOD approval, sanctioned amount, and so on).
+function letterSignatureBlock(type, name, company){
+  const forCompany = `<div class="rpt-sign-line"></div>For ${escapeHtml(company.name)}<br>Authorised Signatory`;
+  if(type === 'Offer Letter' || type === 'Appointment Letter'){
+    return `<table class="rpt-sign-tbl"><tbody><tr>
+      <td style="width:50%;">${forCompany}</td>
+      <td style="width:50%;"><div class="rpt-sign-line"></div>Accepted by<br>${escapeHtml(name)}</td>
+    </tr></tbody></table>`;
+  }
+  return `<table class="rpt-sign-tbl"><tbody><tr>
+    <td style="width:100%;">${forCompany}</td>
+  </tr></tbody></table>`;
+}
+
 function letterTemplate(type, f){
   const company = f.company, name = f.name || '[Employee name]', designation = f.designation || '[Designation]',
         department = f.department || '[Department]', doj = f.doj || '[Date of joining]', lwd = f.lwd || '[Last working date]',
         issueDate = f.issueDate;
-  const niceDate_ = (isoStr) => {
-    if(!isoStr) return '';
-    const d = new Date(isoStr);
-    if(isNaN(d)) return isoStr;
-    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
-  };
-  const pronounsFor_ = (salutation) => {
-    if(salutation === 'Mr.') return { subject: 'he', subjectCap: 'He', object: 'him', possessive: 'his', was: 'was' };
-    if(salutation === 'Ms.' || salutation === 'Mrs.') return { subject: 'she', subjectCap: 'She', object: 'her', possessive: 'her', was: 'was' };
-    return { subject: 'they', subjectCap: 'They', object: 'them', possessive: 'their', was: 'were' };
-  };
+  const inDept = department ? ' in the ' + department + ' department' : '';
   switch(type){
     case 'Offer Letter':
-      return `${company}\n\nDate: ${issueDate}\n\nDear ${name},\n\nFurther to your interview and discussions with us, we are pleased to offer you the position of ${designation}${department ? ' in the ' + department + ' department' : ''} at ${company}, with a proposed joining date of ${doj || '[to be confirmed]'}.\n\n${f.offeredSalary ? 'Offered compensation: ' + f.offeredSalary + '\n\n' : ''}This offer is subject to satisfactory verification of your documents and references, and does not constitute a confirmed appointment until you accept it and formally join the organisation. Detailed terms of employment will be shared in your appointment letter upon joining.\n\n${f.replyBy ? 'Please confirm your acceptance of this offer by ' + f.replyBy + '.\n\n' : ''}We look forward to welcoming you to ${company}.\n\nFor ${company}\n\nAuthorised Signatory`;
+      return `Dear ${name},\n\nFurther to your application and the discussions we have had with you, we are pleased to offer you employment with ${company} in the position of ${designation}${inDept}, on the following terms:\n\nDesignation: ${designation}\n${department ? 'Department: ' + department + '\n' : ''}Proposed date of joining: ${doj || '[to be confirmed]'}\n${f.offeredSalary ? 'Compensation: ' + f.offeredSalary + '\n' : ''}\nThis offer is extended on the basis of the information provided by you during the selection process and is subject to satisfactory verification of your documents, credentials and references. It does not by itself constitute a confirmed appointment — your appointment will be formally confirmed, and the detailed terms of your employment communicated, once you join us and receive your Appointment Letter.\n\n${f.replyBy ? 'Kindly confirm your acceptance of this offer on or before ' + niceDate_(f.replyBy) + ', failing which we will treat this offer as declined.\n\n' : ''}We look forward to welcoming you to the ${company} team.\n\nYours sincerely,`;
     case 'Appointment Letter':
-      return `${company}\n\nDate: ${issueDate}\n\nDear ${name},\n\nWe are pleased to appoint you as ${designation} in the ${department} department at ${company}, effective from ${doj}.\n\nYour employment will be governed by the terms discussed with you and the company's HR policies, including working hours, leave entitlements, and code of conduct. Please treat this letter as confirmation of your appointment and report to work on your date of joining with the required documents.\n\nWe welcome you to the team and look forward to a long and successful association.\n\nFor ${company}\n\nAuthorised Signatory`;
+      return `Dear ${name},\n\nFurther to your acceptance of our offer, we are pleased to confirm your appointment with ${company} as ${designation}${inDept}, with effect from ${doj}.\n\nYour employment will be governed by the Company's HR policies as in force from time to time, including those on working hours, leave entitlements, code of conduct and confidentiality, which will be shared with you separately. Please treat this letter as confirmation of your appointment, and report for duty on your date of joining with the documents requested of you.\n\nWe welcome you to ${company} and look forward to a long and mutually rewarding association.\n\nYours sincerely,`;
     case 'Experience Letter': {
       const p = pronounsFor_(f.salutation);
       const displayName = (f.salutation ? f.salutation + ' ' : '') + name;
       const dojNice = niceDate_(f.doj) || doj;
       const lwdNice = niceDate_(f.lwd) || lwd;
-      return `EXPERIENCE LETTER\n\nDate: ${issueDate}\n\nTo Whomsoever It May Concern,\n\nThis is to certify that ${displayName} was employed with ${company} as ${designation} from ${dojNice} to ${lwdNice}.\n\nDuring ${p.possessive} tenure, ${p.subject} ${p.was} responsible for handling routine HR, Purchase work including maintaining Admin records, preparing salary and send to consultant. All HR & ADMIN files and documents maintaining, and supporting day-to-day accounts-related activities.\n\n${p.subjectCap} performed ${p.possessive} duties sincerely and maintained a professional attitude throughout ${p.possessive} period of employment.\n\nWe wish ${p.object} all the best for ${p.possessive} future endeavors.\n\nSincerely,\n\nFor ${company}\n\n____________________\nAuthorized Signatory\nName: ____________________\nDesignation: ____________________`;
+      // The duties paragraph reads from what is actually on record for THIS
+      // person — Employee Master's Job profile — rather than a fixed
+      // description, so it states what they did, not what somebody else did.
+      const dutiesLine = f.jobProfile
+        ? `During ${p.possessive} tenure, ${p.subject} ${p.was} responsible for ${f.jobProfile.trim().replace(/\.?$/, '.')}`
+        : `During ${p.possessive} tenure, ${p.subject} carried out the duties and responsibilities associated with the role of ${designation}${inDept}.`;
+      return `TO WHOMSOEVER IT MAY CONCERN\n\nThis is to certify that ${displayName} was employed with ${company} as ${designation}${inDept} from ${dojNice} to ${lwdNice}.\n\n${dutiesLine}\n\n${p.subjectCap} carried out ${p.possessive} duties sincerely and maintained a professional attitude throughout ${p.possessive} period of employment with us, and ${p.subject} left us on cordial terms.\n\nWe wish ${p.object} continued success in ${p.possessive} future endeavours.\n\nYours sincerely,`;
     }
     case 'Relieving Letter':
-      return `${company}\n\nDate: ${issueDate}\n\nDear ${name},\n\nThis is to confirm that your resignation from the position of ${designation} in the ${department} department has been accepted, and you are relieved from services of ${company} with effect from ${lwd}.\n\nWe thank you for your contribution and wish you success in your future endeavours.\n\nFor ${company}\n\nAuthorised Signatory`;
+      return `Dear ${name},\n\nThis is to confirm that your resignation from the position of ${designation}${inDept} has been accepted, and that you stand relieved from the services of ${company} with effect from ${lwd}.\n\nAny dues payable to you will be settled as part of the Company's full and final settlement process, and a separate communication will follow in that regard.\n\nWe thank you for your contribution during your tenure with us and wish you success in your future endeavours.\n\nYours sincerely,`;
     case 'Exit Letter':
-      return `${company}\n\nDate: ${issueDate}\n\nDear ${name},\n\nThis letter confirms the completion of your exit formalities with ${company}. Your last working day was ${lwd}.\n\nAll company property and access must be returned/disabled as part of this process. We wish you well in your future career.\n\nFor ${company}\n\nAuthorised Signatory`;
-    case 'No Dues Letter':
-      return `${company}\n\nDate: ${issueDate}\n\nTO WHOMSOEVER IT MAY CONCERN\n\nThis is to certify that ${name}, who worked as ${designation} in the ${department} department, has cleared all dues, returned all company assets and has no outstanding financial obligation towards ${company} as of ${lwd || issueDate}.\n\nFor ${company}\n\nAuthorised Signatory`;
+      return `Dear ${name},\n\nThis letter confirms the completion of your exit formalities with ${company}, your last working day having been ${lwd}.\n\nAll Company property, assets and system access issued to you have been returned or disabled as part of this process, and your association with ${company} stands concluded from the above date.\n\nWe wish you well in your future career.\n\nYours sincerely,`;
+    case 'No Dues Letter': {
+      const p = pronounsFor_(f.salutation);
+      return `TO WHOMSOEVER IT MAY CONCERN\n\nThis is to certify that ${name}, who was employed with ${company} as ${designation}${inDept}, has cleared all dues, returned all Company assets in ${p.possessive} possession, and has no outstanding financial or material obligation towards ${company} as on ${lwd || issueDate}.\n\nThis certificate is issued on request, for whatever purpose it may serve.\n\nYours sincerely,`;
+    }
     case 'Full & Final Settlement Letter':
-      return `${company}\n\nDate: ${issueDate}\n\nDear ${name},\n\nThis letter is to inform you that your full and final settlement with respect to your employment as ${designation} (last working day ${lwd}) has been processed. Any dues payable will be credited to your registered bank account.\n\nFor ${company}\n\nAuthorised Signatory`;
+      return `Dear ${name},\n\nThis is to inform you that your full and final settlement of accounts, consequent to the conclusion of your employment as ${designation}${inDept} (last working day: ${lwd}), has been processed.\n\nAny amount payable to you as part of this settlement will be credited to your bank account as registered with us. Should you have any queries regarding the settlement, please reach out to HR.\n\nWe wish you the very best for the future.\n\nYours sincerely,`;
     case 'Leave Application Form': {
       const line = '____________________';
       const L = f.leave || {};
       const span = L.from ? (L.to && L.to !== L.from ? niceDate_(L.from) + ' to ' + niceDate_(L.to) : niceDate_(L.from)) : line;
       const flags = [].concat(L.blockers || [], L.notes || []);
-      return `${company}\n\nDate: ${issueDate}\n\nLEAVE APPLICATION FORM\n\n` +
-        `Employee name: ${name}\nDesignation: ${designation}\nDepartment: ${department}\n\n` +
+      return `Employee name: ${name}\nDesignation: ${designation}\nDepartment: ${department}\n\n` +
         `LEAVE REQUESTED\nType: ${L.label || line}\nDates: ${span}\n` +
         `Number of days: ${L.days || line}\nReason: ${L.reason || '____________________________________________'}\n\n` +
         `BALANCE\nAvailable before this leave: ${L.balance === undefined ? line : L.balance} day(s)\n` +
@@ -14000,8 +14075,7 @@ function letterTemplate(type, f){
       if(f.existingAdvance) owed.push('Advance balance of ₹' + fmtMoney(f.existingAdvance));
       const standing = 'EXISTING POSITION\n' +
         (owed.length ? owed.join('\n') : 'Nothing outstanding on record.') + '\n\n';
-      return `${company}\n\nDate: ${issueDate}\n\nLOAN / ADVANCE REQUEST FORM\n\n` +
-        `Employee name: ${name}\nDesignation: ${designation}\nDepartment: ${department}\n` +
+      return `Employee name: ${name}\nDesignation: ${designation}\nDepartment: ${department}\n` +
         `Date of joining: ${doj}\n\n${standing}` +
         `REQUEST\nAmount requested: ${rupees(f.loanAmount)}\n` +
         `Reason: ${f.loanReason || '____________________________________________'}\n` +
@@ -14014,9 +14088,9 @@ function letterTemplate(type, f){
         `Management approval: ${line}`;
     }
     case 'Salary Slip':
-      return `${company}\n\nSALARY SLIP — ${issueDate}\n\nEmployee name: ${name}\nDesignation: ${designation}\nDepartment: ${department}\n\nEARNINGS\nBasic: ${f.basic||0}\nHRA: ${f.hra||0}\nLTA: ${f.lta||0}\nOther allowances: ${f.other||0}\nGross: ${f.gross||0}\n${f.conveyance ? 'Conveyance / petrol (paid on top): ' + f.conveyance + '\n' : ''}\nDEDUCTIONS\nPF: ${f.pf||0}\nESI: ${f.esiDeduction||0}\nPT: ${f.pt||0}\n${f.advanceTemp ? 'Advance for temporary: ' + f.advanceTemp + '\n' : ''}${f.advance ? 'Advance: ' + f.advance + '\n' : ''}${f.emi ? 'Loan instalment: ' + f.emi + '\n' : ''}${f.retention ? 'Retention money: ' + f.retention + '\n' : ''}\nNET PAY: ${f.net||0}`;
+      return `Employee name: ${name}\nDesignation: ${designation}\nDepartment: ${department}\n\nEARNINGS\nBasic: ${f.basic||0}\nHRA: ${f.hra||0}\nLTA: ${f.lta||0}\nOther allowances: ${f.other||0}\nGross: ${f.gross||0}\n${f.conveyance ? 'Conveyance / petrol (paid on top): ' + f.conveyance + '\n' : ''}\nDEDUCTIONS\nPF: ${f.pf||0}\nESI: ${f.esiDeduction||0}\nPT: ${f.pt||0}\n${f.advanceTemp ? 'Advance for temporary: ' + f.advanceTemp + '\n' : ''}${f.advance ? 'Advance: ' + f.advance + '\n' : ''}${f.emi ? 'Loan instalment: ' + f.emi + '\n' : ''}${f.retention ? 'Retention money: ' + f.retention + '\n' : ''}\nNET PAY: ${f.net||0}`;
     default:
-      return `${company}\n\nDate: ${issueDate}\n\n${name}`;
+      return name;
   }
 }
 
@@ -14075,7 +14149,11 @@ async function generateLetter(){
     department: document.getElementById('genDepartment').value.trim(),
     doj: document.getElementById('genDoj').value,
     lwd: document.getElementById('genLwd').value,
-    issueDate: document.getElementById('genIssueDate').value || todayStr()
+    issueDate: document.getElementById('genIssueDate').value || todayStr(),
+    // What the Experience Letter's duties paragraph is actually built from —
+    // see letterTemplate — so it states this person's real job, not a fixed
+    // description left over from whoever it was first written for.
+    jobProfile: matched ? (matched.jobProfile || '') : ''
   };
   if(isOffer){
     f.offeredSalary = document.getElementById('genOfferedSalary').value.trim();
@@ -14126,7 +14204,20 @@ async function generateLetter(){
     f.net = Math.round(p.net);
   }
   const text = letterTemplate(type, f);
-  document.getElementById('letterPaper').innerHTML = reportLogoHeader(type) + '<div style="white-space:pre-wrap;">' + escapeHtml(text) + '</div>';
+  // Signed letters (as opposed to the Leave/Loan forms and the Salary Slip,
+  // which build their own signature and approval boxes into the body) get a
+  // ruled signature block under the text — see letterSignatureBlock.
+  const FORMAL_LETTERS = ['Offer Letter', 'Appointment Letter', 'Experience Letter', 'Relieving Letter',
+                          'Exit Letter', 'No Dues Letter', 'Full & Final Settlement Letter'];
+  const company = await getCompanyProfile();
+  company.name = f.company || company.name;
+  const signOff = FORMAL_LETTERS.indexOf(type) !== -1 ? letterSignatureBlock(type, name, company) : '';
+  document.getElementById('letterPaper').innerHTML = `<div class="rpt-wrap"><div class="rpt-page">
+    ${letterHeader(company, type, niceDate_(f.issueDate) || f.issueDate)}
+    <div class="rpt-body" style="white-space:pre-wrap;">${escapeHtml(text)}</div>
+    ${signOff}
+    ${roleReportFooter(company, 1, 1)}
+  </div></div>`;
   document.getElementById('letterOutput').classList.add('show');
   document.getElementById('letterActionsBox').classList.remove('hidden');
   document.getElementById('letterActionsBox').innerHTML =
