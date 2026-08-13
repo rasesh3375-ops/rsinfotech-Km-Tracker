@@ -4650,8 +4650,9 @@ function leaveBalances(emp, used, P){
 function plEncashmentRate(emp, P){
   P = P || LEAVE_POLICY;
   const B = P.privilegeLeave.salaryBasis;
-  const h = SALARY_HEADINGS[(emp || {}).salaryHeading] || SALARY_HEADINGS.managerial;
-  const rate = Number((emp || {}).ratePay) || 0;
+  const asOf = currentRatePay(emp);
+  const h = SALARY_HEADINGS[asOf.salaryHeading] || SALARY_HEADINGS.managerial;
+  const rate = asOf.ratePay;
   // Basic and HRA as the heading splits them; a flat heading pays the whole
   // rate as Basic, so its HRA is nil and the base is simply the rate.
   const part = { basic: h.flat ? rate : rate * h.basicPct,
@@ -5970,6 +5971,68 @@ function loansOf(emp){
   }];
 }
 
+// ---- salary history (increments) ----
+// An employee's Rate of Pay and heading, as a dated list, whatever shape the
+// record is in. Same idea as loansOf: a record with no history yet is a
+// single implicit entry built from the flat ratePay/salaryHeading fields,
+// effective for any date — exactly what every report has always shown, so
+// nobody's figures move until an increment is actually recorded. `from: null`
+// on an entry means "in force before anything else on the list", which is
+// what freezes a rate as the one that covered everything before the first
+// real increment (see recordIncrement).
+function salaryHistoryOf(emp){
+  if(!emp) return [{ from: null, ratePay: 0, salaryHeading: 'managerial' }];
+  if(Array.isArray(emp.salaryHistory) && emp.salaryHistory.length) return emp.salaryHistory;
+  return [{ from: null, ratePay: Number(emp.ratePay) || 0, salaryHeading: emp.salaryHeading || 'managerial' }];
+}
+
+// Rate of Pay and salary heading as they stood on one date. This is the whole
+// point of keeping history: an increment changes every report from its
+// effective date onward without moving a single figure on any report before
+// it. The entry with the latest `from` date that is still on or before
+// dateStr is the one in force; entries are not assumed to already be sorted.
+// A dateStr before every entry (should not happen in practice) falls back to
+// the earliest one on file rather than reading as zero.
+function ratePayAsOf(emp, dateStr){
+  const hist = salaryHistoryOf(emp);
+  const asOf = String(dateStr || todayStr());
+  let chosen = null;
+  hist.forEach(h => {
+    if(h.from && h.from > asOf) return; // not effective yet on this date
+    if(!chosen || (h.from || '') > (chosen.from || '')) chosen = h;
+  });
+  if(!chosen){
+    chosen = hist.slice().sort((a, b) => (a.from || '').localeCompare(b.from || ''))[0];
+  }
+  return { ratePay: Number(chosen.ratePay) || 0, salaryHeading: chosen.salaryHeading || 'managerial' };
+}
+
+// Rate of Pay and heading in force today — what every "current state" screen
+// (the employee form, the dashboard, the Increment and CTC reports) means by
+// "their salary", as opposed to a specific month's Salary Sheet.
+function currentRatePay(emp){
+  return ratePayAsOf(emp, todayStr());
+}
+
+// Adds a new salary history entry, effective from a chosen date, without
+// touching anything before it. An employee's very first recorded increment
+// freezes their rate at the time as the entry that covers everything before
+// it — see salaryHistoryOf — so nothing already shown on any report moves.
+// Mutates and returns emp; the caller is expected to be working on a draft.
+function recordIncrement(emp, opts){
+  opts = opts || {};
+  const hist = salaryHistoryOf(emp).slice();
+  const heading = opts.salaryHeading || currentRatePay(emp).salaryHeading;
+  hist.push({
+    from: opts.from || todayStr(),
+    ratePay: Number(opts.ratePay) || 0,
+    salaryHeading: heading,
+    recordedAt: new Date().toISOString()
+  });
+  emp.salaryHistory = hist;
+  return emp;
+}
+
 // One loan's instalment for one month. How many months it runs is not stored:
 // it is however many instalments the amount needs, so the schedule cannot
 // disagree with itself, and the last one is the remainder so recovery stops
@@ -6149,8 +6212,14 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   // warned about and then left for somebody to apply by hand. Half a day each.
   const policyHalf = policyHalfDaysFor(emp, att, dateList);
   const leaveDays = summary.absent + summary.lpDays + policyHalf.total * 0.5;
-  const heading = SALARY_HEADINGS[emp.salaryHeading] || SALARY_HEADINGS.managerial;
-  const rate = Number(emp.ratePay) || 0;
+  // Rate of Pay and heading as they stood on THIS month, not whatever they are
+  // today — an increment recorded since must not move a month that has
+  // already been paid. asOfEmp carries the historical heading into
+  // calculatePfFor below, so PF eligibility is judged the same way.
+  const asOf = ratePayAsOf(emp, dateList[0]);
+  const asOfEmp = Object.assign({}, emp, asOf);
+  const heading = SALARY_HEADINGS[asOf.salaryHeading] || SALARY_HEADINGS.managerial;
+  const rate = asOf.ratePay;
   const leaveAmount = monthDays ? (rate / monthDays * leaveDays) : 0;
   let basic, hra, lta;
   if(heading.flat){
@@ -6166,7 +6235,7 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   // final payable wage the policy requires PF to be charged on, not the
   // contracted figure. One central call serves both sides of the contribution.
   const pfWage = PF_RULES.wageComponents.reduce((t, k) => t + ({ basic, hra, lta }[k] || 0), 0);
-  const pfCalc = calculatePfFor(emp, pfWage);
+  const pfCalc = calculatePfFor(asOfEmp, pfWage);
   const pf = pfCalc.employee;
   const esiCalc = heading.esi ? computeEsi(gross, {
         isDisabled: emp.esiDisabled === 'yes',
@@ -6256,7 +6325,9 @@ async function renderSalarySheet(){
   const csvRows = [];
 
   for(const headingKey of SALARY_HEADING_ORDER){
-    const group = employees.filter(e => (e.salaryHeading||'managerial') === headingKey);
+    // Grouped by the heading each employee was under THIS month — a promotion
+    // recorded since must not move which group a past month's row sits in.
+    const group = employees.filter(e => ratePayAsOf(e, dateList[0]).salaryHeading === headingKey);
     if(!group.length) continue;
     bodyRows += `<tr class="sal-heading"><td colspan="30">${SALARY_HEADINGS[headingKey].label}</td></tr>`;
     csvRows.push([SALARY_HEADINGS[headingKey].label]);
@@ -6353,7 +6424,7 @@ async function renderStatutoryReport(key, label){
       grandTotal += amount;
     }
     if(key === 'pf'){
-      const heading = SALARY_HEADINGS[emp.salaryHeading] || SALARY_HEADINGS.managerial;
+      const heading = SALARY_HEADINGS[ratePayAsOf(emp, dateList[0]).salaryHeading] || SALARY_HEADINGS.managerial;
       if(heading.pf){
         // The Salary Sheet has already run the central calculation for this
         // employee and month; the report reads its result rather than working
@@ -6377,7 +6448,7 @@ async function renderStatutoryReport(key, label){
       }
     }
     if(key === 'esi'){
-      const heading = SALARY_HEADINGS[emp.salaryHeading] || SALARY_HEADINGS.managerial;
+      const heading = SALARY_HEADINGS[ratePayAsOf(emp, dateList[0]).salaryHeading] || SALARY_HEADINGS.managerial;
       if(!heading.esi) continue;                    // not an ESI establishment heading
       const r = computeEsi(s.gross, {
         isDisabled: emp.esiDisabled === 'yes',
@@ -6527,7 +6598,10 @@ async function renderApprenticeSalaryReport(){
   const dateList = [];
   for(let d=1; d<=monthDays; d++) dateList.push(year + '-' + String(month).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
 
-  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left' && (e.salaryHeading||'managerial') === 'apprentice');
+  // Whoever was under the Apprentices heading THIS month, not whoever is
+  // today — a since-recorded promotion off apprentice must not pull them out
+  // of a month they were still on it for.
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left' && ratePayAsOf(e, dateList[0]).salaryHeading === 'apprentice');
   if(!employees.length){
     box.innerHTML = `${reportLogoHeader('Apprentice Salary Report — ' + monthLabel(monthVal))}<div class="empty">No employees under the Apprentices heading yet.</div>`;
     return;
@@ -6641,7 +6715,9 @@ async function renderFinalSalarySheet(){
   let bodyRows = '', csvRows = [], sr = 0, grand = 0, grandCount = 0;
 
   for(const headingKey of SALARY_HEADING_ORDER){
-    const group = employees.filter(e => (e.salaryHeading || 'managerial') === headingKey);
+    // The heading each employee was under THIS month, same reasoning as the
+    // Salary Sheet above.
+    const group = employees.filter(e => ratePayAsOf(e, dateList[0]).salaryHeading === headingKey);
     if(!group.length) continue;
     const label = SALARY_HEADINGS[headingKey].label;
 
@@ -6788,9 +6864,11 @@ async function renderConsultantReport(){
   // The consultant works R.S. Infotech's own payroll only. Apprentices,
   // Contractors and R.S.IT Solution are separate books that were being folded
   // into this sheet, overstating every column and the headcount with it.
+  // Judged by the heading each employee was under THIS month, same as the
+  // Salary Sheet.
   const employees = (await getEmployees()).filter(e =>
     e.employmentStatus !== 'left' &&
-    CONSULTANT_REPORT_HEADINGS.indexOf(e.salaryHeading || 'managerial') !== -1);
+    CONSULTANT_REPORT_HEADINGS.indexOf(ratePayAsOf(e, dateList[0]).salaryHeading) !== -1);
   if(!employees.length){
     box.innerHTML = '<div class="empty">Nobody is on the R.S. Infotech payroll headings (' +
       CONSULTANT_REPORT_HEADINGS.map(k => SALARY_HEADINGS[k].label).join(', ') +
@@ -6844,7 +6922,7 @@ async function renderConsultantReport(){
       emp.pfNo || '',
       emp.uan || 'NA',
       emp.esiNumber || '',
-      Number(emp.ratePay) || 0,
+      ratePayAsOf(emp, dateList[0]).ratePay,
       consultantDays(workingDays),
       consultantDays(weekOff),
       consultantDays(presentDays),
@@ -8613,7 +8691,7 @@ function buildIncrementRows(onRoll){
       : (due.getMonth() === thisM && due.getFullYear() === thisY) ? 'this'
       : (due.getMonth() === nextM && due.getFullYear() === nextY) ? 'next' : 'later';
     return { id:e.id, name:e.name || '—', dept:e.department || '—', desig:e.designation || '—',
-             salary:Number(e.ratePay) || 0, due:e.nextIncrement, dueTs:due.getTime(), days, band };
+             salary:currentRatePay(e).ratePay, due:e.nextIncrement, dueTs:due.getTime(), days, band };
   }).filter(Boolean);
 }
 
@@ -8997,8 +9075,9 @@ function diwaliBonusFor(emp){
 // suggestion offered on the form so the old figure is one tap away rather than
 // something to work out by hand.
 function suggestedDiwaliBonus(emp){
-  const h = SALARY_HEADINGS[(emp || {}).salaryHeading] || SALARY_HEADINGS.managerial;
-  const rate = Number((emp || {}).ratePay) || 0;
+  const asOf = currentRatePay(emp);
+  const h = SALARY_HEADINGS[asOf.salaryHeading] || SALARY_HEADINGS.managerial;
+  const rate = asOf.ratePay;
   return Math.round((h.flat ? rate : rate * (h.basicPct + h.hraPct + h.ltaPct)) * 100) / 100;
 }
 
@@ -9012,6 +9091,14 @@ function diwaliBonusSource(emp){
 }
 
 function employeeModalHtml(emp){
+  // Once an increment has been recorded, Rate of Pay and heading are shown
+  // read-only here — the current, as-of-today figure — and only change
+  // through Record Increment, so a raise is never confused with a routine
+  // edit of the rest of the record. Before the first increment, the fields
+  // stay exactly as they always were: plain, editable inputs.
+  const salHist = salaryHistoryOf(emp);
+  const hasIncrementHistory = Array.isArray(emp.salaryHistory) && emp.salaryHistory.length > 0;
+  const curPay = currentRatePay(emp);
   return `
   <div class="modal-overlay" id="employeeModalOverlay" onclick="if(event.target===this)closeEmployeeModal()">
     <div class="modal-box">
@@ -9151,8 +9238,8 @@ function employeeModalHtml(emp){
       <div class="field-group">
         <div class="sec-title">Salary sheet heading</div>
         <label class="field">Heading</label>
-        <select class="field-input" id="f_salaryHeading" onchange="toggleStatutoryFieldsForHeading()">
-          ${Object.keys(SALARY_HEADINGS).map(k => `<option value="${k}" ${(emp.salaryHeading===k || (!emp.salaryHeading && k==='managerial'))?'selected':''}>${SALARY_HEADINGS[k].label}</option>`).join('')}
+        <select class="field-input" id="f_salaryHeading" onchange="toggleStatutoryFieldsForHeading()" ${hasIncrementHistory ? 'disabled' : ''}>
+          ${Object.keys(SALARY_HEADINGS).map(k => `<option value="${k}" ${(curPay.salaryHeading===k)?'selected':''}>${SALARY_HEADINGS[k].label}</option>`).join('')}
         </select>
         <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Picks which Basic/HRA/LTA split formula applies to this employee on the Salary Sheet, and which of PF/ESI/PT apply at all — set once here, applied automatically every month.</p>
         <div id="headingCalcBox"></div>
@@ -9162,8 +9249,18 @@ function employeeModalHtml(emp){
         <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;">The figure this employee is actually paid at Diwali, used exactly as entered — the Diwali Bonus Report, the payment sheet and the CTC all take it from here, and nothing is ever deducted from it. <strong style="color:var(--amber-dark);">Left blank, no bonus is paid</strong> and they will not appear on the payment sheet; the box below the eligibility question offers one month's pay if that is the figure you want. It is only paid at all if the eligibility below says Yes.</p>
         <div style="height:14px"></div>
         <label class="field">Rate of pay (monthly)</label>
-        <input type="number" id="f_ratePay" placeholder="0" value="${emp.ratePay||''}" oninput="renderPayrollBreakdown()">
+        <input type="number" id="f_ratePay" placeholder="0" value="${curPay.ratePay||''}" oninput="renderPayrollBreakdown()" ${hasIncrementHistory ? 'readonly' : ''}>
         <div id="ratePayNote" style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;"></div>
+        ${hasIncrementHistory ? `<p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Current since ${salHist.slice().sort((a,b)=>(a.from||'').localeCompare(b.from||'')).slice(-1)[0].from || 'before increments were tracked'}. Rate of Pay and heading now change only through Record Increment below, so a raise is never confused with an ordinary edit to the rest of this record.</p>` : ''}
+        <div style="height:10px"></div>
+        <button type="button" class="btn ghost full" onclick="openIncrementModal('${emp.id}')">📈 Record Increment</button>
+        ${salHist.length > 1 || hasIncrementHistory ? `
+        <div style="height:10px"></div>
+        <details><summary style="font-size:12.5px;color:var(--muted);cursor:pointer;">Salary history (${salHist.length})</summary>
+          <div style="font-size:12.5px;color:var(--muted);margin-top:6px;">
+            ${salHist.slice().sort((a,b)=>(a.from||'').localeCompare(b.from||'')).map(h => `<div style="padding:4px 0;border-bottom:1px solid var(--border,#e5e5e5);">${h.from ? escapeHtml(h.from) : 'Before increments were tracked'} — ₹${fmtMoney(Number(h.ratePay)||0)}, ${escapeHtml((SALARY_HEADINGS[h.salaryHeading]||{}).label || h.salaryHeading || '')}</div>`).join('')}
+          </div>
+        </details>` : ''}
         <div id="directPayWrap" class="hidden">
           <div style="height:12px"></div>
           <label class="field">Paid directly to the employee's account?</label>
@@ -9702,9 +9799,18 @@ function payrollRecordContext(emp){
 // from the same master the Salary Sheet uses, so they cannot drift apart
 // again.
 function monthlyPayFor(emp, asOfYear, asOfMonth){
-  const comps = computePayrollComponents(emp.ratePay, emp.salaryHeading, {}, payrollRecordContext(emp));
+  const now = new Date();
+  const y = asOfYear || now.getFullYear();
+  const m = asOfMonth || (now.getMonth() + 1);
+  // Rate of Pay and heading as they stood in the month being asked about —
+  // "now" by default, so every caller that does not pass a month (the
+  // dashboard, the Increment and CTC reports) still means "their salary
+  // today" — not whatever they are asked about for a specific past month.
+  const asOf = ratePayAsOf(emp, y + '-' + String(m).padStart(2, '0') + '-01');
+  const asOfEmp = Object.assign({}, emp, asOf);
+  const comps = computePayrollComponents(asOf.ratePay, asOf.salaryHeading, {}, payrollRecordContext(emp));
   const val = k => { const c = comps.find(x => x.key === k); return c && c.applies ? (Number(c.value) || 0) : 0; };
-  const heading = SALARY_HEADINGS[emp.salaryHeading] || SALARY_HEADINGS.managerial;
+  const heading = SALARY_HEADINGS[asOf.salaryHeading] || SALARY_HEADINGS.managerial;
   const basic = val('basic'), hra = val('hra'), lta = val('lta');
   const salaryGross = basic + hra + lta;
 
@@ -9716,16 +9822,13 @@ function monthlyPayFor(emp, asOfYear, asOfMonth){
   // deduction the sheet does not take — ₹3,000 against an employee whose
   // eligibility was never set, whose sheet shows nil.
   const pfWage = PF_RULES.wageComponents.reduce((t, k) => t + ({ basic, hra, lta }[k] || 0), 0);
-  const pfCalc = calculatePfFor(emp, pfWage);
+  const pfCalc = calculatePfFor(asOfEmp, pfWage);
   const esiCalc = heading.esi ? computeEsi(salaryGross, {
         isDisabled: emp.esiDisabled === 'yes',
         coveredAtPeriodStart: emp.esiCoveredAtPeriodStart === 'yes'
       }) : { employee:0, employer:0 };
   const pt = heading.pt ? monthlyPtFor(salaryGross, emp.ptPaidThisYear) : 0;
 
-  const now = new Date();
-  const y = asOfYear || now.getFullYear();
-  const m = asOfMonth || (now.getMonth() + 1);
   const other = (Number(emp.otherAllowances) || 0);
   const perks = (Number(emp.dressAllowance) || 0) + (Number(emp.mobileExpense) || 0);
   // Paid on top and outside gross, so it lifts what is handed over without
@@ -10300,6 +10403,99 @@ function employeeModalEscHandler(e){
   closeEmployeeModal();
 }
 
+// ---- record increment ----
+// A raise (or promotion, if the heading is changed too) as its own dated
+// event, kept apart from the rest of the employee record so it is never
+// confused with a routine correction to some other field. See recordIncrement
+// and ratePayAsOf: everything before the effective date keeps reading the old
+// figure, everything on or after it reads the new one.
+async function openIncrementModal(id){
+  const employees = await getEmployees();
+  const emp = employees.find(e => e.id === id);
+  if(!emp) return;
+  const cur = currentRatePay(emp);
+  document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeIncrementModal()">
+    <div class="modal-box">
+      <h2>Record Increment — ${escapeHtml(emp.name || emp.id)}</h2>
+      <p class="hint">Adds a new Rate of Pay effective from the date you choose. Every report dated before that day keeps showing ₹${fmtMoney(cur.ratePay)} — nothing already generated moves.</p>
+      <label class="field">New Rate of Pay (monthly)</label>
+      <input type="number" class="field-input" id="incRatePay" placeholder="0" value="${cur.ratePay || ''}">
+      <div style="height:12px"></div>
+      <label class="field">Effective from</label>
+      <input type="date" class="field-input" id="incFrom" value="${todayStr()}">
+      <div style="height:12px"></div>
+      <label class="field">Heading (only change this for a promotion)</label>
+      <select class="field-input" id="incHeading">
+        ${Object.keys(SALARY_HEADINGS).map(k => `<option value="${k}" ${cur.salaryHeading===k?'selected':''}>${SALARY_HEADINGS[k].label}</option>`).join('')}
+      </select>
+      <p id="incMsg" class="hint" style="min-height:18px;"></p>
+      <div class="modal-actions">
+        <button class="btn ghost" onclick="closeIncrementModal()">Cancel</button>
+        <button class="btn" onclick="saveIncrement('${id}')">Save increment</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function closeIncrementModal(){
+  document.getElementById('checklistModalRoot').innerHTML = '';
+}
+
+async function saveIncrement(id){
+  const msg = document.getElementById('incMsg');
+  const setErr = t => { msg.textContent = t; msg.classList.add('error'); };
+  const ratePay = Number(document.getElementById('incRatePay').value) || 0;
+  const from = document.getElementById('incFrom').value;
+  const salaryHeading = document.getElementById('incHeading').value;
+  if(!(ratePay > 0)) return setErr('Enter the new Rate of Pay.');
+  if(!from) return setErr('Choose an effective date.');
+
+  const employees = await getEmployees();
+  const emp = employees.find(e => e.id === id);
+  if(!emp) return;
+  const before = currentRatePay(emp);
+
+  // Backdating between two increments already on file is unusual, not wrong
+  // — a late-entered correction is exactly this — so it is confirmed rather
+  // than blocked. ratePayAsOf does not require entries to be in date order.
+  const hist = salaryHistoryOf(emp);
+  const latest = hist.slice().sort((a, b) => (a.from || '').localeCompare(b.from || '')).slice(-1)[0];
+  if(latest && latest.from && from < latest.from){
+    if(!confirm('This effective date (' + from + ') is before the increment already on file that took effect ' +
+      latest.from + '.\n\nContinuing inserts it in between — correct only if this is a backdated correction. Continue?')) return;
+  }
+
+  recordIncrement(emp, { ratePay, salaryHeading, from });
+  // The flat fields are only the seed salaryHistoryOf falls back to when
+  // there is no history yet — every report now reads through
+  // currentRatePay/ratePayAsOf instead — but keeping them at today's actual
+  // rate costs nothing and is a fallback should any surface ever be missed.
+  // Deliberately re-read via currentRatePay rather than the entry just
+  // entered: a future-dated increment must not appear to be in force yet.
+  const nowRate = currentRatePay(emp);
+  emp.ratePay = nowRate.ratePay;
+  emp.salaryHeading = nowRate.salaryHeading;
+
+  const merged = await remoteSetItem('employees', emp, 'id');
+  if(!merged){
+    const idx = employees.findIndex(e => e.id === id);
+    employees[idx] = emp;
+    await saveEmployees(employees);
+  }
+  invalidateSharedRead('employees');
+  await addActivityLog('Recorded increment for ' + (emp.name || id) + ': ₹' + fmtMoney(before.ratePay) +
+    ' → ₹' + fmtMoney(ratePay) + ' effective ' + from +
+    (salaryHeading !== before.salaryHeading ? ', heading changed to ' + ((SALARY_HEADINGS[salaryHeading]||{}).label || salaryHeading) : ''));
+  closeIncrementModal();
+  // Refresh the edit form behind it, if open, so the new figure shows at once.
+  if(editingEmployeeId === id){
+    editingEmployeeDraft = JSON.parse(JSON.stringify(emp));
+    document.getElementById('employeeModalRoot').innerHTML = employeeModalHtml(editingEmployeeDraft);
+    toggleStatutoryFieldsForHeading();
+  }
+  await renderEmployeeList();
+}
+
 // A save is several seconds against Apps Script. Two taps on a slow connection
 // used to start two saves: both read the employee list before either wrote, so
 // both passed the duplicate-ID check and the second overwrote the first — or
@@ -10696,6 +10892,8 @@ async function renderEmployeeList(){
         <div class="sub">${escapeHtml(e.designation || '—')} · ${escapeHtml(e.department || '—')}</div>
         <div class="actions">
           <button class="btn ghost" onclick="openAddEmployeeModal('${e.id}')">Edit</button>
+          <button class="btn ghost" onclick="openIncrementModal('${e.id}')"
+                  title="Give this employee a new Rate of Pay effective from a chosen date. Reports before that date keep showing what they were on.">📈 Increment</button>
           <button class="btn ghost" onclick="markEmployeeLeft('${e.id}')"
                   title="Someone who worked here and has now left. Keeps the record, attendance and documents; removes them from every active report.">Mark as left</button>
           <button class="btn ghost btn-danger" onclick="deleteEmployee('${e.id}')"
@@ -11087,8 +11285,8 @@ function reportHasData(key, e){
   if(key==='birthday') return !!e.dob;
   if(key==='increment') return !!e.nextIncrement;
   if(key==='diwali') return e.diwaliEligible === 'yes';
-  if(key==='salary') return (Number(e.ratePay)||0) > 0;
-  if(key==='ctc') return (Number(e.ratePay)||0) > 0;
+  if(key==='salary') return currentRatePay(e).ratePay > 0;
+  if(key==='ctc') return currentRatePay(e).ratePay > 0;
   if(key==='loan') return loansOf(e).length > 0;
   if(key==='retention') return (Number(e.retentionMoney)||0) > 0 && (Number(e.retentionMonths)||0) > 0 && !!e.bondStart;
   return false;
@@ -11690,11 +11888,11 @@ async function viewReport(key, label){
     csvHeader = ['Name','Eligible','Rate of Pay','Bonus','Status'];
     const SRC = { entered:'Amount set', unset:'AMOUNT NOT SET', ineligible:'Not eligible' };
     csvRows = employees.map(e => [e.name, e.diwaliEligible==='yes'?'Yes':'No',
-                                  Number(e.ratePay)||0,
+                                  currentRatePay(e).ratePay,
                                   diwaliBonusSource(e) === 'entered' ? diwaliBonusFor(e) : '',
                                   SRC[diwaliBonusSource(e)]]);
     rows = employees.map(e => {
-      const rate = Number(e.ratePay) || 0;
+      const rate = currentRatePay(e).ratePay;
       const src = diwaliBonusSource(e);
       return `<tr${src === 'unset' ? ' class="inc-overdue"' : ''}>
         <td>${escapeHtml(e.name)}</td><td>${e.diwaliEligible==='yes'?'Yes':'No'}</td>
