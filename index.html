@@ -1992,19 +1992,34 @@ function monthLabel(monthVal){
   const m = /^(\d{4})-(\d{2})/.exec(String(monthVal || ''));
   return m ? MONTH_NAMES[Number(m[2]) - 1] + ' ' + m[1] : String(monthVal || '');
 }
+// Every report using this pair is scoped to a financial year, so the picker
+// is too: the year select holds financial years ("2026-27"), and the month
+// select lists April through March in that order — not the calendar's
+// January start — so April–December sit with the FY they actually belong to
+// and January–March never has to be found by mentally jumping back past
+// December. Before this, the year select held a plain calendar year and the
+// month select ran January–December, so picking "2026" together with
+// January–March actually meant FY 2025-26, not 2026-27 — an easy, silent
+// wrong-month mistake with a payroll report.
+//
+// Month option VALUES stay the actual calendar month number (1–12) — only
+// the order they are listed in changes — so getMonthYearValue below just
+// has to work out which calendar year a given month belongs to within the
+// selected financial year.
+const FY_MONTH_ORDER = [4,5,6,7,8,9,10,11,12,1,2,3];
 function populateMonthYearSelects(monthSelId, yearSelId){
   const monthSel = document.getElementById(monthSelId);
   const yearSel = document.getElementById(yearSelId);
   if(!monthSel || !yearSel) return;
   const firstTime = !monthSel.options.length;
   if(firstTime){
-    monthSel.innerHTML = MONTH_NAMES.map((m,i) => `<option value="${i+1}">${m}</option>`).join('');
+    monthSel.innerHTML = FY_MONTH_ORDER.map(m => `<option value="${m}">${MONTH_NAMES[m-1]}</option>`).join('');
   }
   if(!yearSel.options.length){
-    const current = new Date().getFullYear();
-    const years = [];
-    for(let y = current - 2; y <= current + 1; y++) years.push(y);
-    yearSel.innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join('');
+    const currentFy = getCurrentFYStartYear();
+    const fyStarts = [];
+    for(let y = currentFy - 2; y <= currentFy + 1; y++) fyStarts.push(y);
+    yearSel.innerHTML = fyStarts.map(y => `<option value="${y}">${financialYearLabel(y + '-04-01')}</option>`).join('');
   }
   // Only force today's month/year the first time these are populated — a
   // <select> always reports some value once it has options, so checking
@@ -2013,12 +2028,16 @@ function populateMonthYearSelects(monthSelId, yearSelId){
   // remembers whatever month the person picked afterward.
   if(firstTime){
     monthSel.value = String(new Date().getMonth() + 1);
-    yearSel.value = String(new Date().getFullYear());
+    yearSel.value = String(getCurrentFYStartYear());
   }
 }
 function getMonthYearValue(monthSelId, yearSelId){
-  const month = document.getElementById(monthSelId).value;
-  const year = document.getElementById(yearSelId).value;
+  const month = Number(document.getElementById(monthSelId).value);
+  const fyStart = Number(document.getElementById(yearSelId).value);
+  // January, February and March belong to the calendar year AFTER the
+  // financial year's start year; April through December belong to the
+  // start year itself.
+  const year = month <= 3 ? fyStart + 1 : fyStart;
   return year + '-' + String(month).padStart(2,'0');
 }
 function daysAgoStr(n){
