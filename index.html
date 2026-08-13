@@ -2021,8 +2021,12 @@
 
         <section class="block">
           <h2 style="margin:0 0 4px;">6. Uniform &amp; ID List</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Track uniform and ID card issue status for every employee, with supporting documents.</p>
-          <div id="uniformIdList"></div>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Track uniform and ID card issue status for one employee at a time, with supporting documents.</p>
+          <label class="field">Employee</label>
+          <select class="field-input" id="uniformIdEmpSelect" onchange="renderUniformIdForm(this.value)">
+            <option value="">— Select employee —</option>
+          </select>
+          <div id="uniformIdList" style="margin-top:14px;"></div>
         </section>
 
         <section class="block">
@@ -13432,18 +13436,38 @@ async function deleteCompanyDoc(category, id){
 }
 
 // ---- 6. Uniform & ID list ----
+// Populates the employee picker only — the form itself only ever shows one
+// employee at a time (see renderUniformIdForm), instead of every employee's
+// uniform/ID card stacked one after another on the same page.
 async function renderUniformIdList(employees){
-  const box = document.getElementById('uniformIdList');
-  const list = await getUniformIdList();
-  const byId = {};
-  list.forEach(u => { byId[u.employeeId] = u; });
+  const sel = document.getElementById('uniformIdEmpSelect');
+  if(!sel) return;
   if(!employees.length){
-    box.innerHTML = '<div class="empty">Add employees in Employee Master first.</div>';
+    sel.innerHTML = '<option value="">— No employees yet —</option>';
+    document.getElementById('uniformIdList').innerHTML = '<div class="empty">Add employees in Employee Master first.</div>';
     return;
   }
-  box.innerHTML = employees.map(e => {
-    const u = byId[e.id] || { employeeId: e.id, name: e.name, uniformIssued:false, uniformDate:'', uniformSize:'', idIssued:false, idNumber:'', idDate:'', docUrl:'', docName:'' };
-    return `<div class="emp-row">
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">— Select employee —</option>' +
+    employees.map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('');
+  if(prev && employees.some(e => e.id === prev)) sel.value = prev;
+  renderUniformIdForm(sel.value);
+}
+
+async function renderUniformIdForm(employeeId){
+  const box = document.getElementById('uniformIdList');
+  if(!box) return;
+  if(!employeeId){
+    box.innerHTML = '';
+    return;
+  }
+  const employees = await getEmployees();
+  const e = employees.find(x => x.id === employeeId);
+  if(!e){ box.innerHTML = ''; return; }
+  const list = await getUniformIdList();
+  const u = list.find(x => x.employeeId === e.id) ||
+    { employeeId: e.id, name: e.name, uniformIssued:false, uniformDate:'', uniformSize:'', idIssued:false, idNumber:'', idDate:'', docUrl:'', docName:'' };
+  box.innerHTML = `<div class="emp-row">
       <div class="head"><strong>${escapeHtml(e.name)}</strong></div>
       <div style="height:10px"></div>
       <label class="checklist-row"><input type="checkbox" ${u.uniformIssued?'checked':''} onchange="updateUniformField('${e.id}','${e.name.replace(/'/g,"\\'")}','uniformIssued',this.checked)"> Uniform issued</label>
@@ -13464,7 +13488,6 @@ async function renderUniformIdList(employees){
       <input type="file" accept=".pdf,.jpg,.jpeg,.png" onchange="uploadUniformDoc('${e.id}','${e.name.replace(/'/g,"\\'")}', event)">
       ${u.docUrl ? `<div class="doc-card">✓ <a href="${u.docUrl}" target="_blank">${u.docName}</a></div>` : ''}
     </div>`;
-  }).join('');
 }
 async function updateUniformField(employeeId, employeeName, field, value){
   const list = await getUniformIdList();
@@ -13492,8 +13515,7 @@ async function uploadUniformDoc(employeeId, employeeName, event){
   entry.docUrl = url;
   entry.docName = fileName;
   await saveUniformIdList(list);
-  const employees = await getEmployees();
-  await renderUniformIdList(employees.filter(e => e.employmentStatus !== 'left'));
+  await renderUniformIdForm(employeeId);
 }
 
 // These need nothing beyond what is already on the employee record —
