@@ -438,6 +438,78 @@ function doGetMyProfile_(auth) {
   return { ok: true, enabled: enabled, displayName: displayName, employee: emp };
 }
 
+// ===== one-off: split attendance into one key per financial year =====
+// Attendance has always been one key per employee — attendance:<id> — holding
+// every day they have ever worked. A Sheets cell dies at 50,000 characters,
+// and now that check-in/check-out times are recorded too that is roughly a
+// 1.9 year problem. This splits each employee's record into
+// attendance:<id>:<financial-year> (e.g. attendance:7:2026-27, using the same
+// fyLabelFor_ that already names the Drive year folders), one key per year.
+//
+// Purely additive. attendance:<id> is left exactly as it is — nothing in
+// doGet/doPost reads the new keys yet, so running this changes nothing about
+// how the live app behaves. It only writes the new keys so they can be
+// checked in the sheet before anything is switched over to read them.
+//
+// Safe to run again: every run recomputes every year bucket from the legacy
+// record, so a re-run after more attendance has been saved just brings the
+// split up to date. Does not need the script lock — it never writes
+// attendance:<id>, so it cannot collide with a concurrent attendance save.
+//
+// Run it from the Apps Script editor: select migrateAttendanceToFY_ and
+// press Run.
+function migrateAttendanceToFY_() {
+  var sheet = getSheet_();
+  var rows = sheet.getDataRange().getValues();
+  var toWrite = {}; // 'attendance:<id>:<fy>' -> JSON string, applied in one pass
+  var stats = { employees: 0, yearKeys: 0, days: 0, skippedEntries: 0 };
+
+  for (var i = 0; i < rows.length; i++) {
+    var key = rows[i][0];
+    if (typeof key !== 'string' || key.indexOf('attendance:') !== 0) continue;
+    var rest = key.slice('attendance:'.length);
+    // A new-format key ends in a financial-year label, e.g. ":2026-27" — skip
+    // those, only the legacy whole-history key is a migration source. This is
+    // a suffix check rather than "no colon" because HR types employee ids by
+    // hand on the form and one could in principle contain a colon.
+    if (/:\d{4}-\d{2}$/.test(rest)) continue;
+    var empId = rest;
+
+    var raw = rows[i][1];
+    var all = {};
+    if (raw) { try { all = JSON.parse(raw); } catch (e) { continue; } }
+
+    var byYear = {};
+    for (var d in all) {
+      var m = /^(\d{4})-(\d{2})-\d{2}$/.exec(d);
+      if (!m) { stats.skippedEntries++; continue; } // not a date-shaped entry
+      var label = fyLabelFor_(parseInt(m[1], 10), parseInt(m[2], 10));
+      (byYear[label] || (byYear[label] = {}))[d] = all[d];
+      stats.days++;
+    }
+
+    stats.employees++;
+    for (var label2 in byYear) {
+      toWrite['attendance:' + empId + ':' + label2] = JSON.stringify(byYear[label2]);
+      stats.yearKeys++;
+    }
+  }
+
+  var index = {};
+  for (var r = 1; r < rows.length; r++) index[rows[r][0]] = r + 1;
+  for (var k in toWrite) {
+    if (index[k]) sheet.getRange(index[k], 2).setValue(toWrite[k]);
+    else sheet.appendRow([k, toWrite[k]]);
+  }
+
+  var msg = 'Split attendance for ' + stats.employees + ' employee(s) into ' +
+    stats.yearKeys + ' year key(s), ' + stats.days + ' day(s) total' +
+    (stats.skippedEntries ? ', ' + stats.skippedEntries + ' non-date entry(ies) left out of the split' : '') +
+    '. attendance:<id> left untouched.';
+  Logger.log(msg);
+  return msg;
+}
+
 // ===== attendance for a date range =====
 // Attendance is one value per employee holding every day they have ever
 // worked. Drawing one month, or working out who is absent today, meant
