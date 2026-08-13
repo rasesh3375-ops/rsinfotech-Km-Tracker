@@ -6234,12 +6234,18 @@ function stashReportShare(title, fileName, content, mimeType, folderLabel){
 }
 // sourceId is the report's own box element — the same one openFullscreenView
 // relocates, so this works whether the report is being viewed full screen or
-// in its normal tab. Reports that live inside a card on the Reports tab
-// (viewReport) use clearReportBox instead, since there is no separate tab to
-// navigate away from.
+// in its normal tab. Used to call hrNavigate('dashboard') once not in full
+// screen — every report now auto-opens full screen on generate, so closing
+// it with the fullscreen header's own "✕ Close" leaves it sitting inline on
+// the Reports tab; the report's own Close button then hit this function
+// again, found fullscreenActiveId no longer matched, and sent PF/PT/every
+// other report straight to the Dashboard instead of just clearing the box —
+// and since hrNavigate never touched the box's contents, the stale report
+// was still there on returning to Reports. Now identical to clearReportBox:
+// close full screen if that's where it is, otherwise just clear the box and
+// stay on the current tab.
 function closeReportView(sourceId){
-  if(fullscreenActiveId === sourceId) closeFullscreenView();
-  else hrNavigate('dashboard');
+  clearReportBox(sourceId);
 }
 function clearReportBox(boxId){
   if(fullscreenActiveId === boxId){ closeFullscreenView(); return; }
