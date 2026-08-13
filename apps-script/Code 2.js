@@ -456,9 +456,13 @@ function doGetMyProfile_(auth) {
 // split up to date. Does not need the script lock — it never writes
 // attendance:<id>, so it cannot collide with a concurrent attendance save.
 //
-// Run it from the Apps Script editor: select migrateAttendanceToFY_ and
+// Named without a trailing underscore, unlike this file's other internal
+// helpers, because the Apps Script editor hides underscore-suffixed
+// functions from the "run" dropdown — this one needs to show up there.
+//
+// Run it from the Apps Script editor: select migrateAttendanceToFY and
 // press Run.
-function migrateAttendanceToFY_() {
+function migrateAttendanceToFY() {
   var sheet = getSheet_();
   var rows = sheet.getDataRange().getValues();
   var toWrite = {}; // 'attendance:<id>:<fy>' -> JSON string, applied in one pass
