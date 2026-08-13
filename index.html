@@ -1199,6 +1199,13 @@
       <div id="geofenceZoneList"></div>
     </section>
 
+    <section class="block" id="secDocStorage">
+      <h2 style="margin:0 0 4px;">Document storage</h2>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">New documents go straight to Google Drive, filed per employee, and the record keeps only the link. Records saved earlier still hold their images inside the sheet — which shares one cell with a 50,000 character limit. Move them out here.</p>
+      <button class="btn full" onclick="migrateDocumentsToDrive()">Move stored documents to Drive</button>
+      <div id="docMigrateBox" style="margin-top:10px;"></div>
+    </section>
+
     <section class="block" id="secTeamOverview">
       <h2>Team overview</h2>
       <div id="hrSummaryGrid"></div>
@@ -1366,53 +1373,6 @@
       <!-- ===== Reports ===== -->
       <div id="hrSubReports" class="hidden">
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">Employee Role Reports</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A branded A4 report built from one employee's job profile, responsibilities, designation and department — the measures, risks and recommendations change with the role. Fill in Job profile and Key responsibilities in Employee Master first; without them the report falls back to designation and department and says so.</p>
-          <div class="row-inline">
-            <div>
-              <label class="field">Employee</label>
-              <select class="field-input" id="roleRptEmp"></select>
-            </div>
-            <div>
-              <label class="field">Report</label>
-              <select class="field-input" id="roleRptType"></select>
-            </div>
-          </div>
-          <div style="height:12px"></div>
-          <button class="btn full" onclick="generateRoleReport()">Generate report</button>
-          <div id="roleRptBox"></div>
-        </section>
-
-        <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">Company letterhead</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Printed in the header and footer of every generated report. Anything left blank is left off the report rather than filled with a placeholder.</p>
-          <label class="field">Registered address</label>
-          <textarea class="field-input" id="coAddress" rows="2" placeholder="Street, city, state, PIN"></textarea>
-          <div style="height:10px"></div>
-          <label class="field">Contact number</label>
-          <input class="field-input" type="text" id="coPhone" placeholder="+91 ...">
-          <div style="height:10px"></div>
-          <label class="field">Email address</label>
-          <input class="field-input" type="email" id="coEmail" placeholder="info@example.com">
-          <div style="height:10px"></div>
-          <label class="field">Website</label>
-          <input class="field-input" type="text" id="coWebsite" placeholder="www.example.com">
-          <div style="height:12px"></div>
-          <button class="btn full" onclick="saveCompanyProfileFromForm()">Save letterhead</button>
-          <div class="msg" id="coMsg"></div>
-        </section>
-
-        <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">Add employees from a file</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Download the template, fill one row per employee, upload it back. Everything with an Employee ID and a name is imported in one go. Duplicates, unknown salary headings and IFSC codes that disagree with the bank name are listed by line number as warnings so you know what to look at, but they do not stop the upload.</p>
-          <button class="btn ghost full" onclick="downloadEmployeeTemplate()">⬇ Download template</button>
-          <div style="height:10px"></div>
-          <label class="field">Upload filled template</label>
-          <input type="file" accept=".csv,text/csv" id="empImportFile" onchange="handleEmployeeImport(event)">
-          <div id="importBox" style="margin-top:10px;"></div>
-        </section>
-
-        <section class="block">
           <h2 style="margin:0 0 4px;font-size:17px;">Open a new leave year</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Sets each employee's opening EL from what they earned last year — one day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} attendance days — and their SL to the yearly allowance. Resident Engineers and Work From Home staff are skipped, their policies being different, as are non-R.S. Infotech headings. Run once, in April.</p>
           <label class="field">Year starts</label>
@@ -1420,13 +1380,6 @@
           <div style="height:12px"></div>
           <button class="btn full" onclick="rollOverLeaveYear()">Open leave year</button>
           <div id="rolloverBox" style="margin-top:10px;"></div>
-        </section>
-
-        <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">Document storage</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">New documents go straight to Google Drive, filed per employee, and the record keeps only the link. Records saved earlier still hold their images inside the sheet — which shares one cell with a 50,000 character limit. Move them out here.</p>
-          <button class="btn full" onclick="migrateDocumentsToDrive()">Move stored documents to Drive</button>
-          <div id="docMigrateBox" style="margin-top:10px;"></div>
         </section>
 
         <div id="reportCardsBox"></div>
@@ -1471,48 +1424,6 @@
           <div class="msg" id="holidayMsg"></div>
           <div style="height:14px"></div>
           <div id="holidayListBox"></div>
-        </section>
-
-        <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">Holiday List (to share with engineers)</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A printable holiday list with the company logo, for a chosen financial year (April–March) — built from the Holidays list above.</p>
-          <label class="field">Financial year starting April of</label>
-          <input type="number" id="holidayListYear" placeholder="e.g. 2026 for FY 2026-27" />
-          <div style="height:14px"></div>
-          <button class="btn full" onclick="generateHolidayListDoc()">Generate holiday list</button>
-          <div id="holidayListOutput" class="hidden" style="margin-top:16px;">
-            <div class="row-inline" style="margin-bottom:10px;">
-              <button class="btn ghost full" onclick="closeHolidayListOutput()">✕ Close</button>
-            </div>
-            <div class="holiday-list-paper" id="holidayListPaper"></div>
-            <div class="row-inline" style="margin-top:10px;margin-bottom:0;">
-              <button class="btn ghost" style="flex:1;" onclick="emailHolidayList()">Email</button>
-              <button class="btn ghost" style="flex:1;" onclick="whatsappHolidayList()">WhatsApp</button>
-              <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
-            </div>
-          </div>
-        </section>
-
-        <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">Leave Encashment Report</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">What is owed for unused privilege leave at the year end, as at 31 March. Grouped by salary heading and sorted by bank with account numbers, so it can be paid the same way as the salary and the bonus. Resident Engineers are outside the EL scheme and do not appear.</p>
-          <label class="field">Financial year starting April of</label>
-          <input type="number" id="encashStartYear" placeholder="e.g. 2026 for FY 2026-27" />
-          <div style="height:14px"></div>
-          <button class="btn full" onclick="renderLeaveEncashmentReport()">Generate leave encashment report</button>
-          <div style="height:14px"></div>
-          <div id="encashBox"></div>
-        </section>
-
-        <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">EL Calculation Sheet</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Earned Leave = 1 day per 25 days present, per the leave policy. Resident Engineers are excluded. This computes each employee's EL for the financial year you pick from the Attendance Sheet, and can carry the closing balance forward as next year's opening balance automatically.</p>
-          <label class="field">Financial year starting April of</label>
-          <input type="number" id="elCalcStartYear" placeholder="e.g. 2026 for FY 2026-27" />
-          <div style="height:14px"></div>
-          <button class="btn full" onclick="renderElCalculationSheet()">Generate EL calculation sheet</button>
-          <div style="height:14px"></div>
-          <div id="elCalcBox"></div>
         </section>
 
         <section class="block">
@@ -1665,6 +1576,85 @@
 
       <!-- ===== Generator ===== -->
       <div id="hrSubGenerator" class="hidden">
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">Employee Role Reports</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A branded A4 report built from one employee's job profile, responsibilities, designation and department — the measures, risks and recommendations change with the role. Fill in Job profile and Key responsibilities in Employee Master first; without them the report falls back to designation and department and says so.</p>
+          <div class="row-inline">
+            <div>
+              <label class="field">Employee</label>
+              <select class="field-input" id="roleRptEmp"></select>
+            </div>
+            <div>
+              <label class="field">Report</label>
+              <select class="field-input" id="roleRptType"></select>
+            </div>
+          </div>
+          <div style="height:12px"></div>
+          <button class="btn full" onclick="generateRoleReport()">Generate report</button>
+          <div id="roleRptBox"></div>
+        </section>
+
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">Company letterhead</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Printed in the header and footer of every generated report. Anything left blank is left off the report rather than filled with a placeholder.</p>
+          <label class="field">Registered address</label>
+          <textarea class="field-input" id="coAddress" rows="2" placeholder="Street, city, state, PIN"></textarea>
+          <div style="height:10px"></div>
+          <label class="field">Contact number</label>
+          <input class="field-input" type="text" id="coPhone" placeholder="+91 ...">
+          <div style="height:10px"></div>
+          <label class="field">Email address</label>
+          <input class="field-input" type="email" id="coEmail" placeholder="info@example.com">
+          <div style="height:10px"></div>
+          <label class="field">Website</label>
+          <input class="field-input" type="text" id="coWebsite" placeholder="www.example.com">
+          <div style="height:12px"></div>
+          <button class="btn full" onclick="saveCompanyProfileFromForm()">Save letterhead</button>
+          <div class="msg" id="coMsg"></div>
+        </section>
+
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">Holiday List (to share with engineers)</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A printable holiday list with the company logo, for a chosen financial year (April–March) — built from the Holidays list above.</p>
+          <label class="field">Financial year starting April of</label>
+          <input type="number" id="holidayListYear" placeholder="e.g. 2026 for FY 2026-27" />
+          <div style="height:14px"></div>
+          <button class="btn full" onclick="generateHolidayListDoc()">Generate holiday list</button>
+          <div id="holidayListOutput" class="hidden" style="margin-top:16px;">
+            <div class="row-inline" style="margin-bottom:10px;">
+              <button class="btn ghost full" onclick="closeHolidayListOutput()">✕ Close</button>
+            </div>
+            <div class="holiday-list-paper" id="holidayListPaper"></div>
+            <div class="row-inline" style="margin-top:10px;margin-bottom:0;">
+              <button class="btn ghost" style="flex:1;" onclick="emailHolidayList()">Email</button>
+              <button class="btn ghost" style="flex:1;" onclick="whatsappHolidayList()">WhatsApp</button>
+              <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">Leave Encashment Report</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">What is owed for unused privilege leave at the year end, as at 31 March. Grouped by salary heading and sorted by bank with account numbers, so it can be paid the same way as the salary and the bonus. Resident Engineers are outside the EL scheme and do not appear.</p>
+          <label class="field">Financial year starting April of</label>
+          <input type="number" id="encashStartYear" placeholder="e.g. 2026 for FY 2026-27" />
+          <div style="height:14px"></div>
+          <button class="btn full" onclick="renderLeaveEncashmentReport()">Generate leave encashment report</button>
+          <div style="height:14px"></div>
+          <div id="encashBox"></div>
+        </section>
+
+        <section class="block">
+          <h2 style="margin:0 0 4px;font-size:17px;">EL Calculation Sheet</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Earned Leave = 1 day per 25 days present, per the leave policy. Resident Engineers are excluded. This computes each employee's EL for the financial year you pick from the Attendance Sheet, and can carry the closing balance forward as next year's opening balance automatically.</p>
+          <label class="field">Financial year starting April of</label>
+          <input type="number" id="elCalcStartYear" placeholder="e.g. 2026 for FY 2026-27" />
+          <div style="height:14px"></div>
+          <button class="btn full" onclick="renderElCalculationSheet()">Generate EL calculation sheet</button>
+          <div style="height:14px"></div>
+          <div id="elCalcBox"></div>
+        </section>
+
         <section class="block">
           <div class="field-group">
             <div class="sec-title">Choose a letter</div>
@@ -1883,27 +1873,13 @@
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">6. Workman Compensation &amp; Insurance</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Which employees are covered under Workman Compensation, with their insurance details — add or remove manually.</p>
-          <label class="field">Add employee to this list</label>
-          <select class="field-input" id="workmanEmpSelect">
-            <option value="">— Select employee —</option>
-          </select>
-          <div style="height:12px"></div>
-          <button class="btn full" onclick="addToWorkmanCompensation()">Add to list</button>
-          <div class="msg" id="workmanMsg"></div>
-          <div style="height:14px"></div>
-          <div id="workmanList"></div>
-        </section>
-
-        <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">7. Uniform &amp; ID List</h2>
+          <h2 style="margin:0 0 4px;font-size:17px;">6. Uniform &amp; ID List</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Track uniform and ID card issue status for every employee, with supporting documents.</p>
           <div id="uniformIdList"></div>
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">8. Employee Handbook</h2>
+          <h2 style="margin:0 0 4px;font-size:17px;">7. Employee Handbook</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Field and WFH engineers see the whole handbook. Resident Engineers only see the Resident Engineer Policy section below — not the full document. Update either whenever the policy changes, typically once a year.</p>
           <label class="field">Full handbook document (visible to Field / WFH engineers)</label>
           <input type="file" id="handbookFile" accept=".pdf,.doc,.docx">
@@ -2346,7 +2322,6 @@ const LONG_READ_TTL_MS = {
   rate_per_km: 900000,
   geofences: 900000,
   uniform_id_list: 900000,
-  workman_compensation: 900000,
   reminder_email: 900000
 };
 function readTtlFor(key){
@@ -2758,13 +2733,6 @@ async function getCompanyDocs(category){
 }
 async function saveCompanyDocs(category, list){
   await safeSet('office_company_docs:' + category, JSON.stringify(list), true);
-}
-async function getWorkmanCompensation(){
-  const v = await safeGet('workman_compensation', true);
-  return v ? JSON.parse(v) : [];
-}
-async function saveWorkmanCompensation(list){
-  await safeSet('workman_compensation', JSON.stringify(list), true);
 }
 async function getUniformIdList(){
   const v = await safeGet('uniform_id_list', true);
@@ -8309,7 +8277,7 @@ async function getReminderEmail(){
 // nothing downstream had to change.
 const HR_PANELS = ['hrPageDashboard','hrTabTracking','hrTabMgmt','hrSubDash','hrSubMaster','hrSubReports',
   'hrSubGenerator','hrSubDocs','dashSubAttendance','dashSubSalary','dashSubReminders','dashSubExpiry',
-  'dashSubActivity','secManageTeam','secExpenseRate','secLiveTracking','secGeofence','secTeamOverview',
+  'dashSubActivity','secManageTeam','secExpenseRate','secLiveTracking','secGeofence','secDocStorage','secTeamOverview',
   'secDailySummary','secByCompany','secBackendConn'];
 
 const HR_ROUTES = {
@@ -8327,7 +8295,7 @@ const HR_ROUTES = {
   docs:       { label:'Office Documents',    icon:'🗂️', show:['hrTabMgmt','hrSubDocs'], run:() => renderOfficeDocumentsTab() },
   team:       { label:'Team Overview',       icon:'👤', show:['hrTabTracking','secTeamOverview'], run:() => loadHR() },
   daily:      { label:'Daily Summary',       icon:'📬', show:['hrTabTracking','secDailySummary'] },
-  settings:   { label:'Settings',            icon:'⚙️', show:['hrTabTracking','secExpenseRate','secGeofence','secBackendConn'],
+  settings:   { label:'Settings',            icon:'⚙️', show:['hrTabTracking','secExpenseRate','secGeofence','secDocStorage','secBackendConn'],
                 run: async () => {
                   const el = document.getElementById('rateInput');
                   if(el) el.value = (await getRate()) || '';
@@ -9759,7 +9727,7 @@ function employeeModalHtml(emp){
         <div style="height:12px"></div>
         <label class="field">Number of months to deduct over</label>
         <input type="number" id="f_retentionMonths" placeholder="e.g. 12" value="${emp.retentionMonths||''}">
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Retention money is split evenly across these months from the bond start date and deducted on the Salary Sheet each month, as its own line and in the Retention Money Detail report.</p>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Retention money is split evenly across these months from the bond start date and deducted on the Salary Sheet each month, as its own line.</p>
         </div>
       </div>
 
@@ -11255,7 +11223,6 @@ async function renderReportsTab(){
     {key:'salary', label:'Salary Report'},
     {key:'ctc', label:'Cost to Company Report'},
     {key:'loan', label:'Loan & Advance Report'},
-    {key:'retention', label:'Retention Money Detail'},
     {key:'assets', label:'Employee Assets'}
   ];
   document.getElementById('reportCardsBox').innerHTML = reports.map(r => {
@@ -11405,163 +11372,6 @@ async function rollOverLeaveYear(){
 }
 
 // ---- bulk employee import ----
-// Column order is the template's contract: the header row is written from this
-// list and read back from it, so adding a field here changes both ends at once
-// and an old template still imports because columns are matched by name.
-const IMPORT_COLUMNS = [
-  { key:'id',            label:'Employee ID',            required:true },
-  { key:'name',          label:'Full Name',              required:true },
-  { key:'designation',   label:'Designation' },
-  { key:'department',    label:'Department' },
-  { key:'employeeType',  label:'Employee Type (field/office/wfh/resident)' },
-  { key:'workLocation',  label:'Work Location (resident engineers)' },
-  { key:'shiftTime',     label:'Shift Time (resident engineers)' },
-  { key:'salaryHeading', label:'Salary Heading (managerial/senior/junior/apprentice/rsit/contractor)' },
-  { key:'ratePay',       label:'Rate of Pay', num:true },
-  { key:'conveyance',    label:'Conveyance / Petrol Allowance', num:true },
-  { key:'diwaliBonusAmount', label:'Diwali Bonus Amount (blank = one month)', num:true },
-  { key:'doj',           label:'Date of Joining (YYYY-MM-DD)' },
-  { key:'dob',           label:'Date of Birth (YYYY-MM-DD)' },
-  { key:'fatherName',    label:'Father Full Name (apprentices)' },
-  { key:'motherName',    label:'Mother Full Name (apprentices)' },
-  { key:'phone',         label:'Mobile' },
-  { key:'email',         label:'Email' },
-  { key:'address',       label:'Address' },
-  { key:'bloodGroup',    label:'Blood Group' },
-  { key:'insuranceDetails', label:'Insurance Details' },
-  { key:'aadhaar',       label:'Aadhaar' },
-  { key:'pan',           label:'PAN' },
-  { key:'uan',           label:'UAN' },
-  { key:'esiNumber',     label:'ESI Number' },
-  { key:'bankName',      label:'Bank Name' },
-  { key:'accountNumber', label:'Account Number' },
-  { key:'ifsc',          label:'IFSC' },
-  { key:'elOpening',     label:'EL Opening', num:true },
-  { key:'slOpening',     label:'SL Opening', num:true },
-  { key:'advanceOpening',label:'Advance Balance', num:true },
-  { key:'leaveOpeningFrom', label:'EL/SL Balance as at (YYYY-MM)' },
-  { key:'hasPriorUan',   label:'Had PF before? (yes/no)' },
-  { key:'form11Submitted', label:'Form 11 Submitted? (yes/no)' },
-  { key:'esiDisabled',   label:'Person with disability? (yes/no)' },
-  { key:'esiCoveredAtPeriodStart', label:'ESI covered at period start? (yes/no)' }
-];
-
-function downloadEmployeeTemplate(){
-  const example = {
-    id:'E101', name:'Example Employee', designation:'Service Engineer', department:'Service',
-    employeeType:'field', salaryHeading:'junior', ratePay:'25000', conveyance:'0', diwaliBonusAmount:'', doj:'2026-04-01', dob:'1995-06-15',
-    fatherName:'', motherName:'', workLocation:'', shiftTime:'',
-    phone:'9876543210', email:'name@example.com', address:'Ahmedabad',
-    bloodGroup:'O+', insuranceDetails:'', aadhaar:'123456789012',
-    pan:'ABCDE1234F', uan:'', esiNumber:'', bankName:'Axis Bank', accountNumber:'123456789',
-    ifsc:'UTIB0001234', elOpening:'0', slOpening:'7', advanceOpening:'0',
-    hasPriorUan:'no', form11Submitted:'no', esiDisabled:'no', esiCoveredAtPeriodStart:'no'
-  };
-  const csv = toCsv(IMPORT_COLUMNS.map(c => c.label), [IMPORT_COLUMNS.map(c => example[c.key] || '')]);
-  const blob = new Blob([csv], { type:'text/csv' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'Employee Import Template.csv';
-  a.click();
-}
-
-// Handles quoted fields and embedded commas, which any spreadsheet will produce
-// the moment an address contains one.
-function parseCsv(text){
-  const rows = []; let row = [], cell = '', q = false;
-  for(let i = 0; i < text.length; i++){
-    const ch = text[i];
-    if(q){
-      if(ch === '"' && text[i+1] === '"'){ cell += '"'; i++; }
-      else if(ch === '"') q = false;
-      else cell += ch;
-    } else if(ch === '"') q = true;
-    else if(ch === ','){ row.push(cell); cell = ''; }
-    else if(ch === '\n'){ row.push(cell); rows.push(row); row = []; cell = ''; }
-    else if(ch !== '\r') cell += ch;
-  }
-  if(cell || row.length){ row.push(cell); rows.push(row); }
-  return rows.filter(r => r.some(c => String(c).trim()));
-}
-
-async function handleEmployeeImport(event){
-  const file = event.target.files[0];
-  if(!file) return;
-  const box = document.getElementById('importBox');
-  box.innerHTML = '<p class="dash-muted">Reading file…</p>';
-  const rows = parseCsv(await file.text());
-  event.target.value = '';
-  if(rows.length < 2){ box.innerHTML = '<p class="pol-warn">The file has no rows below the header.</p>'; return; }
-
-  // Match columns by header name, so a re-ordered or partial sheet still works.
-  const header = rows[0].map(h => String(h).trim().toLowerCase());
-  const idx = {};
-  IMPORT_COLUMNS.forEach(c => { idx[c.key] = header.indexOf(c.label.toLowerCase()); });
-
-  const existing = await getEmployees();
-  const seen = {};
-  const parsed = rows.slice(1).map((r, n) => {
-    const rec = {}, problems = [];
-    IMPORT_COLUMNS.forEach(c => {
-      const v = idx[c.key] >= 0 ? String(r[idx[c.key]] ?? '').trim() : '';
-      rec[c.key] = c.num ? (Number(v) || 0) : v;
-      if(c.required && !v) problems.push(c.label + ' is missing');
-    });
-    if(rec.salaryHeading && !SALARY_HEADINGS[rec.salaryHeading])
-      problems.push('Unknown salary heading "' + rec.salaryHeading + '"');
-    if(rec.id && existing.some(e => e.id === rec.id)) problems.push('Employee ID already exists');
-    if(rec.id && seen[rec.id]) problems.push('Employee ID repeated in this file');
-    if(rec.id) seen[rec.id] = true;
-    // Same checks the form applies, so an import cannot bypass them.
-    findEmployeeDuplicates(existing, rec, null).forEach(d =>
-      problems.push(d.field + ' already used by ' + d.employee));
-    validateIfsc(rec.ifsc, rec.bankName).warnings.forEach(w => problems.push(w));
-    return { line: n + 2, rec, problems };
-  });
-
-  // Everything imports. Duplicates and mismatches are reported but do not
-  // block, because HR reconciles those against their own records. The only
-  // hard stop is a row with no Employee ID or no name — that cannot become a
-  // usable record, and importing it would create a blank the app then has to
-  // work around everywhere.
-  const unusable = parsed.filter(p => !p.rec.id || !p.rec.name);
-  const good = parsed.filter(p => p.rec.id && p.rec.name);
-  const warned = good.filter(p => p.problems.length);
-  window.__pendingImport = good.map(p => p.rec);
-
-  const flagged = warned.concat(unusable);
-  box.innerHTML = `
-    <p class="dash-muted">${parsed.length} row(s) read — <strong>${good.length} will be imported</strong>${
-      warned.length ? `, ${warned.length} with warnings` : ''}${
-      unusable.length ? `, <span style="color:var(--red)">${unusable.length} skipped (no ID or name)</span>` : ''}.</p>
-    ${flagged.length ? `<div class="inc-scroll" style="max-height:220px"><table class="inc-table">
-      <thead><tr><th>Line</th><th>Name</th><th>Note</th></tr></thead><tbody>${
-      flagged.map(b => `<tr class="${b.rec.id && b.rec.name ? '' : 'inc-overdue'}"><td>${b.line}</td>
-        <td>${escapeHtml(b.rec.name || '—')}</td>
-        <td>${(b.rec.id && b.rec.name ? b.problems : ['No Employee ID or name — cannot be imported'])
-          .map(x => '<div class="pol-warn">⚠ ' + escapeHtml(x) + '</div>').join('')}</td></tr>`).join('')
-      }</tbody></table></div>
-      <p class="calc-note">Warnings do not stop the import — everything with an ID and a name goes in, and you can correct these afterwards in Employee Master.</p>` : ''}
-    ${good.length ? `<button class="btn full" style="margin-top:12px" onclick="confirmEmployeeImport()">Import all ${good.length} employee(s)</button>` : ''}`;
-}
-
-async function confirmEmployeeImport(){
-  const box = document.getElementById('importBox');
-  const list = window.__pendingImport || [];
-  if(!list.length) return;
-  if(!confirm('Add ' + list.length + ' employee(s)? Existing records are not touched, and any warnings shown are carried in as-is.')) return;
-  box.innerHTML = '<p class="dash-muted">Importing…</p>';
-  const employees = await getEmployees();
-  list.forEach(r => employees.push(Object.assign(emptyEmployee(), r)));
-  await saveEmployees(employees);          // one write, not one per employee
-  invalidateSharedRead('employees');
-  invalidateDashboardSnapshot();
-  addActivityLog('Imported ' + list.length + ' employee(s) from file').catch(() => {});
-  window.__pendingImport = [];
-  box.innerHTML = '<p class="dash-muted">✓ ' + list.length + ' employee(s) added. Open Employee Master to review them.</p>';
-  await renderEmployeeList();
-}
-
 async function saveCompanyProfileFromForm(){
   const msg = document.getElementById('coMsg');
   const co = await getCompanyProfile();
@@ -11598,7 +11408,6 @@ function reportHasData(key, e){
   if(key==='salary') return currentRatePay(e).ratePay > 0;
   if(key==='ctc') return currentRatePay(e).ratePay > 0;
   if(key==='loan') return loansOf(e).length > 0;
-  if(key==='retention') return (Number(e.retentionMoney)||0) > 0 && (Number(e.retentionMonths)||0) > 0 && !!e.bondStart;
   return false;
 }
 
@@ -12316,23 +12125,6 @@ async function viewReport(key, label){
       <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;">₹${fmtMoney(outstanding)} outstanding across ${ledger.length} loan(s); ₹${fmtMoney(monthly)} coming off this month's Salary Sheet.${multi ? ' ' + multi + ' employee(s) are repaying more than one at a time.' : ''}</p>
       ${stalledCount ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${stalledCount} active loan(s) have no recovery month set, so no instalment is coming off the Salary Sheet for them. Set one on the employee record to start recovery.</p>` : ''}
       <table><tr><th>Name</th><th class="num">Amount</th><th class="num">EMI</th><th>Recovery from</th><th class="num">Recovered so far</th><th class="num">Balance</th><th>Status</th></tr>${rows || '<tr><td colspan="7" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
-  } else if(key === 'retention'){
-    const now = new Date();
-    csvHeader = ['Name','Bond start','Bond end','Retention money','Months','Monthly deduction','Months elapsed','Deducted so far','Balance'];
-    rows = employees.filter(e => (Number(e.retentionMoney)||0) > 0 && (Number(e.retentionMonths)||0) > 0 && e.bondStart).map(e => {
-      const money = Number(e.retentionMoney)||0;
-      const months = Number(e.retentionMonths)||0;
-      const monthly = Math.round((money/months)*100)/100;
-      const start = new Date(e.bondStart);
-      const startIndex = start.getFullYear()*12 + start.getMonth();
-      const nowIndex = now.getFullYear()*12 + now.getMonth();
-      const monthsElapsed = Math.min(Math.max(nowIndex - startIndex, 0), months);
-      const deductedSoFar = Math.round(monthly * monthsElapsed * 100)/100;
-      const balance = Math.round((money - deductedSoFar)*100)/100;
-      csvRows.push([e.name, e.bondStart||'', e.bondEnd||'', money, months, monthly, monthsElapsed, deductedSoFar, balance]);
-      return `<tr><td>${escapeHtml(e.name)}</td><td>${e.bondStart||''}</td><td>${e.bondEnd||''}</td><td class="num">₹${fmtMoney(money)}</td><td class="num">${months}</td><td class="num">₹${fmtMoney(monthly)}</td><td class="num">${monthsElapsed}</td><td class="num">₹${fmtMoney(deductedSoFar)}</td><td class="num">₹${fmtMoney(balance)}</td></tr>`;
-    }).join('');
-    box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Bond start</th><th>Bond end</th><th class="num">Retention money</th><th class="num">Months</th><th class="num">Monthly deduction</th><th class="num">Months elapsed</th><th class="num">Deducted so far</th><th class="num">Balance</th></tr>${rows || '<tr><td colspan="9" class="empty">No employees with retention money configured</td></tr>'}</table>${fsBtn}</div>`;
   }
   if(csvHeader.length){
     // Filed under the financial year this is being run in. These reports are a
@@ -12547,13 +12339,11 @@ async function renderOfficeDocumentsTab(){
   await renderCompanyDocList('holidaylist');
   await renderCompanyDocList('profile');
   await renderCompanyDocList('important');
-  await populateWorkmanEmployeeSelect(employees);
-  await renderWorkmanList();
   await renderUniformIdList(employees);
   await renderHandbookSection();
 }
 
-// ---- 8. Employee Handbook ----
+// ---- 7. Employee Handbook ----
 async function renderHandbookSection(){
   const handbook = await getEmployeeHandbook();
   const info = document.getElementById('handbookCurrentInfo');
@@ -12781,97 +12571,7 @@ async function deleteCompanyDoc(category, id){
   await renderCompanyDocList(category);
 }
 
-// ---- 6. Workman Compensation & Insurance ----
-async function populateWorkmanEmployeeSelect(employees){
-  const sel = document.getElementById('workmanEmpSelect');
-  const covered = await getWorkmanCompensation();
-  const coveredIds = new Set(covered.map(c => c.employeeId));
-  const available = employees.filter(e => !coveredIds.has(e.id));
-  sel.innerHTML = '<option value="">— Select employee —</option>' +
-    available.map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('');
-}
-async function addToWorkmanCompensation(){
-  const msg = document.getElementById('workmanMsg');
-  const empId = document.getElementById('workmanEmpSelect').value;
-  if(!empId){
-    msg.textContent = 'Select an employee.';
-    msg.classList.add('error');
-    return;
-  }
-  const employees = await getEmployees();
-  const emp = employees.find(e => e.id === empId);
-  const list = await getWorkmanCompensation();
-  list.push({ employeeId: empId, name: emp.name, policyNumber:'', provider:'', sumInsured:'', expiryDate:'', notes:'', docUrl:'', docName:'' });
-  await saveWorkmanCompensation(list);
-  await addActivityLog('Added ' + emp.name + ' to Workman Compensation list');
-  msg.textContent = 'Added.';
-  msg.classList.remove('error');
-  await renderOfficeDocumentsTab();
-}
-async function removeFromWorkmanCompensation(employeeId){
-  if(!confirm('Remove this employee from the Workman Compensation list?')) return;
-  let list = await getWorkmanCompensation();
-  const entry = list.find(w => w.employeeId === employeeId);
-  list = list.filter(w => w.employeeId !== employeeId);
-  await saveWorkmanCompensation(list);
-  if(entry) await addActivityLog('Removed ' + entry.name + ' from Workman Compensation list');
-  await renderOfficeDocumentsTab();
-}
-async function updateWorkmanField(employeeId, field, value){
-  const list = await getWorkmanCompensation();
-  const entry = list.find(w => w.employeeId === employeeId);
-  if(!entry) return;
-  entry[field] = value;
-  await saveWorkmanCompensation(list);
-}
-async function uploadWorkmanDoc(employeeId, event){
-  const file = event.target.files[0];
-  if(!file) return;
-  const list = await getWorkmanCompensation();
-  const entry = list.find(w => w.employeeId === employeeId);
-  if(!entry) return;
-  const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
-  const fileName = `${escapeHtml(entry.name)} - Insurance Policy${ext}`;
-  const url = await uploadDocumentToDrive(hrYearPath('', 'Office Documents', 'Workman Compensation', entry.name), fileName, file);
-  if(!url){ alert('Upload failed — check your connection and try again.'); return; }
-  entry.docUrl = url;
-  entry.docName = fileName;
-  await saveWorkmanCompensation(list);
-  await renderWorkmanList();
-}
-async function renderWorkmanList(){
-  const box = document.getElementById('workmanList');
-  const list = await getWorkmanCompensation();
-  if(!list.length){
-    box.innerHTML = '<div class="empty">No employees added to the Workman Compensation list yet.</div>';
-    return;
-  }
-  box.innerHTML = list.map(w => `
-    <div class="emp-row">
-      <div class="head"><strong>${escapeHtml(w.name)}</strong><button class="btn ghost" style="font-size:11px;padding:5px 8px;" onclick="removeFromWorkmanCompensation('${w.employeeId}')">Remove</button></div>
-      <div style="height:10px"></div>
-      <label class="field">Policy number</label>
-      <input type="text" value="${w.policyNumber||''}" onchange="updateWorkmanField('${w.employeeId}','policyNumber',this.value)">
-      <div style="height:10px"></div>
-      <label class="field">Insurance provider</label>
-      <input type="text" value="${w.provider||''}" onchange="updateWorkmanField('${w.employeeId}','provider',this.value)">
-      <div style="height:10px"></div>
-      <label class="field">Sum insured</label>
-      <input type="text" value="${w.sumInsured||''}" onchange="updateWorkmanField('${w.employeeId}','sumInsured',this.value)">
-      <div style="height:10px"></div>
-      <label class="field">Policy expiry date</label>
-      <input type="date" value="${w.expiryDate||''}" onchange="updateWorkmanField('${w.employeeId}','expiryDate',this.value)">
-      <div style="height:10px"></div>
-      <label class="field">Notes</label>
-      <input type="text" value="${w.notes||''}" onchange="updateWorkmanField('${w.employeeId}','notes',this.value)">
-      <div style="height:10px"></div>
-      <label class="field">Policy document</label>
-      <input type="file" accept=".pdf,.jpg,.jpeg,.png" onchange="uploadWorkmanDoc('${w.employeeId}', event)">
-      ${w.docUrl ? `<div class="doc-card">✓ <a href="${w.docUrl}" target="_blank">${w.docName}</a></div>` : ''}
-    </div>`).join('');
-}
-
-// ---- 7. Uniform & ID list ----
+// ---- 6. Uniform & ID list ----
 async function renderUniformIdList(employees){
   const box = document.getElementById('uniformIdList');
   const list = await getUniformIdList();
