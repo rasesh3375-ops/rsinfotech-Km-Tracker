@@ -12780,6 +12780,22 @@ function closeHolidayListOutput(){
   document.getElementById('holidayListOutput').classList.add('hidden');
 }
 
+// Same reasoning as closeHolidayListOutput — #letterOutput has fixed child
+// elements (letterActionsBox, letterPaper) that generateLetter() writes into
+// by id every time, so the default clearReportBox's box.innerHTML = '' would
+// delete them outright and crash the next letter generated. Closing a letter
+// used to send switchHrSub('reports') instead — a Close button that jumped
+// you off the screen you were on into an unrelated tab rather than just
+// closing what you closed. This just hides the letter and stays put, same
+// as every other report's Close already does.
+function closeLetterOutput(){
+  if(fullscreenActiveId === 'letterOutput') closeFullscreenView();
+  document.getElementById('letterOutput').classList.remove('show');
+  document.getElementById('letterActionsBox').classList.add('hidden');
+  document.getElementById('letterActionsBox').innerHTML = '';
+  document.getElementById('letterPaper').innerHTML = '';
+}
+
 async function viewReport(key, label, monthFilter){
   // Every one of these reports is about current staff — contact details,
   // birthdays, increments due, bonus, salary, CTC, loans and retention. A
@@ -14274,7 +14290,7 @@ async function generateLetter(){
   document.getElementById('letterOutput').classList.add('show');
   document.getElementById('letterActionsBox').classList.remove('hidden');
   document.getElementById('letterActionsBox').innerHTML =
-    reportActionBar(type + ' — ' + name, 'letterOutput', `switchHrSub('reports')`);
+    reportActionBar(type + ' — ' + name, 'letterOutput', `closeLetterOutput()`);
 
   // A generated leave form with dates on it is an application somebody has to
   // answer, so it is filed as one. A blank form printed to be filled in by hand
