@@ -11603,9 +11603,20 @@ async function renderReportsTab(){
     renderHolidayList(),
     populateOvertimeEmployeeSelect()
   ]);
-  // Show the current month straight away rather than an empty dropdown
+  // Show the current month straight away rather than an empty dropdown —
+  // these Month/Year <select>s were only ever populated inside their own
+  // report's render function, which only runs once "Generate" is pressed.
+  // That left every one of them with no options at all — nothing to pick —
+  // until the first Generate click, so the very first report always came
+  // out for whatever populateMonthYearSelects() defaults to, and only a
+  // second attempt could actually pick a different month.
   populateMonthYearSelects('consultantReportMonthSel', 'consultantReportYearSel');
   populateMonthYearSelects('salCompareMonthSel', 'salCompareYearSel');
+  populateMonthYearSelects('pfReportMonthSel', 'pfReportYearSel');
+  populateMonthYearSelects('esiReportMonthSel', 'esiReportYearSel');
+  populateMonthYearSelects('ptReportMonthSel', 'ptReportYearSel');
+  populateMonthYearSelects('apprenticeReportMonthSel', 'apprenticeReportYearSel');
+  populateMonthYearSelects('finalSalMonthSel', 'finalSalYearSel');
 }
 
 // ---- role report UI ----
