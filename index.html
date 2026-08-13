@@ -556,6 +556,12 @@
      reach a table styled with .inc-table. */
   .inc-table tr.sal-heading{cursor:default;}
   .inc-table tr.sal-heading td{background:#92D050;color:#16213E;font-weight:800;text-align:left;font-size:13px;text-transform:uppercase;letter-spacing:.3px;}
+  /* Same sticky-name-column reasoning as .sal-table/.att-table — the PF and
+     ESI reports are wide enough (13 and 8 columns) that reaching the later
+     ones without it means no longer knowing whose row is on screen. */
+  .inc-table td.sal-name{position:sticky;left:0;background:var(--paper);z-index:1;}
+  .inc-table tr.pay-total td.sal-name{background:var(--navy);}
+  .inc-table tr:hover td.sal-name{background:#F5F7FB;}
   .inc-sub{display:block;font-size:11px;color:var(--muted);margin-top:2px;}
   /* Band colour carried on a left rule rather than a full wash, so several
      rows can sit together without the card turning into a block of colour. */
@@ -7501,7 +7507,7 @@ async function renderStatutoryReport(key, label){
         sr++;
         body += `
       <tr class="${x.applicable ? '' : 'inc-overdue'}">
-        <td>${sr}</td><td>${escapeHtml(x.emp.name)}<span class="inc-sub">${escapeHtml(x.emp.id)}</span></td>
+        <td>${sr}</td><td class="sal-name">${escapeHtml(x.emp.name)}<span class="inc-sub">${escapeHtml(x.emp.id)}</span></td>
         <td>${escapeHtml(x.eligible)}<span class="inc-sub">${escapeHtml(x.pfType)}</span></td>
         <td class="num">${x.leaveDays || 0}<span class="inc-sub">${money(x.leaveAmount)}</span></td>
         <td class="num">${money(x.wage)}</td>
@@ -7581,7 +7587,7 @@ async function renderStatutoryReport(key, label){
         sr++;
         body += `
       <tr class="${x.r.covered ? '' : 'inc-overdue'}">
-        <td>${sr}</td><td>${escapeHtml(x.emp.name)}</td>
+        <td>${sr}</td><td class="sal-name">${escapeHtml(x.emp.name)}</td>
         <td>${escapeHtml(x.emp.esiNumber || '—')}</td>
         <td class="num">${money(x.s.gross)}</td>
         <td class="num">${x.r.covered ? money(x.r.employee) : '—'}</td>
@@ -7691,7 +7697,7 @@ async function renderApprenticeSalaryReport(){
   let bodyRows = '';
   for(const emp of employees){
     const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
-    bodyRows += `<tr><td>${escapeHtml(emp.name)}</td><td class="num">${fmtMoney(s.rate)}</td><td class="num">${s.leaveDays}</td><td class="num">${fmtMoney(s.leaveAmount)}</td>` +
+    bodyRows += `<tr><td class="sal-name">${escapeHtml(emp.name)}</td><td class="num">${fmtMoney(s.rate)}</td><td class="num">${s.leaveDays}</td><td class="num">${fmtMoney(s.leaveAmount)}</td>` +
       `<td class="num">${fmtMoney(s.basic)}</td><td class="num">${fmtMoney(s.hra)}</td><td class="num">${fmtMoney(s.lta)}</td><td class="num">${fmtMoney(s.gross)}</td>` +
       `<td class="num">${fmtMoney(s.advanceTemp)}</td><td class="num">${fmtMoney(s.advance)}</td><td class="num">${fmtMoney(s.loanEmi)}</td><td class="num">${fmtMoney(s.retention)}</td><td class="num">${fmtMoney(s.totalDeduction)}</td>` +
       `<td class="num">${s.conveyance ? '+' + fmtMoney(s.conveyance) : '—'}</td><td class="num">${fmtMoney(s.netBeforeDirect)}</td><td class="num">${s.directPaid ? fmtMoney(s.directPaid) : '—'}</td>` +
@@ -7699,7 +7705,7 @@ async function renderApprenticeSalaryReport(){
     csvRows.push([emp.name, R(s.rate), s.leaveDays, R(s.leaveAmount), R(s.basic), R(s.hra), R(s.lta), R(s.gross), R(s.advanceTemp), R(s.advance), R(s.loanEmi), R(s.retention), R(s.totalDeduction), R(s.conveyance), R(s.netBeforeDirect), R(s.directPaid), R(s.netSalary)]);
     ['rate','leaveAmount','basic','hra','lta','gross','advanceTemp','advance','loanEmi','retention','totalDeduction','conveyance','netBeforeDirect','directPaid','netSalary'].forEach(k => { grand[k]+=s[k]; });
   }
-  bodyRows += `<tr class="sal-grandtotal"><td><strong>Grand Total</strong></td><td class="num">${fmtMoney(grand.rate)}</td><td></td><td class="num">${fmtMoney(grand.leaveAmount)}</td>` +
+  bodyRows += `<tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total</strong></td><td class="num">${fmtMoney(grand.rate)}</td><td></td><td class="num">${fmtMoney(grand.leaveAmount)}</td>` +
     `<td class="num">${fmtMoney(grand.basic)}</td><td class="num">${fmtMoney(grand.hra)}</td><td class="num">${fmtMoney(grand.lta)}</td><td class="num">${fmtMoney(grand.gross)}</td>` +
     `<td class="num">${fmtMoney(grand.advanceTemp)}</td><td class="num">${fmtMoney(grand.advance)}</td><td class="num">${fmtMoney(grand.loanEmi)}</td><td class="num">${fmtMoney(grand.retention)}</td><td class="num">${fmtMoney(grand.totalDeduction)}</td>` +
     `<td class="num">${grand.conveyance ? '+' + fmtMoney(grand.conveyance) : '—'}</td><td class="num">${fmtMoney(grand.netBeforeDirect)}</td><td class="num">${grand.directPaid ? fmtMoney(grand.directPaid) : '—'}</td>` +
@@ -7813,7 +7819,7 @@ async function renderFinalSalarySheet(){
     csvRows.push([label]);
     rows.forEach(r => {
       sr++; sub += r.net; grand += r.net; grandCount++;
-      bodyRows += `<tr><td>${sr}</td><td>${escapeHtml(r.emp.name)}</td>
+      bodyRows += `<tr><td>${sr}</td><td class="sal-name">${escapeHtml(r.emp.name)}</td>
         <td>${escapeHtml(r.emp.bankName || '—')}</td>
         <td>${escapeHtml(r.emp.accountNumber || '—')}</td>
         <td>${escapeHtml(r.emp.ifsc || '—')}</td>
@@ -7821,12 +7827,12 @@ async function renderFinalSalarySheet(){
       csvRows.push([sr, r.emp.name, r.emp.bankName || '', r.emp.accountNumber || '',
                     r.emp.ifsc || '', Math.round(r.net)]);
     });
-    bodyRows += `<tr class="sal-subtotal"><td></td><td>${escapeHtml(label)} subtotal</td>
+    bodyRows += `<tr class="sal-subtotal"><td></td><td class="sal-name">${escapeHtml(label)} subtotal</td>
       <td colspan="3">${rows.length} employee(s)</td><td class="num">${money(sub)}</td></tr>`;
     csvRows.push(['', label + ' subtotal', rows.length + ' employee(s)', '', '', Math.round(sub)]);
   }
 
-  bodyRows += `<tr class="sal-grandtotal"><td></td><td>Grand Total</td>
+  bodyRows += `<tr class="sal-grandtotal"><td></td><td class="sal-name">Grand Total</td>
     <td colspan="3">${grandCount} employee(s)</td><td class="num">${money(grand)}</td></tr>`;
   csvRows.push(['', 'GRAND TOTAL', grandCount + ' employee(s)', '', '', Math.round(grand)]);
 
@@ -7899,7 +7905,7 @@ async function renderBonusPaymentSheet(){
       sr++; sub += amount; grand += amount; grandCount++;
       const missing = !e.bankName || !e.accountNumber;
       if(missing) noBank.push(e.name || e.id);
-      bodyRows += `<tr${missing ? ' class="inc-overdue"' : ''}><td>${sr}</td><td>${escapeHtml(e.name)}</td>
+      bodyRows += `<tr${missing ? ' class="inc-overdue"' : ''}><td>${sr}</td><td class="sal-name">${escapeHtml(e.name)}</td>
         <td>${e.bankName ? escapeHtml(e.bankName) : '<span class="pol-warn">not on file</span>'}</td>
         <td>${e.accountNumber ? escapeHtml(e.accountNumber) : '<span class="pol-warn">not on file</span>'}</td>
         <td>${escapeHtml(e.ifsc || '—')}</td>
@@ -7907,12 +7913,12 @@ async function renderBonusPaymentSheet(){
       csvRows.push([sr, e.name, e.bankName || '', e.accountNumber || '', e.ifsc || '',
                     Math.round(amount)]);
     });
-    bodyRows += `<tr class="sal-subtotal"><td></td><td>${escapeHtml(label)} subtotal</td>
+    bodyRows += `<tr class="sal-subtotal"><td></td><td class="sal-name">${escapeHtml(label)} subtotal</td>
       <td colspan="3">${group.length} employee(s)</td><td class="num">${money(sub)}</td></tr>`;
     csvRows.push(['', label + ' subtotal', group.length + ' employee(s)', '', '', Math.round(sub)]);
   }
 
-  bodyRows += `<tr class="sal-grandtotal"><td></td><td>Grand Total</td>
+  bodyRows += `<tr class="sal-grandtotal"><td></td><td class="sal-name">Grand Total</td>
     <td colspan="3">${grandCount} employee(s)</td><td class="num">${money(grand)}</td></tr>`;
   csvRows.push(['', 'GRAND TOTAL', grandCount + ' employee(s)', '', '', Math.round(grand)]);
 
@@ -12905,7 +12911,7 @@ async function renderLeaveEncashmentReport(){
       const missing = !r.emp.bankName || !r.emp.accountNumber;
       if(missing) noBank.push(r.name || r.id);
       bodyRows += `<tr${missing ? ' class="inc-overdue"' : ''}><td>${sr}</td>
-        <td>${escapeHtml(r.name)}</td>
+        <td class="sal-name">${escapeHtml(r.name)}</td>
         <td>${r.emp.bankName ? escapeHtml(r.emp.bankName) : '<span class="pol-warn">not on file</span>'}</td>
         <td>${r.emp.accountNumber ? escapeHtml(r.emp.accountNumber) : '<span class="pol-warn">not on file</span>'}</td>
         <td class="num">${r.pending}</td>
@@ -12916,13 +12922,13 @@ async function renderLeaveEncashmentReport(){
       csvRows.push([sr, r.name, r.emp.bankName || '', r.emp.accountNumber || '', r.emp.ifsc || '',
                     r.pending, Math.round(r.monthly), Math.round(r.basis), Math.round(r.perDay), Math.round(r.amount)]);
     });
-    bodyRows += `<tr class="sal-subtotal"><td></td><td>${escapeHtml(label)} subtotal</td>
+    bodyRows += `<tr class="sal-subtotal"><td></td><td class="sal-name">${escapeHtml(label)} subtotal</td>
       <td colspan="2">${group.length} employee(s)</td><td class="num">${subDays}</td>
       <td colspan="3"></td><td class="num">${money(subAmt)}</td></tr>`;
     csvRows.push(['', label + ' subtotal', group.length + ' employee(s)', '', '', subDays, '', '', '', Math.round(subAmt)]);
   }
 
-  bodyRows += `<tr class="sal-grandtotal"><td></td><td>Grand Total</td>
+  bodyRows += `<tr class="sal-grandtotal"><td></td><td class="sal-name">Grand Total</td>
     <td colspan="2">${payable.length} employee(s)</td><td class="num">${grandDays}</td>
     <td colspan="3"></td><td class="num">${money(grandAmt)}</td></tr>`;
   csvRows.push(['', 'GRAND TOTAL', payable.length + ' employee(s)', '', '', grandDays, '', '', '', Math.round(grandAmt)]);
