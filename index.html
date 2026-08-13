@@ -2106,6 +2106,26 @@ async function remoteDelete(key){
   invalidateSharedRead(key);
 }
 
+// Deletes attendance:<id> AND every attendance:<id>:<financial-year> key for
+// one employee — a plain remoteDelete('attendance:' + id) would only remove
+// the legacy key and leave every year key behind, now that one person's
+// attendance can be spread across several rows instead of one.
+async function remoteDeleteAttendanceAll(employeeId){
+  try{
+    const data = await backendAction({ action: 'deleteAttendanceAll', id: employeeId });
+    if(!data || !data.ok){
+      // Older backend, or the call failed — at least clear the legacy key,
+      // exactly what this used to do.
+      await remoteDelete('attendance:' + employeeId);
+      return;
+    }
+  }catch(e){
+    await remoteDelete('attendance:' + employeeId);
+    return;
+  }
+  invalidateSharedRead('attendance:' + employeeId);
+}
+
 // Where a dated output belongs in Drive: HR Management / <financial year> /
 // whatever it is. Every report, letter and uploaded document goes through
 // this, so a new one cannot end up outside the year folder by somebody
@@ -2299,12 +2319,22 @@ function invalidateSharedRead(key){
   }
   sharedReadCache.delete(key);
   // Saving somebody's attendance has to drop the date-range slices of it too,
-  // or the Attendance Sheet would redraw the month from before the save.
+  // or the Attendance Sheet would redraw the month from before the save. Key
+  // is either attendance:<id> (the merged whole-history entry) or
+  // attendance:<id>:<financial-year> (one year's own key) — either way the
+  // range cache is keyed by the bare employee id, so any FY suffix is cut off.
   if(key.indexOf('attendance:') === 0 && typeof attRangeCache !== 'undefined'){
-    const id = key.slice('attendance:'.length);
+    let id = key.slice('attendance:'.length);
+    const fySep = id.indexOf(':');
+    if(fySep !== -1) id = id.slice(0, fySep);
     Array.from(attRangeCache.keys()).forEach(k => {
       if(k.indexOf(id + '|') === 0) attRangeCache.delete(k);
     });
+    // A write to one year's key makes the merged whole-history entry (a
+    // different cache key, used by getAttendance/getAttendanceMany) stale
+    // too, so it goes even when the key just invalidated was the year key
+    // itself, not the merged one.
+    sharedReadCache.delete('attendance:' + id);
   }
 }
 
@@ -2493,50 +2523,115 @@ async function getAttendanceMany(ids){
   });
   if(!missing.length) return out;
   ids = missing;
-  const keys = ids.map(id => 'attendance:' + id);
+  // Whole history, merged on the backend across every financial year each
+  // employee has plus whatever is still in their legacy attendance:<id> key.
   try{
-    const res = await apiFetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action:'getBatch', keys, token: sessionToken })
-    });
-    const data = await res.json();
-    if(data && data.batch && data.values){
+    const data = await backendAction({ action:'getAttendanceAll', ids });
+    if(data && data.values){
       ids.forEach(id => {
-        const raw = data.values['attendance:' + id];
+        const att = data.values[id] || {};
         // Primed even when empty, so a new employee with nothing recorded yet
         // is not asked for again on every screen.
-        primeSharedRead('attendance:' + id, raw === undefined ? null : raw);
-        try{ out[id] = raw ? JSON.parse(raw) : {}; }catch(e){ out[id] = {}; }
+        primeSharedRead('attendance:' + id, JSON.stringify(att));
+        out[id] = att;
       });
       return out;
     }
   }catch(e){}
-  // Older backend, or the batch call failed — one at a time, as before.
+  // Older backend, or the call failed — one at a time, as before.
   const each = await Promise.all(ids.map(id => getAttendance(id).catch(() => ({}))));
   ids.forEach((id, i) => { out[id] = each[i] || {}; });
   return out;
 }
 
+// Attendance for a specific set of (employee, financial-year) buckets — the
+// unit a save actually writes, rather than an employee's whole history. Used
+// by the Attendance Sheet's save, which only ever needs the one or two years
+// the edited dates fall in. `pairs` is [{employeeId, fy}, ...]; the result is
+// keyed by 'employeeId|fy' to match.
+async function getAttendanceBuckets(pairs){
+  const out = {};
+  if(!pairs.length) return out;
+  const missing = [];
+  pairs.forEach(p => {
+    const bk = p.employeeId + '|' + p.fy;
+    const key = 'attendance:' + p.employeeId + ':' + p.fy;
+    const hit = sharedReadCache.get(key);
+    if(hit && Date.now() < hit.until){
+      try{ out[bk] = hit.value ? JSON.parse(hit.value) : {}; }catch(e){ out[bk] = {}; }
+    } else {
+      missing.push(p);
+    }
+  });
+  if(!missing.length) return out;
+  const keys = missing.map(p => 'attendance:' + p.employeeId + ':' + p.fy);
+  try{
+    const data = await backendAction({ action: 'getBatch', keys });
+    if(data && data.batch && data.values){
+      missing.forEach(p => {
+        const key = 'attendance:' + p.employeeId + ':' + p.fy;
+        const raw = data.values[key];
+        primeSharedRead(key, raw === undefined ? null : raw);
+        try{ out[p.employeeId + '|' + p.fy] = raw ? JSON.parse(raw) : {}; }catch(e){ out[p.employeeId + '|' + p.fy] = {}; }
+      });
+      return out;
+    }
+  }catch(e){}
+  // getBatch not answering — one key at a time, as elsewhere in this file.
+  await Promise.all(missing.map(async p => {
+    const key = 'attendance:' + p.employeeId + ':' + p.fy;
+    const v = await safeGet(key, true);
+    try{ out[p.employeeId + '|' + p.fy] = v ? JSON.parse(v) : {}; }catch(e){ out[p.employeeId + '|' + p.fy] = {}; }
+  }));
+  return out;
+}
+
 async function getAttendance(employeeId){
-  const v = await safeGet('attendance:' + employeeId, true);
-  return v ? JSON.parse(v) : {};
+  const key = 'attendance:' + employeeId;
+  const hit = sharedReadCache.get(key);
+  if(hit && Date.now() < hit.until) return hit.value ? JSON.parse(hit.value) : {};
+  if(inFlightReads.has(key)) return inFlightReads.get(key);
+  const request = (async () => {
+    // Whole history, merged on the backend across every financial year this
+    // employee has, plus whatever is still in the legacy attendance:<id> key.
+    const data = await backendAction({ action: 'getAttendanceAll', ids: [employeeId] });
+    let att;
+    if(data && data.values){
+      att = data.values[employeeId] || {};
+    } else {
+      // Backend without getAttendanceAll — the legacy whole-record key,
+      // exactly as before, so this still works before the Apps Script side
+      // is pasted in.
+      const v = await remoteGet(key);
+      const remoteVal = (v && v.value !== undefined && v.value !== null) ? v.value : null;
+      try{ att = remoteVal ? JSON.parse(remoteVal) : {}; }catch(e){ att = {}; }
+    }
+    primeSharedRead(key, JSON.stringify(att));
+    return att;
+  })();
+  inFlightReads.set(key, request);
+  try{ return await request; }
+  finally{ inFlightReads.delete(key); }
 }
 // Late coming is a flag on the day, not a code that replaces it. Somebody who
 // arrives late still worked, so overwriting their Present with anything else
 // would cost them a day; this keeps whatever the day already says and records
 // that they were late, which is what the policy counts.
 async function markLateArrival(employeeId, dateStr, extra){
-  const att = await getAttendance(employeeId);
+  const key = 'attendance:' + employeeId + ':' + financialYearLabel(dateStr);
+  const v = await safeGet(key, true);
+  const att = v ? JSON.parse(v) : {};
   const existing = att[dateStr] || {};
   att[dateStr] = Object.assign({}, existing, { code: existing.code || 'P', lateFlag: true }, extra || {});
-  await safeSet('attendance:' + employeeId, JSON.stringify(att), true);
+  await safeSet(key, JSON.stringify(att), true);
 }
 
 async function setAttendanceDay(employeeId, dateStr, code, extra){
-  const att = await getAttendance(employeeId);
+  const key = 'attendance:' + employeeId + ':' + financialYearLabel(dateStr);
+  const v = await safeGet(key, true);
+  const att = v ? JSON.parse(v) : {};
   att[dateStr] = Object.assign({ code }, extra || {});
-  await safeSet('attendance:' + employeeId, JSON.stringify(att), true);
+  await safeSet(key, JSON.stringify(att), true);
 }
 async function findEmployeeByTrackingUsername(username){
   // An engineer asks the backend for their own record. HR keeps reading the
@@ -5591,47 +5686,69 @@ async function saveAttendanceChanges(){
   const btn = document.getElementById('attSaveBtn');
   if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
 
-  // One write per employee, not one per cell. A month for ten people is 310
-  // cells; the old loop read that employee's whole record and wrote it back for
-  // every single one, so filling in a month meant six hundred sequential calls
-  // to Apps Script. Long before the end it would be abandoned or time out — and
-  // because safeSet swallows its errors, every one of those was counted as
-  // saved, the pending list was cleared, and the sheet reported success with
-  // nothing written. That is why a month of attendance could disappear.
-  const byEmployee = {};
-  items.forEach(it => { (byEmployee[it.employeeId] = byEmployee[it.employeeId] || []).push(it); });
-  const ids = Object.keys(byEmployee);
+  // One write per (employee, financial-year) bucket, not one per cell. A
+  // month for ten people is 310 cells; the old loop read that employee's
+  // whole record and wrote it back for every single one, so filling in a
+  // month meant six hundred sequential calls to Apps Script. Long before the
+  // end it would be abandoned or time out — and because safeSet swallows its
+  // errors, every one of those was counted as saved, the pending list was
+  // cleared, and the sheet reported success with nothing written. That is why
+  // a month of attendance could disappear.
+  //
+  // Grouped by (employee, year) rather than just employee, since attendance
+  // is now one key per employee per financial year — almost always every
+  // edit in one save falls in the same year (a month never crosses 1 April),
+  // but this stays correct even for the rare save that edits across the
+  // boundary in one sitting.
+  const byBucket = {};
+  items.forEach(it => {
+    const fy = financialYearLabel(it.dateStr);
+    const bk = it.employeeId + '|' + fy;
+    (byBucket[bk] = byBucket[bk] || []).push(it);
+  });
+  const bucketKeys = Object.keys(byBucket);
+  const bucketPairs = bucketKeys.map(bk => {
+    const sep = bk.lastIndexOf('|');
+    return { employeeId: bk.slice(0, sep), fy: bk.slice(sep + 1) };
+  });
+  const ids = Array.from(new Set(bucketPairs.map(p => p.employeeId)));
 
-  // One batched read for everybody, instead of one read per employee per cell.
-  const attByEmp = await getAttendanceMany(ids);
+  // One batched read for every bucket touched, instead of one read per
+  // employee per cell — and, since this reads only the year(s) actually being
+  // edited rather than each employee's whole history, far less than before.
+  const attByBucket = await getAttendanceBuckets(bucketPairs);
 
   let savedCells = 0, failedCells = 0;
   const stillPending = {};
 
-  // Merge every employee's edits into their record first, then write the lot.
+  // Merge every bucket's edits into its record first, then write the lot.
   const payload = {};
-  ids.forEach(empId => {
-    const att = attByEmp[empId] || {};
-    byEmployee[empId].forEach(it => {
+  bucketKeys.forEach(bk => {
+    const att = attByBucket[bk] || {};
+    byBucket[bk].forEach(it => {
       // Everything already known about that day is kept and only the code
       // replaced — a check-in time, a late flag, the leave request it came
       // from. The old version copied two fields across and dropped the rest.
       att[it.dateStr] = Object.assign({}, att[it.dateStr] || {}, { code: it.code }, it.extra || {});
     });
-    payload['attendance:' + empId] = JSON.stringify(att);
+    payload['attendance:' + bk.replace('|', ':')] = JSON.stringify(att);
   });
 
-  const settle = (empId, ok) => {
-    const key = 'attendance:' + empId;
+  const settle = (bk, ok) => {
+    const key = 'attendance:' + bk.replace('|', ':');
+    const empId = bk.slice(0, bk.lastIndexOf('|'));
     if(ok){
-      savedCells += byEmployee[empId].length;
+      savedCells += byBucket[bk].length;
       try{ localStorage.setItem('kmt_shared_' + key, payload[key]); }catch(e){}
       primeSharedRead(key, payload[key]);
+      // The merged whole-history entry for this employee (used by
+      // getAttendance/getAttendanceMany) is now stale.
+      invalidateSharedRead('attendance:' + empId);
     } else {
-      failedCells += byEmployee[empId].length;
+      failedCells += byBucket[bk].length;
       // Kept exactly as they were, so nothing typed is lost and Save can be
       // pressed again for just the ones that did not go in.
-      byEmployee[empId].forEach(it => { stillPending[it.employeeId + '|' + it.dateStr] = it; });
+      byBucket[bk].forEach(it => { stillPending[it.employeeId + '|' + it.dateStr] = it; });
     }
   };
 
@@ -5642,20 +5759,20 @@ async function saveAttendanceChanges(){
   try{ confirmed = await remoteSetMany(payload); }catch(e){ confirmed = null; }
 
   if(confirmed){
-    ids.forEach(empId => settle(empId, confirmed.has('attendance:' + empId)));
+    bucketKeys.forEach(bk => settle(bk, confirmed.has('attendance:' + bk.replace('|', ':'))));
   } else {
     // Backend without setMany — one at a time, exactly as before, so a save
     // still works while the Apps Script side is being updated.
     let done = 0;
-    for(const empId of ids){
-      const key = 'attendance:' + empId;
+    for(const bk of bucketKeys){
+      const key = 'attendance:' + bk.replace('|', ':');
       let ok = false;
       // remoteSet reports whether the backend actually confirmed the write.
       // safeSet cannot: it returns nothing and swallows the error.
       try{ ok = await remoteSet(key, payload[key]); }catch(e){ ok = false; }
-      settle(empId, ok);
+      settle(bk, ok);
       done++;
-      if(btn) btn.textContent = 'Saving… ' + done + ' of ' + ids.length;
+      if(btn) btn.textContent = 'Saving… ' + done + ' of ' + bucketKeys.length;
     }
   }
 
@@ -10480,7 +10597,7 @@ async function deleteEmployee(id){
 
   // Every key that hangs off this employee, cleared before the record itself so
   // nothing is left pointing at an id that no longer exists.
-  await remoteDelete('attendance:' + id);
+  await remoteDeleteAttendanceAll(id);
   if(uname){
     await remoteDelete('trips:' + uname);
     await remoteDelete('checkins:' + uname);

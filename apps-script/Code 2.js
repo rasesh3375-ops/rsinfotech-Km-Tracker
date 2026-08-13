@@ -380,7 +380,7 @@ function engineerMayRead_(key, username) {
   // per person is a larger change than this one. Revisit if it matters.
   if (key === 'leave_requests') return true;
   var empId = employeeIdForTrackingUser_(username);
-  if (empId && key === 'attendance:' + empId) return true;
+  if (empId && (key === 'attendance:' + empId || key.indexOf('attendance:' + empId + ':') === 0)) return true;
   return false;
 }
 
@@ -515,11 +515,58 @@ function migrateAttendanceToFY() {
 }
 
 // ===== attendance for a date range =====
-// Attendance is one value per employee holding every day they have ever
-// worked. Drawing one month, or working out who is absent today, meant
-// downloading all of it — around 620 KB for a dozen staff with two years of
-// history, on every screen that asked. The record is parsed here and only the
-// days in range are sent back.
+// Attendance is one value per employee, now split into one key per financial
+// year — attendance:<id>:<year> — by migrateAttendanceToFY, with the legacy
+// whole-history attendance:<id> key left in place as a baseline.
+
+// Financial year label for a plain YYYY-MM-DD string, without going through
+// Date() — a date-only string parsed with new Date() is UTC midnight, which
+// in a timezone behind UTC can push 1 April into the previous day. Reuses
+// fyLabelFor_, the same function that names the Drive year folders.
+function fyLabelForDateStr_(dateStr) {
+  var m = /^(\d{4})-(\d{2})-\d{2}$/.exec(String(dateStr || ''));
+  if (!m) return null;
+  return fyLabelFor_(parseInt(m[1], 10), parseInt(m[2], 10));
+}
+
+// One employee's attendance, merged from their year keys and the legacy
+// attendance:<id> key. Legacy is the baseline — migrateAttendanceToFY never
+// deletes it, and nothing writes to it anymore once this is live — and any
+// year key present overrides it, so a newer edit always wins over the frozen
+// legacy snapshot for the same day.
+//
+// `map` is the whole KV sheet as key -> raw value, read once by the caller.
+// `labels`: which year keys to look at. Omit (or pass null) to merge every
+// year key this employee has, for a whole-history read.
+function mergedAttendanceForId_(map, id, labels) {
+  var merged = {};
+  var legacyRaw = map['attendance:' + id];
+  if (legacyRaw) {
+    try { var legacy = JSON.parse(legacyRaw); for (var d0 in legacy) merged[d0] = legacy[d0]; }
+    catch (e) {}
+  }
+  var prefix = 'attendance:' + id + ':';
+  var wanted = labels;
+  if (!wanted) {
+    wanted = [];
+    for (var k in map) {
+      if (k.indexOf(prefix) === 0) wanted.push(k.slice(prefix.length));
+    }
+  }
+  for (var i = 0; i < wanted.length; i++) {
+    if (!wanted[i]) continue;
+    var raw = map[prefix + wanted[i]];
+    if (!raw) continue;
+    try { var obj = JSON.parse(raw); for (var d in obj) merged[d] = obj[d]; }
+    catch (e) {}
+  }
+  return merged;
+}
+
+// Drawing one month, or working out who is absent today, used to mean
+// downloading everyone's whole history — around 620 KB for a dozen staff
+// with two years behind them. Only the year key(s) the range actually spans
+// (almost always one, occasionally two either side of 1 April) are read.
 function doGetAttendanceRange_(body) {
   var sheet = getSheet_();
   var rows = sheet.getDataRange().getValues();
@@ -527,17 +574,32 @@ function doGetAttendanceRange_(body) {
   for (var i = 0; i < rows.length; i++) map[rows[i][0]] = rows[i][1];
   var from = String(body.from || ''), to = String(body.to || '');
   var ids = body.ids || [];
+  var fyFrom = fyLabelForDateStr_(from), fyTo = fyLabelForDateStr_(to);
+  var labels = (fyFrom && fyTo && fyFrom !== fyTo) ? [fyFrom, fyTo] : [fyFrom || fyTo];
   var out = {};
   for (var j = 0; j < ids.length; j++) {
-    var raw = map['attendance:' + ids[j]];
-    var all = {};
-    if (raw) { try { all = JSON.parse(raw); } catch (e) { all = {}; } }
+    var all = mergedAttendanceForId_(map, ids[j], labels);
     var slice = {};
     // Dates are YYYY-MM-DD, so a string comparison is a date comparison.
     for (var d in all) { if (d >= from && d <= to) slice[d] = all[d]; }
     out[ids[j]] = slice;
   }
   return { ok: true, range: true, from: from, to: to, values: out };
+}
+
+// An employee's whole attendance history, merged across every year key they
+// have. Used where a full history is genuinely needed — leave balances, PL
+// encashment, reports that look back further than one year — instead of the
+// range action, which only ever answers a bounded window.
+function doGetAttendanceAll_(body) {
+  var sheet = getSheet_();
+  var rows = sheet.getDataRange().getValues();
+  var map = {};
+  for (var i = 0; i < rows.length; i++) map[rows[i][0]] = rows[i][1];
+  var ids = body.ids || [];
+  var out = {};
+  for (var j = 0; j < ids.length; j++) out[ids[j]] = mergedAttendanceForId_(map, ids[j], null);
+  return { ok: true, values: out };
 }
 
 function jsonOut_(obj) {
@@ -606,6 +668,42 @@ function doPost(e) {
       if (!ownId || asked.length !== 1 || asked[0] !== ownId) return forbidden_();
     }
     return jsonOut_(doGetAttendanceRange_(body));
+  }
+
+  if (body.action === 'getAttendanceAll') {
+    if (isEngineer) {
+      var ownId2 = employeeIdForTrackingUser_(auth.username);
+      var asked2 = body.ids || [];
+      if (!ownId2 || asked2.length !== 1 || asked2[0] !== ownId2) return forbidden_();
+    }
+    return jsonOut_(doGetAttendanceAll_(body));
+  }
+
+  if (body.action === 'deleteAttendanceAll') {
+    if (isEngineer) return forbidden_();
+    // Deletes attendance:<id> and every attendance:<id>:<year> key for one
+    // employee. Used when an employee record is permanently deleted — now
+    // that one person's attendance can be spread across several rows instead
+    // of one, the old single remoteDelete('attendance:' + id) would have left
+    // every year key behind.
+    var lockD = LockService.getScriptLock();
+    lockD.waitLock(10000);
+    var deletedCount = 0;
+    try {
+      var sheetD = getSheet_();
+      var dataD = sheetD.getDataRange().getValues();
+      var prefixD = 'attendance:' + body.id + ':';
+      for (var rIdx = dataD.length - 1; rIdx >= 1; rIdx--) {
+        var kD = dataD[rIdx][0];
+        if (kD === 'attendance:' + body.id || (typeof kD === 'string' && kD.indexOf(prefixD) === 0)) {
+          sheetD.deleteRow(rIdx + 1);
+          deletedCount++;
+        }
+      }
+    } finally {
+      lockD.releaseLock();
+    }
+    return jsonOut_({ ok: true, deleted: deletedCount });
   }
 
   if (body.action === 'moveEmployeeFolder') {
