@@ -6570,6 +6570,16 @@ function nextFinancialYearStart(dateStr){
   return fyOfStartYear(fyStartYearOf(dateStr) + 1).from;
 }
 
+// One year on from a YYYY-MM-DD string, same month and day — done by
+// splitting the string rather than `new Date(dateStr)`, which parses as UTC
+// midnight and can shift the displayed day back a year in a timezone behind
+// UTC once formatted again.
+function nextAnniversaryOf(dateStr){
+  const m = String(dateStr || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(!m) return '';
+  return (Number(m[1]) + 1) + '-' + m[2] + '-' + m[3];
+}
+
 // "1 April 2026 – 31 March 2027", for showing HR which year they are working
 // in rather than making them infer it from a folder name.
 function financialYearRangeText(dateStr){
@@ -12467,15 +12477,27 @@ async function viewReport(key, label){
     rows = employees.filter(e=>e.dob).map(e => `<tr><td class="sal-name">${escapeHtml(e.name)}</td><td>${e.dob}</td></tr>`).join('');
     box.innerHTML = `<div class="sal-sheet-wrap print-isolate" id="reportPrintArea_birthday">${reportLogoHeader(label)}<table class="sal-table"><tr><th>Name</th><th>Date of birth</th></tr>${rows || '<tr><td colspan="2" class="empty">No data yet</td></tr>'}</table></div>${fsBtn}`;
   } else if(key === 'increment'){
-    csvHeader = ['Name','Increment month','Increment date','Last salary (gross)'];
+    csvHeader = ['Name','Increment month','Increment date','Last salary (gross)','Status','Next increment date'];
     rows = employees.filter(e=>e.nextIncrement).map(e => {
       const d = new Date(e.nextIncrement);
       const monthName = d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
       const lastSalary = monthlyPayFor(e).gross;
-      csvRows.push([e.name, monthName, e.nextIncrement, Math.round(lastSalary)]);
-      return `<tr><td class="sal-name">${escapeHtml(e.name)}</td><td>${monthName}</td><td>${e.nextIncrement}</td><td class="num">${rupees(lastSalary)}</td></tr>`;
+      // Done means the Salary Sheet already has a rate on file effective on
+      // or after the due date — read through the same salaryHistory every
+      // report reads through ratePayAsOf, not a separate flag that could say
+      // something different from what the Salary Sheet actually pays.
+      const hist = salaryHistoryOf(e).slice().sort((a, b) => (a.from || '').localeCompare(b.from || ''));
+      const latest = hist[hist.length - 1];
+      const done = !!(latest && latest.from && latest.from >= e.nextIncrement);
+      // A year on from whichever date the increment actually took effect,
+      // not from the original due date — an increment given late or early
+      // still resets the clock from when it really happened.
+      const nextDate = done ? nextAnniversaryOf(latest.from) : '';
+      csvRows.push([e.name, monthName, e.nextIncrement, Math.round(lastSalary), done ? 'Done' : 'Due', nextDate]);
+      return `<tr${done ? '' : ' class="inc-overdue"'}><td class="sal-name">${escapeHtml(e.name)}</td><td>${monthName}</td><td>${e.nextIncrement}</td><td class="num">${rupees(lastSalary)}</td>` +
+        `<td>${done ? '<span class="pol-ok">Done</span>' : '<span class="pol-warn">Due</span>'}</td><td>${nextDate || '—'}</td></tr>`;
     }).join('');
-    box.innerHTML = `<div class="sal-sheet-wrap print-isolate" id="reportPrintArea_increment">${reportLogoHeader(label)}<table class="sal-table"><tr><th>Name</th><th>Increment month</th><th>Increment date</th><th class="num">Last salary (gross)</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table></div>${fsBtn}`;
+    box.innerHTML = `<div class="sal-sheet-wrap print-isolate" id="reportPrintArea_increment">${reportLogoHeader(label)}<table class="sal-table"><tr><th>Name</th><th>Increment month</th><th>Increment date</th><th class="num">Last salary (gross)</th><th>Status</th><th>Next increment date</th></tr>${rows || '<tr><td colspan="6" class="empty">No data yet</td></tr>'}</table></div>${fsBtn}`;
   } else if(key === 'diwali'){
     // Rate of Pay sits beside the bonus so the two can be read against each
     // other. They are always the same figure, and showing only the bonus left
