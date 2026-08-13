@@ -3637,7 +3637,7 @@ function toggleEngLeaveForm(){
   if(!box) return;
   const opening = box.classList.contains('hidden');
   box.classList.toggle('hidden', !opening);
-  if(btn) btn.textContent = opening ? 'cancel' : 'apply';
+  if(btn) btn.textContent = opening ? '✕' : 'apply';
   if(opening){ onEngLeaveTypeChange(); }
 }
 
@@ -6265,7 +6265,7 @@ function confirmCloseSalarySheet(){
         <div style="height:8px"></div>
         <button class="btn ghost full" onclick="closeSalarySheetAction(false)">Close without saving</button>
         <div style="height:8px"></div>
-        <button class="btn ghost full" onclick="dismissCloseSheetModal()">Cancel</button>
+        <button class="btn ghost full" onclick="dismissCloseSheetModal()" title="Cancel" aria-label="Cancel">✕</button>
       </div>
     </div>
   </div>`;
@@ -10216,7 +10216,7 @@ function employeeModalHtml(emp){
       </div>
 
       <div class="modal-actions">
-        <button class="btn ghost" onclick="closeEmployeeModal()">Cancel</button>
+        <button class="btn ghost" onclick="closeEmployeeModal()" title="Cancel" aria-label="Cancel">✕</button>
         <button class="btn" onclick="saveEmployeeForm()">Save employee</button>
         <span id="empDraftNote" class="draft-note"></span>
       </div>
@@ -11242,7 +11242,7 @@ async function openIncrementModal(id){
       </select>
       <p id="incMsg" class="hint" style="min-height:18px;"></p>
       <div class="modal-actions">
-        <button class="btn ghost" onclick="closeIncrementModal()">Cancel</button>
+        <button class="btn ghost" onclick="closeIncrementModal()" title="Cancel" aria-label="Cancel">✕</button>
         <button class="btn" onclick="withBusy(this,'Saving…',()=>saveIncrement('${id}'))">Save increment</button>
       </div>
     </div>
