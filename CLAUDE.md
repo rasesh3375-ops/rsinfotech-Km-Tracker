@@ -191,11 +191,19 @@ unrestricted throughout.
 - The employee record shares one Google Sheets cell with a 50,000 character
   limit. Documents go to Drive and the record keeps only the link; there is a
   migration button in Admin Settings for older records that still hold images.
-  Attendance now records check-in and check-out times too, and at that rate
-  hits the same limit in roughly 1.9 years from when that started. Fixing it
-  needs attendance split into one key per employee per financial year
-  (`attendance:<id>:<financial-year>`) instead of one key per employee
-  holding every day they have ever worked — not started.
+- Attendance is one key per employee **per financial year** —
+  `attendance:<id>:<financial-year>`, e.g. `attendance:7:2026-27` — instead of
+  one key per employee holding every day they have ever worked, which is what
+  kept it well clear of the 50,000-character cell limit even with check-in and
+  check-out times now recorded. `migrateAttendanceToFY` in `Code 2.js` did the
+  one-off split; it is safe to re-run (recomputes every year bucket from
+  scratch) but nothing needs it run again in normal operation. The legacy
+  `attendance:<id>` key is left in place permanently as a fallback baseline —
+  `mergedAttendanceForId_` on the backend overlays each year key on top of it,
+  so a year key never needs to be a complete mirror of its year, only whatever
+  has actually been edited since the split. Deleting an employee goes through
+  `deleteAttendanceAll`, not a plain key delete, so every year key is removed
+  along with the legacy one.
 - Attendance saves are batched via `setMany` — one read and one write for the
   whole save, not one per employee or per cell. An earlier version made 620
   backend calls for a month of ten staff and silently lost most of them. Do
