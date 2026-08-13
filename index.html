@@ -837,6 +837,11 @@
   table.sal-table tr.sal-heading td{background:#92D050;color:#16213E;font-weight:800;text-align:left;font-size:13px;text-transform:uppercase;letter-spacing:.3px;}
   table.sal-table tr.sal-subtotal td{background:var(--cream);font-weight:700;}
   table.sal-table tr.sal-grandtotal td{background:var(--navy);color:#fff;font-weight:800;}
+  /* Same overdue/flag convention .inc-table rows use, extended here since the
+     Bonus Sheet, Leave Encashment and the Assets/Loan reports mark rows with
+     inc-overdue while living inside a sal-table, not an inc-table — without
+     this the flag was applied but never rendered. */
+  table.sal-table tr.inc-overdue td:first-child{box-shadow:inset 3px 0 0 var(--red);}
 
   /* ===== Professional polish pass ===== */
   body{background:linear-gradient(180deg, #FBFAF7 0%, var(--cream) 220px);}
@@ -1335,14 +1340,6 @@
             <div class="msg" id="reminderSaveMsg"></div>
             <div style="height:14px"></div>
             <div id="incrementReminderList"></div>
-            <div class="row-inline" style="margin-top:12px;">
-              <button class="btn ghost" style="flex:1;" onclick="closeReportView('incrementReminderList')">✕ Close</button>
-              <button class="btn ghost" style="flex:1;" onclick="openFullscreenView('Increment Reminders','incrementReminderList')">⛶ Full screen</button>
-            </div>
-            <div class="row-inline" style="margin-top:8px;">
-              <button class="btn ghost" style="flex:1;" onclick="shareCurrentReport('whatsapp')">📱 WhatsApp</button>
-              <button class="btn ghost" style="flex:1;" onclick="shareCurrentReport('email')">✉️ Email</button>
-            </div>
           </section>
         </div>
         <div id="dashSubExpiry" class="hidden">
@@ -1635,15 +1632,8 @@
           <div style="height:14px"></div>
           <button class="btn full" onclick="generateHolidayListDoc()">Generate holiday list</button>
           <div id="holidayListOutput" class="hidden" style="margin-top:16px;">
-            <div class="row-inline" style="margin-bottom:10px;">
-              <button class="btn ghost full" onclick="closeHolidayListOutput()">✕ Close</button>
-            </div>
+            <div id="holidayListActionBar"></div>
             <div class="holiday-list-paper" id="holidayListPaper"></div>
-            <div class="row-inline" style="margin-top:10px;margin-bottom:0;">
-              <button class="btn ghost" style="flex:1;" onclick="emailHolidayList()">Email</button>
-              <button class="btn ghost" style="flex:1;" onclick="whatsappHolidayList()">WhatsApp</button>
-              <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
-            </div>
           </div>
         </section>
 
@@ -1785,12 +1775,7 @@
           <div class="letter-paper" id="letterPaper"></div>
         </div>
 
-        <div id="letterActionsBox" class="hidden">
-          <button class="btn ghost full" style="margin-bottom:10px;" onclick="switchHrSub('reports')">← Back to dashboard</button>
-          <button class="btn ghost full" style="margin-bottom:10px;" onclick="emailLetter()">Email</button>
-          <button class="btn ghost full" style="margin-bottom:10px;" onclick="whatsappLetter()">WhatsApp</button>
-          <button class="btn full" onclick="window.print()">Print / Save as PDF</button>
-        </div>
+        <div id="letterActionsBox" class="hidden"></div>
       </div>
 
       <!-- ===== Office Documents ===== -->
@@ -5605,7 +5590,7 @@ async function renderAttendanceSheet(){
 
   box.innerHTML = `${reportActionBar('Attendance Sheet — ' + monthLabel(monthVal), 'attendanceSheetBox', null, { print: false })}
     ${reportLogoHeader('Attendance Sheet — ' + monthLabel(monthVal))}
-    <div class="att-sheet-wrap"><table class="att-table">${headerRow}${bodyRows}</table></div>
+    <div class="att-sheet-wrap print-isolate" id="attendanceSheetPrintArea"><table class="att-table">${headerRow}${bodyRows}</table></div>
     <div class="att-legend">
       <span><strong>P</strong> Present</span><span><strong>A</strong> Absent</span><span><strong>H</strong> Holiday</span>
       <span><strong>EL</strong> Earned leave</span><span><strong>SL</strong> Sick leave</span><span><strong>LP</strong> Leave without pay</span>
@@ -6027,6 +6012,9 @@ function discardAttendanceChanges(){
 // the question of where the 33 paise went. CSV exports round the same way;
 // see the R()/Math.round() calls next to each csvRows.push.
 function fmtMoney(n){ return Math.round(Number(n) || 0).toLocaleString('en-IN'); }
+// The ₹-prefixed form used in report tables — one function instead of the same
+// one-line arrow copy-pasted into five different report renderers.
+function rupees(n){ return '₹' + fmtMoney(n); }
 
 // Shared logo + current-date header for every report and generated document.
 function reportLogoHeader(title){
@@ -6730,7 +6718,7 @@ async function renderStatutoryReport(key, label){
   }
 
   if(key === 'pf' && pfRows.length){
-    const money = v => '₹' + fmtMoney(v);
+    const money = rupees;
     const body = pfRows.map((x, i) => `
       <tr class="${x.applicable ? '' : 'inc-overdue'}">
         <td>${i + 1}</td><td>${escapeHtml(x.emp.name)}<span class="inc-sub">${escapeHtml(x.emp.id)}</span></td>
@@ -6795,7 +6783,7 @@ async function renderStatutoryReport(key, label){
 
   if(key === 'esi' && esiRows.length){
     const period = esiContributionPeriod(dateList[0]);
-    const money = v => '₹' + fmtMoney(v);
+    const money = rupees;
     const body = esiRows.map((x, i) => `
       <tr class="${x.r.covered ? '' : 'inc-overdue'}">
         <td>${i + 1}</td><td>${escapeHtml(x.emp.name)}</td>
@@ -6838,11 +6826,11 @@ async function renderStatutoryReport(key, label){
     return;
   }
 
-  const tableRows = rows.map(r => `<tr><td>${r[0]}</td><td class="num">₹${fmtMoney(r[1])}</td></tr>`).join('');
+  const tableRows = rows.map(r => `<tr><td class="sal-name">${r[0]}</td><td class="num">${rupees(r[1])}</td></tr>`).join('');
   box.innerHTML = `${reportActionBar(label + ' — ' + monthLabel(monthVal), cfg.box)}
-    <div class="print-isolate" id="statReportPrintArea_${key}">
+    <div class="sal-sheet-wrap print-isolate" id="statReportPrintArea_${key}">
       ${reportLogoHeader(label + ' — ' + monthLabel(monthVal))}
-      <table><tr><th>Name</th><th class="num">${key.toUpperCase()} Amount</th></tr>${tableRows}<tr class="sal-grandtotal"><td><strong>Grand Total</strong></td><td class="num"><strong>₹${fmtMoney(grandTotal)}</strong></td></tr></table>
+      <table class="sal-table"><tr><th>Name</th><th class="num">${key.toUpperCase()} Amount</th></tr>${tableRows}<tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total</strong></td><td class="num"><strong>${rupees(grandTotal)}</strong></td></tr></table>
     </div>`;
 
   const csvRows = rows.map(r => [r[0], Math.round(r[1])]);
@@ -6988,7 +6976,7 @@ async function renderFinalSalarySheet(){
   const holidayMap = await getHolidayMap_local();
   await getAttendanceMany(employees.map(e => e.id));
 
-  const money = v => '₹' + fmtMoney(v);
+  const money = rupees;
   let bodyRows = '', csvRows = [], sr = 0, grand = 0, grandCount = 0;
 
   for(const headingKey of SALARY_HEADING_ORDER){
@@ -7042,7 +7030,7 @@ async function renderFinalSalarySheet(){
   box.innerHTML = `${reportActionBar('Final Salary Sheet — ' + monthLabel(monthVal), 'finalSalaryBox')}
     ${reportLogoHeader('Final Salary Sheet — ' + monthLabel(monthVal))}
     <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by salary heading, sorted by bank. Final Payable is after every deduction, including anything paid directly to the account.</p>
-    <div class="sal-sheet-wrap"><table class="sal-table">
+    <div class="sal-sheet-wrap print-isolate" id="finalSalaryPrintArea"><table class="sal-table">
       <thead><tr><th>SR</th><th>Employee Name</th><th>Bank Name</th><th>Account Number</th><th>IFSC</th><th class="num">Final Payable</th></tr></thead>
       <tbody>${bodyRows}</tbody></table></div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(monthVal + '-01'))} &gt; Dashboard &gt; Final Salary Sheet.</p>`;
@@ -7072,7 +7060,7 @@ async function renderBonusPaymentSheet(){
     return;
   }
 
-  const money = v => '₹' + fmtMoney(v);
+  const money = rupees;
   let bodyRows = '', csvRows = [], sr = 0, grand = 0, grandCount = 0;
   const noBank = [];
 
@@ -7129,7 +7117,7 @@ async function renderBonusPaymentSheet(){
     <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by salary heading, sorted by bank. Each figure is the Diwali bonus amount set on that employee's record — nothing is taken off it: no PF, no ESI, no Professional Tax, no loan instalment, no advance, no retention money, and no reduction for leave taken, however many days were lost that year.</p>
     ${noAmount.length ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${noAmount.length} eligible employee(s) are missing from this sheet because no bonus amount has been set for them: ${escapeHtml(noAmount.map(e => e.name || e.id).join(', '))}. Set an amount on each record, then generate the sheet again.</p>` : ''}
     ${noBank.length ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${noBank.length} employee(s) have no bank details on file and cannot be paid by transfer: ${escapeHtml(noBank.join(', '))}.</p>` : ''}
-    <div class="sal-sheet-wrap"><table class="sal-table">
+    <div class="sal-sheet-wrap print-isolate" id="bonusPaymentPrintArea"><table class="sal-table">
       <thead><tr><th>SR</th><th>Employee Name</th><th>Bank Name</th><th>Account Number</th><th>IFSC</th><th class="num">Bonus Payable</th></tr></thead>
       <tbody>${bodyRows}</tbody></table></div>
     ${notEligible.length ? `<p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">Not on this sheet: ${notEligible.length} marked not eligible.</p>` : ''}
@@ -7223,17 +7211,15 @@ async function renderConsultantReport(){
 
   const head = CONSULTANT_REPORT_COLS.map(c => `<th>${c}</th>`).join('');
   const body = rows.map(r => '<tr>' + r.map((cell, i) =>
-    `<td${i === 9 || i === 19 ? ' class="num"' : ''}>${cell === '' ? '' : cell}</td>`
+    `<td${i === 9 || i === 19 ? ' class="num"' : i === 2 ? ' class="sal-name"' : ''}>${cell === '' ? '' : cell}</td>`
   ).join('') + '</tr>').join('');
 
   box.innerHTML = `${reportActionBar('Consultant Report — ' + monthLabel(monthVal), 'consultantReportBox')}
-    <div class="print-isolate" id="consultantReportPrintArea">
+    <div class="sal-sheet-wrap print-isolate" id="consultantReportPrintArea">
       ${reportLogoHeader('Consultant Report — ' + monthLabel(monthVal))}
-      <div style="overflow-x:auto;">
-        <table style="min-width:1500px;font-size:11.5px;white-space:nowrap;">
-          <tr>${head}</tr>${body}
-        </table>
-      </div>
+      <table class="sal-table" style="min-width:1500px;font-size:11.5px;">
+        <tr>${head}</tr>${body}
+      </table>
       <p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">${rows.length} employees · ${monthDays} days · ${workingDays} working, ${weekOff} week-off, ${publicHolidays} public holiday${publicHolidays === 1 ? '' : 's'}.</p>
     </div>`;
 
@@ -7660,7 +7646,6 @@ function exportCompanyCSV(){
 // ============================================================
 
 let selectedLetterIdx = 0;
-let lastGeneratedLetter = null;
 let editingEmployeeId = null;
 let currentChecklistType = null;
 
@@ -9230,17 +9215,19 @@ async function renderIncrementReminders(){
     stashReportShare('Increment Reminders — ' + todayStr(), fileName, content, 'text/csv',
       'HR Management > ' + financialYearLabel(todayStr()) + ' > Dashboard > Increment Reminders');
   }
-  box.innerHTML = reportLogoHeader('Increment Reminders') + upcoming.map(e => {
-    const days = Math.ceil((new Date(e.nextIncrement) - now) / 86400000);
-    const subject = encodeURIComponent('Increment reminder: ' + e.name);
-    const body = encodeURIComponent('Reminder: ' + e.name + ' (' + (e.designation||'') + ') has an increment due on ' + e.nextIncrement + '.');
-    const mailLink = email ? `mailto:${email}?subject=${subject}&body=${body}` : `mailto:?subject=${subject}&body=${body}`;
-    return `<div class="emp-row">
-      <div class="head"><strong>${escapeHtml(e.name)}</strong><span class="id">in ${days} day${days===1?'':'s'}</span></div>
-      <div class="sub">${escapeHtml(e.designation || '')} · increment due ${e.nextIncrement}</div>
-      <div class="actions"><a class="btn ghost" href="${mailLink}">Send reminder email</a></div>
-    </div>`;
-  }).join('');
+  box.innerHTML = reportActionBar('Increment Reminders', 'incrementReminderList') +
+    `<div class="print-isolate" id="incrementRemindersPrintArea">${reportLogoHeader('Increment Reminders')}` +
+    upcoming.map(e => {
+      const days = Math.ceil((new Date(e.nextIncrement) - now) / 86400000);
+      const subject = encodeURIComponent('Increment reminder: ' + e.name);
+      const body = encodeURIComponent('Reminder: ' + e.name + ' (' + (e.designation||'') + ') has an increment due on ' + e.nextIncrement + '.');
+      const mailLink = email ? `mailto:${email}?subject=${subject}&body=${body}` : `mailto:?subject=${subject}&body=${body}`;
+      return `<div class="emp-row">
+        <div class="head"><strong>${escapeHtml(e.name)}</strong><span class="id">in ${days} day${days===1?'':'s'}</span></div>
+        <div class="sub">${escapeHtml(e.designation || '')} · increment due ${e.nextIncrement}</div>
+        <div class="actions"><a class="btn ghost" href="${mailLink}">Send reminder email</a></div>
+      </div>`;
+    }).join('') + `</div>`;
 }
 
 async function renderDocExpiryList(){
@@ -11583,9 +11570,15 @@ async function generateRoleReport(){
   const emp = (await getEmployees()).find(e => e.id === empId);
   if(!emp){ box.innerHTML = '<p class="dash-muted">That employee could not be found.</p>'; return; }
   const html = await buildRoleReportHtml(emp, typeKey);
-  box.innerHTML = `<div style="margin:14px 0 10px;display:flex;gap:10px;flex-wrap:wrap;">
-      <button class="btn ghost" onclick="window.print()">Print / Save as PDF</button>
-    </div><div class="rpt-wrap">${html}</div>`;
+  const typeLabel = (ROLE_REPORT_TYPES.find(t => t.key === typeKey) || ROLE_REPORT_TYPES[0]).label;
+  const reportTitle = (emp.name || empId) + ' — ' + typeLabel;
+  // Not saved to Drive and not a CSV like the other reports, so there is
+  // nothing meaningful to attach as a file — WhatsApp/Email fall back to a
+  // text summary naming the report, same as they would for any report on a
+  // device without the Web Share API.
+  stashReportShare(reportTitle, reportTitle.replace(/[^\w .-]/g, '') + '.txt', reportTitle, 'text/plain', '');
+  box.innerHTML = `<div style="margin:14px 0 10px;">${reportActionBar(reportTitle, 'roleRptBox', `clearReportBox('roleRptBox')`)}</div>
+    <div class="rpt-wrap">${html}</div>`;
   await addActivityLog('Role report generated: ' + (emp.name || empId));
 }
 
@@ -11656,7 +11649,7 @@ async function loadAttendanceCalendar(){
     } else {
       status = 'Absent'; cls = 'warn'; absent++;
     }
-    const dayName = new Date(year, month - 1, day).toLocaleDateString(undefined, { weekday: 'short' });
+    const dayName = new Date(year, month - 1, day).toLocaleDateString('en-IN', { weekday: 'short' });
     rows.push(`<tr><td>${dateStr} (${dayName})</td><td><span class="pill ${cls}">${status}</span></td></tr>`);
   }
   box.innerHTML = `
@@ -11751,7 +11744,7 @@ async function renderLeaveEncashmentReport(){
     return;
   }
 
-  const money = v => '₹' + fmtMoney(v);
+  const money = rupees;
   let bodyRows = '', csvRows = [], sr = 0, grandDays = 0, grandAmt = 0;
   const noBank = [];
 
@@ -12083,9 +12076,9 @@ async function renderOvertimeReport(){
       'HR Management > ' + financialYearLabel(monthStr + '-01') + ' > Reports > Overtime Report');
   }
   box.innerHTML = `${reportActionBar(reportTitle, 'overtimeReportBox')}
-    <div style="overflow-x:auto;"><table>
+    <div class="sal-sheet-wrap print-isolate" id="overtimeReportPrintArea"><table class="sal-table">
       <tr><th>Name</th><th>Date</th><th class="num">Hours</th><th>Note</th><th></th></tr>
-      ${log.map(o => `<tr><td>${escapeHtml(o.name)}</td><td>${o.date}</td><td class="num">${o.hours}</td><td>${o.note||''}</td><td><button class="btn ghost" style="font-size:11px;padding:5px 8px;" onclick="deleteOvertimeEntry('${o.id}')">Delete</button></td></tr>`).join('')}
+      ${log.map(o => `<tr><td class="sal-name">${escapeHtml(o.name)}</td><td>${o.date}</td><td class="num">${o.hours}</td><td>${o.note||''}</td><td><button class="btn ghost" style="font-size:11.5px;padding:6px 10px;" onclick="deleteOvertimeEntry('${o.id}')">Delete</button></td></tr>`).join('')}
     </table></div>
     <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Total overtime hours for ${monthLabel(monthStr)}: <strong>${totalHours}</strong></p>`;
 }
@@ -12105,8 +12098,8 @@ async function generateHolidayListDoc(){
   const rows = holidays.length
     ? holidays.map(h => {
         const d = new Date(h.date);
-        const dayName = d.toLocaleDateString(undefined, { weekday: 'long' });
-        const niceDate = d.toLocaleDateString(undefined, { day: '2-digit', month: 'long', year: 'numeric' });
+        const dayName = d.toLocaleDateString('en-IN', { weekday: 'long' });
+        const niceDate = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
         return `<tr><td>${niceDate}</td><td>${dayName}</td><td>${escapeHtml(h.name)}</td></tr>`;
       }).join('')
     : `<tr><td colspan="3" class="empty">No holidays added for ${fyLabel} yet — add them in the Holidays section above.</td></tr>`;
@@ -12132,7 +12125,7 @@ async function generateHolidayListDoc(){
     (holidays.length
       ? holidays.map(h => {
           const d = new Date(h.date);
-          return d.toLocaleDateString(undefined, { day: '2-digit', month: 'long', year: 'numeric' }) + ' (' + d.toLocaleDateString(undefined, { weekday: 'long' }) + ') — ' + h.name;
+          return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }) + ' (' + d.toLocaleDateString('en-IN', { weekday: 'long' }) + ') — ' + h.name;
         }).join('\n')
       : 'No holidays added for ' + fyLabel + ' yet.');
 
@@ -12140,19 +12133,14 @@ async function generateHolidayListDoc(){
   // 2027-28 list produced in March 2027 belongs in 2027-28. `monthVal` was
   // never defined in this function, so this line threw and the Drive copy was
   // never written at all.
-  saveFileToDrive(hrYearPath(fyStart, 'Reports', 'Holiday List'), `Holiday List - ${fyLabel}.txt`, lastHolidayListText, 'text/plain');
+  const fileName = `Holiday List - ${fyLabel}.txt`;
+  saveFileToDrive(hrYearPath(fyStart, 'Reports', 'Holiday List'), fileName, lastHolidayListText, 'text/plain');
+  stashReportShare('R.S. Infotech — Holiday List (' + fyLabel + ')', fileName, lastHolidayListText, 'text/plain',
+    'HR Management > ' + financialYearLabel(fyStart) + ' > Reports > Holiday List');
+  document.getElementById('holidayListActionBar').innerHTML =
+    reportActionBar('Holiday List — ' + fyLabel, 'holidayListOutput', `closeHolidayListOutput()`);
 }
 
-function emailHolidayList(){
-  if(!lastHolidayListText) return;
-  const subject = encodeURIComponent('R.S. Infotech — Holiday List');
-  const body = encodeURIComponent(lastHolidayListText);
-  window.location.href = `mailto:?subject=${subject}&body=${body}`;
-}
-function whatsappHolidayList(){
-  if(!lastHolidayListText) return;
-  window.open('https://wa.me/?text=' + encodeURIComponent(lastHolidayListText), '_blank');
-}
 function closeHolidayListOutput(){
   document.getElementById('holidayListOutput').classList.add('hidden');
 }
@@ -12182,14 +12170,14 @@ async function viewReport(key, label){
                               r.a.returnedOn || '', r.out ? 'Outstanding' : 'Returned']);
     const outCount = rows2.filter(r => r.out).length;
     rows = rows2.map(r => `<tr class="${r.out ? 'inc-overdue' : ''}">
-        <td>${escapeHtml(r.e.name)}<span class="inc-sub">${escapeHtml(r.e.id)}</span></td>
+        <td class="sal-name">${escapeHtml(r.e.name)}<span class="inc-sub">${escapeHtml(r.e.id)}</span></td>
         <td>${escapeHtml(r.a.item)}</td><td class="num">${r.a.qty || '—'}</td>
         <td>${escapeHtml(r.a.issuedOn || '—')}</td>
         <td>${r.out ? '<span class="pol-warn">Not returned</span>' : escapeHtml(r.a.returnedOn)}</td></tr>`).join('');
     document.getElementById('reportBox_assets').innerHTML =
       `${reportLogoHeader('Employee Assets — issued and outstanding')}
        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">${rows2.length} item(s) issued, <strong>${outCount} still outstanding</strong>. An Experience Letter cannot be generated while anything is outstanding.</p>
-       <table><thead><tr><th>Employee</th><th>Item</th><th class="num">Qty</th><th>Issued</th><th>Returned</th></tr></thead><tbody>${rows}</tbody></table>${fsBtn}`;
+       <div class="sal-sheet-wrap print-isolate" id="reportPrintArea_assets"><table class="sal-table"><thead><tr><th>Employee</th><th>Item</th><th class="num">Qty</th><th>Issued</th><th>Returned</th></tr></thead><tbody>${rows}</tbody></table></div>${fsBtn}`;
     {
       const fileName = `Employee Assets - ${todayStr()}.csv`;
       const content = toCsv(csvHeader, csvRows);
@@ -12202,23 +12190,23 @@ async function viewReport(key, label){
   if(key === 'contact'){
     csvHeader = ['Name','Designation','Phone','Email'];
     csvRows = employees.map(e => [e.name, e.designation||'', e.phone||'', e.email||'']);
-    rows = employees.map(e => `<tr><td>${escapeHtml(e.name)}</td><td>${escapeHtml(e.designation||'')}</td><td>${escapeHtml(e.phone||'')}</td><td>${escapeHtml(e.email||'')}</td></tr>`).join('');
-    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Designation</th><th>Phone</th><th>Email</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
+    rows = employees.map(e => `<tr><td class="sal-name">${escapeHtml(e.name)}</td><td>${escapeHtml(e.designation||'')}</td><td>${escapeHtml(e.phone||'')}</td><td>${escapeHtml(e.email||'')}</td></tr>`).join('');
+    box.innerHTML = `<div class="sal-sheet-wrap print-isolate" id="reportPrintArea_contact">${reportLogoHeader(label)}<table class="sal-table"><tr><th>Name</th><th>Designation</th><th>Phone</th><th>Email</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table></div>${fsBtn}`;
   } else if(key === 'birthday'){
     csvHeader = ['Name','Date of birth'];
     csvRows = employees.filter(e=>e.dob).map(e => [e.name, e.dob]);
-    rows = employees.filter(e=>e.dob).map(e => `<tr><td>${escapeHtml(e.name)}</td><td>${e.dob}</td></tr>`).join('');
-    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Date of birth</th></tr>${rows || '<tr><td colspan="2" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
+    rows = employees.filter(e=>e.dob).map(e => `<tr><td class="sal-name">${escapeHtml(e.name)}</td><td>${e.dob}</td></tr>`).join('');
+    box.innerHTML = `<div class="sal-sheet-wrap print-isolate" id="reportPrintArea_birthday">${reportLogoHeader(label)}<table class="sal-table"><tr><th>Name</th><th>Date of birth</th></tr>${rows || '<tr><td colspan="2" class="empty">No data yet</td></tr>'}</table></div>${fsBtn}`;
   } else if(key === 'increment'){
     csvHeader = ['Name','Increment month','Increment date','Last salary (gross)'];
     rows = employees.filter(e=>e.nextIncrement).map(e => {
       const d = new Date(e.nextIncrement);
-      const monthName = d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+      const monthName = d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
       const lastSalary = monthlyPayFor(e).gross;
       csvRows.push([e.name, monthName, e.nextIncrement, Math.round(lastSalary)]);
-      return `<tr><td>${escapeHtml(e.name)}</td><td>${monthName}</td><td>${e.nextIncrement}</td><td class="num">₹${lastSalary.toFixed(0)}</td></tr>`;
+      return `<tr><td class="sal-name">${escapeHtml(e.name)}</td><td>${monthName}</td><td>${e.nextIncrement}</td><td class="num">${rupees(lastSalary)}</td></tr>`;
     }).join('');
-    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Increment month</th><th>Increment date</th><th class="num">Last salary (gross)</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
+    box.innerHTML = `<div class="sal-sheet-wrap print-isolate" id="reportPrintArea_increment">${reportLogoHeader(label)}<table class="sal-table"><tr><th>Name</th><th>Increment month</th><th>Increment date</th><th class="num">Last salary (gross)</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table></div>${fsBtn}`;
   } else if(key === 'diwali'){
     // Rate of Pay sits beside the bonus so the two can be read against each
     // other. They are always the same figure, and showing only the bonus left
@@ -12234,16 +12222,16 @@ async function viewReport(key, label){
       const rate = currentRatePay(e).ratePay;
       const src = diwaliBonusSource(e);
       return `<tr${src === 'unset' ? ' class="inc-overdue"' : ''}>
-        <td>${escapeHtml(e.name)}</td><td>${e.diwaliEligible==='yes'?'Yes':'No'}</td>
-        <td class="num">₹${fmtMoney(rate)}</td>
-        <td class="num">${src === 'entered' ? '₹' + fmtMoney(diwaliBonusFor(e)) : '—'}</td>
+        <td class="sal-name">${escapeHtml(e.name)}</td><td>${e.diwaliEligible==='yes'?'Yes':'No'}</td>
+        <td class="num">${rupees(rate)}</td>
+        <td class="num">${src === 'entered' ? rupees(diwaliBonusFor(e)) : '—'}</td>
         <td>${src === 'entered' ? '<span class="pol-ok">Amount set</span>'
             : src === 'unset' ? '<span class="pol-warn">No amount set</span>'
             : '<span style="color:var(--muted);">Not eligible</span>'}</td></tr>`;
     }).join('');
     const unsetCount = employees.filter(e => diwaliBonusSource(e) === 'unset').length;
-    box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">The bonus is the amount entered against each employee — nothing is worked out from the Rate of Pay, which is shown only for comparison. Nothing is deducted from a bonus and nothing is added to one: no PF, ESI or Professional Tax, no advance, loan or retention, and no reduction for leave taken during the year.</p>
-      ${unsetCount ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${unsetCount} eligible employee(s) have no bonus amount set, so nothing will be paid to them. Open each record and fill in Diwali bonus amount — the form suggests one month's pay if that is what you want.</p>` : ''}<table><tr><th>Name</th><th>Eligible</th><th class="num">Rate of Pay</th><th class="num">Bonus</th><th>Status</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
+    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">The bonus is the amount entered against each employee — nothing is worked out from the Rate of Pay, which is shown only for comparison. Nothing is deducted from a bonus and nothing is added to one: no PF, ESI or Professional Tax, no advance, loan or retention, and no reduction for leave taken during the year.</p>
+      ${unsetCount ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${unsetCount} eligible employee(s) have no bonus amount set, so nothing will be paid to them. Open each record and fill in Diwali bonus amount — the form suggests one month's pay if that is what you want.</p>` : ''}<div class="sal-sheet-wrap print-isolate" id="reportPrintArea_diwali"><table class="sal-table"><tr><th>Name</th><th>Eligible</th><th class="num">Rate of Pay</th><th class="num">Bonus</th><th>Status</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table></div></div>${fsBtn}`;
   } else if(key === 'salary'){
     // Conveyance gets its own column. Without it the row did not add up —
     // gross 30,000 less deductions 200 showing a net of 32,800 — and a row that
@@ -12253,11 +12241,11 @@ async function viewReport(key, label){
       const p = monthlyPayFor(e);
       const gross = p.gross, deductions = p.deductions, net = p.net, conv = p.conveyance;
       csvRows.push([e.name, Math.round(gross), Math.round(conv), Math.round(deductions), Math.round(net)]);
-      return `<tr><td>${escapeHtml(e.name)}</td><td class="num">₹${gross.toFixed(0)}</td>` +
-        `<td class="num">${conv ? '+₹' + conv.toFixed(0) : '—'}</td>` +
-        `<td class="num">−₹${deductions.toFixed(0)}</td><td class="num"><strong>₹${net.toFixed(0)}</strong></td></tr>`;
+      return `<tr><td class="sal-name">${escapeHtml(e.name)}</td><td class="num">${rupees(gross)}</td>` +
+        `<td class="num">${conv ? '+' + rupees(conv) : '—'}</td>` +
+        `<td class="num">−${rupees(deductions)}</td><td class="num"><strong>${rupees(net)}</strong></td></tr>`;
     }).join('');
-    box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">Net = Gross + Conveyance − Deductions. Conveyance is paid on top of the salary, so it is added rather than taken off; deductions cover PF, ESI, PT and anything being recovered — advance, loan instalment and retention.</p><table><tr><th>Name</th><th class="num">Gross</th><th class="num">Conveyance</th><th class="num">Deductions</th><th class="num">Net</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
+    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">Net = Gross + Conveyance − Deductions. Conveyance is paid on top of the salary, so it is added rather than taken off; deductions cover PF, ESI, PT and anything being recovered — advance, loan instalment and retention.</p><div class="sal-sheet-wrap print-isolate" id="reportPrintArea_salary"><table class="sal-table"><tr><th>Name</th><th class="num">Gross</th><th class="num">Conveyance</th><th class="num">Deductions</th><th class="num">Net</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table></div></div>${fsBtn}`;
   } else if(key === 'ctc'){
     csvHeader = ['Name','Monthly gross','Annual gross','Diwali bonus','Annual CTC'];
     rows = employees.map(e => {
@@ -12266,9 +12254,9 @@ async function viewReport(key, label){
       const bonus = diwaliBonusFor(e);
       const annualCtc = annualGross + bonus;
       csvRows.push([e.name, Math.round(monthlyGross), Math.round(annualGross), Math.round(bonus), Math.round(annualCtc)]);
-      return `<tr><td>${escapeHtml(e.name)}</td><td class="num">₹${monthlyGross.toFixed(0)}</td><td class="num">₹${annualGross.toFixed(0)}</td><td class="num">₹${bonus.toFixed(0)}</td><td class="num">₹${annualCtc.toFixed(0)}</td></tr>`;
+      return `<tr><td class="sal-name">${escapeHtml(e.name)}</td><td class="num">${rupees(monthlyGross)}</td><td class="num">${rupees(annualGross)}</td><td class="num">${rupees(bonus)}</td><td class="num">${rupees(annualCtc)}</td></tr>`;
     }).join('');
-    box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}<table><tr><th>Name</th><th class="num">Monthly gross</th><th class="num">Annual gross</th><th class="num">Diwali bonus</th><th class="num">Annual CTC</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table><p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Annual CTC = (Rate of Pay + Other allowances + Dress allowance + Mobile expense + Conveyance) × 12 + Diwali bonus. Rate of Pay is the whole Basic + HRA + LTA gross. PF, ESI and PT come out of it, so they are not added again. The employer's own PF and ESI are not included here either.</p>${fsBtn}</div>`;
+    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<div class="sal-sheet-wrap print-isolate" id="reportPrintArea_ctc"><table class="sal-table"><tr><th>Name</th><th class="num">Monthly gross</th><th class="num">Annual gross</th><th class="num">Diwali bonus</th><th class="num">Annual CTC</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table></div><p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Annual CTC = (Rate of Pay + Other allowances + Dress allowance + Mobile expense + Conveyance) × 12 + Diwali bonus. Rate of Pay is the whole Basic + HRA + LTA gross. PF, ESI and PT come out of it, so they are not added again. The employer's own PF and ESI are not included here either.</p></div>${fsBtn}`;
   } else if(key === 'loan'){
     // One row per loan, not per employee — somebody repaying two shows twice,
     // which is the point of the ledger. Recovered-so-far and balance are worked
@@ -12298,12 +12286,12 @@ async function viewReport(key, label){
                     Math.round(l.status === 'active' ? recovered : amount),
                     Math.round(l.status === 'active' ? bal : 0), note]);
       return `<tr${stalled ? ' class="inc-overdue"' : ''}>
-        <td>${escapeHtml(e.name)}<span class="inc-sub">${escapeHtml(what)}</span></td>
-        <td class="num">₹${fmtMoney(amount)}</td>
-        <td class="num">₹${fmtMoney(Number(l.instalment) || 0)}</td>
+        <td class="sal-name">${escapeHtml(e.name)}<span class="inc-sub">${escapeHtml(what)}</span></td>
+        <td class="num">${rupees(amount)}</td>
+        <td class="num">${rupees(Number(l.instalment) || 0)}</td>
         <td>${started ? escapeHtml(started) : '<span class="pol-warn">not set</span>'}</td>
-        <td class="num">₹${fmtMoney(l.status === 'active' ? recovered : amount)}</td>
-        <td class="num">₹${fmtMoney(l.status === 'active' ? bal : 0)}</td>
+        <td class="num">${rupees(l.status === 'active' ? recovered : amount)}</td>
+        <td class="num">${rupees(l.status === 'active' ? bal : 0)}</td>
         <td>${escapeHtml(note)}</td></tr>`;
     }).join('');
 
@@ -12311,10 +12299,10 @@ async function viewReport(key, label){
     const outstanding = ledger.reduce((t, { l }) => t + loanBalanceAfter(l, nowY, nowM), 0);
     const monthly = ledger.reduce((t, { l }) => t + loanEmiForMonth(l, nowY, nowM), 0);
     const multi = employees.filter(e => loansOf(e).filter(l => l.status === 'active').length > 1).length;
-    box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}
-      <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;">₹${fmtMoney(outstanding)} outstanding across ${ledger.length} loan(s); ₹${fmtMoney(monthly)} coming off this month's Salary Sheet.${multi ? ' ' + multi + ' employee(s) are repaying more than one at a time.' : ''}</p>
+    box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;">${rupees(outstanding)} outstanding across ${ledger.length} loan(s); ${rupees(monthly)} coming off this month's Salary Sheet.${multi ? ' ' + multi + ' employee(s) are repaying more than one at a time.' : ''}</p>
       ${stalledCount ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${stalledCount} active loan(s) have no recovery month set, so no instalment is coming off the Salary Sheet for them. Set one on the employee record to start recovery.</p>` : ''}
-      <table><tr><th>Name</th><th class="num">Amount</th><th class="num">EMI</th><th>Recovery from</th><th class="num">Recovered so far</th><th class="num">Balance</th><th>Status</th></tr>${rows || '<tr><td colspan="7" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
+      <div class="sal-sheet-wrap print-isolate" id="reportPrintArea_loan"><table class="sal-table"><tr><th>Name</th><th class="num">Amount</th><th class="num">EMI</th><th>Recovery from</th><th class="num">Recovered so far</th><th class="num">Balance</th><th>Status</th></tr>${rows || '<tr><td colspan="7" class="empty">No data yet</td></tr>'}</table></div></div>${fsBtn}`;
   }
   if(csvHeader.length){
     // Filed under the financial year this is being run in. These reports are a
@@ -13265,7 +13253,7 @@ function letterTemplate(type, f){
     if(!isoStr) return '';
     const d = new Date(isoStr);
     if(isNaN(d)) return isoStr;
-    return d.toLocaleDateString(undefined, { day: '2-digit', month: 'long', year: 'numeric' });
+    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
   };
   const pronounsFor_ = (salutation) => {
     if(salutation === 'Mr.') return { subject: 'he', subjectCap: 'He', object: 'him', possessive: 'his', was: 'was' };
@@ -13449,10 +13437,11 @@ async function generateLetter(){
     f.net = Math.round(p.net);
   }
   const text = letterTemplate(type, f);
-  lastGeneratedLetter = { type, text, employeeName: name };
   document.getElementById('letterPaper').innerHTML = reportLogoHeader(type) + '<div style="white-space:pre-wrap;">' + escapeHtml(text) + '</div>';
   document.getElementById('letterOutput').classList.add('show');
   document.getElementById('letterActionsBox').classList.remove('hidden');
+  document.getElementById('letterActionsBox').innerHTML =
+    reportActionBar(type + ' — ' + name, 'letterOutput', `switchHrSub('reports')`);
 
   // A generated leave form with dates on it is an application somebody has to
   // answer, so it is filed as one. A blank form printed to be filled in by hand
@@ -13496,7 +13485,10 @@ async function generateLetter(){
   await addActivityLog('Generated ' + type + ' for ' + name);
 
   const safeType = type.replace(/\//g, '-'); // matches the Drive folder name (no slashes in folder names)
-  saveFileToDrive(hrYearPath(f.issueDate, 'Generator', safeType), `${name} - ${f.issueDate}.txt`, text, 'text/plain');
+  const letterFileName = `${name} - ${f.issueDate}.txt`;
+  saveFileToDrive(hrYearPath(f.issueDate, 'Generator', safeType), letterFileName, text, 'text/plain');
+  stashReportShare(type + ' — ' + name, letterFileName, text, 'text/plain',
+    'HR Management > ' + financialYearLabel(f.issueDate) + ' > Generator > ' + safeType);
 }
 
 // Everything user-entered goes through this before it reaches innerHTML.
@@ -13512,16 +13504,6 @@ function escapeHtml(str){
   return div.innerHTML;
 }
 
-function emailLetter(){
-  if(!lastGeneratedLetter) return;
-  const subject = encodeURIComponent(lastGeneratedLetter.type + ' — ' + lastGeneratedLetter.employeeName);
-  const body = encodeURIComponent(lastGeneratedLetter.text);
-  window.location.href = `mailto:?subject=${subject}&body=${body}`;
-}
-function whatsappLetter(){
-  if(!lastGeneratedLetter) return;
-  window.open('https://wa.me/?text=' + encodeURIComponent(lastGeneratedLetter.text), '_blank');
-}
 
 // ---- don't let the app be left by accident ----
 // This is one page holding a signed-in session, and three different gestures
