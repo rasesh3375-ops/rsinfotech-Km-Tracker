@@ -9647,6 +9647,8 @@ function emptyEmployee(){
     assets:[],
     wcApplicable:'no', wcPolicyNumber:'', wcProvider:'', wcSumInsured:'', wcExpiryDate:'',
     gpaApplicable:'no', gpaPolicyNumber:'', gpaProvider:'', gpaSumInsured:'', gpaExpiryDate:'',
+    mediclaimApplicable:'no',
+    otherInsuranceApplicable:'no', otherInsuranceLabel:'',
     specialRemarks:''
   };
 }
@@ -9930,6 +9932,28 @@ function employeeModalHtml(emp){
           <div style="height:10px"></div>
           <label class="field">Policy expiry date</label>
           <input type="date" id="f_gpaExpiryDate" value="${emp.gpaExpiryDate||''}">
+        </div>
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Mediclaim Insurance</div>
+        <label class="field">Covered under Mediclaim insurance?</label>
+        <select class="field-input" id="f_mediclaimApplicable">
+          <option value="no" ${emp.mediclaimApplicable==='yes'?'':'selected'}>No</option>
+          <option value="yes" ${emp.mediclaimApplicable==='yes'?'selected':''}>Yes</option>
+        </select>
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Other Insurance</div>
+        <label class="field">Covered under any other insurance?</label>
+        <select class="field-input" id="f_otherInsuranceApplicable" onchange="toggleOtherInsuranceFields()">
+          <option value="no" ${emp.otherInsuranceApplicable==='yes'?'':'selected'}>No</option>
+          <option value="yes" ${emp.otherInsuranceApplicable==='yes'?'selected':''}>Yes</option>
+        </select>
+        <div id="otherInsuranceFields" class="${emp.otherInsuranceApplicable==='yes'?'':'hidden'}" style="margin-top:12px;">
+          <label class="field">Which insurance?</label>
+          <input type="text" id="f_otherInsuranceLabel" placeholder="e.g. Term Life" value="${escapeHtml(emp.otherInsuranceLabel||'')}">
         </div>
       </div>
 
@@ -10257,6 +10281,16 @@ function toggleGpaFields(){
       const el = document.getElementById(id);
       if(el) el.value = '';
     });
+  }
+}
+
+function toggleOtherInsuranceFields(){
+  const on = (document.getElementById('f_otherInsuranceApplicable') || {}).value === 'yes';
+  const box = document.getElementById('otherInsuranceFields');
+  if(box) box.classList.toggle('hidden', !on);
+  if(!on){
+    const el = document.getElementById('f_otherInsuranceLabel');
+    if(el) el.value = '';
   }
 }
 
@@ -11437,6 +11471,9 @@ async function saveEmployeeForm(){
     gpaProvider: ((document.getElementById('f_gpaProvider') || {}).value || '').trim(),
     gpaSumInsured: ((document.getElementById('f_gpaSumInsured') || {}).value || '').trim(),
     gpaExpiryDate: (document.getElementById('f_gpaExpiryDate') || {}).value || '',
+    mediclaimApplicable: (document.getElementById('f_mediclaimApplicable') || {}).value || 'no',
+    otherInsuranceApplicable: (document.getElementById('f_otherInsuranceApplicable') || {}).value || 'no',
+    otherInsuranceLabel: ((document.getElementById('f_otherInsuranceLabel') || {}).value || '').trim(),
     specialRemarks: ((document.getElementById('f_specialRemarks') || {}).value || '').trim()
   });
   // Validation is done; from here on the write must not be entered twice.
@@ -11735,7 +11772,8 @@ async function renderReportsTab(){
     {key:'salary', label:'Salary Report'},
     {key:'ctc', label:'Cost to Company Report'},
     {key:'loan', label:'Loan & Advance Report'},
-    {key:'assets', label:'Employee Assets'}
+    {key:'assets', label:'Employee Assets'},
+    {key:'insurance', label:'Employee Insurance Details'}
   ];
   document.getElementById('reportCardsBox').innerHTML = reports.map(r => {
     // Count only the people the report will actually show, so the card does
@@ -11945,6 +11983,7 @@ function reportHasData(key, e){
   if(key==='salary') return currentRatePay(e).ratePay > 0;
   if(key==='ctc') return currentRatePay(e).ratePay > 0;
   if(key==='loan') return loansOf(e).length > 0;
+  if(key==='insurance') return e.wcApplicable==='yes' || e.gpaApplicable==='yes' || e.mediclaimApplicable==='yes' || e.otherInsuranceApplicable==='yes';
   return false;
 }
 
@@ -12727,6 +12766,23 @@ async function viewReport(key, label){
       <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;">${rupees(outstanding)} outstanding across ${ledger.length} loan(s); ${rupees(monthly)} coming off this month's Salary Sheet.${multi ? ' ' + multi + ' employee(s) are repaying more than one at a time.' : ''}</p>
       ${stalledCount ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${stalledCount} active loan(s) have no recovery month set, so no instalment is coming off the Salary Sheet for them. Set one on the employee record to start recovery.</p>` : ''}
       <div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th class="num">Amount</th><th class="num">EMI</th><th>Recovery from</th><th class="num">Recovered so far</th><th class="num">Balance</th><th>Status</th></tr>${rows || '<tr><td colspan="7" class="empty">No data yet</td></tr>'}</table></div></div>${fsBtn}`;
+  } else if(key === 'insurance'){
+    // A checkmark, not the policy detail — WC and GPA already carry their own
+    // policy number/provider/sum insured/expiry on the employee record; this
+    // is the one-glance view across everybody, not a replacement for that.
+    const tick = v => v === 'yes' ? '<span class="pol-ok">✓</span>' : '—';
+    csvHeader = ['Name','WC','GPA','Mediclaim','Other'];
+    csvRows = employees.map(e => [e.name,
+      e.wcApplicable === 'yes' ? 'Yes' : 'No',
+      e.gpaApplicable === 'yes' ? 'Yes' : 'No',
+      e.mediclaimApplicable === 'yes' ? 'Yes' : 'No',
+      e.otherInsuranceApplicable === 'yes' ? ('Yes' + (e.otherInsuranceLabel ? ' (' + e.otherInsuranceLabel + ')' : '')) : 'No']);
+    rows = employees.map(e => `<tr><td class="sal-name">${escapeHtml(e.name)}</td>` +
+      `<td style="text-align:center;">${tick(e.wcApplicable)}</td>` +
+      `<td style="text-align:center;">${tick(e.gpaApplicable)}</td>` +
+      `<td style="text-align:center;">${tick(e.mediclaimApplicable)}</td>` +
+      `<td style="text-align:center;">${tick(e.otherInsuranceApplicable)}${e.otherInsuranceApplicable === 'yes' && e.otherInsuranceLabel ? '<span class="inc-sub">' + escapeHtml(e.otherInsuranceLabel) + '</span>' : ''}</td></tr>`).join('');
+    box.innerHTML = `<div class="print-isolate" id="reportPrintArea_insurance" style="margin-top:12px;">${reportLogoHeader(label)}<div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th>WC</th><th>GPA</th><th>Mediclaim</th><th>Other</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table></div></div>${fsBtn}`;
   }
   if(csvHeader.length){
     // Filed under the financial year this is being run in. These reports are a
