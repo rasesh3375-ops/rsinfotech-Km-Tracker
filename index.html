@@ -1314,7 +1314,14 @@
             <div class="msg" id="reminderSaveMsg"></div>
             <div style="height:14px"></div>
             <div id="incrementReminderList"></div>
-            <button class="btn ghost full" style="margin-top:12px;" onclick="openFullscreenView('Increment Reminders','incrementReminderList')">⛶ Full screen</button>
+            <div class="row-inline" style="margin-top:12px;">
+              <button class="btn ghost" style="flex:1;" onclick="closeReportView('incrementReminderList')">✕ Close</button>
+              <button class="btn ghost" style="flex:1;" onclick="openFullscreenView('Increment Reminders','incrementReminderList')">⛶ Full screen</button>
+            </div>
+            <div class="row-inline" style="margin-top:8px;">
+              <button class="btn ghost" style="flex:1;" onclick="shareCurrentReport('whatsapp')">📱 WhatsApp</button>
+              <button class="btn ghost" style="flex:1;" onclick="shareCurrentReport('email')">✉️ Email</button>
+            </div>
           </section>
         </div>
         <div id="dashSubExpiry" class="hidden">
@@ -1474,6 +1481,9 @@
           <div style="height:14px"></div>
           <button class="btn full" onclick="generateHolidayListDoc()">Generate holiday list</button>
           <div id="holidayListOutput" class="hidden" style="margin-top:16px;">
+            <div class="row-inline" style="margin-bottom:10px;">
+              <button class="btn ghost full" onclick="closeHolidayListOutput()">✕ Close</button>
+            </div>
             <div class="holiday-list-paper" id="holidayListPaper"></div>
             <div class="row-inline" style="margin-top:10px;margin-bottom:0;">
               <button class="btn ghost" style="flex:1;" onclick="emailHolidayList()">Email</button>
@@ -5600,17 +5610,22 @@ async function renderAttendanceSheet(){
       r.warn.length ? r.warn.join('; ') : 'Within policy'
     );
   });
-  queueFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Attendance Sheet'),
-    `Attendance Sheet - ${monthVal}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
+  {
+    const fileName = `Attendance Sheet - ${monthVal}.csv`;
+    const content = toCsv(csvHeader, csvRows);
+    queueFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Attendance Sheet'), fileName, content, 'text/csv');
+    stashReportShare('Attendance Sheet — ' + monthLabel(monthVal), fileName, content, 'text/csv',
+      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Dashboard > Attendance Sheet');
+  }
 
-  box.innerHTML = `${reportLogoHeader('Attendance Sheet — ' + monthLabel(monthVal))}
+  box.innerHTML = `${reportActionBar('Attendance Sheet — ' + monthLabel(monthVal), 'attendanceSheetBox', null, { print: false })}
+    ${reportLogoHeader('Attendance Sheet — ' + monthLabel(monthVal))}
     <div class="att-sheet-wrap"><table class="att-table">${headerRow}${bodyRows}</table></div>
     <div class="att-legend">
       <span><strong>P</strong> Present</span><span><strong>A</strong> Absent</span><span><strong>H</strong> Holiday</span>
       <span><strong>EL</strong> Earned leave</span><span><strong>SL</strong> Sick leave</span><span><strong>LP</strong> Leave without pay</span>
       <span><strong>HEL/HSL/HLP</strong> Half-day variants</span><span><strong>SHORT</strong> Short leave</span>
-    </div>
-    <button class="btn ghost full" style="margin-top:12px;" onclick="openFullscreenView('Attendance Sheet','attendanceSheetBox')">⛶ Full screen</button>`
+    </div>`
     // Policy position for the same month, from the rows already computed — so
     // the panel and the exported columns cannot disagree about who breached
     // what, and neither pays for the calculation twice.
@@ -6112,6 +6127,73 @@ function closeSalarySheetAction(save){
   else hrNavigate('dashboard');
 }
 
+// ---- shared report footer: Close, Full screen, Print, WhatsApp, Email ----
+// One footer for every report screen, so these behave the same way
+// everywhere instead of each report growing its own copy. Every report
+// already saves its CSV to Drive the instant it is generated (queueFileToDrive),
+// so unlike the Salary Sheet's Close — which asks about a fresh PDF — a plain
+// report's Close just closes: there is nothing pending to decide about.
+//
+// WhatsApp and Email cannot attach a file through a plain web link — a
+// wa.me link only pre-fills text, and mailto: has no attachment mechanism at
+// all. Where the device's own share sheet is available (Web Share API,
+// mostly phones and some desktop browsers) the real file is attached through
+// that instead; everywhere else this falls back to a text summary naming
+// where the file already is in Drive.
+let currentReportShare = null;
+function stashReportShare(title, fileName, content, mimeType, folderLabel){
+  currentReportShare = { title, fileName, content, mimeType: mimeType || 'text/csv', folderLabel };
+}
+// sourceId is the report's own box element — the same one openFullscreenView
+// relocates, so this works whether the report is being viewed full screen or
+// in its normal tab. Reports that live inside a card on the Reports tab
+// (viewReport) use clearReportBox instead, since there is no separate tab to
+// navigate away from.
+function closeReportView(sourceId){
+  if(fullscreenActiveId === sourceId) closeFullscreenView();
+  else hrNavigate('dashboard');
+}
+function clearReportBox(boxId){
+  if(fullscreenActiveId === boxId){ closeFullscreenView(); return; }
+  const box = document.getElementById(boxId);
+  if(box) box.innerHTML = '';
+}
+async function shareCurrentReport(via){
+  const s = currentReportShare;
+  if(!s) return;
+  let file = null;
+  try{
+    const blob = new Blob([s.content], { type: s.mimeType });
+    file = new File([blob], s.fileName, { type: s.mimeType });
+  }catch(e){}
+  if(file && navigator.canShare && navigator.canShare({ files: [file] })){
+    try{ await navigator.share({ files: [file], title: s.title, text: s.title }); return; }
+    catch(e){ if(e && e.name === 'AbortError') return; } // cancelled from the share sheet — not a failure to fall back on
+  }
+  const summary = s.title + (s.folderLabel ? '\nSaved to Drive: ' + s.folderLabel : '');
+  if(via === 'whatsapp') window.open('https://wa.me/?text=' + encodeURIComponent(summary), '_blank');
+  else window.location.href = 'mailto:?subject=' + encodeURIComponent(s.title) + '&body=' + encodeURIComponent(summary);
+}
+// closeAttr lets a report override the default Close behaviour — the Salary
+// Sheet passes its own save-or-not prompt; everything else uses the plain
+// close/clear this defaults to.
+function reportActionBar(title, sourceId, closeAttr, opts){
+  opts = opts || {};
+  const safeTitle = String(title).replace(/'/g, "\\'");
+  const close = closeAttr || `closeReportView('${sourceId}')`;
+  return `<div class="row-inline" style="margin-bottom:10px;">
+      <button class="btn ghost full" onclick="${close}">✕ Close</button>
+    </div>
+    <div class="row-inline" style="margin-bottom:0;">
+      <button class="btn ghost" style="flex:1;" onclick="openFullscreenView('${safeTitle}','${sourceId}')">⛶ Full screen</button>
+      ${opts.print === false ? '' : `<button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>`}
+    </div>
+    <div class="row-inline" style="margin-top:8px;">
+      <button class="btn ghost" style="flex:1;" onclick="shareCurrentReport('whatsapp')">📱 WhatsApp</button>
+      <button class="btn ghost" style="flex:1;" onclick="shareCurrentReport('email')">✉️ Email</button>
+    </div>`;
+}
+
 
 // Loan recovery, month by month, from the two figures HR already enters — the
 // amount and the instalment. How many months it runs is not stored: it is
@@ -6556,7 +6638,13 @@ async function renderSalarySheet(){
     R(grand.directPaid), R(grand.netSalary), R(grand.pen), R(grand.employerPf), R(grand.pfAdmin), R(grand.edli), R(grand.esiEmployer), R(grand.employerCont), R(grand.ctc),
     R(grand.advanceBalance), R(grand.loanBalance), '', '']);
 
-  queueFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Salary Sheet'), `Salary Sheet - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
+  {
+    const fileName = `Salary Sheet - ${monthVal}.csv`;
+    const content = toCsv(cols, csvRows);
+    queueFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Salary Sheet'), fileName, content, 'text/csv');
+    stashReportShare('Salary Sheet — ' + monthLabel(monthVal), fileName, content, 'text/csv',
+      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Dashboard > Salary Sheet');
+  }
 
   box.innerHTML = `<div class="row-inline" style="margin-bottom:10px;">
       <button class="btn ghost full" onclick="confirmCloseSalarySheet()">✕ Close</button>
@@ -6569,6 +6657,10 @@ async function renderSalarySheet(){
     <div class="row-inline" style="margin-bottom:0;">
       <button class="btn ghost" style="flex:1;" onclick="openFullscreenView('Salary Sheet','salarySheetBox')">⛶ Full screen</button>
       <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
+    </div>
+    <div class="row-inline" style="margin-top:8px;">
+      <button class="btn ghost" style="flex:1;" onclick="shareCurrentReport('whatsapp')">📱 WhatsApp</button>
+      <button class="btn ghost" style="flex:1;" onclick="shareCurrentReport('email')">✉️ Email</button>
     </div>`;
 }
 
@@ -6709,7 +6801,10 @@ async function renderStatutoryReport(key, label){
         </tbody></table></div>
       <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Employee share ${money(pfTot.employee)} ·
         employer share ${money(pfTot.epf + pfTot.eps + pfTot.admin + pfTot.edli)} ·
-        total remittance <strong>${money(pfTot.total)}</strong>. Saved to Drive under HR Management &gt; Reports &gt; PF.</p>`;
+        total remittance <strong>${money(pfTot.total)}</strong>. Saved to Drive under HR Management &gt; Reports &gt; PF.</p>
+      ${reportActionBar('Provident Fund Return — ' + monthLabel(monthVal), cfg.box)}`;
+    stashReportShare('Provident Fund Return — ' + monthLabel(monthVal), `PF Return - ${monthVal}.csv`, csv, 'text/csv',
+      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > PF');
     return;
   }
 
@@ -6746,7 +6841,10 @@ async function renderStatutoryReport(key, label){
             <td class="num">${money(esiTot.gross)}</td><td class="num">${money(esiTot.employee)}</td>
             <td class="num">${money(esiTot.employer)}</td><td class="num">${money(esiTot.total)}</td><td></td></tr>
         </tbody></table></div>
-      <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; Reports &gt; ESI.</p>`;
+      <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; Reports &gt; ESI.</p>
+      ${reportActionBar('ESI Contribution Return — ' + monthLabel(monthVal), cfg.box)}`;
+    stashReportShare('ESI Contribution Return — ' + monthLabel(monthVal), `ESI Return - ${monthVal}.csv`, csv, 'text/csv',
+      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > ESI');
     return;
   }
 
@@ -6756,18 +6854,19 @@ async function renderStatutoryReport(key, label){
   }
 
   const tableRows = rows.map(r => `<tr><td>${r[0]}</td><td class="num">₹${fmtMoney(r[1])}</td></tr>`).join('');
-  box.innerHTML = `<div class="print-isolate" id="statReportPrintArea_${key}">
+  box.innerHTML = `${reportActionBar(label + ' — ' + monthLabel(monthVal), cfg.box)}
+    <div class="print-isolate" id="statReportPrintArea_${key}">
       ${reportLogoHeader(label + ' — ' + monthLabel(monthVal))}
       <table><tr><th>Name</th><th class="num">${key.toUpperCase()} Amount</th></tr>${tableRows}<tr class="sal-grandtotal"><td><strong>Grand Total</strong></td><td class="num"><strong>₹${fmtMoney(grandTotal)}</strong></td></tr></table>
-    </div>
-    <div class="row-inline" style="margin-top:10px;margin-bottom:0;">
-      <button class="btn ghost" style="flex:1;" onclick="openFullscreenView('${label}','${cfg.box}')">⛶ Full screen</button>
-      <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
     </div>`;
 
   const csvRows = rows.map(r => [r[0], r[1]]);
   csvRows.push(['Grand Total', grandTotal]);
-  queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', cfg.folder), `${label} - ${monthVal}.csv`, toCsv(['Name', key.toUpperCase() + ' Amount'], csvRows), 'text/csv');
+  const fileName = `${label} - ${monthVal}.csv`;
+  const content = toCsv(['Name', key.toUpperCase() + ' Amount'], csvRows);
+  queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', cfg.folder), fileName, content, 'text/csv');
+  stashReportShare(label + ' — ' + monthLabel(monthVal), fileName, content, 'text/csv',
+    'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > ' + cfg.folder);
 }
 
 // Small local helper so these reports don't depend on load order of the holiday-map builder elsewhere
@@ -6822,17 +6921,20 @@ async function renderApprenticeSalaryReport(){
     `<td class="num">${fmtMoney(grand.netSalary)}</td></tr>`;
   csvRows.push(['Grand Total', grand.rate, '', grand.leaveAmount, grand.basic, grand.hra, grand.lta, grand.gross, grand.advanceTemp, grand.advance, grand.loanEmi, grand.retention, grand.totalDeduction, grand.conveyance, grand.netSalary]);
 
-  box.innerHTML = `<div class="sal-sheet-wrap print-isolate" id="apprenticeReportPrintArea">
+  box.innerHTML = `${reportActionBar('Apprentice Salary Report — ' + monthLabel(monthVal), 'apprenticeReportBox')}
+    <div class="sal-sheet-wrap print-isolate" id="apprenticeReportPrintArea">
       ${reportLogoHeader('Apprentice Salary Report — ' + monthLabel(monthVal))}
       <table class="sal-table"><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr>${bodyRows}</table>
     </div>
-    <p style="font-size:11px;color:var(--muted);margin:10px 0;">No PF, ESI, or PT — Apprentices are excluded from all three.</p>
-    <div class="row-inline" style="margin-bottom:0;">
-      <button class="btn ghost" style="flex:1;" onclick="openFullscreenView('Apprentice Salary Report','apprenticeReportBox')">⛶ Full screen</button>
-      <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
-    </div>`;
+    <p style="font-size:11px;color:var(--muted);margin:10px 0;">No PF, ESI, or PT — Apprentices are excluded from all three.</p>`;
 
-  queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Apprentice Salary Report'), `Apprentice Salary Report - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
+  {
+    const fileName = `Apprentice Salary Report - ${monthVal}.csv`;
+    const content = toCsv(cols, csvRows);
+    queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Apprentice Salary Report'), fileName, content, 'text/csv');
+    stashReportShare('Apprentice Salary Report — ' + monthLabel(monthVal), fileName, content, 'text/csv',
+      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > Apprentice Salary Report');
+  }
 }
 
 // ---- Consultant Report ----
@@ -6943,15 +7045,20 @@ async function renderFinalSalarySheet(){
   csvRows.push(['', 'GRAND TOTAL', grandCount + ' employee(s)', '', '', Math.round(grand * 100) / 100]);
 
   const cols = ['SR NO','Employee Name','Bank Name','Account Number','IFSC','Final Payable Salary'];
-  queueFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Final Salary Sheet'),
-    `Final Salary Sheet - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
+  {
+    const fileName = `Final Salary Sheet - ${monthVal}.csv`;
+    const content = toCsv(cols, csvRows);
+    queueFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Final Salary Sheet'), fileName, content, 'text/csv');
+    stashReportShare('Final Salary Sheet — ' + monthLabel(monthVal), fileName, content, 'text/csv',
+      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Dashboard > Final Salary Sheet');
+  }
 
-  box.innerHTML = `${reportLogoHeader('Final Salary Sheet — ' + monthLabel(monthVal))}
+  box.innerHTML = `${reportActionBar('Final Salary Sheet — ' + monthLabel(monthVal), 'finalSalaryBox')}
+    ${reportLogoHeader('Final Salary Sheet — ' + monthLabel(monthVal))}
     <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by salary heading, sorted by bank. Final Payable is after every deduction, including anything paid directly to the account.</p>
     <div class="sal-sheet-wrap"><table class="sal-table">
       <thead><tr><th>SR</th><th>Employee Name</th><th>Bank Name</th><th>Account Number</th><th>IFSC</th><th class="num">Final Payable</th></tr></thead>
       <tbody>${bodyRows}</tbody></table></div>
-    <button class="btn ghost full" style="margin-top:12px;" onclick="openFullscreenView('Final Salary Sheet','finalSalaryBox')">⛶ Full screen</button>
     <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(monthVal + '-01'))} &gt; Dashboard &gt; Final Salary Sheet.</p>`;
 }
 
@@ -7018,15 +7125,21 @@ async function renderBonusPaymentSheet(){
   csvRows.push(['', 'GRAND TOTAL', grandCount + ' employee(s)', '', '', Math.round(grand * 100) / 100]);
 
   const cols = ['SR NO','Employee Name','Bank Name','Account Number','IFSC','Bonus Payable'];
-  queueFileToDrive(hrYearPath(paidOn, 'Dashboard', 'Diwali Bonus Payment Sheet'),
-    `Diwali Bonus Payment Sheet - ${paidOn}.csv`, toCsv(cols, csvRows), 'text/csv');
+  {
+    const fileName = `Diwali Bonus Payment Sheet - ${paidOn}.csv`;
+    const content = toCsv(cols, csvRows);
+    queueFileToDrive(hrYearPath(paidOn, 'Dashboard', 'Diwali Bonus Payment Sheet'), fileName, content, 'text/csv');
+    stashReportShare('Diwali Bonus Payment Sheet — paid ' + paidOn, fileName, content, 'text/csv',
+      'HR Management > ' + financialYearLabel(paidOn) + ' > Dashboard > Diwali Bonus Payment Sheet');
+  }
 
   // Anyone left out is named rather than silently missing — "why is he not on
   // the list" is the first question asked of a payment sheet.
   const notEligible = onRoll.filter(e => e.diwaliEligible !== 'yes');
   const noAmount = onRoll.filter(e => diwaliBonusSource(e) === 'unset');
 
-  box.innerHTML = `${reportLogoHeader('Diwali Bonus Payment Sheet — paid ' + paidOn)}
+  box.innerHTML = `${reportActionBar('Diwali Bonus Payment Sheet — paid ' + paidOn, 'bonusPaymentBox')}
+    ${reportLogoHeader('Diwali Bonus Payment Sheet — paid ' + paidOn)}
     <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by salary heading, sorted by bank. Each figure is the Diwali bonus amount set on that employee's record — nothing is taken off it: no PF, no ESI, no Professional Tax, no loan instalment, no advance, no retention money, and no reduction for leave taken, however many days were lost that year.</p>
     ${noAmount.length ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${noAmount.length} eligible employee(s) are missing from this sheet because no bonus amount has been set for them: ${escapeHtml(noAmount.map(e => e.name || e.id).join(', '))}. Set an amount on each record, then generate the sheet again.</p>` : ''}
     ${noBank.length ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${noBank.length} employee(s) have no bank details on file and cannot be paid by transfer: ${escapeHtml(noBank.join(', '))}.</p>` : ''}
@@ -7034,10 +7147,6 @@ async function renderBonusPaymentSheet(){
       <thead><tr><th>SR</th><th>Employee Name</th><th>Bank Name</th><th>Account Number</th><th>IFSC</th><th class="num">Bonus Payable</th></tr></thead>
       <tbody>${bodyRows}</tbody></table></div>
     ${notEligible.length ? `<p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">Not on this sheet: ${notEligible.length} marked not eligible.</p>` : ''}
-    <div class="row-inline" style="margin-top:12px;">
-      <button class="btn ghost" style="flex:1;" onclick="openFullscreenView('Diwali Bonus Payment Sheet','bonusPaymentBox')">⛶ Full screen</button>
-      <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
-    </div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(paidOn))} &gt; Dashboard &gt; Diwali Bonus Payment Sheet.</p>`;
 }
 
@@ -7131,7 +7240,8 @@ async function renderConsultantReport(){
     `<td${i === 9 || i === 19 ? ' class="num"' : ''}>${cell === '' ? '' : cell}</td>`
   ).join('') + '</tr>').join('');
 
-  box.innerHTML = `<div class="print-isolate" id="consultantReportPrintArea">
+  box.innerHTML = `${reportActionBar('Consultant Report — ' + monthLabel(monthVal), 'consultantReportBox')}
+    <div class="print-isolate" id="consultantReportPrintArea">
       ${reportLogoHeader('Consultant Report — ' + monthLabel(monthVal))}
       <div style="overflow-x:auto;">
         <table style="min-width:1500px;font-size:11.5px;white-space:nowrap;">
@@ -7139,14 +7249,15 @@ async function renderConsultantReport(){
         </table>
       </div>
       <p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">${rows.length} employees · ${monthDays} days · ${workingDays} working, ${weekOff} week-off, ${publicHolidays} public holiday${publicHolidays === 1 ? '' : 's'}.</p>
-    </div>
-    <div class="row-inline" style="margin-top:10px;margin-bottom:0;">
-      <button class="btn ghost" style="flex:1;" onclick="openFullscreenView('Consultant Report','consultantReportBox')">⛶ Full screen</button>
-      <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
     </div>`;
 
-  queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Consultant Report'), `Consultant Report - ${monthVal}.csv`,
-    toCsv(CONSULTANT_REPORT_COLS, rows), 'text/csv');
+  {
+    const fileName = `Consultant Report - ${monthVal}.csv`;
+    const content = toCsv(CONSULTANT_REPORT_COLS, rows);
+    queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Consultant Report'), fileName, content, 'text/csv');
+    stashReportShare('Consultant Report — ' + monthLabel(monthVal), fileName, content, 'text/csv',
+      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > Consultant Report');
+  }
 }
 
 // ---- Month-wise Salary Comparison ----
@@ -7244,7 +7355,8 @@ async function renderSalaryComparisonReport(){
   // visible rather than silent.
   const reconciled = Math.round((joined.concat(leavers, changed).reduce((t, i) => t + i.amount, 0) - difference) * 100) === 0;
 
-  box.innerHTML = `<div class="print-isolate" id="salComparePrintArea">
+  box.innerHTML = `${reportActionBar('Month-wise Salary Comparison — ' + curr.label, 'salCompareBox')}
+    <div class="print-isolate" id="salComparePrintArea">
       ${reportLogoHeader('Month-wise Salary Comparison — ' + curr.label)}
       <table>
         <tr><th>Month</th><th class="num">Total Salary</th></tr>
@@ -7262,10 +7374,6 @@ async function renderSalaryComparisonReport(){
         ${joined.length} joined · ${leavers.length} left · ${changed.length} changed.
         ${reconciled ? 'Reasons add up to the difference exactly.' : '⚠ Reasons do not add up to the difference — please report this.'}
       </p>
-    </div>
-    <div class="row-inline" style="margin-top:10px;margin-bottom:0;">
-      <button class="btn ghost" style="flex:1;" onclick="openFullscreenView('Month-wise Salary Comparison','salCompareBox')">⛶ Full screen</button>
-      <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
     </div>`;
 
   const csvHead = ['Employee', 'Reason', 'Effect on total'];
@@ -7275,8 +7383,13 @@ async function renderSalaryComparisonReport(){
     ['Difference', '', Math.round(difference * 100) / 100],
     ['', '', '']
   ].concat(csvRows, [['Grand Total', '', Math.round(difference * 100) / 100]]);
-  queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Salary Comparison'),
-    `Month-wise Salary Comparison - ${monthVal}.csv`, toCsv(csvHead, csvAll), 'text/csv');
+  {
+    const fileName = `Month-wise Salary Comparison - ${monthVal}.csv`;
+    const content = toCsv(csvHead, csvAll);
+    queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Salary Comparison'), fileName, content, 'text/csv');
+    stashReportShare('Month-wise Salary Comparison — ' + curr.label, fileName, content, 'text/csv',
+      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > Salary Comparison');
+  }
 }
 
 // ---- geofence zones ----
@@ -9123,8 +9236,14 @@ async function renderIncrementReminders(){
   // A reminder list is a snapshot of today, so it is filed under today's
   // financial year. `monthVal` was never defined here, so this threw before
   // the panel below was written and the reminders never appeared at all.
-  queueFileToDrive(hrYearPath(todayStr(), 'Dashboard', 'Increment Reminders'), `Increment Reminders - ${todayStr()}.csv`,
-    toCsv(['Name','Designation','Increment due','Days away'], upcoming.map(e => [e.name, e.designation||'', e.nextIncrement, Math.ceil((new Date(e.nextIncrement) - now) / 86400000)])), 'text/csv');
+  {
+    const fileName = `Increment Reminders - ${todayStr()}.csv`;
+    const content = toCsv(['Name','Designation','Increment due','Days away'],
+      upcoming.map(e => [e.name, e.designation||'', e.nextIncrement, Math.ceil((new Date(e.nextIncrement) - now) / 86400000)]));
+    queueFileToDrive(hrYearPath(todayStr(), 'Dashboard', 'Increment Reminders'), fileName, content, 'text/csv');
+    stashReportShare('Increment Reminders — ' + todayStr(), fileName, content, 'text/csv',
+      'HR Management > ' + financialYearLabel(todayStr()) + ' > Dashboard > Increment Reminders');
+  }
   box.innerHTML = reportLogoHeader('Increment Reminders') + upcoming.map(e => {
     const days = Math.ceil((new Date(e.nextIncrement) - now) / 86400000);
     const subject = encodeURIComponent('Increment reminder: ' + e.name);
@@ -11677,11 +11796,17 @@ async function renderLeaveEncashmentReport(){
   const cols = ['SR NO','Employee Name','Bank Name','Account Number','IFSC',
                 'Pending leave days', B.label + ' (monthly)',
                 'Basis at ' + Math.round(B.grossPct * 100) + '%', 'Per day', 'Encashment payable'];
-  queueFileToDrive(hrYearPath(asAt, 'Reports', 'Leave Encashment'),
-    `Leave Encashment - FY ${fyLabel}.csv`, toCsv(cols, csvRows), 'text/csv');
+  {
+    const fileName = `Leave Encashment - FY ${fyLabel}.csv`;
+    const content = toCsv(cols, csvRows);
+    queueFileToDrive(hrYearPath(asAt, 'Reports', 'Leave Encashment'), fileName, content, 'text/csv');
+    stashReportShare('Leave Encashment — FY ' + fyLabel, fileName, content, 'text/csv',
+      'HR Management > ' + financialYearLabel(asAt) + ' > Reports > Leave Encashment');
+  }
 
   const nil = rows.length - payable.length;
-  box.innerHTML = `${reportLogoHeader('Leave Encashment — FY ' + fyLabel + ', as at ' + asAt)}
+  box.innerHTML = `${reportActionBar('Leave Encashment — FY ' + fyLabel, 'encashBox')}
+    ${reportLogoHeader('Leave Encashment — FY ' + fyLabel + ', as at ' + asAt)}
     <p style="font-size:12px;color:var(--muted);margin:0 0 12px;line-height:1.6;">
       Pending days are what is left of privilege leave at 31 March — opening balance plus what was
       earned over the year, less what was taken. The policy is that it is encashed rather than
@@ -11701,10 +11826,6 @@ async function renderLeaveEncashmentReport(){
         <th class="num">Payable</th></tr></thead>
       <tbody>${bodyRows}</tbody></table></div>
     ${nil ? `<p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">${nil} employee(s) have no leave left to encash and are not listed.</p>` : ''}
-    <div class="row-inline" style="margin-top:12px;">
-      <button class="btn ghost" style="flex:1;" onclick="openFullscreenView('Leave Encashment','encashBox')">⛶ Full screen</button>
-      <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
-    </div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(asAt))} &gt; Reports &gt; Leave Encashment. Use <em>Encash and start next year at nil</em> on the EL Calculation Sheet once these have been paid.</p>`;
 }
 
@@ -11762,12 +11883,19 @@ async function renderElCalculationSheet(){
   const totalEncash = Math.round(rows.reduce((t, r) => t + r.amount, 0) * 100) / 100;
   const B = LEAVE_POLICY.privilegeLeave.salaryBasis;
 
-  queueFileToDrive(hrYearPath(fyEnd, 'Reports', 'EL Calculation Sheet'), `EL Calculation Sheet - FY ${startYear}-${String(startYear+1).slice(2)}.csv`,
-    toCsv(['Name','Opening EL','Present days (FY)','EL earned','EL used','Closing EL','Encashment per day','Encashment payable'],
+  const elReportTitle = 'EL Calculation Sheet — FY ' + startYear + '-' + String(startYear+1).slice(2);
+  {
+    const fileName = `EL Calculation Sheet - FY ${startYear}-${String(startYear+1).slice(2)}.csv`;
+    const content = toCsv(['Name','Opening EL','Present days (FY)','EL earned','EL used','Closing EL','Encashment per day','Encashment payable'],
       rows.map(r => [r.name, r.opening, r.presentDays, r.earned, r.elUsed, r.closing, r.perDay, r.amount])
-        .concat([['GRAND TOTAL','','','','','','', totalEncash]])), 'text/csv');
+        .concat([['GRAND TOTAL','','','','','','', totalEncash]]));
+    queueFileToDrive(hrYearPath(fyEnd, 'Reports', 'EL Calculation Sheet'), fileName, content, 'text/csv');
+    stashReportShare(elReportTitle, fileName, content, 'text/csv',
+      'HR Management > ' + financialYearLabel(fyEnd) + ' > Reports > EL Calculation Sheet');
+  }
 
   box.innerHTML = `
+    ${reportActionBar(elReportTitle, 'elCalcBox')}
     <div style="overflow-x:auto;"><table>
       <tr><th>Name</th><th class="num">Opening EL</th><th class="num">Present days (FY)</th><th class="num">EL earned</th><th class="num">EL used</th><th class="num">Closing EL</th><th class="num">Per day</th><th class="num">Encashment</th></tr>
       ${rows.map(r => `<tr><td>${escapeHtml(r.name)}</td><td class="num">${r.opening}</td><td class="num">${r.presentDays}</td><td class="num">${r.earned}</td><td class="num">${r.elUsed}</td><td class="num">${r.closing}</td><td class="num">₹${fmtMoney(r.perDay)}</td><td class="num"><strong>₹${fmtMoney(r.amount)}</strong></td></tr>`).join('')}
@@ -11866,21 +11994,24 @@ async function renderMonthlyLeaveReport(){
   const header = ['Name'].concat(FY_MONTH_LABELS).concat(['Total']);
   const tableRows = rows.map(r => `<tr><td class="sal-name">${escapeHtml(r.name)}</td>${r.monthTotals.map(v => `<td class="num">${v || ''}</td>`).join('')}<td class="num"><strong>${r.yearTotal}</strong></td></tr>`).join('');
 
-  box.innerHTML = `${reportLogoHeader('Monthly Leave Report — FY ' + startYear + '-' + String(startYear+1).slice(2))}
+  const reportTitle = 'Monthly Leave Report — FY ' + startYear + '-' + String(startYear+1).slice(2);
+  box.innerHTML = `${reportActionBar(reportTitle, 'monthlyLeaveReportBox')}
+    ${reportLogoHeader(reportTitle)}
     <div class="sal-sheet-wrap print-isolate" id="leaveReportPrintArea">
       <table class="sal-table"><tr>${header.map(h=>`<th>${h}</th>`).join('')}</tr>${tableRows}</table>
     </div>
-    <p style="font-size:11px;color:var(--muted);margin:10px 0;">Each number is EL + SL + LP days that month (half-day codes count as 0.5). Absent and Short Leave are not counted here — see the Attendance Sheet for the complete picture.</p>
-    <div class="row-inline" style="margin-bottom:0;">
-      <button class="btn ghost" style="flex:1;" onclick="openFullscreenView('Monthly Leave Report','monthlyLeaveReportBox')">⛶ Full screen</button>
-      <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
-    </div>`;
+    <p style="font-size:11px;color:var(--muted);margin:10px 0;">Each number is EL + SL + LP days that month (half-day codes count as 0.5). Absent and Short Leave are not counted here — see the Attendance Sheet for the complete picture.</p>`;
 
   const csvHeader = header;
   const csvRows = rows.map(r => [r.name, ...r.monthTotals, r.yearTotal]);
-  // Filed under the financial year the report covers.
-  queueFileToDrive(hrYearPath(fyOfStartYear(startYear).from, 'Reports', 'Monthly Leave Report'),
-    `Monthly Leave Report - FY ${fyOfStartYear(startYear).label}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
+  {
+    const fileName = `Monthly Leave Report - FY ${fyOfStartYear(startYear).label}.csv`;
+    const content = toCsv(csvHeader, csvRows);
+    // Filed under the financial year the report covers.
+    queueFileToDrive(hrYearPath(fyOfStartYear(startYear).from, 'Reports', 'Monthly Leave Report'), fileName, content, 'text/csv');
+    stashReportShare(reportTitle, fileName, content, 'text/csv',
+      'HR Management > ' + fyOfStartYear(startYear).label + ' > Reports > Monthly Leave Report');
+  }
 }
 
 // ---- overtime report ----
@@ -11941,12 +12072,19 @@ async function renderOvertimeReport(){
     return;
   }
   const totalHours = log.reduce((sum,o) => sum + Number(o.hours), 0);
+  const reportTitle = 'Overtime Report — ' + monthLabel(monthStr);
   // The month being viewed decides the year. `monthVal` was never defined
   // here, so this threw before the table below was written and the Overtime
   // Report showed nothing whenever there was anything to show.
-  queueFileToDrive(hrYearPath(monthStr + '-01', 'Reports', 'Overtime Report'), `Overtime Report - ${monthStr}.csv`,
-    toCsv(['Name','Date','Hours','Note'], log.map(o => [o.name, o.date, o.hours, o.note||''])), 'text/csv');
-  box.innerHTML = `<div style="overflow-x:auto;"><table>
+  {
+    const fileName = `Overtime Report - ${monthStr}.csv`;
+    const content = toCsv(['Name','Date','Hours','Note'], log.map(o => [o.name, o.date, o.hours, o.note||'']));
+    queueFileToDrive(hrYearPath(monthStr + '-01', 'Reports', 'Overtime Report'), fileName, content, 'text/csv');
+    stashReportShare(reportTitle, fileName, content, 'text/csv',
+      'HR Management > ' + financialYearLabel(monthStr + '-01') + ' > Reports > Overtime Report');
+  }
+  box.innerHTML = `${reportActionBar(reportTitle, 'overtimeReportBox')}
+    <div style="overflow-x:auto;"><table>
       <tr><th>Name</th><th>Date</th><th class="num">Hours</th><th>Note</th><th></th></tr>
       ${log.map(o => `<tr><td>${escapeHtml(o.name)}</td><td>${o.date}</td><td class="num">${o.hours}</td><td>${o.note||''}</td><td><button class="btn ghost" style="font-size:11px;padding:5px 8px;" onclick="deleteOvertimeEntry('${o.id}')">Delete</button></td></tr>`).join('')}
     </table></div>
@@ -12016,6 +12154,9 @@ function whatsappHolidayList(){
   if(!lastHolidayListText) return;
   window.open('https://wa.me/?text=' + encodeURIComponent(lastHolidayListText), '_blank');
 }
+function closeHolidayListOutput(){
+  document.getElementById('holidayListOutput').classList.add('hidden');
+}
 
 async function viewReport(key, label){
   // Every one of these reports is about current staff — contact details,
@@ -12024,7 +12165,9 @@ async function viewReport(key, label){
   // pays from.
   const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
   const box = document.getElementById('reportBox_' + key);
-  const fsBtn = `<button class="btn ghost full" style="margin-top:8px;" onclick="openFullscreenView('${label.replace(/'/g,"\\'")}','reportBox_${key}')">⛶ Full screen</button>`;
+  // Lives inside a card on the Reports tab, not its own nav tab, so Close
+  // clears the card rather than navigating away from the whole tab.
+  const fsBtn = reportActionBar(label, 'reportBox_' + key, `clearReportBox('reportBox_${key}')`);
   let rows = '';
   let csvHeader = [], csvRows = [];
   if(key === 'assets'){
@@ -12048,7 +12191,13 @@ async function viewReport(key, label){
       `${reportLogoHeader('Employee Assets — issued and outstanding')}
        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">${rows2.length} item(s) issued, <strong>${outCount} still outstanding</strong>. An Experience Letter cannot be generated while anything is outstanding.</p>
        <table><thead><tr><th>Employee</th><th>Item</th><th class="num">Qty</th><th>Issued</th><th>Returned</th></tr></thead><tbody>${rows}</tbody></table>${fsBtn}`;
-    queueFileToDrive(hrYearPath('', 'Reports', 'Assets'), `Employee Assets - ${todayStr()}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
+    {
+      const fileName = `Employee Assets - ${todayStr()}.csv`;
+      const content = toCsv(csvHeader, csvRows);
+      queueFileToDrive(hrYearPath('', 'Reports', 'Assets'), fileName, content, 'text/csv');
+      stashReportShare('Employee Assets — issued and outstanding', fileName, content, 'text/csv',
+        'HR Management > ' + financialYearLabel(todayStr()) + ' > Reports > Assets');
+    }
     return;
   }
   if(key === 'contact'){
@@ -12190,7 +12339,11 @@ async function viewReport(key, label){
     // snapshot of today rather than of a chosen month, so there is no month to
     // take the year from — reaching for one threw a ReferenceError on the last
     // line of every report, which is why none of them ever reached Drive.
-    queueFileToDrive(hrYearPath('', 'Reports', label), `${label} - ${todayStr()}.csv`, toCsv(csvHeader, csvRows), 'text/csv');
+    const fileName = `${label} - ${todayStr()}.csv`;
+    const content = toCsv(csvHeader, csvRows);
+    queueFileToDrive(hrYearPath('', 'Reports', label), fileName, content, 'text/csv');
+    stashReportShare(label, fileName, content, 'text/csv',
+      'HR Management > ' + financialYearLabel(todayStr()) + ' > Reports > ' + label);
   }
 }
 
