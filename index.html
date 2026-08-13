@@ -104,6 +104,13 @@
     --green:#2E7D4F;
     --red:#B23A32;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    /* A defined stack instead of one-off numbers per modal — each new root
+       added since has needed to sit above the last (increment above employee,
+       the close-sheet prompt above fullscreen), so the scale has headroom
+       rather than each addition inventing its own number. */
+    --z-modal:50;
+    --z-fullscreen:200;
+    --z-modal-top:300;
   }
   *{box-sizing:border-box;}
   /* Kills the browser's pull-to-refresh. Dragging down past the top of a
@@ -131,7 +138,7 @@
   header.top .brand .tagline{font-size:10px;color:var(--red);font-style:italic;font-weight:600;}
   header.top .brand .dot{width:10px;height:10px;border-radius:50%;background:var(--amber);}
   header.top h1{font-size:17px;font-weight:700;margin:0;letter-spacing:0.2px;}
-  header.top button.linkbtn{
+  .linkbtn{
     background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;
     text-decoration:underline;padding:4px;
   }
@@ -205,8 +212,8 @@
   .trackbtn.stop{background:var(--red);color:#fff;}
   .msg{font-size:12.5px;color:var(--muted);text-align:center;margin-top:10px;}
   .msg.error{color:var(--red);}
-  section.block{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px;}
-  section.block h2{font-size:14px;margin:0 0 12px;}
+  section.block{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px;}
+  section.block h2{font-size:17px;margin:0 0 12px;}
   table{width:100%;border-collapse:collapse;font-size:13px;}
   th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);}
   th{color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;}
@@ -214,7 +221,10 @@
   .empty{color:var(--muted);font-size:13px;padding:14px 4px;text-align:center;}
   .row-inline{display:flex;gap:10px;align-items:flex-end;margin-bottom:14px;flex-wrap:wrap;}
   .row-inline > div{flex:1;min-width:130px;}
-  .pill{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;font-weight:600;}
+  /* Shared "chip" shape — .pill (status), .feed-tag (activity log), .calc-tag
+     (calculation-guidance tags) are all the same pill geometry with their own
+     color variants layered on top. */
+  .pill, .feed-tag, .calc-tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.2px;padding:3px 9px;border-radius:20px;}
   .pill.live{background:#FDECC8;color:var(--amber-dark);}
   .pill.idle{background:#EDEDE7;color:var(--muted);}
   .switch-role{text-align:center;margin-top:26px;}
@@ -517,6 +527,11 @@
   .inc-table td.num,.inc-table th.num{text-align:right;white-space:nowrap;}
   .inc-table tbody tr{cursor:pointer;}
   .inc-table tbody tr:hover{background:#F5F7FB;}
+  /* Grand Total rows (PF/ESI reports) — same treatment as every other report's
+     total row, since .pay-table's .pay-total rule doesn't reach a table styled
+     with .inc-table. */
+  .inc-table tr.pay-total{cursor:default;}
+  .inc-table tr.pay-total td{background:var(--navy);color:#fff;font-weight:800;border-bottom-color:var(--navy);}
   .inc-sub{display:block;font-size:11px;color:var(--muted);margin-top:2px;}
   /* Band colour carried on a left rule rather than a full wash, so several
      rows can sit together without the card turning into a block of colour. */
@@ -547,7 +562,7 @@
   .feed-row .body{flex:1;min-width:0;}
   .feed-row .t{font-size:13px;color:var(--navy);line-height:1.35;}
   .feed-row .when{font-size:11.5px;color:var(--muted);margin-top:2px;}
-  .feed-tag{font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;flex-shrink:0;}
+  .feed-tag{white-space:nowrap;flex-shrink:0;}
 
   /* One row, every tile an equal share of the width, so there is no dead space
      on the right however many actions there are. */
@@ -619,7 +634,7 @@
   .emp-row .actions{margin-top:10px;display:flex;gap:8px;}
   .emp-row .actions button{font-size:12px;padding:7px 10px;}
 
-  .modal-overlay{position:fixed;inset:0;background:rgba(22,33,62,0.55);display:flex;align-items:flex-start;justify-content:center;padding:20px 12px;overflow-y:auto;z-index:50;}
+  .modal-overlay{position:fixed;inset:0;background:rgba(22,33,62,0.55);display:flex;align-items:flex-start;justify-content:center;padding:20px 12px;overflow-y:auto;z-index:var(--z-modal);}
   .modal-box{background:var(--paper);border-radius:14px;max-width:520px;width:100%;padding:22px;margin:20px 0 40px;}
   .modal-box h2{margin:0 0 6px;font-size:19px;}
   /* Title bar that stays put. The overlay is the scrolling element, so sticky
@@ -652,8 +667,7 @@
   .calc-text{font-size:12.5px;color:var(--navy);line-height:1.55;margin:0;}
   .calc-note{font-size:11.5px;color:var(--muted);line-height:1.5;margin:4px 0 0;white-space:normal;}
   .calc-tags{display:flex;flex-wrap:wrap;gap:6px;}
-  .calc-tag{font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;
-    background:#E7ECFA;color:#3B5BA9;}
+  .calc-tag{background:#E7ECFA;color:#3B5BA9;}
   .calc-empty{font-size:12.5px;color:var(--muted);margin:12px 0 0;}
 
   /* Every dynamic description folds. Closed they are one line, so a long form
@@ -682,13 +696,14 @@
   .pay-manual{font-size:10px;font-weight:700;color:var(--amber-dark);cursor:help;white-space:nowrap;}
   .pay-warn{font-size:11.5px;color:var(--red);margin:8px 0 0;line-height:1.5;}
   .field-group .sec-title:first-child{border-top:none;padding-top:0;margin-top:0;}
-  select.field-input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;font-size:14.5px;background:var(--paper);color:var(--navy);}
+  .field-input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;font-size:14.5px;background:var(--paper);color:var(--navy);font-family:inherit;}
+  textarea.field-input{resize:vertical;}
   input[type=date]{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;background:var(--paper);color:var(--navy);}
   input[type=file]{width:100%;font-size:12.5px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--paper);}
   input:disabled{background:#EDEDE7;color:var(--muted);cursor:not-allowed;}
 
   /* ===== Full-screen sheet viewer ===== */
-  #fullscreenSheetRoot{position:fixed;inset:0;background:var(--paper);z-index:200;display:flex;flex-direction:column;}
+  #fullscreenSheetRoot{position:fixed;inset:0;background:var(--paper);z-index:var(--z-fullscreen);display:flex;flex-direction:column;}
   .fullscreen-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line);background:var(--navy);color:#fff;flex-shrink:0;}
   .fullscreen-header strong{font-size:15px;}
   .fullscreen-header .btn.ghost{color:#fff;border:1px solid rgba(255,255,255,.4);}
@@ -836,7 +851,6 @@
   .btn.ghost{box-shadow:none;}
   .odometer-box{box-shadow:0 4px 18px rgba(22,33,62,.28);background:linear-gradient(160deg, var(--navy) 0%, var(--navy2) 100%);}
   .stat-card2, .summary-grid .stat{transition:box-shadow .15s ease;box-shadow:0 1px 2px rgba(22,33,62,.04), 0 1px 6px rgba(22,33,62,.05);}
-  .pill{font-weight:700;letter-spacing:.2px;}
   .hr-tabs{box-shadow:inset 0 1px 2px rgba(22,33,62,.06);}
   h1, h2{letter-spacing:.1px;}
   section.block h2{color:var(--navy);}
@@ -1353,7 +1367,7 @@
 
       <!-- ===== Employee Master ===== -->
       <div id="hrSubMaster" class="hidden">
-        <h2 style="margin:0 0 14px;font-size:17px;">Employee master</h2>
+        <h2 style="margin:0 0 14px;">Employee master</h2>
         <section class="block">
           <div class="emp-search-row">
             <input type="text" id="empSearchInput" placeholder="Search by name or employee ID..." oninput="renderEmployeeList()" />
@@ -1364,7 +1378,7 @@
           <div id="employeeListBox"></div>
         </section>
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">Left Employees</h2>
+          <h2 style="margin:0 0 4px;">Left Employees</h2>
           <p style="font-size:13px;color:var(--muted);margin:0 0 14px;" id="leftEmployeeCount">0 on file</p>
           <button class="btn full" onclick="openLeftEmployeesModal()">View left employees</button>
         </section>
@@ -1373,7 +1387,7 @@
       <!-- ===== Reports ===== -->
       <div id="hrSubReports" class="hidden">
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">Open a new leave year</h2>
+          <h2 style="margin:0 0 4px;">Open a new leave year</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Sets each employee's opening EL from what they earned last year — one day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} attendance days — and their SL to the yearly allowance. Resident Engineers and Work From Home staff are skipped, their policies being different, as are non-R.S. Infotech headings. Run once, in April.</p>
           <label class="field">Year starts</label>
           <input class="field-input" type="date" id="rolloverFy">
@@ -1385,7 +1399,7 @@
         <div id="reportCardsBox"></div>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">Attendance</h2>
+          <h2 style="margin:0 0 4px;">Attendance</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Marked Present as soon as the engineer takes a check-in selfie that day — whether or not they end up recording a trip. Sundays are excluded automatically; add festivals or declared holidays below so they don't count as absent either.</p>
           <div class="row-inline">
             <div>
@@ -1409,7 +1423,7 @@
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">Holidays</h2>
+          <h2 style="margin:0 0 4px;">Holidays</h2>
           <div class="row-inline">
             <div>
               <label class="field">Date</label>
@@ -1427,7 +1441,7 @@
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">Monthly Leave Report</h2>
+          <h2 style="margin:0 0 4px;">Monthly Leave Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Every employee's leave days (EL + SL + LP, half-days counted as 0.5) broken down month by month across the financial year — April through March — so you can see each person's full-year leave pattern at a glance.</p>
           <label class="field">Financial year starting April of</label>
           <input type="number" id="leaveReportStartYear" placeholder="e.g. 2026 for FY 2026-27" />
@@ -1438,7 +1452,7 @@
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">PF Report</h2>
+          <h2 style="margin:0 0 4px;">PF Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">PF deducted per employee for the month, pulled from the Salary Sheet. Apprentices, R.S.IT Solution and Contractors don't have PF, so they're excluded here.</p>
           <div class="row-inline">
             <div><label class="field">Month</label><select class="field-input" id="pfReportMonthSel"></select></div>
@@ -1450,7 +1464,7 @@
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">ESI Report</h2>
+          <h2 style="margin:0 0 4px;">ESI Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">ESI deducted per employee for the month, pulled from the Salary Sheet. Apprentices, R.S.IT Solution and Contractors don't have ESI, so they're excluded here.</p>
           <div class="row-inline">
             <div><label class="field">Month</label><select class="field-input" id="esiReportMonthSel"></select></div>
@@ -1462,7 +1476,7 @@
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">PT Report</h2>
+          <h2 style="margin:0 0 4px;">PT Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Professional Tax deducted per employee for the month, pulled from the Salary Sheet. Apprentices and Contractors don't have PT — Managerial, Seniors, Junior Engineers, and R.S.IT Solution do, when Gross exceeds ₹12,000.</p>
           <div class="row-inline">
             <div><label class="field">Month</label><select class="field-input" id="ptReportMonthSel"></select></div>
@@ -1474,7 +1488,7 @@
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">Apprentice Salary Report</h2>
+          <h2 style="margin:0 0 4px;">Apprentice Salary Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Full salary breakdown for employees under the Apprentices heading only, for the month you pick — pulled from the Salary Sheet.</p>
           <div class="row-inline">
             <div><label class="field">Month</label><select class="field-input" id="apprenticeReportMonthSel"></select></div>
@@ -1486,7 +1500,7 @@
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">Final Salary Sheet</h2>
+          <h2 style="margin:0 0 4px;">Final Salary Sheet</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The payment list: every employee grouped by salary heading, sorted by bank within each heading, with account number and the final amount payable after all deductions. Built for handing to the bank — one block per heading, subtotalled, with a grand total at the end.</p>
           <div class="row-inline">
             <div><label class="field">Month</label><select class="field-input" id="finalSalMonthSel"></select></div>
@@ -1498,7 +1512,7 @@
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">Diwali Bonus Payment Sheet</h2>
+          <h2 style="margin:0 0 4px;">Diwali Bonus Payment Sheet</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The payment list for the bonus, in the same shape as the Final Salary Sheet — grouped by salary heading, sorted by bank, with account number and the amount payable. An employee appears once they are marked eligible <em>and</em> have a Diwali bonus amount set on their record; anyone eligible without one is named above the table rather than left off quietly. No PF, ESI, Professional Tax, advance, loan or retention is deducted, and leave taken during the year does not reduce it.</p>
           <label class="field">Paid on</label>
           <input type="date" class="field-input" id="bonusPaidOn" />
@@ -1509,7 +1523,7 @@
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">Consultant Report</h2>
+          <h2 style="margin:0 0 4px;">Consultant Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The monthly attendance sheet in the exact column format the consultant asks for — one row per employee, built automatically from Employee Master and the month's attendance. Pick any month; export the CSV and send it on.</p>
           <div class="row-inline">
             <div><label class="field">Month</label><select class="field-input" id="consultantReportMonthSel"></select></div>
@@ -1521,7 +1535,7 @@
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">Month-wise Salary Comparison</h2>
+          <h2 style="margin:0 0 4px;">Month-wise Salary Comparison</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Last month's total salary against the month you pick, and exactly what explains the gap — each new joiner that added to it, each leaver that took away from it, and anyone whose own salary moved. The reasons add up to the difference.</p>
           <div class="row-inline">
             <div><label class="field">Month</label><select class="field-input" id="salCompareMonthSel"></select></div>
@@ -1533,7 +1547,7 @@
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">Overtime Report</h2>
+          <h2 style="margin:0 0 4px;">Overtime Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Applies to Field Engineers per the overtime policy. Log hours HR has been informed of (by the following day, per policy) — this is manual since overtime is reported over WhatsApp, not through this app.</p>
           <div class="row-inline">
             <div>
@@ -1577,7 +1591,7 @@
       <!-- ===== Generator ===== -->
       <div id="hrSubGenerator" class="hidden">
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">Employee Role Reports</h2>
+          <h2 style="margin:0 0 4px;">Employee Role Reports</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A branded A4 report built from one employee's job profile, responsibilities, designation and department — the measures, risks and recommendations change with the role. Fill in Job profile and Key responsibilities in Employee Master first; without them the report falls back to designation and department and says so.</p>
           <div class="row-inline">
             <div>
@@ -1595,7 +1609,7 @@
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">Company letterhead</h2>
+          <h2 style="margin:0 0 4px;">Company letterhead</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Printed in the header and footer of every generated report. Anything left blank is left off the report rather than filled with a placeholder.</p>
           <label class="field">Registered address</label>
           <textarea class="field-input" id="coAddress" rows="2" placeholder="Street, city, state, PIN"></textarea>
@@ -1614,7 +1628,7 @@
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">Holiday List (to share with engineers)</h2>
+          <h2 style="margin:0 0 4px;">Holiday List (to share with engineers)</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A printable holiday list with the company logo, for a chosen financial year (April–March) — built from the Holidays list above.</p>
           <label class="field">Financial year starting April of</label>
           <input type="number" id="holidayListYear" placeholder="e.g. 2026 for FY 2026-27" />
@@ -1634,7 +1648,7 @@
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">Leave Encashment Report</h2>
+          <h2 style="margin:0 0 4px;">Leave Encashment Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">What is owed for unused privilege leave at the year end, as at 31 March. Grouped by salary heading and sorted by bank with account numbers, so it can be paid the same way as the salary and the bonus. Resident Engineers are outside the EL scheme and do not appear.</p>
           <label class="field">Financial year starting April of</label>
           <input type="number" id="encashStartYear" placeholder="e.g. 2026 for FY 2026-27" />
@@ -1645,7 +1659,7 @@
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">EL Calculation Sheet</h2>
+          <h2 style="margin:0 0 4px;">EL Calculation Sheet</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Earned Leave = 1 day per 25 days present, per the leave policy. Resident Engineers are excluded. This computes each employee's EL for the financial year you pick from the Attendance Sheet, and can carry the closing balance forward as next year's opening balance automatically.</p>
           <label class="field">Financial year starting April of</label>
           <input type="number" id="elCalcStartYear" placeholder="e.g. 2026 for FY 2026-27" />
@@ -1783,7 +1797,7 @@
       <div id="hrSubDocs" class="hidden">
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">1. Payroll Documents (monthly)</h2>
+          <h2 style="margin:0 0 4px;">1. Payroll Documents (monthly)</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">PF Challan, ESI Challan, PT Challan, Wages Register, Pay Slip — upload each month's document manually; files are stored in Google Drive, not in the app itself.</p>
           <label class="field">Document type</label>
           <select class="field-input" id="payrollDocType">
@@ -1807,7 +1821,7 @@
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">2. Apprentice Documents</h2>
+          <h2 style="margin:0 0 4px;">2. Apprentice Documents</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Apprentice claim documents, contracts, and other important apprentice paperwork.</p>
           <label class="field">Category</label>
           <select class="field-input" id="apprenticeDocCategory">
@@ -1834,7 +1848,7 @@
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">3. Holiday List — R.S. Infotech, Vadodara</h2>
+          <h2 style="margin:0 0 4px;">3. Holiday List — R.S. Infotech, Vadodara</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The generated holiday list already lives in Reports → Holiday List. If you also have an official signed/stamped copy, upload it here for record-keeping.</p>
           <label class="field">File</label>
           <input type="file" id="companyDocFile_holidaylist" accept=".pdf,.jpg,.jpeg,.png">
@@ -1846,7 +1860,7 @@
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">4. R.S. Infotech Profile</h2>
+          <h2 style="margin:0 0 4px;">4. R.S. Infotech Profile</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Company profile documents — brochures, presentations, credentials.</p>
           <label class="field">File</label>
           <input type="file" id="companyDocFile_profile" accept=".pdf,.jpg,.jpeg,.png,.ppt,.pptx,.doc,.docx">
@@ -1858,7 +1872,7 @@
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">5. R.S. Infotech Important Documents</h2>
+          <h2 style="margin:0 0 4px;">5. R.S. Infotech Important Documents</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Registration certificates, licenses, and other important company documents.</p>
           <label class="field">Document name</label>
           <input type="text" id="importantDocName" placeholder="e.g. GST Registration Certificate">
@@ -1873,13 +1887,13 @@
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">6. Uniform &amp; ID List</h2>
+          <h2 style="margin:0 0 4px;">6. Uniform &amp; ID List</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Track uniform and ID card issue status for every employee, with supporting documents.</p>
           <div id="uniformIdList"></div>
         </section>
 
         <section class="block">
-          <h2 style="margin:0 0 4px;font-size:17px;">7. Employee Handbook</h2>
+          <h2 style="margin:0 0 4px;">7. Employee Handbook</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Field and WFH engineers see the whole handbook. Resident Engineers only see the Resident Engineer Policy section below — not the full document. Update either whenever the policy changes, typically once a year.</p>
           <label class="field">Full handbook document (visible to Field / WFH engineers)</label>
           <input type="file" id="handbookFile" accept=".pdf,.doc,.docx">
@@ -1923,10 +1937,13 @@
     <div class="fullscreen-body" id="fullscreenBody"></div>
   </div>
 
-  <!-- z-index set inline above fullscreenSheetRoot's 200, since this can be
-       opened from the Salary Sheet's Close button while it is showing in
-       full screen — a plain .modal-overlay (z-index 50) would render behind
-       it and be invisible, same bug as incrementModalRoot before it moved. -->
+  <!-- Uses --z-modal-top (300), above #fullscreenSheetRoot's --z-fullscreen
+       (200), since this can be opened from the Salary Sheet's Close button
+       while it is showing in full screen — plain --z-modal (50) would render
+       behind it and be invisible, same bug as incrementModalRoot below. The
+       three-step scale is defined once on :root; a modal that needs to sit
+       above another open one should use the next step up rather than another
+       one-off number. -->
   <div id="closeSheetModalRoot"></div>
 
   <div class="switch-role hidden" id="switchBottom"></div>
@@ -6068,7 +6085,7 @@ function closeFullscreenView(){
 // to the Salary Sheet because that is the one report HR is most likely to
 // want a dated PDF copy of before moving on.
 function confirmCloseSalarySheet(){
-  document.getElementById('closeSheetModalRoot').innerHTML = `<div class="modal-overlay" style="z-index:300;" onclick="if(event.target===this)dismissCloseSheetModal()">
+  document.getElementById('closeSheetModalRoot').innerHTML = `<div class="modal-overlay" style="z-index:var(--z-modal-top);" onclick="if(event.target===this)dismissCloseSheetModal()">
     <div class="modal-box">
       <h2>Close Salary Sheet</h2>
       <p class="hint">Save this Salary Sheet as a PDF before closing?</p>
@@ -7327,17 +7344,17 @@ async function renderSalaryComparisonReport(){
   box.innerHTML = `${reportActionBar('Month-wise Salary Comparison — ' + curr.label, 'salCompareBox')}
     <div class="print-isolate" id="salComparePrintArea">
       ${reportLogoHeader('Month-wise Salary Comparison — ' + curr.label)}
-      <table>
+      <table class="sal-table">
         <tr><th>Month</th><th class="num">Total Salary</th></tr>
-        <tr><td>${prev.label} (last month)</td><td class="num">₹${fmtMoney(prevTotal)}</td></tr>
-        <tr><td>${curr.label} (this month)</td><td class="num">₹${fmtMoney(currTotal)}</td></tr>
-        <tr class="sal-grandtotal"><td><strong>Difference</strong></td><td class="num"><strong>${fmtSigned_(difference)}</strong></td></tr>
+        <tr><td class="sal-name">${prev.label} (last month)</td><td class="num">₹${fmtMoney(prevTotal)}</td></tr>
+        <tr><td class="sal-name">${curr.label} (this month)</td><td class="num">₹${fmtMoney(currTotal)}</td></tr>
+        <tr class="sal-grandtotal"><td class="sal-name"><strong>Difference</strong></td><td class="num"><strong>${fmtSigned_(difference)}</strong></td></tr>
       </table>
       <h2 style="font-size:15px;margin:18px 0 8px;">Why the salary differs</h2>
-      <table>
+      <table class="sal-table">
         <tr><th>Employee</th><th>Reason</th><th class="num">Effect on total</th></tr>
         ${rowsHtml}
-        <tr class="sal-grandtotal"><td><strong>Grand Total</strong></td><td></td><td class="num"><strong>${fmtSigned_(difference)}</strong></td></tr>
+        <tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total</strong></td><td></td><td class="num"><strong>${fmtSigned_(difference)}</strong></td></tr>
       </table>
       <p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">
         ${joined.length} joined · ${leavers.length} left · ${changed.length} changed.
@@ -11403,7 +11420,7 @@ async function renderReportsTab(){
     // not promise rows that are then filtered out.
     const withData = employees.filter(e => e.employmentStatus !== 'left' && reportHasData(r.key, e)).length;
     return `<section class="block">
-      <h2 style="margin:0 0 4px;font-size:17px;">${r.label}</h2>
+      <h2 style="margin:0 0 4px;">${r.label}</h2>
       <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">${withData} employees with data</p>
       <button class="btn full" onclick="viewReport('${r.key}','${r.label}')">View report</button>
       <div id="reportBox_${r.key}"></div>
@@ -11878,10 +11895,10 @@ async function renderElCalculationSheet(){
 
   box.innerHTML = `
     ${reportActionBar(elReportTitle, 'elCalcBox')}
-    <div style="overflow-x:auto;"><table>
+    <div class="sal-sheet-wrap print-isolate" id="elCalcPrintArea"><table class="sal-table">
       <tr><th>Name</th><th class="num">Opening EL</th><th class="num">Present days (FY)</th><th class="num">EL earned</th><th class="num">EL used</th><th class="num">Closing EL</th><th class="num">Per day</th><th class="num">Encashment</th></tr>
-      ${rows.map(r => `<tr><td>${escapeHtml(r.name)}</td><td class="num">${r.opening}</td><td class="num">${r.presentDays}</td><td class="num">${r.earned}</td><td class="num">${r.elUsed}</td><td class="num">${r.closing}</td><td class="num">₹${fmtMoney(r.perDay)}</td><td class="num"><strong>₹${fmtMoney(r.amount)}</strong></td></tr>`).join('')}
-      <tr class="sal-grandtotal"><td><strong>Grand Total</strong></td><td colspan="6"></td><td class="num"><strong>₹${fmtMoney(totalEncash)}</strong></td></tr>
+      ${rows.map(r => `<tr><td class="sal-name">${escapeHtml(r.name)}</td><td class="num">${r.opening}</td><td class="num">${r.presentDays}</td><td class="num">${r.earned}</td><td class="num">${r.elUsed}</td><td class="num">${r.closing}</td><td class="num">₹${fmtMoney(r.perDay)}</td><td class="num"><strong>₹${fmtMoney(r.amount)}</strong></td></tr>`).join('')}
+      <tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total</strong></td><td colspan="6"></td><td class="num"><strong>₹${fmtMoney(totalEncash)}</strong></td></tr>
     </table></div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0;line-height:1.6;">FY ${startYear}-${String(startYear+1).slice(2)}: ${fyStart} to ${fyEnd}. EL earned = 1 day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} days present (present includes EL/SL days and half-day equivalents), floored. Closing = Opening + Earned − Used.
       <br><strong style="color:var(--navy);">Encashment</strong> = closing days × ${headingPct(B.grossPct)} of ${escapeHtml(B.label)} ÷ ${B.dayDivisor}, worked out from each employee's Rate of Pay and salary heading. The ${B.dayDivisor} is the same figure that earns the leave — one day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} days of attendance. Policy is that unused PL is encashed at the year end and not carried forward, so the closing balance is a figure to pay.</p>
