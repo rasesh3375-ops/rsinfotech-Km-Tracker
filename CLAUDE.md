@@ -146,8 +146,22 @@ it; the employer's contributions sit on top of it.
 - **Leave** — 7 SL a year (4 for Work From Home), PL earned at 1 per 25
   attendance days, neither carried forward. PL is encashable at 70% of
   Basic + HRA, a day being a twenty-fifth of that. SL requires a medical
-  certificate. Late coming: 15 minutes grace, 3 free instances a month, then
-  half a day per two further instances.
+  certificate.
+- **Late coming** — 15 minutes grace, then 3 free instances a month. Past
+  that, each late arrival is judged by its own instance number, not a flat
+  rate: the 4th is a warning with no deduction, the 5th costs half a day, the
+  6th another warning, and the 7th — and every one after it — costs a full
+  day. See `LEAVE_POLICY.lateComing.escalation` and `lateComingUnitsFor`; the
+  list's last entry is what repeats for the 8th late arrival onward.
+- **Sandwich leave** — a Sunday, or a declared holiday, is charged as an
+  extra unpaid day when the working day immediately before it and the working
+  day immediately after it are both Absent or Leave Without Pay. Approved
+  leave (EL/SL) on either side does not trigger it. A run of adjacent
+  non-working days (e.g. a Saturday holiday next to the Sunday) is judged as
+  one block, bracketed by the working days either side of the whole block,
+  not day by day — see `sandwichDaysFor`. Applied in
+  `computeSalaryForEmployee`, so it actually reduces pay, not just a note on
+  a leave application.
 
 ## Conventions
 
