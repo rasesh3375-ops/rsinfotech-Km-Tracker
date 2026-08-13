@@ -1516,6 +1516,29 @@
         </section>
 
         <section class="block">
+          <h2 style="margin:0 0 4px;">Monthly Leave Detail Report</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Every employee's late coming, EL/PL, SL, half days and short leaves for one month, side by side. Whoever has the highest count in a column is shown in red, so it's easy to see at a glance who to have a word with.</p>
+          <div class="row-inline">
+            <div><label class="field">Month</label><select class="field-input" id="leaveDetailMonthSel"></select></div>
+            <div><label class="field">Year</label><select class="field-input" id="leaveDetailYearSel"></select></div>
+          </div>
+          <button class="btn full" onclick="withBusy(this,'Building report…',renderMonthlyLeaveDetailReport)">Generate monthly leave detail report</button>
+          <div style="height:14px"></div>
+          <div id="monthlyLeaveDetailReportBox"></div>
+        </section>
+
+        <section class="block">
+          <h2 style="margin:0 0 4px;">Yearly Leave Detail Report</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The same breakdown — late coming, EL/PL, SL, half days, short leaves — one table per category, month by month across the financial year with a Total column. The highest count in each column is shown in red.</p>
+          <label class="field">Financial year starting April of</label>
+          <input type="number" id="leaveDetailYearlyStartYear" placeholder="e.g. 2026 for FY 2026-27" />
+          <div style="height:14px"></div>
+          <button class="btn full" onclick="withBusy(this,'Building report…',renderYearlyLeaveDetailReport)">Generate yearly leave detail report</button>
+          <div style="height:14px"></div>
+          <div id="yearlyLeaveDetailReportBox"></div>
+        </section>
+
+        <section class="block">
           <h2 style="margin:0 0 4px;">PF Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">PF deducted per employee for the month, pulled from the Salary Sheet. Apprentices, R.S.IT Solution and Contractors don't have PF, so they're excluded here.</p>
           <div class="row-inline">
@@ -12695,6 +12718,154 @@ async function renderMonthlyLeaveReport(){
       'HR Management > ' + fyOfStartYear(startYear).label + ' > Reports > Monthly Leave Report');
   }
   openFullscreenView(reportTitle, 'monthlyLeaveReportBox');
+}
+
+// ---- leave detail reports: late coming / EL-PL / SL / half day / short leave, broken out per category ----
+// EL and PL are the same figure — the app only ever stores one earned-leave
+// code (EL) — so there is one combined column rather than two that would
+// always read identically. Half Day is one combined count too, regardless of
+// whether it came from a half-EL, half-SL, half-LP or a late-coming
+// escalation, matching how the Attendance Sheet already reports it.
+const LEAVE_DETAIL_METRICS = [
+  { key:'lateCount',  label:'Late Coming' },
+  { key:'elUsed',     label:'EL / PL' },
+  { key:'slUsed',     label:'SL' },
+  { key:'halfDays',   label:'Half Day' },
+  { key:'shortCount', label:'Short Leave' }
+];
+
+// A ruled-off cell, in red and bold when it equals the column's highest value
+// — the whole point of this report is spotting who to raise a leave pattern
+// with, so the flag has to be the number itself, not a separate note. A
+// column that is all zero flags nobody: there is nothing there to raise.
+function leaveDetailCell(value, columnMax, bold){
+  const v = value || 0;
+  const isMax = columnMax > 0 && v === columnMax;
+  const style = isMax ? 'color:var(--red);font-weight:700;' : (bold ? 'font-weight:700;' : '');
+  return `<td class="num"${style ? ` style="${style}"` : ''}>${v || ''}</td>`;
+}
+
+async function renderMonthlyLeaveDetailReport(){
+  const box = document.getElementById('monthlyLeaveDetailReportBox');
+  populateMonthYearSelects('leaveDetailMonthSel', 'leaveDetailYearSel');
+  const monthVal = getMonthYearValue('leaveDetailMonthSel', 'leaveDetailYearSel');
+  const [year, month] = monthVal.split('-').map(Number);
+  const monthDays = new Date(year, month, 0).getDate();
+  const dateList = [];
+  for(let d=1; d<=monthDays; d++) dateList.push(year + '-' + String(month).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
+
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
+  if(!employees.length){
+    box.innerHTML = '<div class="empty">Add employees in Employee Master first.</div>';
+    return;
+  }
+  const holidayMap = await getHolidayMap_local();
+  await getAttendanceMany(employees.map(e => e.id));
+
+  const rows = [];
+  for(const emp of employees){
+    const att = await getAttendance(emp.id);
+    const s = computeAttendanceSummary(att, emp, dateList, holidayMap);
+    rows.push({ name: emp.name, lateCount: s.lateCount, elUsed: s.elUsed, slUsed: s.slUsed, halfDays: s.halfDays, shortCount: s.shortCount });
+  }
+
+  const maxes = {};
+  LEAVE_DETAIL_METRICS.forEach(m => { maxes[m.key] = rows.reduce((mx, r) => Math.max(mx, r[m.key] || 0), 0); });
+
+  const header = ['Name'].concat(LEAVE_DETAIL_METRICS.map(m => m.label));
+  const tableRows = rows.map(r => `<tr><td class="sal-name">${escapeHtml(r.name)}</td>${
+    LEAVE_DETAIL_METRICS.map(m => leaveDetailCell(r[m.key], maxes[m.key], false)).join('')}</tr>`).join('');
+
+  const monthLabel = MONTH_NAMES[month-1] + ' ' + year;
+  const reportTitle = 'Monthly Leave Detail Report — ' + monthLabel;
+  box.innerHTML = `${reportActionBar(reportTitle, 'monthlyLeaveDetailReportBox')}
+    <div class="sal-sheet-wrap print-isolate" id="leaveDetailPrintArea">
+      ${reportLogoHeader(reportTitle)}
+      <table class="sal-table"><tr>${header.map(h=>`<th>${h}</th>`).join('')}</tr>${tableRows}</table>
+    </div>
+    <p style="font-size:11px;color:var(--muted);margin:10px 0;">EL/PL and SL include half-day instances at 0.5; Half Day is the count of half-day instances of any kind. A number shown in red is the highest in that column this month.</p>`;
+
+  const csvHeader = header;
+  const csvRows = rows.map(r => [r.name, r.lateCount, r.elUsed, r.slUsed, r.halfDays, r.shortCount]);
+  {
+    const fileName = `Monthly Leave Detail Report - ${monthLabel}.csv`;
+    const content = toCsv(csvHeader, csvRows);
+    queueFileToDrive(hrYearPath(dateList[0], 'Reports', 'Monthly Leave Detail Report'), fileName, content, 'text/csv');
+    stashReportShare(reportTitle, fileName, content, 'text/csv',
+      'HR Management > ' + financialYearLabel(dateList[0]) + ' > Reports > Monthly Leave Detail Report');
+  }
+  openFullscreenView(reportTitle, 'monthlyLeaveDetailReportBox');
+}
+
+async function renderYearlyLeaveDetailReport(){
+  const box = document.getElementById('yearlyLeaveDetailReportBox');
+  const yearInput = document.getElementById('leaveDetailYearlyStartYear');
+  if(!yearInput.value) yearInput.value = getCurrentFYStartYear();
+  const startYear = parseInt(yearInput.value, 10);
+
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
+  if(!employees.length){
+    box.innerHTML = '<div class="empty">Add employees in Employee Master first.</div>';
+    return;
+  }
+  const holidayMap = await getHolidayMap_local();
+
+  const fyMonths = [];
+  for(let i=0; i<12; i++){
+    const m = (3 + i) % 12; // 3 = April (0-indexed)
+    const y = startYear + Math.floor((3 + i) / 12);
+    fyMonths.push({ year: y, month: m + 1 });
+  }
+
+  await getAttendanceMany(employees.map(e => e.id));
+  const perEmp = [];
+  for(const emp of employees){
+    const att = await getAttendance(emp.id);
+    const months = fyMonths.map(({year, month}) => {
+      const monthDays = new Date(year, month, 0).getDate();
+      const dateList = [];
+      for(let d=1; d<=monthDays; d++) dateList.push(year + '-' + String(month).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
+      return computeAttendanceSummary(att, emp, dateList, holidayMap);
+    });
+    perEmp.push({ name: emp.name, months });
+  }
+
+  const csvBlocks = [];
+  const tablesHtml = LEAVE_DETAIL_METRICS.map(metric => {
+    const rows = perEmp.map(e => {
+      const monthVals = e.months.map(s => s[metric.key] || 0);
+      return { name: e.name, monthVals, total: monthVals.reduce((a,b) => a+b, 0) };
+    });
+    const colMaxes = FY_MONTH_LABELS.map((_, i) => rows.reduce((mx, r) => Math.max(mx, r.monthVals[i]), 0));
+    const totalMax = rows.reduce((mx, r) => Math.max(mx, r.total), 0);
+
+    const header = ['Name'].concat(FY_MONTH_LABELS).concat(['Total']);
+    const tableRows = rows.map(r => `<tr><td class="sal-name">${escapeHtml(r.name)}</td>${
+      r.monthVals.map((v,i) => leaveDetailCell(v, colMaxes[i], false)).join('')
+    }${leaveDetailCell(r.total, totalMax, true)}</tr>`).join('');
+
+    csvBlocks.push(metric.label + '\n' + toCsv(header, rows.map(r => [r.name, ...r.monthVals, r.total])));
+
+    return `<h3 style="margin:20px 0 6px;font-size:14px;">${escapeHtml(metric.label)}</h3>
+      <table class="sal-table"><tr>${header.map(h=>`<th>${h}</th>`).join('')}</tr>${tableRows}</table>`;
+  }).join('');
+
+  const reportTitle = 'Yearly Leave Detail Report — FY ' + startYear + '-' + String(startYear+1).slice(2);
+  box.innerHTML = `${reportActionBar(reportTitle, 'yearlyLeaveDetailReportBox')}
+    <div class="sal-sheet-wrap print-isolate" id="yearlyLeaveDetailPrintArea">
+      ${reportLogoHeader(reportTitle)}
+      ${tablesHtml}
+    </div>
+    <p style="font-size:11px;color:var(--muted);margin:10px 0;">EL/PL and SL include half-day instances at 0.5; Half Day is the count of half-day instances of any kind. A number shown in red is the highest in that column — that month, or for the Total column, across the whole year.</p>`;
+
+  {
+    const fileName = `Yearly Leave Detail Report - FY ${fyOfStartYear(startYear).label}.csv`;
+    const content = csvBlocks.join('\n\n');
+    queueFileToDrive(hrYearPath(fyOfStartYear(startYear).from, 'Reports', 'Yearly Leave Detail Report'), fileName, content, 'text/csv');
+    stashReportShare(reportTitle, fileName, content, 'text/csv',
+      'HR Management > ' + fyOfStartYear(startYear).label + ' > Reports > Yearly Leave Detail Report');
+  }
+  openFullscreenView(reportTitle, 'yearlyLeaveDetailReportBox');
 }
 
 // ---- overtime report ----
