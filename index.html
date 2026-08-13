@@ -1900,6 +1900,7 @@
 
       <!-- ===== Office Documents ===== -->
       <div id="hrSubDocs" class="hidden">
+        <button type="button" class="gen-back-btn" onclick="hrNavigate('dashboard')">← Back to Dashboard</button>
 
         <section class="block">
           <h2 style="margin:0 0 4px;">1. Payroll Documents (monthly)</h2>
@@ -11949,13 +11950,39 @@ async function loadAttendanceCalendar(){
     const dayName = new Date(year, month - 1, day).toLocaleDateString('en-IN', { weekday: 'short' });
     rows.push(`<tr><td>${dateStr} (${dayName})</td><td><span class="pill ${cls}">${status}</span></td></tr>`);
   }
-  box.innerHTML = `
-    <div class="summary-grid" style="grid-template-columns:repeat(3,1fr);">
-      <div class="stat"><div class="n">${present}</div><div class="l">Present</div></div>
-      <div class="stat"><div class="n">${absent}</div><div class="l">Absent</div></div>
-      <div class="stat"><div class="n">${offDays}</div><div class="l">Off / holiday</div></div>
-    </div>
-    <table><tr><th>Date</th><th>Status</th></tr>${rows.join('')}</table>`;
+  const label = document.getElementById('attendanceUserSelect').selectedOptions[0].textContent;
+  const title = 'Attendance — ' + label + ' — ' + monthLabel(monthStr);
+  box.innerHTML = `${reportActionBar(title, 'attendanceCalendarBox')}
+    <div class="print-isolate" id="attendanceCalendarPrintArea">
+      ${reportLogoHeader(title)}
+      <div class="summary-grid" style="grid-template-columns:repeat(3,1fr);">
+        <div class="stat"><div class="n">${present}</div><div class="l">Present</div></div>
+        <div class="stat"><div class="n">${absent}</div><div class="l">Absent</div></div>
+        <div class="stat"><div class="n">${offDays}</div><div class="l">Off / holiday</div></div>
+      </div>
+      <table class="sal-table"><tr><th>Date</th><th>Status</th></tr>${rows.join('')}</table>
+    </div>`;
+
+  const csvRows = [];
+  for(let day = 1; day <= daysInMonth; day++){
+    const dateStr = year + '-' + String(month).padStart(2,'0') + '-' + String(day).padStart(2,'0');
+    // Re-derive the same status shown above, rather than parsing it back out
+    // of the rendered row HTML.
+    const dow = new Date(year, month - 1, day).getDay();
+    let status;
+    if(dateStr > todayD) status = '—';
+    else if(dow === 0) status = 'Weekly off (Sunday)';
+    else if(holidayMap[dateStr]) status = 'Holiday — ' + holidayMap[dateStr];
+    else if(tripDates.has(dateStr) || checkinDates.has(dateStr)) status = 'Present';
+    else status = 'Absent';
+    csvRows.push([dateStr, status]);
+  }
+  const fileName = `Attendance - ${label.replace(/[^\w .-]/g,'')} - ${monthStr}.csv`;
+  const content = toCsv(['Date','Status'], csvRows);
+  queueFileToDrive(hrYearPath(monthStr + '-01', 'Reports', 'Attendance'), fileName, content, 'text/csv');
+  stashReportShare(title, fileName, content, 'text/csv',
+    'HR Management > ' + financialYearLabel(monthStr + '-01') + ' > Reports > Attendance');
+  openFullscreenView(title, 'attendanceCalendarBox');
 }
 
 async function addHoliday(){
