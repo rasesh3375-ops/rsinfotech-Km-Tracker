@@ -436,6 +436,9 @@
     #hrContent .btn,#hrContent .linkbtn,#hrContent select,#hrContent input,
     #hrContent .qa,#hrContent .icon-btn{min-height:44px;}
     #hrContent select,#hrContent input,#hrContent textarea{font-size:16px;}
+    /* The report close button stays visually small everywhere else, but
+       widens slightly on a touch screen so it's not a 34px target. */
+    #hrContent .rpt-close-btn{width:40px;height:40px;}
   }
 
   /* ---- breadcrumb ---- */
@@ -757,6 +760,27 @@
     .rpt-page:last-child{break-after:auto;page-break-after:auto;}
     @page{size:A4 portrait;margin:0;}
   }
+
+  /* ===== Shared report action bar — reportActionBar() ===== */
+  .rpt-actions{margin-bottom:14px;}
+  .rpt-actions-top{display:flex;justify-content:flex-end;}
+  .rpt-close-btn{
+    width:34px;height:34px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+    border:1px solid var(--line);border-radius:50%;background:var(--paper);color:var(--muted);
+    font-size:15px;line-height:1;cursor:pointer;
+  }
+  .rpt-close-btn:hover{background:#00000008;color:var(--navy);border-color:var(--navy);}
+  .rpt-actions-row{
+    display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;padding-top:10px;border-top:1px solid var(--line);
+  }
+  .rpt-icon-btn{
+    flex:1;min-width:64px;display:flex;flex-direction:column;align-items:center;gap:4px;
+    padding:9px 4px;border:1px solid var(--line);border-radius:10px;background:var(--paper);
+    color:var(--navy);font-size:10.5px;font-weight:600;cursor:pointer;font-family:inherit;
+  }
+  .rpt-icon-btn:hover{background:#00000008;border-color:var(--navy);}
+  .rpt-icon-btn .ic{font-size:17px;line-height:1;}
+  .rpt-icon-btn .lbl{white-space:nowrap;}
 
   /* ===== Shared logo + date header for reports & documents ===== */
   .report-logo-header{display:flex;align-items:center;gap:12px;border-bottom:2px solid var(--navy);padding-bottom:12px;margin-bottom:14px;}
@@ -6152,21 +6176,26 @@ async function shareCurrentReport(via){
 // closeAttr lets a report override the default Close behaviour — the Salary
 // Sheet passes its own save-or-not prompt; everything else uses the plain
 // close/clear this defaults to.
+// A small ✕ top-right, then one compact row of icon buttons for every other
+// action a report already had (Full screen, Print/PDF, Email, WhatsApp) —
+// replacing what used to be three separate full-width button rows, so a
+// generated report reads as a document with small report actions under it
+// rather than a stack of app buttons.
 function reportActionBar(title, sourceId, closeAttr, opts){
   opts = opts || {};
   const safeTitle = String(title).replace(/'/g, "\\'");
   const close = closeAttr || `closeReportView('${sourceId}')`;
-  return `<div class="row-inline" style="margin-bottom:10px;">
-      <button class="btn ghost full" onclick="${close}">✕ Close</button>
+  return `<div class="rpt-actions">
+    <div class="rpt-actions-top">
+      <button class="rpt-close-btn" onclick="${close}" title="Close" aria-label="Close">✕</button>
     </div>
-    <div class="row-inline" style="margin-bottom:0;">
-      <button class="btn ghost" style="flex:1;" onclick="openFullscreenView('${safeTitle}','${sourceId}')">⛶ Full screen</button>
-      ${opts.print === false ? '' : `<button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>`}
+    <div class="rpt-actions-row">
+      <button class="rpt-icon-btn" onclick="openFullscreenView('${safeTitle}','${sourceId}')" title="Full screen"><span class="ic">⛶</span><span class="lbl">Full screen</span></button>
+      ${opts.print === false ? '' : `<button class="rpt-icon-btn" onclick="window.print()" title="Print / Save PDF"><span class="ic">📄</span><span class="lbl">PDF</span></button>`}
+      <button class="rpt-icon-btn" onclick="shareCurrentReport('email')" title="Email"><span class="ic">✉️</span><span class="lbl">Email</span></button>
+      <button class="rpt-icon-btn" onclick="shareCurrentReport('whatsapp')" title="WhatsApp"><span class="ic">📱</span><span class="lbl">WhatsApp</span></button>
     </div>
-    <div class="row-inline" style="margin-top:8px;">
-      <button class="btn ghost" style="flex:1;" onclick="shareCurrentReport('whatsapp')">📱 WhatsApp</button>
-      <button class="btn ghost" style="flex:1;" onclick="shareCurrentReport('email')">✉️ Email</button>
-    </div>`;
+  </div>`;
 }
 
 
