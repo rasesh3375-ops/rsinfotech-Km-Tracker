@@ -806,10 +806,18 @@
   .att-legend{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:10px;}
 
   /* ===== Salary sheet ===== */
-  .sal-sheet-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  /* Bounded height with its own scrollbars, so reaching a later column is a
+     scroll of the table itself — right where it is on screen — instead of
+     scrolling the whole page down to the very bottom first to find the
+     horizontal scrollbar of an otherwise unbounded, very tall wrapper. */
+  .sal-sheet-wrap{overflow-x:auto;overflow-y:auto;max-height:70vh;-webkit-overflow-scrolling:touch;}
+  @media print{
+    /* Printing needs every row, not just what fits the on-screen box. */
+    .sal-sheet-wrap{max-height:none;overflow:visible;}
+  }
   table.sal-table{border-collapse:collapse;font-size:12px;white-space:nowrap;width:100%;}
   table.sal-table th, table.sal-table td{border:1px solid var(--line);padding:5px 7px;text-align:right;}
-  table.sal-table th{background:var(--navy);color:#fff;font-size:10.5px;text-transform:uppercase;text-align:center;}
+  table.sal-table th{background:var(--navy);color:#fff;font-size:10.5px;text-transform:uppercase;text-align:center;position:sticky;top:0;z-index:2;}
   table.sal-table td.sal-name{text-align:left;font-weight:600;}
   table.sal-table tr.sal-heading td{background:#92D050;color:#16213E;font-weight:800;text-align:left;font-size:13px;text-transform:uppercase;letter-spacing:.3px;}
   table.sal-table tr.sal-subtotal td{background:var(--cream);font-weight:700;}
@@ -1928,6 +1936,12 @@
     </div>
     <div class="fullscreen-body" id="fullscreenBody"></div>
   </div>
+
+  <!-- z-index set inline above fullscreenSheetRoot's 200, since this can be
+       opened from the Salary Sheet's Close button while it is showing in
+       full screen — a plain .modal-overlay (z-index 50) would render behind
+       it and be invisible, same bug as incrementModalRoot before it moved. -->
+  <div id="closeSheetModalRoot"></div>
 
   <div class="switch-role hidden" id="switchBottom"></div>
 
@@ -5889,6 +5903,10 @@ function discardAttendanceChanges(){
 
 // ---- salary sheet ----
 function fmtMoney(n){ return (Math.round(n*100)/100).toLocaleString('en-IN'); }
+// Whole rupees, no paise — for the Salary Sheet specifically, where every
+// column is rounded. fmtMoney (with paise) is untouched everywhere else, so
+// this only changes what the Salary Sheet shows.
+function fmtMoneyWhole(n){ return Math.round(Number(n) || 0).toLocaleString('en-IN'); }
 
 // Shared logo + current-date header for every report and generated document.
 function reportLogoHeader(title){
@@ -5938,6 +5956,40 @@ function closeFullscreenView(){
   document.body.style.overflow = '';
   fullscreenActiveId = null;
   try{ if(document.fullscreenElement) document.exitFullscreen().catch(()=>{}); }catch(e){}
+}
+
+// ---- close the Salary Sheet, asking whether to save a PDF first ----
+// A plain ✕ on the report itself, in both normal and full-screen view — the
+// generic fullscreen header's own ✕ Close still works for a quick exit
+// without asking anything, same as every other report. This one is specific
+// to the Salary Sheet because that is the one report HR is most likely to
+// want a dated PDF copy of before moving on.
+function confirmCloseSalarySheet(){
+  document.getElementById('closeSheetModalRoot').innerHTML = `<div class="modal-overlay" style="z-index:300;" onclick="if(event.target===this)dismissCloseSheetModal()">
+    <div class="modal-box">
+      <h2>Close Salary Sheet</h2>
+      <p class="hint">Save this Salary Sheet as a PDF before closing?</p>
+      <div class="modal-actions" style="flex-direction:column;align-items:stretch;">
+        <button class="btn full" onclick="closeSalarySheetAction(true)">Save as PDF, then close</button>
+        <div style="height:8px"></div>
+        <button class="btn ghost full" onclick="closeSalarySheetAction(false)">Close without saving</button>
+        <div style="height:8px"></div>
+        <button class="btn ghost full" onclick="dismissCloseSheetModal()">Cancel</button>
+      </div>
+    </div>
+  </div>`;
+}
+function dismissCloseSheetModal(){
+  document.getElementById('closeSheetModalRoot').innerHTML = '';
+}
+function closeSalarySheetAction(save){
+  dismissCloseSheetModal();
+  // Print while the sheet is still on screen (full screen or not) — closing
+  // first would leave nothing in view to print. window.print() blocks until
+  // the browser's print dialog is dismissed, so the close below runs after.
+  if(save) window.print();
+  if(fullscreenActiveId) closeFullscreenView();
+  else hrNavigate('dashboard');
 }
 
 
@@ -6328,6 +6380,10 @@ async function renderSalarySheet(){
   let srNo = 1;
   const grand = { rate:0, leaveAmount:0, policyHalfDays:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, loanEmi:0, loanBalance:0, retention:0, totalDeduction:0, conveyance:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0, directPaid:0, netBeforeDirect:0 };
   const csvRows = [];
+  // Whole rupees in the CSV too, matching what the sheet itself shows — day
+  // counts (leave days, half days, leave balances) are left exactly as they
+  // are, since those are not money.
+  const R = v => Math.round(Number(v) || 0);
 
   for(const headingKey of SALARY_HEADING_ORDER){
     // Grouped by the heading each employee was under THIS month — a promotion
@@ -6339,45 +6395,48 @@ async function renderSalarySheet(){
     const sub = { rate:0, leaveAmount:0, policyHalfDays:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, loanEmi:0, loanBalance:0, retention:0, totalDeduction:0, conveyance:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0, directPaid:0, netBeforeDirect:0 };
     for(const emp of group){
       const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
-      bodyRows += `<tr><td>${srNo++}</td><td class="sal-name">${escapeHtml(emp.name)}</td><td>${fmtMoney(s.rate)}</td><td>${s.leaveDays}</td><td>${s.policyHalfDays ? '<span class="pol-warn">' + s.policyHalfDays + '</span>' : '—'}</td><td>${fmtMoney(s.leaveAmount)}</td>` +
-        `<td>${fmtMoney(s.basic)}</td><td>${fmtMoney(s.hra)}</td><td>${fmtMoney(s.lta)}</td><td>${fmtMoney(s.gross)}</td>` +
-        `<td>${fmtMoney(s.pf)}</td><td>${fmtMoney(s.esi)}</td><td>${fmtMoney(s.pt)}</td><td>${fmtMoney(s.advanceTemp)}</td><td>${fmtMoney(s.advance)}</td><td>${fmtMoney(s.loanEmi)}</td><td>${fmtMoney(s.retention)}</td>` +
-        `<td>${fmtMoney(s.totalDeduction)}</td><td>${s.conveyance ? '+' + fmtMoney(s.conveyance) : '—'}</td><td>${fmtMoney(s.netBeforeDirect)}</td>` +
-        `<td>${s.directPaid ? fmtMoney(s.directPaid) : '—'}</td><td><strong>${fmtMoney(s.netSalary)}</strong></td>` +
-        `<td>${fmtMoney(s.pen)}</td><td>${fmtMoney(s.employerPf)}</td><td>${fmtMoney(s.pfAdmin)}</td>` +
-        `<td>${fmtMoney(s.edli)}</td><td>${fmtMoney(s.esiEmployer)}</td><td>${fmtMoney(s.employerCont)}</td><td>${fmtMoney(s.ctc)}</td>` +
-        `<td>${fmtMoney(s.advanceBalance)}</td><td>${fmtMoney(s.loanBalance)}</td><td>${s.fullDayLeaveBal}</td><td>${s.halfDayLeaveBal}</td></tr>`;
-      csvRows.push([srNo-1, emp.name, s.rate, s.leaveDays, s.policyHalfDays, s.leaveAmount, s.basic, s.hra, s.lta, s.gross, s.pf, s.esi, s.pt, s.advanceTemp, s.advance, s.loanEmi, s.retention, s.totalDeduction, s.conveyance, s.netBeforeDirect, s.directPaid, s.netSalary,
-        s.pen, s.employerPf, s.pfAdmin, s.edli, s.esiEmployer, s.employerCont, s.ctc,
-        s.advanceBalance, s.loanBalance, s.fullDayLeaveBal, s.halfDayLeaveBal]);
+      bodyRows += `<tr><td>${srNo++}</td><td class="sal-name">${escapeHtml(emp.name)}</td><td>${fmtMoneyWhole(s.rate)}</td><td>${s.leaveDays}</td><td>${s.policyHalfDays ? '<span class="pol-warn">' + s.policyHalfDays + '</span>' : '—'}</td><td>${fmtMoneyWhole(s.leaveAmount)}</td>` +
+        `<td>${fmtMoneyWhole(s.basic)}</td><td>${fmtMoneyWhole(s.hra)}</td><td>${fmtMoneyWhole(s.lta)}</td><td>${fmtMoneyWhole(s.gross)}</td>` +
+        `<td>${fmtMoneyWhole(s.pf)}</td><td>${fmtMoneyWhole(s.esi)}</td><td>${fmtMoneyWhole(s.pt)}</td><td>${fmtMoneyWhole(s.advanceTemp)}</td><td>${fmtMoneyWhole(s.advance)}</td><td>${fmtMoneyWhole(s.loanEmi)}</td><td>${fmtMoneyWhole(s.retention)}</td>` +
+        `<td>${fmtMoneyWhole(s.totalDeduction)}</td><td>${s.conveyance ? '+' + fmtMoneyWhole(s.conveyance) : '—'}</td><td>${fmtMoneyWhole(s.netBeforeDirect)}</td>` +
+        `<td>${s.directPaid ? fmtMoneyWhole(s.directPaid) : '—'}</td><td><strong>${fmtMoneyWhole(s.netSalary)}</strong></td>` +
+        `<td>${fmtMoneyWhole(s.pen)}</td><td>${fmtMoneyWhole(s.employerPf)}</td><td>${fmtMoneyWhole(s.pfAdmin)}</td>` +
+        `<td>${fmtMoneyWhole(s.edli)}</td><td>${fmtMoneyWhole(s.esiEmployer)}</td><td>${fmtMoneyWhole(s.employerCont)}</td><td>${fmtMoneyWhole(s.ctc)}</td>` +
+        `<td>${fmtMoneyWhole(s.advanceBalance)}</td><td>${fmtMoneyWhole(s.loanBalance)}</td><td>${s.fullDayLeaveBal}</td><td>${s.halfDayLeaveBal}</td></tr>`;
+      csvRows.push([srNo-1, emp.name, R(s.rate), s.leaveDays, s.policyHalfDays, R(s.leaveAmount), R(s.basic), R(s.hra), R(s.lta), R(s.gross), R(s.pf), R(s.esi), R(s.pt), R(s.advanceTemp), R(s.advance), R(s.loanEmi), R(s.retention), R(s.totalDeduction), R(s.conveyance), R(s.netBeforeDirect), R(s.directPaid), R(s.netSalary),
+        R(s.pen), R(s.employerPf), R(s.pfAdmin), R(s.edli), R(s.esiEmployer), R(s.employerCont), R(s.ctc),
+        R(s.advanceBalance), R(s.loanBalance), s.fullDayLeaveBal, s.halfDayLeaveBal]);
       ['rate','leaveAmount','policyHalfDays','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','loanEmi','retention','totalDeduction','conveyance','netSalary','pen','employerPf','pfAdmin','edli','employerCont','ctc','esiEmployer','advanceBalance','loanBalance','directPaid','netBeforeDirect'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; });
     }
-    bodyRows += `<tr class="sal-subtotal"><td></td><td>Subtotal</td><td>${fmtMoney(sub.rate)}</td><td></td><td>${sub.policyHalfDays || '—'}</td><td>${fmtMoney(sub.leaveAmount)}</td>` +
-      `<td>${fmtMoney(sub.basic)}</td><td>${fmtMoney(sub.hra)}</td><td>${fmtMoney(sub.lta)}</td><td>${fmtMoney(sub.gross)}</td>` +
-      `<td>${fmtMoney(sub.pf)}</td><td>${fmtMoney(sub.esi)}</td><td>${fmtMoney(sub.pt)}</td><td>${fmtMoney(sub.advanceTemp)}</td><td>${fmtMoney(sub.advance)}</td><td>${fmtMoney(sub.loanEmi)}</td><td>${fmtMoney(sub.retention)}</td>` +
-      `<td>${fmtMoney(sub.totalDeduction)}</td><td>${sub.conveyance ? '+' + fmtMoney(sub.conveyance) : '—'}</td><td>${fmtMoney(sub.netBeforeDirect)}</td>` +
-      `<td>${sub.directPaid ? fmtMoney(sub.directPaid) : '—'}</td><td>${fmtMoney(sub.netSalary)}</td>` +
-      `<td>${fmtMoney(sub.pen)}</td><td>${fmtMoney(sub.employerPf)}</td><td>${fmtMoney(sub.pfAdmin)}</td>` +
-      `<td>${fmtMoney(sub.edli)}</td><td>${fmtMoney(sub.esiEmployer)}</td><td>${fmtMoney(sub.employerCont)}</td><td>${fmtMoney(sub.ctc)}</td>` +
-      `<td>${fmtMoney(sub.advanceBalance)}</td><td>${fmtMoney(sub.loanBalance)}</td><td></td><td></td></tr>`;
-    csvRows.push(['', 'Subtotal', sub.rate, '', sub.policyHalfDays, sub.leaveAmount, sub.basic, sub.hra, sub.lta, sub.gross, sub.pf, sub.esi, sub.pt, sub.advanceTemp, sub.advance, sub.loanEmi, sub.retention, sub.totalDeduction, sub.conveyance, sub.netSalary]);
+    bodyRows += `<tr class="sal-subtotal"><td></td><td>Subtotal</td><td>${fmtMoneyWhole(sub.rate)}</td><td></td><td>${sub.policyHalfDays || '—'}</td><td>${fmtMoneyWhole(sub.leaveAmount)}</td>` +
+      `<td>${fmtMoneyWhole(sub.basic)}</td><td>${fmtMoneyWhole(sub.hra)}</td><td>${fmtMoneyWhole(sub.lta)}</td><td>${fmtMoneyWhole(sub.gross)}</td>` +
+      `<td>${fmtMoneyWhole(sub.pf)}</td><td>${fmtMoneyWhole(sub.esi)}</td><td>${fmtMoneyWhole(sub.pt)}</td><td>${fmtMoneyWhole(sub.advanceTemp)}</td><td>${fmtMoneyWhole(sub.advance)}</td><td>${fmtMoneyWhole(sub.loanEmi)}</td><td>${fmtMoneyWhole(sub.retention)}</td>` +
+      `<td>${fmtMoneyWhole(sub.totalDeduction)}</td><td>${sub.conveyance ? '+' + fmtMoneyWhole(sub.conveyance) : '—'}</td><td>${fmtMoneyWhole(sub.netBeforeDirect)}</td>` +
+      `<td>${sub.directPaid ? fmtMoneyWhole(sub.directPaid) : '—'}</td><td>${fmtMoneyWhole(sub.netSalary)}</td>` +
+      `<td>${fmtMoneyWhole(sub.pen)}</td><td>${fmtMoneyWhole(sub.employerPf)}</td><td>${fmtMoneyWhole(sub.pfAdmin)}</td>` +
+      `<td>${fmtMoneyWhole(sub.edli)}</td><td>${fmtMoneyWhole(sub.esiEmployer)}</td><td>${fmtMoneyWhole(sub.employerCont)}</td><td>${fmtMoneyWhole(sub.ctc)}</td>` +
+      `<td>${fmtMoneyWhole(sub.advanceBalance)}</td><td>${fmtMoneyWhole(sub.loanBalance)}</td><td></td><td></td></tr>`;
+    csvRows.push(['', 'Subtotal', R(sub.rate), '', sub.policyHalfDays, R(sub.leaveAmount), R(sub.basic), R(sub.hra), R(sub.lta), R(sub.gross), R(sub.pf), R(sub.esi), R(sub.pt), R(sub.advanceTemp), R(sub.advance), R(sub.loanEmi), R(sub.retention), R(sub.totalDeduction), R(sub.conveyance), R(sub.netSalary)]);
   }
 
-  bodyRows += `<tr class="sal-grandtotal"><td></td><td>Grand Total</td><td>${fmtMoney(grand.rate)}</td><td></td><td>${grand.policyHalfDays || '—'}</td><td>${fmtMoney(grand.leaveAmount)}</td>` +
-    `<td>${fmtMoney(grand.basic)}</td><td>${fmtMoney(grand.hra)}</td><td>${fmtMoney(grand.lta)}</td><td>${fmtMoney(grand.gross)}</td>` +
-    `<td>${fmtMoney(grand.pf)}</td><td>${fmtMoney(grand.esi)}</td><td>${fmtMoney(grand.pt)}</td><td>${fmtMoney(grand.advanceTemp)}</td><td>${fmtMoney(grand.advance)}</td><td>${fmtMoney(grand.loanEmi)}</td><td>${fmtMoney(grand.retention)}</td>` +
-    `<td>${fmtMoney(grand.totalDeduction)}</td><td>${grand.conveyance ? '+' + fmtMoney(grand.conveyance) : '—'}</td><td>${fmtMoney(grand.netBeforeDirect)}</td>` +
-    `<td>${grand.directPaid ? fmtMoney(grand.directPaid) : '—'}</td><td>${fmtMoney(grand.netSalary)}</td>` +
-    `<td>${fmtMoney(grand.pen)}</td><td>${fmtMoney(grand.employerPf)}</td><td>${fmtMoney(grand.pfAdmin)}</td>` +
-    `<td>${fmtMoney(grand.edli)}</td><td>${fmtMoney(grand.esiEmployer)}</td><td>${fmtMoney(grand.employerCont)}</td><td>${fmtMoney(grand.ctc)}</td>` +
-    `<td>${fmtMoney(grand.advanceBalance)}</td><td>${fmtMoney(grand.loanBalance)}</td><td></td><td></td></tr>`;
-  csvRows.push(['', 'Grand Total', grand.rate, '', grand.policyHalfDays, grand.leaveAmount, grand.basic, grand.hra, grand.lta, grand.gross, grand.pf, grand.esi, grand.pt, grand.advanceTemp, grand.advance, grand.loanEmi, grand.retention, grand.totalDeduction, grand.conveyance, grand.netBeforeDirect,
-    grand.directPaid, grand.netSalary, grand.pen, grand.employerPf, grand.pfAdmin, grand.edli, grand.esiEmployer, grand.employerCont, grand.ctc,
-    grand.advanceBalance, grand.loanBalance, '', '']);
+  bodyRows += `<tr class="sal-grandtotal"><td></td><td>Grand Total</td><td>${fmtMoneyWhole(grand.rate)}</td><td></td><td>${grand.policyHalfDays || '—'}</td><td>${fmtMoneyWhole(grand.leaveAmount)}</td>` +
+    `<td>${fmtMoneyWhole(grand.basic)}</td><td>${fmtMoneyWhole(grand.hra)}</td><td>${fmtMoneyWhole(grand.lta)}</td><td>${fmtMoneyWhole(grand.gross)}</td>` +
+    `<td>${fmtMoneyWhole(grand.pf)}</td><td>${fmtMoneyWhole(grand.esi)}</td><td>${fmtMoneyWhole(grand.pt)}</td><td>${fmtMoneyWhole(grand.advanceTemp)}</td><td>${fmtMoneyWhole(grand.advance)}</td><td>${fmtMoneyWhole(grand.loanEmi)}</td><td>${fmtMoneyWhole(grand.retention)}</td>` +
+    `<td>${fmtMoneyWhole(grand.totalDeduction)}</td><td>${grand.conveyance ? '+' + fmtMoneyWhole(grand.conveyance) : '—'}</td><td>${fmtMoneyWhole(grand.netBeforeDirect)}</td>` +
+    `<td>${grand.directPaid ? fmtMoneyWhole(grand.directPaid) : '—'}</td><td>${fmtMoneyWhole(grand.netSalary)}</td>` +
+    `<td>${fmtMoneyWhole(grand.pen)}</td><td>${fmtMoneyWhole(grand.employerPf)}</td><td>${fmtMoneyWhole(grand.pfAdmin)}</td>` +
+    `<td>${fmtMoneyWhole(grand.edli)}</td><td>${fmtMoneyWhole(grand.esiEmployer)}</td><td>${fmtMoneyWhole(grand.employerCont)}</td><td>${fmtMoneyWhole(grand.ctc)}</td>` +
+    `<td>${fmtMoneyWhole(grand.advanceBalance)}</td><td>${fmtMoneyWhole(grand.loanBalance)}</td><td></td><td></td></tr>`;
+  csvRows.push(['', 'Grand Total', R(grand.rate), '', grand.policyHalfDays, R(grand.leaveAmount), R(grand.basic), R(grand.hra), R(grand.lta), R(grand.gross), R(grand.pf), R(grand.esi), R(grand.pt), R(grand.advanceTemp), R(grand.advance), R(grand.loanEmi), R(grand.retention), R(grand.totalDeduction), R(grand.conveyance), R(grand.netBeforeDirect),
+    R(grand.directPaid), R(grand.netSalary), R(grand.pen), R(grand.employerPf), R(grand.pfAdmin), R(grand.edli), R(grand.esiEmployer), R(grand.employerCont), R(grand.ctc),
+    R(grand.advanceBalance), R(grand.loanBalance), '', '']);
 
   queueFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Salary Sheet'), `Salary Sheet - ${monthVal}.csv`, toCsv(cols, csvRows), 'text/csv');
 
-  box.innerHTML = `<div class="sal-sheet-wrap print-isolate" id="salaryPrintArea">
+  box.innerHTML = `<div class="row-inline" style="margin-bottom:10px;">
+      <button class="btn ghost full" onclick="confirmCloseSalarySheet()">✕ Close</button>
+    </div>
+    <div class="sal-sheet-wrap print-isolate" id="salaryPrintArea">
       ${reportLogoHeader('Salary Sheet — ' + monthLabel(monthVal))}
       <table class="sal-table"><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr>${bodyRows}</table>
     </div>
