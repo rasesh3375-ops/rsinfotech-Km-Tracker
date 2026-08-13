@@ -9456,6 +9456,16 @@ function employeeModalHtml(emp){
         <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Blood group and policy details are the two things needed fastest in an emergency — kept here so they are with the contact who would be called.</p>
       </div>
 
+      <div class="field-group ${emp.salaryHeading==='apprentice'?'':'hidden'}" id="familyFields">
+        <div class="sec-title">Family information</div>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Required for apprentices — the apprenticeship registration and the NAPS/board records ask for parents' names in full.</p>
+        <label class="field">Father's full name</label>
+        <input type="text" id="f_fatherName" placeholder="Full name as on records" value="${escapeHtml(emp.fatherName||'')}">
+        <div style="height:12px"></div>
+        <label class="field">Mother's full name</label>
+        <input type="text" id="f_motherName" placeholder="Full name as on records" value="${escapeHtml(emp.motherName||'')}">
+      </div>
+
       <div class="field-group">
         <div class="sec-title">Employment dates</div>
         <label class="field">Date of joining</label>
@@ -9576,14 +9586,16 @@ function employeeModalHtml(emp){
         <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Enter the outstanding advance as it stands today, once. The Salary Sheet then carries it forward each month, less what is recovered, so it does not need entering again.</p>
       </div>
 
-      <div class="field-group ${emp.salaryHeading==='apprentice'?'':'hidden'}" id="familyFields">
-        <div class="sec-title">Family information</div>
-        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Required for apprentices — the apprenticeship registration and the NAPS/board records ask for parents' names in full.</p>
-        <label class="field">Father's full name</label>
-        <input type="text" id="f_fatherName" placeholder="Full name as on records" value="${escapeHtml(emp.fatherName||'')}">
-        <div style="height:12px"></div>
-        <label class="field">Mother's full name</label>
-        <input type="text" id="f_motherName" placeholder="Full name as on records" value="${escapeHtml(emp.motherName||'')}">
+      <div class="field-group">
+        <div class="sec-title">Diwali bonus eligibility</div>
+        <label class="field">Eligible this year?</label>
+        <select class="field-input" id="f_diwaliEligible" onchange="updateBonusPreview()">
+          <option value="yes" ${emp.diwaliEligible==='yes'?'selected':''}>Yes</option>
+          <option value="no" ${emp.diwaliEligible==='no'?'selected':''}>No</option>
+        </select>
+        <div class="bonus-callout" id="bonusPreview" style="margin-top:12px;">Calculated Diwali bonus: Rs. ${diwaliBonusFor(emp)}</div>
+        <details style="margin-top:8px;"><summary style="font-size:12px;color:var(--muted);cursor:pointer;">How this is worked out</summary>
+        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;">Worked out automatically — nothing to enter by hand. It is one whole month at the Rate of Pay: Basic plus HRA plus LTA, with <strong>no PF, ESI, Professional Tax, advance, loan instalment or retention taken off</strong>, and no reduction for leave taken during the year. Other allowances, dress and mobile are separate from the Rate of Pay and are not added in.</p></details>
       </div>
 
       <div class="field-group">
@@ -9744,25 +9756,6 @@ function employeeModalHtml(emp){
       </div>
 
       <div class="field-group">
-        <div class="sec-title">Diwali bonus eligibility</div>
-        <label class="field">Eligible this year?</label>
-        <select class="field-input" id="f_diwaliEligible" onchange="updateBonusPreview()">
-          <option value="yes" ${emp.diwaliEligible==='yes'?'selected':''}>Yes</option>
-          <option value="no" ${emp.diwaliEligible==='no'?'selected':''}>No</option>
-        </select>
-        <div class="bonus-callout" id="bonusPreview" style="margin-top:12px;">Calculated Diwali bonus: Rs. ${diwaliBonusFor(emp)}</div>
-        <details style="margin-top:8px;"><summary style="font-size:12px;color:var(--muted);cursor:pointer;">How this is worked out</summary>
-        <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;">Worked out automatically — nothing to enter by hand. It is one whole month at the Rate of Pay: Basic plus HRA plus LTA, with <strong>no PF, ESI, Professional Tax, advance, loan instalment or retention taken off</strong>, and no reduction for leave taken during the year. Other allowances, dress and mobile are separate from the Rate of Pay and are not added in.</p></details>
-      </div>
-
-      <div class="field-group">
-        <div class="sec-title">Assets issued (at joining)</div>
-        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">What was handed over when this employee joined — uniform, laptop, phone, tools. Shows on the Employee Assets report and has to be returned before an Experience Letter can be issued.</p>
-        <div id="assetRowsBox"></div>
-        <a href="#" onclick="addAssetRow();return false;" style="font-size:13px;color:var(--amber-dark);font-weight:600;">+ Add an item</a>
-      </div>
-
-      <div class="field-group">
         <div class="sec-title">Workman Compensation (WC)</div>
         <label class="field">Covered under Workman Compensation insurance?</label>
         <select class="field-input" id="f_wcApplicable" onchange="toggleWcFields()">
@@ -9804,6 +9797,13 @@ function employeeModalHtml(emp){
           <label class="field">Policy expiry date</label>
           <input type="date" id="f_gpaExpiryDate" value="${emp.gpaExpiryDate||''}">
         </div>
+      </div>
+
+      <div class="field-group">
+        <div class="sec-title">Assets issued (at joining)</div>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">What was handed over when this employee joined — uniform, laptop, phone, tools. Shows on the Employee Assets report and has to be returned before an Experience Letter can be issued.</p>
+        <div id="assetRowsBox"></div>
+        <a href="#" onclick="addAssetRow();return false;" style="font-size:13px;color:var(--amber-dark);font-weight:600;">+ Add an item</a>
       </div>
 
       <div class="field-group">
