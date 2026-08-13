@@ -5944,6 +5944,24 @@ window.addEventListener('resize', () => {
   }, 300);
 });
 
+// ---- generic mobile-card fallback for the simpler reports ----
+// Attendance and Salary each needed their own bespoke card shape — day
+// grids, grouped Salary/Deductions/Employer sections — because their tables
+// are large and internally structured. Every other report in the app is a
+// flat list of columns per row: a name (or a month, or a loan) plus a
+// handful of figures. One shared builder covers all of them, so a report
+// doesn't need its own hand-rolled card markup, and every card in the app
+// looks like it came from the same place because it did.
+function hrRow(label, value){
+  return `<div class="hr-sheet-row"><span>${label}</span><span class="v">${value}</span></div>`;
+}
+function hrCard(headHtml, bodyHtml, cls){
+  return `<div class="hr-sheet-card${cls ? ' ' + cls : ''}">${headHtml ? `<div class="head">${headHtml}</div>` : ''}${bodyHtml}</div>`;
+}
+function hrHeadingCard(label){
+  return `<div class="hr-sheet-card sal-heading-card">${escapeHtml(label)}</div>`;
+}
+
 // One employee's compact-view row: name and the same eight totals the table
 // shows in its own last eight columns, up front; the 31 day cells (the same
 // <select> markup the table uses, just reflowed into a small grid) sit
@@ -7417,6 +7435,7 @@ const STATUTORY_REPORT_CONFIG = {
 async function renderStatutoryReport(key, label){
   const cfg = STATUTORY_REPORT_CONFIG[key];
   const box = document.getElementById(cfg.box);
+  const isCompact = isCompactSheetView();
   populateMonthYearSelects(cfg.selMonth, cfg.selYear);
   const monthVal = getMonthYearValue(cfg.selMonth, cfg.selYear);
   const [year, month] = monthVal.split('-').map(Number);
@@ -7501,11 +7520,30 @@ async function renderStatutoryReport(key, label){
     SALARY_HEADING_ORDER.forEach(hk => {
       const group = pfRows.filter(x => x.headingKey === hk);
       if(!group.length) return;
-      body += `<tr class="sal-heading"><td colspan="13">${escapeHtml(SALARY_HEADINGS[hk].label)}</td></tr>`;
+      if(isCompact) body += hrHeadingCard(SALARY_HEADINGS[hk].label);
+      else body += `<tr class="sal-heading"><td colspan="13">${escapeHtml(SALARY_HEADINGS[hk].label)}</td></tr>`;
       csvBody.push([SALARY_HEADINGS[hk].label]);
       group.forEach(x => {
         sr++;
-        body += `
+        const status = (x.applicable ? 'Contributing' : (x.notConfigured ? 'Not configured' : 'PF Not Applicable'));
+        if(isCompact){
+          body += hrCard(
+            `<strong>${escapeHtml(x.emp.name)}</strong><span class="id">${escapeHtml(x.emp.id)}</span>`,
+            hrRow('Eligible / Type', escapeHtml(x.eligible) + ' — ' + escapeHtml(x.pfType)) +
+            hrRow('Leave days / ₹', (x.leaveDays || 0) + ' / ' + money(x.leaveAmount)) +
+            hrRow('Final Payable Basic', money(x.wage)) +
+            hrRow('Employee', x.applicable ? money(x.employee) : '—') +
+            hrRow('Employer EPF', x.applicable ? money(x.epf) : '—') +
+            hrRow('Employer EPS', x.applicable ? money(x.eps) : '—') +
+            hrRow('Admin', x.applicable ? money(x.admin) : '—') +
+            hrRow('EDLI', x.applicable ? money(x.edli) : '—') +
+            hrRow('Employer Total', x.applicable ? money(x.employerTotal) : '—') +
+            hrRow('Status', escapeHtml(status) + (x.reason ? ' — ' + escapeHtml(x.reason) : '')) +
+            `<div class="hr-sheet-net"><span>Grand Total</span><span>${x.applicable ? money(x.total) : '—'}</span></div>`,
+            x.applicable ? '' : 'sal-total-card'
+          );
+        } else {
+          body += `
       <tr class="${x.applicable ? '' : 'inc-overdue'}">
         <td>${sr}</td><td class="sal-name">${escapeHtml(x.emp.name)}<span class="inc-sub">${escapeHtml(x.emp.id)}</span></td>
         <td>${escapeHtml(x.eligible)}<span class="inc-sub">${escapeHtml(x.pfType)}</span></td>
@@ -7518,16 +7556,16 @@ async function renderStatutoryReport(key, label){
         <td class="num">${x.applicable ? money(x.edli) : '—'}</td>
         <td class="num">${x.applicable ? money(x.employerTotal) : '—'}</td>
         <td class="num"><strong>${x.applicable ? money(x.total) : '—'}</strong></td>
-        <td>${x.applicable ? 'Contributing' : (x.notConfigured ? 'Not configured' : 'PF Not Applicable')}
+        <td>${status}
           <span class="inc-sub">${escapeHtml(x.reason)}</span></td>
       </tr>`;
+        }
         csvBody.push([sr, x.emp.name, x.emp.id, x.emp.uan || '', x.eligible, x.pfType,
           Math.round(x.wage + (x.leaveAmount || 0)), x.leaveDays || 0, Math.round(x.leaveAmount || 0), Math.round(x.wage),
           x.applicable ? Math.round(x.employee) : 0, x.applicable ? Math.round(x.epf) : 0, x.applicable ? Math.round(x.eps) : 0,
           x.applicable ? Math.round(x.edli) : 0, x.applicable ? Math.round(x.admin) : 0,
           x.applicable ? Math.round(x.employeeTotal) : 0, x.applicable ? Math.round(x.employerTotal) : 0,
-          x.applicable ? Math.round(x.total) : 0,
-          x.applicable ? 'Contributing' : (x.notConfigured ? 'Not configured' : 'PF Not Applicable'), x.reason]);
+          x.applicable ? Math.round(x.total) : 0, status, x.reason]);
       });
     });
     const csv = toCsv(
@@ -7538,16 +7576,16 @@ async function renderStatutoryReport(key, label){
                   Math.round(pfTot.epf), Math.round(pfTot.eps), Math.round(pfTot.edli), Math.round(pfTot.admin), Math.round(pfTot.employee),
                   Math.round(pfTot.epf + pfTot.eps + pfTot.edli + pfTot.admin), Math.round(pfTot.total), '', '']]));
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'PF'), `PF Return - ${monthVal}.csv`, csv, 'text/csv');
-    box.innerHTML = `${reportActionBar('Provident Fund Return — ' + monthLabel(monthVal), cfg.box)}
-    <div class="print-isolate" id="pfReportPrintArea">
-      ${reportLogoHeader('Provident Fund Return — ' + monthLabel(monthVal))}
-      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Charged on ${
-        PF_RULES.wageComponents.map(k => ({ basic:'Basic', hra:'HRA', lta:'LTA' }[k] || k)).join(' + ')} ·
-        employee ${headingPct(PF_RULES.employeePct)} · employer ${headingPct(0.0367)} EPF and ${headingPct(PF_RULES.epsPct)} EPS,
-        EPS capped at ₹${fmtMoney(PF_RULES.epsMonthlyCap)} above a ₹${fmtMoney(PF_RULES.epsWageCeiling)} wage ·
-        admin ${headingPct(PF_RULES.adminPct)} · EDLI ${headingPct(PF_RULES.edliPct)}.
-        Covers the R.S. Infotech payroll headings only.</p>
-      <div class="inc-scroll"><table class="inc-table">
+    const pfGrandCard = hrCard('<strong>Grand Total</strong>',
+      hrRow('Final Payable Basic', money(pfTot.wage)) + hrRow('Employee', money(pfTot.employee)) +
+      hrRow('Employer EPF', money(pfTot.epf)) + hrRow('Employer EPS', money(pfTot.eps)) +
+      hrRow('Admin', money(pfTot.admin)) + hrRow('EDLI', money(pfTot.edli)) +
+      hrRow('Employer Total', money(pfTot.epf + pfTot.eps + pfTot.admin + pfTot.edli)) +
+      `<div class="hr-sheet-net"><span>Grand Total</span><span>${money(pfTot.total)}</span></div>`,
+      'sal-grand-card');
+    const pfInner = isCompact
+      ? `<div class="hr-sheet-cards">${body}${pfGrandCard}</div>`
+      : `<div class="inc-scroll"><table class="inc-table">
         <thead><tr><th>#</th><th>Employee</th><th>Eligible / Type</th>
           <th class="num">Leave<br><span class="th-sub">days / ₹</span></th>
           <th class="num">Final Payable<br><span class="th-sub">${PF_RULES.wageComponents.map(k => ({ basic:'Basic', hra:'HRA', lta:'LTA' }[k] || k)).join(' + ')}</span></th>
@@ -7561,7 +7599,17 @@ async function renderStatutoryReport(key, label){
             <td class="num">${money(pfTot.admin)}</td><td class="num">${money(pfTot.edli)}</td>
             <td class="num">${money(pfTot.epf + pfTot.eps + pfTot.admin + pfTot.edli)}</td>
             <td class="num">${money(pfTot.total)}</td><td></td></tr>
-        </tbody></table></div>
+        </tbody></table></div>`;
+    box.innerHTML = `${reportActionBar('Provident Fund Return — ' + monthLabel(monthVal), cfg.box)}
+    <div class="print-isolate" id="pfReportPrintArea">
+      ${reportLogoHeader('Provident Fund Return — ' + monthLabel(monthVal))}
+      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Charged on ${
+        PF_RULES.wageComponents.map(k => ({ basic:'Basic', hra:'HRA', lta:'LTA' }[k] || k)).join(' + ')} ·
+        employee ${headingPct(PF_RULES.employeePct)} · employer ${headingPct(0.0367)} EPF and ${headingPct(PF_RULES.epsPct)} EPS,
+        EPS capped at ₹${fmtMoney(PF_RULES.epsMonthlyCap)} above a ₹${fmtMoney(PF_RULES.epsWageCeiling)} wage ·
+        admin ${headingPct(PF_RULES.adminPct)} · EDLI ${headingPct(PF_RULES.edliPct)}.
+        Covers the R.S. Infotech payroll headings only.</p>
+      ${pfInner}
       <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Employee share ${money(pfTot.employee)} ·
         employer share ${money(pfTot.epf + pfTot.eps + pfTot.admin + pfTot.edli)} ·
         total remittance <strong>${money(pfTot.total)}</strong>. Saved to Drive under HR Management &gt; Reports &gt; PF.</p>
@@ -7581,11 +7629,24 @@ async function renderStatutoryReport(key, label){
     SALARY_HEADING_ORDER.forEach(hk => {
       const group = esiRows.filter(x => x.headingKey === hk);
       if(!group.length) return;
-      body += `<tr class="sal-heading"><td colspan="8">${escapeHtml(SALARY_HEADINGS[hk].label)}</td></tr>`;
+      if(isCompact) body += hrHeadingCard(SALARY_HEADINGS[hk].label);
+      else body += `<tr class="sal-heading"><td colspan="8">${escapeHtml(SALARY_HEADINGS[hk].label)}</td></tr>`;
       csvBody.push([SALARY_HEADINGS[hk].label]);
       group.forEach(x => {
         sr++;
-        body += `
+        const status = x.r.covered ? 'Covered' : 'Exempt';
+        if(isCompact){
+          body += hrCard(
+            `<strong>${escapeHtml(x.emp.name)}</strong><span class="id">${escapeHtml(x.emp.esiNumber || '—')}</span>`,
+            hrRow('Gross', money(x.s.gross)) +
+            hrRow('Employee 0.75%', x.r.covered ? money(x.r.employee) : '—') +
+            hrRow('Employer 3.25%', x.r.covered ? money(x.r.employer) : '—') +
+            hrRow('Status', escapeHtml(status) + (x.r.reason ? ' — ' + escapeHtml(x.r.reason) : '')) +
+            `<div class="hr-sheet-net"><span>Total</span><span>${x.r.covered ? money(x.r.total) : '—'}</span></div>`,
+            x.r.covered ? '' : 'sal-total-card'
+          );
+        } else {
+          body += `
       <tr class="${x.r.covered ? '' : 'inc-overdue'}">
         <td>${sr}</td><td class="sal-name">${escapeHtml(x.emp.name)}</td>
         <td>${escapeHtml(x.emp.esiNumber || '—')}</td>
@@ -7593,17 +7654,32 @@ async function renderStatutoryReport(key, label){
         <td class="num">${x.r.covered ? money(x.r.employee) : '—'}</td>
         <td class="num">${x.r.covered ? money(x.r.employer) : '—'}</td>
         <td class="num">${x.r.covered ? money(x.r.total) : '—'}</td>
-        <td>${x.r.covered ? 'Covered' : 'Exempt'}<span class="inc-sub">${escapeHtml(x.r.reason)}</span></td>
+        <td>${status}<span class="inc-sub">${escapeHtml(x.r.reason)}</span></td>
       </tr>`;
+        }
         csvBody.push([sr, x.emp.name, x.emp.esiNumber || '', Math.round(x.s.gross),
           x.r.covered ? Math.round(x.r.employee) : 0, x.r.covered ? Math.round(x.r.employer) : 0, x.r.covered ? Math.round(x.r.total) : 0,
-          x.r.covered ? 'Covered' : 'Exempt', x.r.reason]);
+          status, x.r.reason]);
       });
     });
     const csv = toCsv(
       ['SR NO','Name','ESI Number','Gross Wages','Employee 0.75%','Employer 3.25%','Total','Status','Rule Applied'],
       csvBody.concat([['', 'TOTAL', '', Math.round(esiTot.gross), Math.round(esiTot.employee), Math.round(esiTot.employer), Math.round(esiTot.total), '', '']]));
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'ESI'), `ESI Return - ${monthVal}.csv`, csv, 'text/csv');
+    const esiGrandCard = hrCard('<strong>Total</strong>',
+      hrRow('Gross', money(esiTot.gross)) + hrRow('Employee', money(esiTot.employee)) + hrRow('Employer', money(esiTot.employer)) +
+      `<div class="hr-sheet-net"><span>Total</span><span>${money(esiTot.total)}</span></div>`,
+      'sal-grand-card');
+    const esiInner = isCompact
+      ? `<div class="hr-sheet-cards">${body}${esiGrandCard}</div>`
+      : `<div class="inc-scroll"><table class="inc-table">
+        <thead><tr><th>#</th><th>Name</th><th>ESI No.</th><th class="num">Gross</th>
+          <th class="num">Employee</th><th class="num">Employer</th><th class="num">Total</th><th>Status</th></tr></thead>
+        <tbody>${body}
+          <tr class="pay-total"><td></td><td><strong>Total</strong></td><td></td>
+            <td class="num">${money(esiTot.gross)}</td><td class="num">${money(esiTot.employee)}</td>
+            <td class="num">${money(esiTot.employer)}</td><td class="num">${money(esiTot.total)}</td><td></td></tr>
+        </tbody></table></div>`;
     box.innerHTML = `${reportActionBar('ESI Contribution Return — ' + monthLabel(monthVal), cfg.box)}
     <div class="print-isolate" id="esiReportPrintArea">
       ${reportLogoHeader('ESI Contribution Return — ' + monthLabel(monthVal))}
@@ -7611,14 +7687,7 @@ async function renderStatutoryReport(key, label){
         employee ${headingPct(ESI_RULES.employeePct)} · employer ${headingPct(ESI_RULES.employerPct)} ·
         ceiling ₹${fmtMoney(ESI_RULES.wageCeiling)} (₹${fmtMoney(ESI_RULES.disabledCeiling)} for persons with disability).
         Covers the R.S. Infotech payroll headings only.</p>
-      <div class="inc-scroll"><table class="inc-table">
-        <thead><tr><th>#</th><th>Name</th><th>ESI No.</th><th class="num">Gross</th>
-          <th class="num">Employee</th><th class="num">Employer</th><th class="num">Total</th><th>Status</th></tr></thead>
-        <tbody>${body}
-          <tr class="pay-total"><td></td><td><strong>Total</strong></td><td></td>
-            <td class="num">${money(esiTot.gross)}</td><td class="num">${money(esiTot.employee)}</td>
-            <td class="num">${money(esiTot.employer)}</td><td class="num">${money(esiTot.total)}</td><td></td></tr>
-        </tbody></table></div>
+      ${esiInner}
       <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; Reports &gt; ESI.</p>
       </div>`;
     stashReportShare('ESI Contribution Return — ' + monthLabel(monthVal), `ESI Return - ${monthVal}.csv`, csv, 'text/csv',
@@ -7637,17 +7706,22 @@ async function renderStatutoryReport(key, label){
   SALARY_HEADING_ORDER.forEach(hk => {
     const group = rows.filter(r => r[2] === hk);
     if(!group.length) return;
-    tableRows += `<tr class="sal-heading"><td colspan="2">${escapeHtml(SALARY_HEADINGS[hk].label)}</td></tr>`;
+    if(isCompact) tableRows += hrHeadingCard(SALARY_HEADINGS[hk].label);
+    else tableRows += `<tr class="sal-heading"><td colspan="2">${escapeHtml(SALARY_HEADINGS[hk].label)}</td></tr>`;
     csvRows.push([SALARY_HEADINGS[hk].label]);
     group.forEach(r => {
-      tableRows += `<tr><td class="sal-name">${r[0]}</td><td class="num">${rupees(r[1])}</td></tr>`;
+      if(isCompact) tableRows += hrCard(`<strong>${escapeHtml(r[0])}</strong>`, hrRow(key.toUpperCase() + ' Amount', rupees(r[1])));
+      else tableRows += `<tr><td class="sal-name">${r[0]}</td><td class="num">${rupees(r[1])}</td></tr>`;
       csvRows.push([r[0], Math.round(r[1])]);
     });
   });
+  const statInner = isCompact
+    ? `<div class="hr-sheet-cards">${tableRows}${hrCard('<strong>Grand Total</strong>', hrRow(key.toUpperCase() + ' Amount', rupees(grandTotal)), 'sal-grand-card')}</div>`
+    : `<table class="sal-table"><tr><th>Name</th><th class="num">${key.toUpperCase()} Amount</th></tr>${tableRows}<tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total</strong></td><td class="num"><strong>${rupees(grandTotal)}</strong></td></tr></table>`;
   box.innerHTML = `${reportActionBar(label + ' — ' + monthLabel(monthVal), cfg.box)}
     <div class="sal-sheet-wrap print-isolate" id="statReportPrintArea_${key}">
       ${reportLogoHeader(label + ' — ' + monthLabel(monthVal))}
-      <table class="sal-table"><tr><th>Name</th><th class="num">${key.toUpperCase()} Amount</th></tr>${tableRows}<tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total</strong></td><td class="num"><strong>${rupees(grandTotal)}</strong></td></tr></table>
+      ${statInner}
     </div>`;
 
   csvRows.push(['Grand Total', Math.round(grandTotal)]);
@@ -7669,6 +7743,7 @@ async function getHolidayMap_local(){
 
 async function renderApprenticeSalaryReport(){
   const box = document.getElementById('apprenticeReportBox');
+  const isCompact = isCompactSheetView();
   populateMonthYearSelects('apprenticeReportMonthSel', 'apprenticeReportYearSel');
   const monthVal = getMonthYearValue('apprenticeReportMonthSel', 'apprenticeReportYearSel');
   const [year, month] = monthVal.split('-').map(Number);
@@ -7694,28 +7769,53 @@ async function renderApprenticeSalaryReport(){
   const R = v => Math.round(Number(v) || 0);
   let srNo = 1;
   const grand = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, advanceTemp:0, advance:0, loanEmi:0, retention:0, totalDeduction:0, conveyance:0, netBeforeDirect:0, directPaid:0, netSalary:0 };
+  // Same field set the table's own columns show — Rate of Pay through Paid
+  // Directly — reused for both the row and the compact card so neither can
+  // show a figure the other does not.
+  const apprenticeCardRows = s => hrRow('Rate of Pay', fmtMoney(s.rate)) + hrRow('Leave Days', s.leaveDays) +
+    hrRow('Leave Amount', fmtMoney(s.leaveAmount)) + hrRow('Basic', fmtMoney(s.basic)) + hrRow('HRA', fmtMoney(s.hra)) +
+    hrRow('LTA', fmtMoney(s.lta)) + hrRow('Gross', fmtMoney(s.gross)) +
+    hrRow('Advance Temp', fmtMoney(s.advanceTemp)) + hrRow('Advance', fmtMoney(s.advance)) + hrRow('Loan EMI', fmtMoney(s.loanEmi)) +
+    hrRow('Retention', fmtMoney(s.retention)) + hrRow('Total Deduction', fmtMoney(s.totalDeduction)) +
+    hrRow('Conveyance', s.conveyance ? '+' + fmtMoney(s.conveyance) : '—') + hrRow('Net Before Direct', fmtMoney(s.netBeforeDirect)) +
+    hrRow('Paid Directly', s.directPaid ? fmtMoney(s.directPaid) : '—');
+
   let bodyRows = '';
   for(const emp of employees){
     const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
-    bodyRows += `<tr><td class="sal-name">${escapeHtml(emp.name)}</td><td class="num">${fmtMoney(s.rate)}</td><td class="num">${s.leaveDays}</td><td class="num">${fmtMoney(s.leaveAmount)}</td>` +
-      `<td class="num">${fmtMoney(s.basic)}</td><td class="num">${fmtMoney(s.hra)}</td><td class="num">${fmtMoney(s.lta)}</td><td class="num">${fmtMoney(s.gross)}</td>` +
-      `<td class="num">${fmtMoney(s.advanceTemp)}</td><td class="num">${fmtMoney(s.advance)}</td><td class="num">${fmtMoney(s.loanEmi)}</td><td class="num">${fmtMoney(s.retention)}</td><td class="num">${fmtMoney(s.totalDeduction)}</td>` +
-      `<td class="num">${s.conveyance ? '+' + fmtMoney(s.conveyance) : '—'}</td><td class="num">${fmtMoney(s.netBeforeDirect)}</td><td class="num">${s.directPaid ? fmtMoney(s.directPaid) : '—'}</td>` +
-      `<td class="num"><strong>${fmtMoney(s.netSalary)}</strong></td></tr>`;
+    if(isCompact){
+      bodyRows += hrCard(`<strong>${escapeHtml(emp.name)}</strong>`,
+        apprenticeCardRows(s) + `<div class="hr-sheet-net"><span>Net Payable</span><span>${fmtMoney(s.netSalary)}</span></div>`);
+    } else {
+      bodyRows += `<tr><td class="sal-name">${escapeHtml(emp.name)}</td><td class="num">${fmtMoney(s.rate)}</td><td class="num">${s.leaveDays}</td><td class="num">${fmtMoney(s.leaveAmount)}</td>` +
+        `<td class="num">${fmtMoney(s.basic)}</td><td class="num">${fmtMoney(s.hra)}</td><td class="num">${fmtMoney(s.lta)}</td><td class="num">${fmtMoney(s.gross)}</td>` +
+        `<td class="num">${fmtMoney(s.advanceTemp)}</td><td class="num">${fmtMoney(s.advance)}</td><td class="num">${fmtMoney(s.loanEmi)}</td><td class="num">${fmtMoney(s.retention)}</td><td class="num">${fmtMoney(s.totalDeduction)}</td>` +
+        `<td class="num">${s.conveyance ? '+' + fmtMoney(s.conveyance) : '—'}</td><td class="num">${fmtMoney(s.netBeforeDirect)}</td><td class="num">${s.directPaid ? fmtMoney(s.directPaid) : '—'}</td>` +
+        `<td class="num"><strong>${fmtMoney(s.netSalary)}</strong></td></tr>`;
+    }
     csvRows.push([emp.name, R(s.rate), s.leaveDays, R(s.leaveAmount), R(s.basic), R(s.hra), R(s.lta), R(s.gross), R(s.advanceTemp), R(s.advance), R(s.loanEmi), R(s.retention), R(s.totalDeduction), R(s.conveyance), R(s.netBeforeDirect), R(s.directPaid), R(s.netSalary)]);
     ['rate','leaveAmount','basic','hra','lta','gross','advanceTemp','advance','loanEmi','retention','totalDeduction','conveyance','netBeforeDirect','directPaid','netSalary'].forEach(k => { grand[k]+=s[k]; });
   }
-  bodyRows += `<tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total</strong></td><td class="num">${fmtMoney(grand.rate)}</td><td></td><td class="num">${fmtMoney(grand.leaveAmount)}</td>` +
-    `<td class="num">${fmtMoney(grand.basic)}</td><td class="num">${fmtMoney(grand.hra)}</td><td class="num">${fmtMoney(grand.lta)}</td><td class="num">${fmtMoney(grand.gross)}</td>` +
-    `<td class="num">${fmtMoney(grand.advanceTemp)}</td><td class="num">${fmtMoney(grand.advance)}</td><td class="num">${fmtMoney(grand.loanEmi)}</td><td class="num">${fmtMoney(grand.retention)}</td><td class="num">${fmtMoney(grand.totalDeduction)}</td>` +
-    `<td class="num">${grand.conveyance ? '+' + fmtMoney(grand.conveyance) : '—'}</td><td class="num">${fmtMoney(grand.netBeforeDirect)}</td><td class="num">${grand.directPaid ? fmtMoney(grand.directPaid) : '—'}</td>` +
-    `<td class="num">${fmtMoney(grand.netSalary)}</td></tr>`;
+  if(isCompact){
+    bodyRows += hrCard('<strong>Grand Total</strong>',
+      apprenticeCardRows(grand) + `<div class="hr-sheet-net"><span>Net Payable</span><span>${fmtMoney(grand.netSalary)}</span></div>`,
+      'sal-grand-card');
+  } else {
+    bodyRows += `<tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total</strong></td><td class="num">${fmtMoney(grand.rate)}</td><td></td><td class="num">${fmtMoney(grand.leaveAmount)}</td>` +
+      `<td class="num">${fmtMoney(grand.basic)}</td><td class="num">${fmtMoney(grand.hra)}</td><td class="num">${fmtMoney(grand.lta)}</td><td class="num">${fmtMoney(grand.gross)}</td>` +
+      `<td class="num">${fmtMoney(grand.advanceTemp)}</td><td class="num">${fmtMoney(grand.advance)}</td><td class="num">${fmtMoney(grand.loanEmi)}</td><td class="num">${fmtMoney(grand.retention)}</td><td class="num">${fmtMoney(grand.totalDeduction)}</td>` +
+      `<td class="num">${grand.conveyance ? '+' + fmtMoney(grand.conveyance) : '—'}</td><td class="num">${fmtMoney(grand.netBeforeDirect)}</td><td class="num">${grand.directPaid ? fmtMoney(grand.directPaid) : '—'}</td>` +
+      `<td class="num">${fmtMoney(grand.netSalary)}</td></tr>`;
+  }
   csvRows.push(['Grand Total', R(grand.rate), '', R(grand.leaveAmount), R(grand.basic), R(grand.hra), R(grand.lta), R(grand.gross), R(grand.advanceTemp), R(grand.advance), R(grand.loanEmi), R(grand.retention), R(grand.totalDeduction), R(grand.conveyance), R(grand.netSalary)]);
 
+  const apprenticeInner = isCompact
+    ? `<div class="hr-sheet-cards">${bodyRows}</div>`
+    : `<table class="sal-table"><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr>${bodyRows}</table>`;
   box.innerHTML = `${reportActionBar('Apprentice Salary Report — ' + monthLabel(monthVal), 'apprenticeReportBox')}
     <div class="sal-sheet-wrap print-isolate" id="apprenticeReportPrintArea">
       ${reportLogoHeader('Apprentice Salary Report — ' + monthLabel(monthVal))}
-      <table class="sal-table"><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr>${bodyRows}</table>
+      ${apprenticeInner}
     </div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0;">No PF, ESI, or PT — Apprentices are excluded from all three.</p>`;
 
@@ -7795,6 +7895,7 @@ async function renderFinalSalarySheet(){
   await getAttendanceMany(employees.map(e => e.id));
 
   const money = rupees;
+  const isCompact = isCompactSheetView();
   let bodyRows = '', csvRows = [], sr = 0, grand = 0, grandCount = 0;
 
   for(const headingKey of SALARY_HEADING_ORDER){
@@ -7815,25 +7916,44 @@ async function renderFinalSalarySheet(){
       || (a.emp.name || '').localeCompare(b.emp.name || ''));
 
     let sub = 0;
-    bodyRows += `<tr class="sal-heading"><td colspan="6">${escapeHtml(label)}</td></tr>`;
+    if(isCompact) bodyRows += hrHeadingCard(label);
+    else bodyRows += `<tr class="sal-heading"><td colspan="6">${escapeHtml(label)}</td></tr>`;
     csvRows.push([label]);
     rows.forEach(r => {
       sr++; sub += r.net; grand += r.net; grandCount++;
-      bodyRows += `<tr><td>${sr}</td><td class="sal-name">${escapeHtml(r.emp.name)}</td>
-        <td>${escapeHtml(r.emp.bankName || '—')}</td>
-        <td>${escapeHtml(r.emp.accountNumber || '—')}</td>
-        <td>${escapeHtml(r.emp.ifsc || '—')}</td>
-        <td class="num"><strong>${money(r.net)}</strong></td></tr>`;
+      if(isCompact){
+        bodyRows += hrCard(`<strong>${escapeHtml(r.emp.name)}</strong><span class="id">#${sr}</span>`,
+          hrRow('Bank Name', escapeHtml(r.emp.bankName || '—')) +
+          hrRow('Account Number', escapeHtml(r.emp.accountNumber || '—')) +
+          hrRow('IFSC', escapeHtml(r.emp.ifsc || '—')) +
+          `<div class="hr-sheet-net"><span>Final Payable</span><span>${money(r.net)}</span></div>`);
+      } else {
+        bodyRows += `<tr><td>${sr}</td><td class="sal-name">${escapeHtml(r.emp.name)}</td>
+          <td>${escapeHtml(r.emp.bankName || '—')}</td>
+          <td>${escapeHtml(r.emp.accountNumber || '—')}</td>
+          <td>${escapeHtml(r.emp.ifsc || '—')}</td>
+          <td class="num"><strong>${money(r.net)}</strong></td></tr>`;
+      }
       csvRows.push([sr, r.emp.name, r.emp.bankName || '', r.emp.accountNumber || '',
                     r.emp.ifsc || '', Math.round(r.net)]);
     });
-    bodyRows += `<tr class="sal-subtotal"><td></td><td class="sal-name">${escapeHtml(label)} subtotal</td>
-      <td colspan="3">${rows.length} employee(s)</td><td class="num">${money(sub)}</td></tr>`;
+    if(isCompact){
+      bodyRows += hrCard(null, hrRow(label + ' subtotal', rows.length + ' employee(s)') +
+        `<div class="hr-sheet-net"><span>Subtotal</span><span>${money(sub)}</span></div>`, 'sal-total-card');
+    } else {
+      bodyRows += `<tr class="sal-subtotal"><td></td><td class="sal-name">${escapeHtml(label)} subtotal</td>
+        <td colspan="3">${rows.length} employee(s)</td><td class="num">${money(sub)}</td></tr>`;
+    }
     csvRows.push(['', label + ' subtotal', rows.length + ' employee(s)', '', '', Math.round(sub)]);
   }
 
-  bodyRows += `<tr class="sal-grandtotal"><td></td><td class="sal-name">Grand Total</td>
-    <td colspan="3">${grandCount} employee(s)</td><td class="num">${money(grand)}</td></tr>`;
+  if(isCompact){
+    bodyRows += hrCard(`<strong>Grand Total</strong>`, hrRow('Employees', grandCount + ' employee(s)') +
+      `<div class="hr-sheet-net"><span>Grand Total</span><span>${money(grand)}</span></div>`, 'sal-grand-card');
+  } else {
+    bodyRows += `<tr class="sal-grandtotal"><td></td><td class="sal-name">Grand Total</td>
+      <td colspan="3">${grandCount} employee(s)</td><td class="num">${money(grand)}</td></tr>`;
+  }
   csvRows.push(['', 'GRAND TOTAL', grandCount + ' employee(s)', '', '', Math.round(grand)]);
 
   const cols = ['SR NO','Employee Name','Bank Name','Account Number','IFSC','Final Payable Salary'];
@@ -7849,13 +7969,15 @@ async function renderFinalSalarySheet(){
       'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Dashboard > Final Salary Sheet');
   }
 
+  const finalSalaryInner = isCompact ? `<div class="hr-sheet-cards">${bodyRows}</div>` :
+    `<table class="sal-table">
+      <thead><tr><th>SR</th><th>Employee Name</th><th>Bank Name</th><th>Account Number</th><th>IFSC</th><th class="num">Final Payable</th></tr></thead>
+      <tbody>${bodyRows}</tbody></table>`;
   box.innerHTML = `${reportActionBar(rptTitle + ' — ' + monthLabel(monthVal), 'finalSalaryBox')}
     <div class="sal-sheet-wrap print-isolate" id="finalSalaryPrintArea">
       ${reportLogoHeader(rptTitle + ' — ' + monthLabel(monthVal))}
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by salary heading, sorted by bank. Final Payable is after every deduction, including anything paid directly to the account.</p>
-      <table class="sal-table">
-      <thead><tr><th>SR</th><th>Employee Name</th><th>Bank Name</th><th>Account Number</th><th>IFSC</th><th class="num">Final Payable</th></tr></thead>
-      <tbody>${bodyRows}</tbody></table></div>
+      ${finalSalaryInner}</div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(monthVal + '-01'))} &gt; Dashboard &gt; Final Salary Sheet.</p>`;
   openFullscreenView(rptTitle + ' — ' + monthLabel(monthVal), 'finalSalaryBox');
 }
@@ -7885,6 +8007,7 @@ async function renderBonusPaymentSheet(){
   }
 
   const money = rupees;
+  const isCompact = isCompactSheetView();
   let bodyRows = '', csvRows = [], sr = 0, grand = 0, grandCount = 0;
   const noBank = [];
 
@@ -7898,28 +8021,48 @@ async function renderBonusPaymentSheet(){
       || (a.name || '').localeCompare(b.name || ''));
 
     let sub = 0;
-    bodyRows += `<tr class="sal-heading"><td colspan="6">${escapeHtml(label)}</td></tr>`;
+    if(isCompact) bodyRows += hrHeadingCard(label);
+    else bodyRows += `<tr class="sal-heading"><td colspan="6">${escapeHtml(label)}</td></tr>`;
     csvRows.push([label]);
     group.forEach(e => {
       const amount = diwaliBonusFor(e);
       sr++; sub += amount; grand += amount; grandCount++;
       const missing = !e.bankName || !e.accountNumber;
       if(missing) noBank.push(e.name || e.id);
-      bodyRows += `<tr${missing ? ' class="inc-overdue"' : ''}><td>${sr}</td><td class="sal-name">${escapeHtml(e.name)}</td>
-        <td>${e.bankName ? escapeHtml(e.bankName) : '<span class="pol-warn">not on file</span>'}</td>
-        <td>${e.accountNumber ? escapeHtml(e.accountNumber) : '<span class="pol-warn">not on file</span>'}</td>
-        <td>${escapeHtml(e.ifsc || '—')}</td>
-        <td class="num"><strong>${money(amount)}</strong></td></tr>`;
+      if(isCompact){
+        bodyRows += hrCard(`<strong>${escapeHtml(e.name)}</strong><span class="id">#${sr}</span>`,
+          hrRow('Bank Name', e.bankName ? escapeHtml(e.bankName) : '<span class="pol-warn">not on file</span>') +
+          hrRow('Account Number', e.accountNumber ? escapeHtml(e.accountNumber) : '<span class="pol-warn">not on file</span>') +
+          hrRow('IFSC', escapeHtml(e.ifsc || '—')) +
+          `<div class="hr-sheet-net"><span>Bonus Payable</span><span>${money(amount)}</span></div>`,
+          missing ? 'is-new' : '');
+      } else {
+        bodyRows += `<tr${missing ? ' class="inc-overdue"' : ''}><td>${sr}</td><td class="sal-name">${escapeHtml(e.name)}</td>
+          <td>${e.bankName ? escapeHtml(e.bankName) : '<span class="pol-warn">not on file</span>'}</td>
+          <td>${e.accountNumber ? escapeHtml(e.accountNumber) : '<span class="pol-warn">not on file</span>'}</td>
+          <td>${escapeHtml(e.ifsc || '—')}</td>
+          <td class="num"><strong>${money(amount)}</strong></td></tr>`;
+      }
       csvRows.push([sr, e.name, e.bankName || '', e.accountNumber || '', e.ifsc || '',
                     Math.round(amount)]);
     });
-    bodyRows += `<tr class="sal-subtotal"><td></td><td class="sal-name">${escapeHtml(label)} subtotal</td>
-      <td colspan="3">${group.length} employee(s)</td><td class="num">${money(sub)}</td></tr>`;
+    if(isCompact){
+      bodyRows += hrCard(null, hrRow(label + ' subtotal', group.length + ' employee(s)') +
+        `<div class="hr-sheet-net"><span>Subtotal</span><span>${money(sub)}</span></div>`, 'sal-total-card');
+    } else {
+      bodyRows += `<tr class="sal-subtotal"><td></td><td class="sal-name">${escapeHtml(label)} subtotal</td>
+        <td colspan="3">${group.length} employee(s)</td><td class="num">${money(sub)}</td></tr>`;
+    }
     csvRows.push(['', label + ' subtotal', group.length + ' employee(s)', '', '', Math.round(sub)]);
   }
 
-  bodyRows += `<tr class="sal-grandtotal"><td></td><td class="sal-name">Grand Total</td>
-    <td colspan="3">${grandCount} employee(s)</td><td class="num">${money(grand)}</td></tr>`;
+  if(isCompact){
+    bodyRows += hrCard(`<strong>Grand Total</strong>`, hrRow('Employees', grandCount + ' employee(s)') +
+      `<div class="hr-sheet-net"><span>Grand Total</span><span>${money(grand)}</span></div>`, 'sal-grand-card');
+  } else {
+    bodyRows += `<tr class="sal-grandtotal"><td></td><td class="sal-name">Grand Total</td>
+      <td colspan="3">${grandCount} employee(s)</td><td class="num">${money(grand)}</td></tr>`;
+  }
   csvRows.push(['', 'GRAND TOTAL', grandCount + ' employee(s)', '', '', Math.round(grand)]);
 
   const cols = ['SR NO','Employee Name','Bank Name','Account Number','IFSC','Bonus Payable'];
@@ -7942,9 +8085,9 @@ async function renderBonusPaymentSheet(){
     <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by salary heading, sorted by bank. Each figure is the Diwali bonus amount set on that employee's record — nothing is taken off it: no PF, no ESI, no Professional Tax, no loan instalment, no advance, no retention money, and no reduction for leave taken, however many days were lost that year.</p>
     ${noAmount.length ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${noAmount.length} eligible employee(s) are missing from this sheet because no bonus amount has been set for them: ${escapeHtml(noAmount.map(e => e.name || e.id).join(', '))}. Set an amount on each record, then generate the sheet again.</p>` : ''}
     ${noBank.length ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${noBank.length} employee(s) have no bank details on file and cannot be paid by transfer: ${escapeHtml(noBank.join(', '))}.</p>` : ''}
-    <table class="sal-table">
+    ${isCompact ? `<div class="hr-sheet-cards">${bodyRows}</div>` : `<table class="sal-table">
       <thead><tr><th>SR</th><th>Employee Name</th><th>Bank Name</th><th>Account Number</th><th>IFSC</th><th class="num">Bonus Payable</th></tr></thead>
-      <tbody>${bodyRows}</tbody></table>
+      <tbody>${bodyRows}</tbody></table>`}
     </div>
     ${notEligible.length ? `<p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">Not on this sheet: ${notEligible.length} marked not eligible.</p>` : ''}
     <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(paidOn))} &gt; Dashboard &gt; Diwali Bonus Payment Sheet.</p>`;
@@ -8123,19 +8266,31 @@ async function renderSalaryComparisonReport(){
     else if(Math.round((c - p) * 100) !== 0) changed.push({ emp, amount: c - p, from: p, to: c });
   }
   const difference = currTotal - prevTotal;
+  const isCompact = isCompactSheetView();
 
   const csvRows = [];
   let rowsHtml = '';
   const group = (title, items, detailFor) => {
     if(!items.length) return;
     const sub = items.reduce((t, i) => t + i.amount, 0);
-    rowsHtml += `<tr class="sal-heading"><td colspan="3">${title}</td></tr>`;
+    if(isCompact) rowsHtml += hrHeadingCard(title);
+    else rowsHtml += `<tr class="sal-heading"><td colspan="3">${title}</td></tr>`;
     csvRows.push([title, '', '']);
     items.forEach(i => {
-      rowsHtml += `<tr><td class="sal-name">${escapeHtml(i.emp.name)}</td><td>${detailFor(i)}</td><td class="num">${fmtSigned_(i.amount)}</td></tr>`;
+      if(isCompact){
+        rowsHtml += hrCard(`<strong>${escapeHtml(i.emp.name)}</strong>`,
+          hrRow('Reason', detailFor(i)) +
+          `<div class="hr-sheet-net"><span>Effect on total</span><span>${fmtSigned_(i.amount)}</span></div>`);
+      } else {
+        rowsHtml += `<tr><td class="sal-name">${escapeHtml(i.emp.name)}</td><td>${detailFor(i)}</td><td class="num">${fmtSigned_(i.amount)}</td></tr>`;
+      }
       csvRows.push([i.emp.name, detailFor(i), Math.round(i.amount)]);
     });
-    rowsHtml += `<tr class="sal-subtotal"><td></td><td>Subtotal</td><td class="num">${fmtSigned_(sub)}</td></tr>`;
+    if(isCompact){
+      rowsHtml += hrCard(null, hrRow('Subtotal', fmtSigned_(sub)), 'sal-total-card');
+    } else {
+      rowsHtml += `<tr class="sal-subtotal"><td></td><td>Subtotal</td><td class="num">${fmtSigned_(sub)}</td></tr>`;
+    }
     csvRows.push(['', 'Subtotal', Math.round(sub)]);
   };
 
@@ -8146,7 +8301,8 @@ async function renderSalaryComparisonReport(){
   group('Salary changed (same employees)', changed,
     i => `${fmtMoney(i.from)} → ${fmtMoney(i.to)} (increment, attendance or loan/advance)`);
 
-  if(!joined.length && !leavers.length && !changed.length){
+  const nothingChanged = !joined.length && !leavers.length && !changed.length;
+  if(nothingChanged && !isCompact){
     rowsHtml = `<tr><td colspan="3" class="empty">Nothing changed between ${prev.label} and ${curr.label}.</td></tr>`;
   }
 
@@ -8155,21 +8311,30 @@ async function renderSalaryComparisonReport(){
   // visible rather than silent.
   const reconciled = Math.round((joined.concat(leavers, changed).reduce((t, i) => t + i.amount, 0) - difference) * 100) === 0;
 
-  box.innerHTML = `${reportActionBar('Month-wise Salary Comparison — ' + curr.label, 'salCompareBox')}
-    <div class="print-isolate" id="salComparePrintArea">
-      ${reportLogoHeader('Month-wise Salary Comparison — ' + curr.label)}
-      <table class="sal-table">
+  const summaryInner = isCompact ? `<div class="hr-sheet-cards">
+      ${hrCard(null, hrRow(prev.label + ' (last month)', '₹' + fmtMoney(prevTotal)) + hrRow(curr.label + ' (this month)', '₹' + fmtMoney(currTotal)))}
+      ${hrCard(null, hrRow('Difference', fmtSigned_(difference)), 'sal-grand-card')}
+    </div>` : `<table class="sal-table">
         <tr><th>Month</th><th class="num">Total Salary</th></tr>
         <tr><td class="sal-name">${prev.label} (last month)</td><td class="num">₹${fmtMoney(prevTotal)}</td></tr>
         <tr><td class="sal-name">${curr.label} (this month)</td><td class="num">₹${fmtMoney(currTotal)}</td></tr>
         <tr class="sal-grandtotal"><td class="sal-name"><strong>Difference</strong></td><td class="num"><strong>${fmtSigned_(difference)}</strong></td></tr>
-      </table>
-      <h2 style="font-size:15px;margin:18px 0 8px;">Why the salary differs</h2>
-      <table class="sal-table">
+      </table>`;
+  const reasonsInner = isCompact ? (nothingChanged
+      ? `<div class="empty">Nothing changed between ${prev.label} and ${curr.label}.</div>`
+      : `<div class="hr-sheet-cards">${rowsHtml}${hrCard('<strong>Grand Total</strong>', hrRow('Effect on total', fmtSigned_(difference)), 'sal-grand-card')}</div>`)
+    : `<table class="sal-table">
         <tr><th>Employee</th><th>Reason</th><th class="num">Effect on total</th></tr>
         ${rowsHtml}
         <tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total</strong></td><td></td><td class="num"><strong>${fmtSigned_(difference)}</strong></td></tr>
-      </table>
+      </table>`;
+
+  box.innerHTML = `${reportActionBar('Month-wise Salary Comparison — ' + curr.label, 'salCompareBox')}
+    <div class="print-isolate" id="salComparePrintArea">
+      ${reportLogoHeader('Month-wise Salary Comparison — ' + curr.label)}
+      ${summaryInner}
+      <h2 style="font-size:15px;margin:18px 0 8px;">Why the salary differs</h2>
+      ${reasonsInner}
       <p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">
         ${joined.length} joined · ${leavers.length} left · ${changed.length} changed.
         ${reconciled ? 'Reasons add up to the difference exactly.' : '⚠ Reasons do not add up to the difference — please report this.'}
@@ -12893,6 +13058,7 @@ async function renderLeaveEncashmentReport(){
   }
 
   const money = rupees;
+  const isCompact = isCompactSheetView();
   let bodyRows = '', csvRows = [], sr = 0, grandDays = 0, grandAmt = 0;
   const noBank = [];
 
@@ -12904,33 +13070,54 @@ async function renderLeaveEncashmentReport(){
       || (a.name || '').localeCompare(b.name || ''));
 
     let subDays = 0, subAmt = 0;
-    bodyRows += `<tr class="sal-heading"><td colspan="9">${escapeHtml(label)}</td></tr>`;
+    if(isCompact) bodyRows += hrHeadingCard(label);
+    else bodyRows += `<tr class="sal-heading"><td colspan="9">${escapeHtml(label)}</td></tr>`;
     csvRows.push([label]);
     group.forEach(r => {
       sr++; subDays += r.pending; subAmt += r.amount; grandDays += r.pending; grandAmt += r.amount;
       const missing = !r.emp.bankName || !r.emp.accountNumber;
       if(missing) noBank.push(r.name || r.id);
-      bodyRows += `<tr${missing ? ' class="inc-overdue"' : ''}><td>${sr}</td>
-        <td class="sal-name">${escapeHtml(r.name)}</td>
-        <td>${r.emp.bankName ? escapeHtml(r.emp.bankName) : '<span class="pol-warn">not on file</span>'}</td>
-        <td>${r.emp.accountNumber ? escapeHtml(r.emp.accountNumber) : '<span class="pol-warn">not on file</span>'}</td>
-        <td class="num">${r.pending}</td>
-        <td class="num">${money(r.monthly)}</td>
-        <td class="num">${money(r.basis)}</td>
-        <td class="num">${money(r.perDay)}</td>
-        <td class="num"><strong>${money(r.amount)}</strong></td></tr>`;
+      if(isCompact){
+        bodyRows += hrCard(`<strong>${escapeHtml(r.name)}</strong><span class="id">#${sr}</span>`,
+          hrRow('Bank Name', r.emp.bankName ? escapeHtml(r.emp.bankName) : '<span class="pol-warn">not on file</span>') +
+          hrRow('Account Number', r.emp.accountNumber ? escapeHtml(r.emp.accountNumber) : '<span class="pol-warn">not on file</span>') +
+          hrRow('Pending days', r.pending) + hrRow(B.label + ' (monthly)', money(r.monthly)) +
+          hrRow('Basis', money(r.basis)) + hrRow('Per day', money(r.perDay)) +
+          `<div class="hr-sheet-net"><span>Encashment Payable</span><span>${money(r.amount)}</span></div>`,
+          missing ? 'is-new' : '');
+      } else {
+        bodyRows += `<tr${missing ? ' class="inc-overdue"' : ''}><td>${sr}</td>
+          <td class="sal-name">${escapeHtml(r.name)}</td>
+          <td>${r.emp.bankName ? escapeHtml(r.emp.bankName) : '<span class="pol-warn">not on file</span>'}</td>
+          <td>${r.emp.accountNumber ? escapeHtml(r.emp.accountNumber) : '<span class="pol-warn">not on file</span>'}</td>
+          <td class="num">${r.pending}</td>
+          <td class="num">${money(r.monthly)}</td>
+          <td class="num">${money(r.basis)}</td>
+          <td class="num">${money(r.perDay)}</td>
+          <td class="num"><strong>${money(r.amount)}</strong></td></tr>`;
+      }
       csvRows.push([sr, r.name, r.emp.bankName || '', r.emp.accountNumber || '', r.emp.ifsc || '',
                     r.pending, Math.round(r.monthly), Math.round(r.basis), Math.round(r.perDay), Math.round(r.amount)]);
     });
-    bodyRows += `<tr class="sal-subtotal"><td></td><td class="sal-name">${escapeHtml(label)} subtotal</td>
-      <td colspan="2">${group.length} employee(s)</td><td class="num">${subDays}</td>
-      <td colspan="3"></td><td class="num">${money(subAmt)}</td></tr>`;
+    if(isCompact){
+      bodyRows += hrCard(null, hrRow(label + ' subtotal', group.length + ' employee(s)') + hrRow('Days', subDays) +
+        `<div class="hr-sheet-net"><span>Subtotal</span><span>${money(subAmt)}</span></div>`, 'sal-total-card');
+    } else {
+      bodyRows += `<tr class="sal-subtotal"><td></td><td class="sal-name">${escapeHtml(label)} subtotal</td>
+        <td colspan="2">${group.length} employee(s)</td><td class="num">${subDays}</td>
+        <td colspan="3"></td><td class="num">${money(subAmt)}</td></tr>`;
+    }
     csvRows.push(['', label + ' subtotal', group.length + ' employee(s)', '', '', subDays, '', '', '', Math.round(subAmt)]);
   }
 
-  bodyRows += `<tr class="sal-grandtotal"><td></td><td class="sal-name">Grand Total</td>
-    <td colspan="2">${payable.length} employee(s)</td><td class="num">${grandDays}</td>
-    <td colspan="3"></td><td class="num">${money(grandAmt)}</td></tr>`;
+  if(isCompact){
+    bodyRows += hrCard('<strong>Grand Total</strong>', hrRow('Employees', payable.length + ' employee(s)') + hrRow('Days', grandDays) +
+      `<div class="hr-sheet-net"><span>Grand Total</span><span>${money(grandAmt)}</span></div>`, 'sal-grand-card');
+  } else {
+    bodyRows += `<tr class="sal-grandtotal"><td></td><td class="sal-name">Grand Total</td>
+      <td colspan="2">${payable.length} employee(s)</td><td class="num">${grandDays}</td>
+      <td colspan="3"></td><td class="num">${money(grandAmt)}</td></tr>`;
+  }
   csvRows.push(['', 'GRAND TOTAL', payable.length + ' employee(s)', '', '', grandDays, '', '', '', Math.round(grandAmt)]);
 
   const cols = ['SR NO','Employee Name','Bank Name','Account Number','IFSC',
@@ -12958,14 +13145,14 @@ async function renderLeaveEncashmentReport(){
       This payroll has no separate dearness allowance — HRA is the component that stands in for it,
       and it is included.</p>
     ${noBank.length ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${noBank.length} employee(s) have no bank details on file and cannot be paid by transfer: ${escapeHtml(noBank.join(', '))}.</p>` : ''}
-    <table class="sal-table">
+    ${isCompact ? `<div class="hr-sheet-cards">${bodyRows}</div>` : `<table class="sal-table">
       <thead><tr><th>SR</th><th>Employee Name</th><th>Bank Name</th><th>Account Number</th>
         <th class="num">Pending<br><span class="th-sub">days</span></th>
         <th class="num">${escapeHtml(B.label)}<br><span class="th-sub">monthly</span></th>
         <th class="num">Basis<br><span class="th-sub">${headingPct(B.grossPct)}</span></th>
         <th class="num">Per day<br><span class="th-sub">÷ ${B.dayDivisor}</span></th>
         <th class="num">Payable</th></tr></thead>
-      <tbody>${bodyRows}</tbody></table>
+      <tbody>${bodyRows}</tbody></table>`}
     </div>
     ${nil ? `<p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">${nil} employee(s) have no leave left to encash and are not listed.</p>` : ''}
     <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(asAt))} &gt; Reports &gt; Leave Encashment. Use <em>Encash and start next year at nil</em> on the EL Calculation Sheet once these have been paid.</p>`;
@@ -13037,15 +13224,23 @@ async function renderElCalculationSheet(){
       'HR Management > ' + financialYearLabel(fyEnd) + ' > Reports > EL Calculation Sheet');
   }
 
+  const isCompact = isCompactSheetView();
+  const elInner = isCompact ? `<div class="hr-sheet-cards">
+      ${rows.map(r => hrCard(`<strong>${escapeHtml(r.name)}</strong>`,
+        hrRow('Opening EL', r.opening) + hrRow('Present days (FY)', r.presentDays) + hrRow('EL earned', r.earned) +
+        hrRow('EL used', r.elUsed) + hrRow('Closing EL', r.closing) + hrRow('Per day', '₹' + fmtMoney(r.perDay)) +
+        `<div class="hr-sheet-net"><span>Encashment</span><span>₹${fmtMoney(r.amount)}</span></div>`)).join('')}
+      ${hrCard('<strong>Grand Total</strong>', hrRow('Encashment', '₹' + fmtMoney(totalEncash)), 'sal-grand-card')}
+    </div>` : `<table class="sal-table">
+      <tr><th>Name</th><th class="num">Opening EL</th><th class="num">Present days (FY)</th><th class="num">EL earned</th><th class="num">EL used</th><th class="num">Closing EL</th><th class="num">Per day</th><th class="num">Encashment</th></tr>
+      ${rows.map(r => `<tr><td class="sal-name">${escapeHtml(r.name)}</td><td class="num">${r.opening}</td><td class="num">${r.presentDays}</td><td class="num">${r.earned}</td><td class="num">${r.elUsed}</td><td class="num">${r.closing}</td><td class="num">₹${fmtMoney(r.perDay)}</td><td class="num"><strong>₹${fmtMoney(r.amount)}</strong></td></tr>`).join('')}
+      <tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total</strong></td><td colspan="6"></td><td class="num"><strong>₹${fmtMoney(totalEncash)}</strong></td></tr>
+    </table>`;
   box.innerHTML = `
     ${reportActionBar(elReportTitle, 'elCalcBox')}
     <div class="sal-sheet-wrap print-isolate" id="elCalcPrintArea">
     ${reportLogoHeader(elReportTitle)}
-    <table class="sal-table">
-      <tr><th>Name</th><th class="num">Opening EL</th><th class="num">Present days (FY)</th><th class="num">EL earned</th><th class="num">EL used</th><th class="num">Closing EL</th><th class="num">Per day</th><th class="num">Encashment</th></tr>
-      ${rows.map(r => `<tr><td class="sal-name">${escapeHtml(r.name)}</td><td class="num">${r.opening}</td><td class="num">${r.presentDays}</td><td class="num">${r.earned}</td><td class="num">${r.elUsed}</td><td class="num">${r.closing}</td><td class="num">₹${fmtMoney(r.perDay)}</td><td class="num"><strong>₹${fmtMoney(r.amount)}</strong></td></tr>`).join('')}
-      <tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total</strong></td><td colspan="6"></td><td class="num"><strong>₹${fmtMoney(totalEncash)}</strong></td></tr>
-    </table>
+    ${elInner}
     </div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0;line-height:1.6;">FY ${startYear}-${String(startYear+1).slice(2)}: ${fyStart} to ${fyEnd}. EL earned = 1 day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} days present (present includes EL/SL days and half-day equivalents), floored. Closing = Opening + Earned − Used.
       <br><strong style="color:var(--navy);">Encashment</strong> = closing days × ${headingPct(B.grossPct)} of ${escapeHtml(B.label)} ÷ ${B.dayDivisor}, worked out from each employee's Rate of Pay and salary heading. The ${B.dayDivisor} is the same figure that earns the leave — one day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} days of attendance. Policy is that unused PL is encashed at the year end and not carried forward, so the closing balance is a figure to pay.</p>
@@ -13379,13 +13574,19 @@ async function renderOvertimeReport(){
     stashReportShare(reportTitle, fileName, content, 'text/csv',
       'HR Management > ' + financialYearLabel(monthStr + '-01') + ' > Reports > Overtime Report');
   }
+  const isCompact = isCompactSheetView();
+  const overtimeInner = isCompact ? `<div class="hr-sheet-cards">${log.map(o => hrCard(
+      `<strong>${escapeHtml(o.name)}</strong><span class="id">${o.date}</span>`,
+      hrRow('Hours', o.hours) + hrRow('Note', escapeHtml(o.note || '—')) +
+      `<div class="hr-sheet-row" style="border-bottom:none;"><span></span><span class="v"><button class="btn ghost" style="font-size:11.5px;padding:6px 10px;" onclick="deleteOvertimeEntry('${o.id}')">Delete</button></span></div>`
+    )).join('')}</div>` : `<table class="sal-table">
+      <tr><th>Name</th><th>Date</th><th class="num">Hours</th><th>Note</th><th></th></tr>
+      ${log.map(o => `<tr><td class="sal-name">${escapeHtml(o.name)}</td><td>${o.date}</td><td class="num">${o.hours}</td><td>${o.note||''}</td><td><button class="btn ghost" style="font-size:11.5px;padding:6px 10px;" onclick="deleteOvertimeEntry('${o.id}')">Delete</button></td></tr>`).join('')}
+    </table>`;
   box.innerHTML = `${reportActionBar(reportTitle, 'overtimeReportBox')}
     <div class="sal-sheet-wrap print-isolate" id="overtimeReportPrintArea">
     ${reportLogoHeader(reportTitle)}
-    <table class="sal-table">
-      <tr><th>Name</th><th>Date</th><th class="num">Hours</th><th>Note</th><th></th></tr>
-      ${log.map(o => `<tr><td class="sal-name">${escapeHtml(o.name)}</td><td>${o.date}</td><td class="num">${o.hours}</td><td>${o.note||''}</td><td><button class="btn ghost" style="font-size:11.5px;padding:6px 10px;" onclick="deleteOvertimeEntry('${o.id}')">Delete</button></td></tr>`).join('')}
-    </table>
+    ${overtimeInner}
     </div>
     <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Total overtime hours for ${monthLabel(monthStr)}: <strong>${totalHours}</strong></p>`;
 }
@@ -13500,6 +13701,7 @@ async function viewReport(key, label, monthFilter){
   // Lives inside a card on the Reports tab, not its own nav tab, so Close
   // clears the card rather than navigating away from the whole tab.
   const fsBtn = reportActionBar(label, 'reportBox_' + key, `clearReportBox('reportBox_${key}')`);
+  const isCompact = isCompactSheetView();
   let rows = '';
   let csvHeader = [], csvRows = [];
   if(key === 'assets'){
@@ -13519,11 +13721,17 @@ async function viewReport(key, label, monthFilter){
         <td>${escapeHtml(r.a.item)}</td><td class="num">${r.a.qty || '—'}</td>
         <td>${escapeHtml(r.a.issuedOn || '—')}</td>
         <td>${r.out ? '<span class="pol-warn">Not returned</span>' : escapeHtml(r.a.returnedOn)}</td></tr>`).join('');
+    const assetsCards = rows2.map(r => hrCard(`<strong>${escapeHtml(r.e.name)}</strong><span class="id">${escapeHtml(r.e.id)}</span>`,
+      hrRow('Item', escapeHtml(r.a.item)) + hrRow('Qty', r.a.qty || '—') + hrRow('Issued', escapeHtml(r.a.issuedOn || '—')) +
+      hrRow('Returned', r.out ? '<span class="pol-warn">Not returned</span>' : escapeHtml(r.a.returnedOn)),
+      r.out ? 'is-new' : '')).join('');
+    const assetsInner = isCompact ? `<div class="hr-sheet-cards">${assetsCards}</div>`
+      : `<table class="sal-table"><thead><tr><th>Employee</th><th>Item</th><th class="num">Qty</th><th>Issued</th><th>Returned</th></tr></thead><tbody>${rows}</tbody></table>`;
     document.getElementById('reportBox_assets').innerHTML =
       `${fsBtn}<div class="sal-sheet-wrap print-isolate" id="reportPrintArea_assets">
        ${reportLogoHeader('Employee Assets — issued and outstanding')}
        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">${rows2.length} item(s) issued, <strong>${outCount} still outstanding</strong>. An Experience Letter cannot be generated while anything is outstanding.</p>
-       <table class="sal-table"><thead><tr><th>Employee</th><th>Item</th><th class="num">Qty</th><th>Issued</th><th>Returned</th></tr></thead><tbody>${rows}</tbody></table>
+       ${assetsInner}
        </div>`;
     {
       const fileName = `Employee Assets - ${todayStr()}.csv`;
@@ -13539,7 +13747,11 @@ async function viewReport(key, label, monthFilter){
     csvHeader = ['Name','Designation','Phone','Email'];
     csvRows = employees.map(e => [e.name, e.designation||'', e.phone||'', e.email||'']);
     rows = employees.map(e => `<tr><td class="sal-name">${escapeHtml(e.name)}</td><td>${escapeHtml(e.designation||'')}</td><td>${escapeHtml(e.phone||'')}</td><td>${escapeHtml(e.email||'')}</td></tr>`).join('');
-    box.innerHTML = `${fsBtn}<div class="sal-sheet-wrap print-isolate" id="reportPrintArea_contact">${reportLogoHeader(label)}<table class="sal-table"><tr><th>Name</th><th>Designation</th><th>Phone</th><th>Email</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table></div>`;
+    const contactCards = employees.map(e => hrCard(`<strong>${escapeHtml(e.name)}</strong>`,
+      hrRow('Designation', escapeHtml(e.designation||'—')) + hrRow('Phone', escapeHtml(e.phone||'—')) + hrRow('Email', escapeHtml(e.email||'—')))).join('');
+    const contactInner = isCompact ? (contactCards ? `<div class="hr-sheet-cards">${contactCards}</div>` : '<div class="empty">No data yet</div>')
+      : `<table class="sal-table"><tr><th>Name</th><th>Designation</th><th>Phone</th><th>Email</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table>`;
+    box.innerHTML = `${fsBtn}<div class="sal-sheet-wrap print-isolate" id="reportPrintArea_contact">${reportLogoHeader(label)}${contactInner}</div>`;
   } else if(key === 'birthday'){
     // dob is a plain "YYYY-MM-DD" date-input value — the month is read by
     // string slice, not new Date().getMonth(), which would shift it a day in
@@ -13548,9 +13760,13 @@ async function viewReport(key, label, monthFilter){
     csvHeader = ['Name','Date of birth'];
     csvRows = birthdayList.map(e => [e.name, e.dob]);
     rows = birthdayList.map(e => `<tr><td class="sal-name">${escapeHtml(e.name)}</td><td>${e.dob}</td></tr>`).join('');
-    box.innerHTML = `${fsBtn}<div class="sal-sheet-wrap print-isolate" id="reportPrintArea_birthday">${reportLogoHeader(label)}<table class="sal-table"><tr><th>Name</th><th>Date of birth</th></tr>${rows || '<tr><td colspan="2" class="empty">No data yet</td></tr>'}</table></div>`;
+    const birthdayCards = birthdayList.map(e => hrCard(`<strong>${escapeHtml(e.name)}</strong>`, hrRow('Date of birth', e.dob))).join('');
+    const birthdayInner = isCompact ? (birthdayCards ? `<div class="hr-sheet-cards">${birthdayCards}</div>` : '<div class="empty">No data yet</div>')
+      : `<table class="sal-table"><tr><th>Name</th><th>Date of birth</th></tr>${rows || '<tr><td colspan="2" class="empty">No data yet</td></tr>'}</table>`;
+    box.innerHTML = `${fsBtn}<div class="sal-sheet-wrap print-isolate" id="reportPrintArea_birthday">${reportLogoHeader(label)}${birthdayInner}</div>`;
   } else if(key === 'increment'){
     csvHeader = ['Name','Increment month','Increment date','Last salary (gross)','Status','Next increment date'];
+    let incrementCards = '';
     rows = employees.filter(e => e.nextIncrement && (!monthFilter || e.nextIncrement.slice(5,7) === monthFilter)).map(e => {
       // Month name read from the stored "YYYY-MM-DD" string, not new
       // Date().getMonth() — a date-only string parses as UTC midnight, so in
@@ -13569,10 +13785,19 @@ async function viewReport(key, label, monthFilter){
       // still resets the clock from when it really happened.
       const nextDate = done ? nextAnniversaryOf(latest.from) : '';
       csvRows.push([e.name, monthName, e.nextIncrement, Math.round(lastSalary), done ? 'Done' : 'Due', nextDate]);
+      if(isCompact){
+        incrementCards += hrCard(`<strong>${escapeHtml(e.name)}</strong>`,
+          hrRow('Increment month', monthName) + hrRow('Increment date', e.nextIncrement) +
+          hrRow('Last salary (gross)', rupees(lastSalary)) +
+          hrRow('Status', done ? '<span class="pol-ok">Done</span>' : '<span class="pol-warn">Due</span>') +
+          hrRow('Next increment date', nextDate || '—'), done ? '' : 'is-new');
+      }
       return `<tr${done ? '' : ' class="inc-overdue"'}><td class="sal-name">${escapeHtml(e.name)}</td><td>${monthName}</td><td>${e.nextIncrement}</td><td class="num">${rupees(lastSalary)}</td>` +
         `<td>${done ? '<span class="pol-ok">Done</span>' : '<span class="pol-warn">Due</span>'}</td><td>${nextDate || '—'}</td></tr>`;
     }).join('');
-    box.innerHTML = `${fsBtn}<div class="sal-sheet-wrap print-isolate" id="reportPrintArea_increment">${reportLogoHeader(label)}<table class="sal-table"><tr><th>Name</th><th>Increment month</th><th>Increment date</th><th class="num">Last salary (gross)</th><th>Status</th><th>Next increment date</th></tr>${rows || '<tr><td colspan="6" class="empty">No data yet</td></tr>'}</table></div>`;
+    const incrementInner = isCompact ? (incrementCards ? `<div class="hr-sheet-cards">${incrementCards}</div>` : '<div class="empty">No data yet</div>')
+      : `<table class="sal-table"><tr><th>Name</th><th>Increment month</th><th>Increment date</th><th class="num">Last salary (gross)</th><th>Status</th><th>Next increment date</th></tr>${rows || '<tr><td colspan="6" class="empty">No data yet</td></tr>'}</table>`;
+    box.innerHTML = `${fsBtn}<div class="sal-sheet-wrap print-isolate" id="reportPrintArea_increment">${reportLogoHeader(label)}${incrementInner}</div>`;
   } else if(key === 'diwali'){
     // Rate of Pay sits beside the bonus so the two can be read against each
     // other. They are always the same figure, and showing only the bonus left
@@ -13584,9 +13809,19 @@ async function viewReport(key, label, monthFilter){
                                   currentRatePay(e).ratePay,
                                   diwaliBonusSource(e) === 'entered' ? diwaliBonusFor(e) : '',
                                   SRC[diwaliBonusSource(e)]]);
+    let diwaliCards = '';
     rows = employees.map(e => {
       const rate = currentRatePay(e).ratePay;
       const src = diwaliBonusSource(e);
+      if(isCompact){
+        diwaliCards += hrCard(`<strong>${escapeHtml(e.name)}</strong>`,
+          hrRow('Eligible', e.diwaliEligible==='yes'?'Yes':'No') + hrRow('Rate of Pay', rupees(rate)) +
+          hrRow('Bonus', src === 'entered' ? rupees(diwaliBonusFor(e)) : '—') +
+          hrRow('Status', src === 'entered' ? '<span class="pol-ok">Amount set</span>'
+              : src === 'unset' ? '<span class="pol-warn">No amount set</span>'
+              : '<span style="color:var(--muted);">Not eligible</span>'),
+          src === 'unset' ? 'is-new' : '');
+      }
       return `<tr${src === 'unset' ? ' class="inc-overdue"' : ''}>
         <td class="sal-name">${escapeHtml(e.name)}</td><td>${e.diwaliEligible==='yes'?'Yes':'No'}</td>
         <td class="num">${rupees(rate)}</td>
@@ -13596,33 +13831,53 @@ async function viewReport(key, label, monthFilter){
             : '<span style="color:var(--muted);">Not eligible</span>'}</td></tr>`;
     }).join('');
     const unsetCount = employees.filter(e => diwaliBonusSource(e) === 'unset').length;
+    const diwaliInner = isCompact ? (diwaliCards ? `<div class="hr-sheet-cards">${diwaliCards}</div>` : '<div class="empty">No data yet</div>')
+      : `<div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th>Eligible</th><th class="num">Rate of Pay</th><th class="num">Bonus</th><th>Status</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table></div>`;
     box.innerHTML = `${fsBtn}<div class="print-isolate" id="reportPrintArea_diwali" style="margin-top:12px;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">The bonus is the amount entered against each employee — nothing is worked out from the Rate of Pay, which is shown only for comparison. Nothing is deducted from a bonus and nothing is added to one: no PF, ESI or Professional Tax, no advance, loan or retention, and no reduction for leave taken during the year.</p>
-      ${unsetCount ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${unsetCount} eligible employee(s) have no bonus amount set, so nothing will be paid to them. Open each record and fill in Diwali bonus amount — the form suggests one month's pay if that is what you want.</p>` : ''}<div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th>Eligible</th><th class="num">Rate of Pay</th><th class="num">Bonus</th><th>Status</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table></div></div>`;
+      ${unsetCount ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${unsetCount} eligible employee(s) have no bonus amount set, so nothing will be paid to them. Open each record and fill in Diwali bonus amount — the form suggests one month's pay if that is what you want.</p>` : ''}${diwaliInner}</div>`;
   } else if(key === 'salary'){
     // Conveyance gets its own column. Without it the row did not add up —
     // gross 30,000 less deductions 200 showing a net of 32,800 — and a row that
     // does not add up is read as a mistake even when the net is right.
     csvHeader = ['Name','Gross','Conveyance','Deductions','Net'];
+    let salaryCards = '';
     rows = employees.map(e => {
       const p = monthlyPayFor(e);
       const gross = p.gross, deductions = p.deductions, net = p.net, conv = p.conveyance;
       csvRows.push([e.name, Math.round(gross), Math.round(conv), Math.round(deductions), Math.round(net)]);
+      if(isCompact){
+        salaryCards += hrCard(`<strong>${escapeHtml(e.name)}</strong>`,
+          hrRow('Gross', rupees(gross)) + hrRow('Conveyance', conv ? '+' + rupees(conv) : '—') +
+          hrRow('Deductions', '−' + rupees(deductions)) +
+          `<div class="hr-sheet-net"><span>Net</span><span>${rupees(net)}</span></div>`);
+      }
       return `<tr><td class="sal-name">${escapeHtml(e.name)}</td><td class="num">${rupees(gross)}</td>` +
         `<td class="num">${conv ? '+' + rupees(conv) : '—'}</td>` +
         `<td class="num">−${rupees(deductions)}</td><td class="num"><strong>${rupees(net)}</strong></td></tr>`;
     }).join('');
-    box.innerHTML = `${fsBtn}<div class="print-isolate" id="reportPrintArea_salary" style="margin-top:12px;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">Net = Gross + Conveyance − Deductions. Conveyance is paid on top of the salary, so it is added rather than taken off; deductions cover PF, ESI, PT and anything being recovered — advance, loan instalment and retention.</p><div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th class="num">Gross</th><th class="num">Conveyance</th><th class="num">Deductions</th><th class="num">Net</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table></div></div>`;
+    const salaryInner = isCompact ? (salaryCards ? `<div class="hr-sheet-cards">${salaryCards}</div>` : '<div class="empty">No data yet</div>')
+      : `<div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th class="num">Gross</th><th class="num">Conveyance</th><th class="num">Deductions</th><th class="num">Net</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table></div>`;
+    box.innerHTML = `${fsBtn}<div class="print-isolate" id="reportPrintArea_salary" style="margin-top:12px;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">Net = Gross + Conveyance − Deductions. Conveyance is paid on top of the salary, so it is added rather than taken off; deductions cover PF, ESI, PT and anything being recovered — advance, loan instalment and retention.</p>${salaryInner}</div>`;
   } else if(key === 'ctc'){
     csvHeader = ['Name','Monthly gross','Annual gross','Diwali bonus','Annual CTC'];
+    let ctcCards = '';
     rows = employees.map(e => {
       const monthlyGross = monthlyPayFor(e).ctcGross;
       const annualGross = monthlyGross * 12;
       const bonus = diwaliBonusFor(e);
       const annualCtc = annualGross + bonus;
       csvRows.push([e.name, Math.round(monthlyGross), Math.round(annualGross), Math.round(bonus), Math.round(annualCtc)]);
+      if(isCompact){
+        ctcCards += hrCard(`<strong>${escapeHtml(e.name)}</strong>`,
+          hrRow('Monthly gross', rupees(monthlyGross)) + hrRow('Annual gross', rupees(annualGross)) +
+          hrRow('Diwali bonus', rupees(bonus)) +
+          `<div class="hr-sheet-net"><span>Annual CTC</span><span>${rupees(annualCtc)}</span></div>`);
+      }
       return `<tr><td class="sal-name">${escapeHtml(e.name)}</td><td class="num">${rupees(monthlyGross)}</td><td class="num">${rupees(annualGross)}</td><td class="num">${rupees(bonus)}</td><td class="num">${rupees(annualCtc)}</td></tr>`;
     }).join('');
-    box.innerHTML = `${fsBtn}<div class="print-isolate" id="reportPrintArea_ctc" style="margin-top:12px;">${reportLogoHeader(label)}<div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th class="num">Monthly gross</th><th class="num">Annual gross</th><th class="num">Diwali bonus</th><th class="num">Annual CTC</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table></div><p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Annual CTC = (Rate of Pay + Other allowances + Dress allowance + Mobile expense + Conveyance) × 12 + Diwali bonus. Rate of Pay is the whole Basic + HRA + LTA gross. PF, ESI and PT come out of it, so they are not added again. The employer's own PF and ESI are not included here either.</p></div>`;
+    const ctcInner = isCompact ? (ctcCards ? `<div class="hr-sheet-cards">${ctcCards}</div>` : '<div class="empty">No data yet</div>')
+      : `<div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th class="num">Monthly gross</th><th class="num">Annual gross</th><th class="num">Diwali bonus</th><th class="num">Annual CTC</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table></div>`;
+    box.innerHTML = `${fsBtn}<div class="print-isolate" id="reportPrintArea_ctc" style="margin-top:12px;">${reportLogoHeader(label)}${ctcInner}<p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Annual CTC = (Rate of Pay + Other allowances + Dress allowance + Mobile expense + Conveyance) × 12 + Diwali bonus. Rate of Pay is the whole Basic + HRA + LTA gross. PF, ESI and PT come out of it, so they are not added again. The employer's own PF and ESI are not included here either.</p></div>`;
   } else if(key === 'loan'){
     // One row per loan, not per employee — somebody repaying two shows twice,
     // which is the point of the ledger. Recovered-so-far and balance are worked
@@ -13640,6 +13895,7 @@ async function viewReport(key, label, monthFilter){
       (loanBalanceAfter(b.l, nowY, nowM) - loanBalanceAfter(a.l, nowY, nowM)) ||
       String(a.e.name || '').localeCompare(String(b.e.name || '')));
 
+    let loanCards = '';
     rows = ledger.map(({ e, l, i }) => {
       const amount = Number(l.amount) || 0;
       const bal = loanBalanceAfter(l, nowY, nowM);
@@ -13656,6 +13912,15 @@ async function viewReport(key, label, monthFilter){
       csvRows.push([e.name, what, Math.round(amount), Math.round(currentEmi), started || '—',
                     Math.round(l.status === 'active' ? recovered : amount),
                     Math.round(l.status === 'active' ? bal : 0), note]);
+      if(isCompact){
+        loanCards += hrCard(`<strong>${escapeHtml(e.name)}</strong><span class="id">${escapeHtml(what)}</span>`,
+          hrRow('Amount', rupees(amount)) + hrRow('Current EMI', rupees(currentEmi)) +
+          hrRow('Recovery from', started ? escapeHtml(started) : '<span class="pol-warn">not set</span>') +
+          hrRow('Recovered so far', rupees(l.status === 'active' ? recovered : amount)) +
+          hrRow('Balance', rupees(l.status === 'active' ? bal : 0)) +
+          hrRow('Status', escapeHtml(note)),
+          stalled || skippedThisMonth ? 'is-new' : '');
+      }
       return `<tr${stalled || skippedThisMonth ? ' class="inc-overdue"' : ''}>
         <td class="sal-name">${escapeHtml(e.name)}<span class="inc-sub">${escapeHtml(what)}</span></td>
         <td class="num">${rupees(amount)}</td>
@@ -13670,10 +13935,12 @@ async function viewReport(key, label, monthFilter){
     const outstanding = ledger.reduce((t, { l }) => t + loanBalanceAfter(l, nowY, nowM), 0);
     const monthly = ledger.reduce((t, { l }) => t + loanEmiForMonth(l, nowY, nowM), 0);
     const multi = employees.filter(e => loansOf(e).filter(l => l.status === 'active').length > 1).length;
+    const loanInner = isCompact ? (loanCards ? `<div class="hr-sheet-cards">${loanCards}</div>` : '<div class="empty">No data yet</div>')
+      : `<div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th class="num">Amount</th><th class="num">Current EMI</th><th>Recovery from</th><th class="num">Recovered so far</th><th class="num">Balance</th><th>Status</th></tr>${rows || '<tr><td colspan="7" class="empty">No data yet</td></tr>'}</table></div>`;
     box.innerHTML = `${fsBtn}<div class="print-isolate" id="reportPrintArea_loan" style="margin-top:12px;">${reportLogoHeader(label)}
       <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;">${rupees(outstanding)} outstanding across ${ledger.length} loan(s); ${rupees(monthly)} coming off this month's Salary Sheet.${multi ? ' ' + multi + ' employee(s) are repaying more than one at a time.' : ''}</p>
       ${stalledCount ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${stalledCount} active loan(s) have no recovery month set, so no instalment is coming off the Salary Sheet for them. Set one on the employee record to start recovery.</p>` : ''}
-      <div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th class="num">Amount</th><th class="num">Current EMI</th><th>Recovery from</th><th class="num">Recovered so far</th><th class="num">Balance</th><th>Status</th></tr>${rows || '<tr><td colspan="7" class="empty">No data yet</td></tr>'}</table></div></div>`;
+      ${loanInner}</div>`;
   } else if(key === 'insurance'){
     // A checkmark, not the policy detail — WC and GPA already carry their own
     // policy number/provider/sum insured/expiry on the employee record; this
@@ -13690,7 +13957,12 @@ async function viewReport(key, label, monthFilter){
       `<td style="text-align:center;">${tick(e.gpaApplicable)}</td>` +
       `<td style="text-align:center;">${tick(e.mediclaimApplicable)}</td>` +
       `<td style="text-align:center;">${tick(e.ayushmanCardApplicable)}</td></tr>`).join('');
-    box.innerHTML = `${fsBtn}<div class="print-isolate" id="reportPrintArea_insurance" style="margin-top:12px;">${reportLogoHeader(label)}<div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th>WC</th><th>GPA</th><th>Mediclaim</th><th>Ayushman Card</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table></div></div>`;
+    const insuranceCards = employees.map(e => hrCard(`<strong>${escapeHtml(e.name)}</strong>`,
+      hrRow('WC', tick(e.wcApplicable)) + hrRow('GPA', tick(e.gpaApplicable)) +
+      hrRow('Mediclaim', tick(e.mediclaimApplicable)) + hrRow('Ayushman Card', tick(e.ayushmanCardApplicable)))).join('');
+    const insuranceInner = isCompact ? (insuranceCards ? `<div class="hr-sheet-cards">${insuranceCards}</div>` : '<div class="empty">No data yet</div>')
+      : `<div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th>WC</th><th>GPA</th><th>Mediclaim</th><th>Ayushman Card</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table></div>`;
+    box.innerHTML = `${fsBtn}<div class="print-isolate" id="reportPrintArea_insurance" style="margin-top:12px;">${reportLogoHeader(label)}${insuranceInner}</div>`;
   }
   if(csvHeader.length){
     // Filed under the financial year this is being run in. These reports are a
