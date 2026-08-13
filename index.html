@@ -801,6 +801,25 @@
   .letter-choice .num{font-size:11px;color:var(--muted);font-weight:700;}
   .letter-choice.active{border-left-color:var(--amber-dark);background:var(--cream);font-weight:700;}
 
+  /* ===== Generator landing: a card grid picking which existing form to open ===== */
+  .gen-landing h1{font-size:20px;margin:0 0 4px;color:var(--navy);}
+  .gen-landing>p{font-size:13px;color:var(--muted);margin:0;}
+  .gen-card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin-top:18px;}
+  .gen-card{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:18px;cursor:pointer;
+    display:flex;flex-direction:column;gap:10px;text-align:left;font-family:inherit;transition:border-color .15s,box-shadow .15s;}
+  .gen-card:hover{border-color:var(--amber-dark);box-shadow:0 2px 12px rgba(22,33,62,.08);}
+  .gen-card-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;}
+  .gen-card-icon.t1{background:#E7EAF3;}
+  .gen-card-icon.t2{background:#FDECC8;}
+  .gen-card-icon.t3{background:#E1F0E7;}
+  .gen-card-icon.t4{background:#FBE4E1;}
+  .gen-card h3{font-size:15px;margin:0;color:var(--navy);}
+  .gen-card p{font-size:12px;color:var(--muted);margin:0;line-height:1.5;flex:1;}
+  .gen-card .btn{margin-top:2px;pointer-events:none;}
+  .gen-back-btn{display:inline-flex;align-items:center;gap:6px;background:none;border:none;color:var(--navy);
+    font-size:13px;font-weight:700;cursor:pointer;padding:0;margin-bottom:14px;font-family:inherit;}
+  .gen-back-btn:hover{color:var(--amber-dark);}
+
   .letter-paper{display:none;}
   #letterOutput.show .letter-paper{display:block;margin:18px 0;font-size:13.5px;line-height:1.7;white-space:pre-wrap;}
   .holiday-list-paper{display:none;}
@@ -1613,6 +1632,57 @@
 
       <!-- ===== Generator ===== -->
       <div id="hrSubGenerator" class="hidden">
+        <div id="genLanding" class="gen-landing">
+          <h1>Generator</h1>
+          <p>Generate HR reports, letters and calculation sheets — pick what you need below.</p>
+          <div class="gen-card-grid">
+            <button type="button" class="gen-card" onclick="openGeneratorCard('genSecRoleReports')">
+              <div class="gen-card-icon t1">👤</div>
+              <h3>Employee Role Reports</h3>
+              <p>A4 report built from one employee's job profile and responsibilities.</p>
+              <span class="btn full">Generate</span>
+            </button>
+            <button type="button" class="gen-card" onclick="openGeneratorCard('genSecLetters')">
+              <div class="gen-card-icon t2">✉️</div>
+              <h3>Letters</h3>
+              <p>Offer, Appointment, Experience and more, plus leave and loan request forms.</p>
+              <span class="btn full">Generate</span>
+            </button>
+            <button type="button" class="gen-card" onclick="openGeneratorCard('genSecChecklists')">
+              <div class="gen-card-icon t3">✅</div>
+              <h3>Checklists</h3>
+              <p>Joining checklist, joining kit and exit checklist.</p>
+              <span class="btn full">Open</span>
+            </button>
+            <button type="button" class="gen-card" onclick="openGeneratorCard('genSecHolidayList')">
+              <div class="gen-card-icon t4">📅</div>
+              <h3>Holiday List</h3>
+              <p>A printable holiday list for engineers, by financial year.</p>
+              <span class="btn full">Generate</span>
+            </button>
+            <button type="button" class="gen-card" onclick="openGeneratorCard('genSecElCalc')">
+              <div class="gen-card-icon t1">🧮</div>
+              <h3>EL Calculation Sheet</h3>
+              <p>Earned leave for the financial year, from the Attendance Sheet.</p>
+              <span class="btn full">Generate</span>
+            </button>
+            <button type="button" class="gen-card" onclick="openGeneratorCard('genSecLeaveEncashment')">
+              <div class="gen-card-icon t2">💰</div>
+              <h3>Leave Encashment Report</h3>
+              <p>What is owed for unused privilege leave at the year end.</p>
+              <span class="btn full">Generate</span>
+            </button>
+            <button type="button" class="gen-card" onclick="openGeneratorCard('genSecLetterhead')">
+              <div class="gen-card-icon t3">🏢</div>
+              <h3>Company Letterhead</h3>
+              <p>Address, phone, email and website printed on every generated report.</p>
+              <span class="btn full">Open</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="genSecRoleReports" class="hidden">
+        <button type="button" class="gen-back-btn" onclick="showGeneratorLanding()">← Back to Generator</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Employee Role Reports</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A branded A4 report built from one employee's job profile, responsibilities, designation and department — the measures, risks and recommendations change with the role. Fill in Job profile and Key responsibilities in Employee Master first; without them the report falls back to designation and department and says so.</p>
@@ -1625,7 +1695,10 @@
           <button class="btn full" onclick="generateRoleReport()">Generate report</button>
           <div id="roleRptBox"></div>
         </section>
+        </div>
 
+        <div id="genSecLetterhead" class="hidden">
+        <button type="button" class="gen-back-btn" onclick="showGeneratorLanding()">← Back to Generator</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Company letterhead</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Printed in the header and footer of every generated report. Anything left blank is left off the report rather than filled with a placeholder.</p>
@@ -1644,7 +1717,10 @@
           <button class="btn full" onclick="saveCompanyProfileFromForm()">Save letterhead</button>
           <div class="msg" id="coMsg"></div>
         </section>
+        </div>
 
+        <div id="genSecHolidayList" class="hidden">
+        <button type="button" class="gen-back-btn" onclick="showGeneratorLanding()">← Back to Generator</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Holiday List (to share with engineers)</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A printable holiday list with the company logo, for a chosen financial year (April–March) — built from the Holidays list above.</p>
@@ -1657,7 +1733,10 @@
             <div class="holiday-list-paper" id="holidayListPaper"></div>
           </div>
         </section>
+        </div>
 
+        <div id="genSecLeaveEncashment" class="hidden">
+        <button type="button" class="gen-back-btn" onclick="showGeneratorLanding()">← Back to Generator</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Leave Encashment Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">What is owed for unused privilege leave at the year end, as at 31 March. Grouped by salary heading and sorted by bank with account numbers, so it can be paid the same way as the salary and the bonus. Resident Engineers are outside the EL scheme and do not appear.</p>
@@ -1668,7 +1747,10 @@
           <div style="height:14px"></div>
           <div id="encashBox"></div>
         </section>
+        </div>
 
+        <div id="genSecElCalc" class="hidden">
+        <button type="button" class="gen-back-btn" onclick="showGeneratorLanding()">← Back to Generator</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">EL Calculation Sheet</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Earned Leave = 1 day per 25 days present, per the leave policy. Resident Engineers are excluded. This computes each employee's EL for the financial year you pick from the Attendance Sheet, and can carry the closing balance forward as next year's opening balance automatically.</p>
@@ -1679,12 +1761,24 @@
           <div style="height:14px"></div>
           <div id="elCalcBox"></div>
         </section>
+        </div>
 
+        <div id="genSecChecklists" class="hidden">
+        <button type="button" class="gen-back-btn" onclick="showGeneratorLanding()">← Back to Generator</button>
+        <section class="block">
+          <h2 style="margin:0 0 4px;">Checklists</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Joining checklist, items issued at joining, and the exit checklist — same lists that were under "Choose a letter" before, kept together here since they're not letters.</p>
+          <div id="checklistPickerList"></div>
+          <div id="joiningKitBox" class="hidden" style="margin-top:14px;"></div>
+        </section>
+        </div>
+
+        <div id="genSecLetters" class="hidden">
+        <button type="button" class="gen-back-btn" onclick="showGeneratorLanding()">← Back to Generator</button>
         <section class="block">
           <div class="field-group">
             <div class="sec-title">Choose a letter</div>
             <div id="letterChoiceList"></div>
-            <div id="joiningKitBox" class="hidden" style="margin-top:14px;"></div>
           </div>
           <label class="field">Company name</label>
           <input type="text" id="genCompanyName" value="R.S.Infotech" />
@@ -1795,6 +1889,7 @@
         <div id="letterOutput">
           <div id="letterActionsBox" class="hidden"></div>
           <div class="letter-paper" id="letterPaper"></div>
+        </div>
         </div>
       </div>
 
@@ -12432,7 +12527,10 @@ function closeChecklistModal(){
 const KIT_SLOTS = 7;
 
 async function openJoiningKit(){
-  switchHrSub('generator');
+  // No switchHrSub('generator') here — this is only ever clicked from inside
+  // the Checklists section, already on the Generator tab. Calling it would
+  // re-run renderGeneratorTab(), which resets the tab back to the landing
+  // grid and hide the very section this is opening a kit inside of.
   const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
   const box = document.getElementById('letterOutput') || document.getElementById('generatorOutput');
   const host = document.getElementById('joiningKitBox');
@@ -12528,12 +12626,35 @@ function clearGeneratorEmployeeFields(){
   });
 }
 
+// Generator landing: a card grid picking which of the existing forms below to
+// open, instead of showing all six stacked on one long page. Each card just
+// toggles which of these wrapper divs is visible — no new report, letter or
+// calculation, only how you get to the ones that already existed.
+const GENERATOR_SECTIONS = ['genSecRoleReports','genSecLetterhead','genSecHolidayList',
+  'genSecLeaveEncashment','genSecElCalc','genSecChecklists','genSecLetters'];
+function showGeneratorLanding(){
+  document.getElementById('genLanding').classList.remove('hidden');
+  GENERATOR_SECTIONS.forEach(id => document.getElementById(id).classList.add('hidden'));
+}
+function openGeneratorCard(sectionId){
+  document.getElementById('genLanding').classList.add('hidden');
+  GENERATOR_SECTIONS.forEach(id => document.getElementById(id).classList.toggle('hidden', id !== sectionId));
+}
+
 function jumpToGenerator(letterLabel){
   switchHrSub('generator');
   const idx = LETTER_TYPES.indexOf(letterLabel);
   if(idx >= 0) selectLetterType(idx);
+  openGeneratorCard('genSecLetters');
 }
 async function renderGeneratorTab(){
+  // Runs on every visit to the Generator tab, including a jumpToGenerator()
+  // from elsewhere in the app — reset to the landing grid first; a caller
+  // that wants a specific card open (jumpToGenerator, openJoiningKit) calls
+  // openGeneratorCard() itself right after, synchronously, before the
+  // getEmployees() below resolves.
+  showGeneratorLanding();
+
   const employees = await getEmployees();
   const joiningDone = employees.filter(e => Object.values(e.checklists?.joining||{}).filter(Boolean).length === CHECKLIST_ITEMS.joining.length).length;
   const exitDone = employees.filter(e => Object.values(e.checklists?.exit||{}).filter(Boolean).length === CHECKLIST_ITEMS.exit.length).length;
@@ -12542,18 +12663,23 @@ async function renderGeneratorTab(){
     <div class="letter-choice ${i===selectedLetterIdx?'active':''}" onclick="selectLetterType(${i})">
       <span class="num">${String(i+1).padStart(2,'0')}</span> ${t}
     </div>`).join('');
-  const checklistItems = `
+  document.getElementById('letterChoiceList').innerHTML = letterItems;
+
+  document.getElementById('checklistPickerList').innerHTML = `
     <div class="letter-choice" onclick="openChecklistPicker('joining')">
-      <span class="num">${String(LETTER_TYPES.length+1).padStart(2,'0')}</span> Joining Checklist <span style="margin-left:auto;color:var(--muted);font-weight:400;font-size:12px;">${employees.length} employees${joiningDone ? ', ' + joiningDone + ' complete' : ''}</span>
+      <span class="num">01</span> Joining Checklist <span style="margin-left:auto;color:var(--muted);font-weight:400;font-size:12px;">${employees.length} employees${joiningDone ? ', ' + joiningDone + ' complete' : ''}</span>
     </div>
     <div class="letter-choice" onclick="openJoiningKit()">
-      <span class="num">${String(LETTER_TYPES.length+2).padStart(2,'0')}</span> Joining Kit <span style="margin-left:auto;color:var(--muted);font-weight:400;font-size:12px;">uniform &amp; assets issued</span>
+      <span class="num">02</span> Joining Kit <span style="margin-left:auto;color:var(--muted);font-weight:400;font-size:12px;">uniform &amp; assets issued</span>
     </div>
     <div class="letter-choice" onclick="openChecklistPicker('exit')">
-      <span class="num">${String(LETTER_TYPES.length+3).padStart(2,'0')}</span> Exit Checklist <span style="margin-left:auto;color:var(--muted);font-weight:400;font-size:12px;">${employees.length} employees${exitDone ? ', ' + exitDone + ' complete' : ''}</span>
+      <span class="num">03</span> Exit Checklist <span style="margin-left:auto;color:var(--muted);font-weight:400;font-size:12px;">${employees.length} employees${exitDone ? ', ' + exitDone + ' complete' : ''}</span>
     </div>`;
-  document.getElementById('letterChoiceList').innerHTML = letterItems + checklistItems;
 
+  // The Role Reports card lives on this tab now, but its picker was only ever
+  // populated from the Reports tab's render — fine when Reports was visited
+  // first, empty if this card is opened straight from the Generator landing.
+  await populateRoleReportPickers();
   await populateGeneratorEmployees();
 
   document.getElementById('genIssueDate').value = document.getElementById('genIssueDate').value || todayStr();
