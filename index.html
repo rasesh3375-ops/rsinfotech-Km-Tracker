@@ -1593,7 +1593,7 @@
               <select class="field-input" id="otViewYearSel"></select>
             </div>
           </div>
-          <button class="btn ghost full" onclick="renderOvertimeReport()">Show month</button>
+          <button class="btn ghost full" onclick="showOvertimeReport()">Show month</button>
           <div style="height:14px"></div>
           <div id="overtimeReportBox"></div>
         </section>
@@ -6803,6 +6803,7 @@ async function renderStatutoryReport(key, label){
       ${reportActionBar('Provident Fund Return — ' + monthLabel(monthVal), cfg.box)}`;
     stashReportShare('Provident Fund Return — ' + monthLabel(monthVal), `PF Return - ${monthVal}.csv`, csv, 'text/csv',
       'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > PF');
+    openFullscreenView('Provident Fund Return — ' + monthLabel(monthVal), cfg.box);
     return;
   }
 
@@ -6843,6 +6844,7 @@ async function renderStatutoryReport(key, label){
       ${reportActionBar('ESI Contribution Return — ' + monthLabel(monthVal), cfg.box)}`;
     stashReportShare('ESI Contribution Return — ' + monthLabel(monthVal), `ESI Return - ${monthVal}.csv`, csv, 'text/csv',
       'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > ESI');
+    openFullscreenView('ESI Contribution Return — ' + monthLabel(monthVal), cfg.box);
     return;
   }
 
@@ -6865,6 +6867,7 @@ async function renderStatutoryReport(key, label){
   queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', cfg.folder), fileName, content, 'text/csv');
   stashReportShare(label + ' — ' + monthLabel(monthVal), fileName, content, 'text/csv',
     'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > ' + cfg.folder);
+  openFullscreenView(label + ' — ' + monthLabel(monthVal), cfg.box);
 }
 
 // Small local helper so these reports don't depend on load order of the holiday-map builder elsewhere
@@ -6934,6 +6937,7 @@ async function renderApprenticeSalaryReport(){
     stashReportShare('Apprentice Salary Report — ' + monthLabel(monthVal), fileName, content, 'text/csv',
       'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > Apprentice Salary Report');
   }
+  openFullscreenView('Apprentice Salary Report — ' + monthLabel(monthVal), 'apprenticeReportBox');
 }
 
 // ---- Consultant Report ----
@@ -7059,6 +7063,7 @@ async function renderFinalSalarySheet(){
       <thead><tr><th>SR</th><th>Employee Name</th><th>Bank Name</th><th>Account Number</th><th>IFSC</th><th class="num">Final Payable</th></tr></thead>
       <tbody>${bodyRows}</tbody></table></div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(monthVal + '-01'))} &gt; Dashboard &gt; Final Salary Sheet.</p>`;
+  openFullscreenView('Final Salary Sheet — ' + monthLabel(monthVal), 'finalSalaryBox');
 }
 
 // The bonus payment list. Same shape as the Final Salary Sheet so it can be
@@ -7147,6 +7152,7 @@ async function renderBonusPaymentSheet(){
       <tbody>${bodyRows}</tbody></table></div>
     ${notEligible.length ? `<p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">Not on this sheet: ${notEligible.length} marked not eligible.</p>` : ''}
     <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(paidOn))} &gt; Dashboard &gt; Diwali Bonus Payment Sheet.</p>`;
+  openFullscreenView('Diwali Bonus Payment Sheet — paid ' + paidOn, 'bonusPaymentBox');
 }
 
 async function renderConsultantReport(){
@@ -7255,6 +7261,7 @@ async function renderConsultantReport(){
     stashReportShare('Consultant Report — ' + monthLabel(monthVal), fileName, content, 'text/csv',
       'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > Consultant Report');
   }
+  openFullscreenView('Consultant Report — ' + monthLabel(monthVal), 'consultantReportBox');
 }
 
 // ---- Month-wise Salary Comparison ----
@@ -7387,6 +7394,7 @@ async function renderSalaryComparisonReport(){
     stashReportShare('Month-wise Salary Comparison — ' + curr.label, fileName, content, 'text/csv',
       'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > Salary Comparison');
   }
+  openFullscreenView('Month-wise Salary Comparison — ' + curr.label, 'salCompareBox');
 }
 
 // ---- geofence zones ----
@@ -12045,6 +12053,7 @@ async function renderMonthlyLeaveReport(){
     stashReportShare(reportTitle, fileName, content, 'text/csv',
       'HR Management > ' + fyOfStartYear(startYear).label + ' > Reports > Monthly Leave Report');
   }
+  openFullscreenView(reportTitle, 'monthlyLeaveReportBox');
 }
 
 // ---- overtime report ----
@@ -12122,6 +12131,19 @@ async function renderOvertimeReport(){
       ${log.map(o => `<tr><td class="sal-name">${escapeHtml(o.name)}</td><td>${o.date}</td><td class="num">${o.hours}</td><td>${o.note||''}</td><td><button class="btn ghost" style="font-size:11.5px;padding:6px 10px;" onclick="deleteOvertimeEntry('${o.id}')">Delete</button></td></tr>`).join('')}
     </table></div>
     <p style="font-size:12px;color:var(--muted);margin:10px 0 0;">Total overtime hours for ${monthLabel(monthStr)}: <strong>${totalHours}</strong></p>`;
+}
+
+// Wraps renderOvertimeReport() for the "Show month" button only — that function
+// also runs after adding/deleting a single entry, when jumping to full screen
+// would interrupt logging several entries in a row. Skips full screen on the
+// empty-month state, same as every other auto-fullscreen report.
+async function showOvertimeReport(){
+  await renderOvertimeReport();
+  const box = document.getElementById('overtimeReportBox');
+  if(box.querySelector('.rpt-actions')){
+    const monthStr = getMonthYearValue('otViewMonthSel', 'otViewYearSel');
+    openFullscreenView('Overtime Report — ' + monthLabel(monthStr), 'overtimeReportBox');
+  }
 }
 
 let lastHolidayListText = '';
@@ -12227,6 +12249,7 @@ async function viewReport(key, label){
       stashReportShare('Employee Assets — issued and outstanding', fileName, content, 'text/csv',
         'HR Management > ' + financialYearLabel(todayStr()) + ' > Reports > Assets');
     }
+    openFullscreenView(label, 'reportBox_' + key);
     return;
   }
   if(key === 'contact'){
@@ -12357,6 +12380,7 @@ async function viewReport(key, label){
     stashReportShare(label, fileName, content, 'text/csv',
       'HR Management > ' + financialYearLabel(todayStr()) + ' > Reports > ' + label);
   }
+  openFullscreenView(label, 'reportBox_' + key);
 }
 
 // ---- checklists ----
