@@ -2037,7 +2037,7 @@
   <div id="fullscreenSheetRoot" class="hidden">
     <div class="fullscreen-header">
       <strong id="fullscreenTitle"></strong>
-      <button class="btn ghost" onclick="closeFullscreenView()">✕ Close</button>
+      <button class="btn ghost" onclick="closeFullscreenHeaderButton()">✕ Close</button>
     </div>
     <div class="fullscreen-body" id="fullscreenBody"></div>
   </div>
@@ -6202,6 +6202,26 @@ function closeFullscreenView(){
   fullscreenActiveId = null;
   try{ if(document.fullscreenElement) document.exitFullscreen().catch(()=>{}); }catch(e){}
 }
+// The full-screen header's own Close button, generic across every use of
+// full screen (reports, letters, the Salary Sheet). A report/letter already
+// carries its own Close button (reportActionBar's .rpt-close-btn), moved
+// into full screen along with the rest of its content, which does whatever
+// that report considers "closed" — clear the box, or for a letter, navigate
+// back to Reports. This button used to always just call closeFullscreenView()
+// directly regardless, which only ever exits full screen: the report was
+// left sitting inline, unchanged, and pressing Close again was needed to
+// actually dismiss it. Delegating to the report's own button means one press
+// here now does exactly what one press on that button does. Content with no
+// such button — the Salary Sheet, which has its own separate confirm-before-
+// close flow — falls through to the plain "exit full screen" behavior.
+function closeFullscreenHeaderButton(){
+  if(fullscreenActiveId){
+    const box = document.getElementById(fullscreenActiveId);
+    const ownClose = box && box.querySelector('.rpt-close-btn');
+    if(ownClose){ ownClose.click(); return; }
+  }
+  closeFullscreenView();
+}
 
 // ---- close the Salary Sheet, asking whether to save a PDF first ----
 // A plain ✕ on the report itself, in both normal and full-screen view — the
@@ -6286,8 +6306,12 @@ function stashReportShare(title, fileName, content, mimeType, folderLabel){
 function closeReportView(sourceId){
   clearReportBox(sourceId);
 }
+// Leaves full screen AND clears the box in one call — pressing Close from
+// full screen used to only exit full screen, leaving the report sitting
+// inline, unchanged, so a second Close press was needed to actually get rid
+// of it. One press now does both.
 function clearReportBox(boxId){
-  if(fullscreenActiveId === boxId){ closeFullscreenView(); return; }
+  if(fullscreenActiveId === boxId) closeFullscreenView();
   const box = document.getElementById(boxId);
   if(box) box.innerHTML = '';
 }
@@ -8587,6 +8611,13 @@ function hrNavigate(route){
     pendingAttendance = {};
     updateAttendanceSaveBar();
   }
+  // Navigating away must never leave a full-screen report stuck on top of
+  // the screen it's navigating to — a stale overlay showing the report you
+  // just left behind, on a tab that no longer has anything to do with it.
+  // Covers every way of leaving a report full screen that isn't its own
+  // Close button: the sidebar, a breadcrumb, or a close handler (like a
+  // Letter's) that navigates elsewhere instead of just clearing a box.
+  if(fullscreenActiveId) closeFullscreenView();
   hrRoute = route;
   HR_PANELS.forEach(id => {
     const el = document.getElementById(id);
@@ -12433,6 +12464,10 @@ async function generateHolidayListDoc(){
 }
 
 function closeHolidayListOutput(){
+  // Same one-press fix as clearReportBox — leave full screen first if that's
+  // where the holiday list currently is, then hide it, instead of a Close
+  // press only ever doing the first half.
+  if(fullscreenActiveId === 'holidayListOutput') closeFullscreenView();
   document.getElementById('holidayListOutput').classList.add('hidden');
 }
 
