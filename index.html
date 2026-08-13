@@ -9069,14 +9069,6 @@ async function buildHrDashboardHome(box){
       <span class="feed-tag" style="background:#EEF0FB;color:#3B4A7A;">${b.days === 0 ? 'today' : b.days + (b.days === 1 ? ' day' : ' days')}</span>
     </div>`).join('') : '<div class="empty">No birthdays in the next 30 days.</div>';
 
-  const expList = expiring.length ? expiring.slice(0, 6).map(x => `
-    <div class="feed-row">
-      <div class="ic">📄</div>
-      <div class="body"><div class="t"><strong>${escapeHtml(x.kind)}</strong> — ${escapeHtml(x.who)}</div>
-      <div class="when">Expiring on <span style="color:var(--red);font-weight:600;">${consultantDate(x.when)}</span></div></div>
-      <span class="feed-tag" style="background:#FBE3E0;color:#B23A32;">${x.days}d</span>
-    </div>`).join('') : '<div class="empty">Nothing expiring in the next 30 days.</div>';
-
   const quick = [
     // Attendance and Doc Expiry are not here: Attendance has its own card on
     // the dashboard now, and Doc Expiry has its own section further down.
@@ -9107,6 +9099,13 @@ async function buildHrDashboardHome(box){
     <div id="dashAbsentPanel" class="hidden"></div>
     <div id="dashLeavePanel" class="hidden"></div>
 
+    <div class="dash-card">
+      <div class="card-head"><h3>Policy Alerts</h3>
+        <button class="linkbtn" style="padding:0" onclick="hrNavigate('attendance')">Attendance sheet</button></div>
+      <p class="card-sub" style="margin:0 0 10px;">Who needs attention this month — late arrivals, leave limits and unpaid days, per ${escapeHtml(LEAVE_POLICY.version)}. Tap anyone to open the Attendance Sheet.</p>
+      <div id="dashPolicyAlerts"><p class="dash-muted">Checking policy…</p></div>
+    </div>
+
     <div class="dash-2col">
       <details class="dash-card dash-fold" open>
         <summary><span class="fold-t">Increment Reminder</span><span class="fold-x">▾</span></summary>
@@ -9131,47 +9130,34 @@ async function buildHrDashboardHome(box){
         </div>
       </details>
 
-      <details class="dash-card dash-fold" open ontoggle="setTimeout(invalidateLiveMaps,60)">
-        <summary><span class="fold-t">Live Tracking</span>
-          <span class="live-dot-label"><span class="live-dot"></span>${checkedIn} on air</span></summary>
-        <div class="fold-body">
-        <div class="dash-map-wrap">
-          <div id="dashLiveMap"></div>
-          <div id="dashLiveMapEmpty" class="map-empty">
-            <div class="map-empty-inner">
-              <span class="ic">🛰️</span>
-              <strong>No live positions</strong>
-              <span>Engineer locations appear here once someone checks in.</span>
-            </div>
-          </div>
-        </div>
-        <div class="map-legend">
-          <span><span class="swatch" style="background:var(--green)"></span>Moving ${moving}</span>
-          <span><span class="swatch" style="background:var(--red)"></span>Stopped ${stopped}</span>
-          <span><span class="swatch" style="background:var(--amber)"></span>Unresponsive ${unresponsive}</span>
-        </div>
-        <button class="btn ghost full" style="margin-top:12px;" onclick="hrNavigate('tracking')">Open full tracking</button>
-        </div>
-      </details>
-    </div>
-
-    <div class="dash-2col">
       <div class="dash-card">
         <div class="card-head"><h3>Upcoming Birthdays</h3></div>
         ${bdayList}
       </div>
-      <div class="dash-card">
-        <div class="card-head"><h3>Upcoming Document Expiry</h3></div>
-        ${expList}
-      </div>
     </div>
 
-    <div class="dash-card">
-      <div class="card-head"><h3>Policy Alerts</h3>
-        <button class="linkbtn" style="padding:0" onclick="hrNavigate('attendance')">Attendance sheet</button></div>
-      <p class="card-sub" style="margin:0 0 10px;">Who needs attention this month — late arrivals, leave limits and unpaid days, per ${escapeHtml(LEAVE_POLICY.version)}. Tap anyone to open the Attendance Sheet.</p>
-      <div id="dashPolicyAlerts"><p class="dash-muted">Checking policy…</p></div>
-    </div>
+    <details class="dash-card dash-fold" open ontoggle="setTimeout(invalidateLiveMaps,60)">
+      <summary><span class="fold-t">Live Tracking</span>
+        <span class="live-dot-label"><span class="live-dot"></span>${checkedIn} on air</span></summary>
+      <div class="fold-body">
+      <div class="dash-map-wrap">
+        <div id="dashLiveMap"></div>
+        <div id="dashLiveMapEmpty" class="map-empty">
+          <div class="map-empty-inner">
+            <span class="ic">🛰️</span>
+            <strong>No live positions</strong>
+            <span>Engineer locations appear here once someone checks in.</span>
+          </div>
+        </div>
+      </div>
+      <div class="map-legend">
+        <span><span class="swatch" style="background:var(--green)"></span>Moving ${moving}</span>
+        <span><span class="swatch" style="background:var(--red)"></span>Stopped ${stopped}</span>
+        <span><span class="swatch" style="background:var(--amber)"></span>Unresponsive ${unresponsive}</span>
+      </div>
+      <button class="btn ghost full" style="margin-top:12px;" onclick="hrNavigate('tracking')">Open full tracking</button>
+      </div>
+    </details>
 
     <div class="dash-card">
       <div class="card-head"><h3>Quick Actions</h3></div>
