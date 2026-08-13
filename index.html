@@ -11450,13 +11450,40 @@ function renderPayrollBreakdown(){
     </tr>`).join('');
   const na = comps.filter(c => !c.applies).map(c => c.label);
 
+  // Annual CTC, read the same way the Cost to Company Report works it out —
+  // annual gross (Basic + HRA + LTA plus the other allowances, perks and
+  // conveyance) plus the Diwali bonus, with the employer's own PF and ESI
+  // left out of it there too. Shown here so it is visible before saving,
+  // not just after, and through diwaliBonusFor so it can never disagree with
+  // what the Diwali Bonus Payment Sheet actually pays.
+  const monthlyGrossForCtc = (comps.find(c => c.key === 'gross') || {}).value || 0;
+  const otherAllowances = Number((document.getElementById('f_otherAllowances') || {}).value) || 0;
+  const perks = (Number((document.getElementById('f_dressAllowance') || {}).value) || 0) +
+                (Number((document.getElementById('f_mobileExpense') || {}).value) || 0);
+  const conveyance = Number((document.getElementById('f_conveyance') || {}).value) || 0;
+  const annualGross = (monthlyGrossForCtc + otherAllowances + perks + conveyance) * 12;
+  const bonus = diwaliBonusFor({
+    diwaliEligible: (document.getElementById('f_diwaliEligible') || {}).value,
+    diwaliBonusAmount: (document.getElementById('f_diwaliBonusAmount') || {}).value
+  });
+  const annualCtc = annualGross + bonus;
+
   box.innerHTML = `<details class="pay-box fold-card" open>
     <summary class="pay-head">Salary breakdown — worked out from Rate of Pay</summary>
     <table class="pay-table"><tbody>${rows}</tbody></table>
     ${na.length ? `<p class="calc-note">Not applicable to this heading: ${escapeHtml(na.join(', '))}.</p>` : ''}
     ${missing.length ? `<p class="pay-warn">No formula configured for: <strong>${escapeHtml(missing.join(', '))}</strong>. Fix the payroll master before saving.</p>` : ''}
     <p class="calc-note">🧮 means the figure is worked out for you and cannot be typed. ✏️ means there is no formula configured, so it is entered by hand. This shows a full month — leave days reduce each earning in proportion on the Salary Sheet.</p>
-  </details>`;
+  </details>
+  <div class="pay-box fold-card" style="margin-top:10px;">
+    <div class="pay-head">Annual CTC — same figure as the Cost to Company Report</div>
+    <table class="pay-table"><tbody>
+      <tr><td>Annual gross <span class="calc-note" style="display:inline;">(Rate of Pay + other allowances + dress + mobile + conveyance) × 12</span></td><td class="num">₹${fmtMoney(annualGross)}</td></tr>
+      <tr><td>Diwali bonus</td><td class="num">₹${fmtMoney(bonus)}</td></tr>
+      <tr class="pay-total"><td>Annual CTC</td><td class="num">₹${fmtMoney(annualCtc)}</td></tr>
+    </tbody></table>
+    <p class="calc-note">Matches the Cost to Company Report: the employer's own PF and ESI contributions are not included here either, since that report does not include them.</p>
+  </div>`;
 }
 
 // Fills the box with a month's pay. The old default, kept as one tap rather
