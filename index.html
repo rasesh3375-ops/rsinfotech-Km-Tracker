@@ -13210,14 +13210,27 @@ async function elFyRows(employees, startYear){
       else if(code === 'HEL') elUsed += 0.5;
     });
     const opening = Number(emp.elOpening) || 0;
+    // What is earned THIS year is not usable until NEXT year — "earned in
+    // year 1, usable from year 2" (LEAVE_POLICY.privilegeLeave.usableInFirstYear)
+    // — so it is never part of what gets paid for the year that is closing.
+    // It only carries forward automatically as next year's opening balance.
     const earned = Math.floor(presentDays / LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays);
+    // What is actually payable now: whatever was already usable this year
+    // (last year's earned days, i.e. this year's opening) and went unused. A
+    // negative figure is leave taken beyond what was available and is not an
+    // encashment of less than nothing.
+    const unusedOpening = Math.max(0, opening - elUsed);
+    // Kept only for the legacy "carry the whole balance forward, no cash"
+    // option — the old opening leftover plus this year's earned days, in one
+    // figure, the way EL used to be rolled over before encashment was
+    // automated. Deliberately NOT floored at nil here: a negative figure is
+    // leave taken beyond what was available, and carrying that debt forward
+    // is the point of this legacy path — flooring it would forgive it instead.
     const closing = opening + earned - elUsed;
-    // Unused PL is encashed, not carried, so the closing balance is a figure to
-    // pay rather than one to bring forward. A negative closing is leave taken
-    // beyond what was earned and is not an encashment of less than nothing.
-    const cash = plEncashmentFor(emp, Math.max(0, closing));
-    rows.push({ emp, id: emp.id, name: emp.name, opening, presentDays, earned, elUsed, closing,
-                pending: Math.max(0, closing), monthly: cash.monthly, basis: cash.basis,
+    const cash = plEncashmentFor(emp, unusedOpening);
+    rows.push({ emp, id: emp.id, name: emp.name, opening, presentDays, earned, elUsed,
+                unusedOpening, closing, nextOpening: earned,
+                pending: unusedOpening, monthly: cash.monthly, basis: cash.basis,
                 perDay: cash.perDay, amount: cash.amount });
   }
   return rows;
@@ -13240,12 +13253,16 @@ async function renderElCalculationSheet(){
   const rows = await elFyRows(employees, startYear);
   const totalEncash = Math.round(rows.reduce((t, r) => t + r.amount, 0) * 100) / 100;
   const B = LEAVE_POLICY.privilegeLeave.salaryBasis;
+  // The FY this sheet is closing opens the NEXT one — earned this year,
+  // usable from next year — so the automatic button needs to know which
+  // month that new year's leaveOpeningFrom baseline should start from.
+  const nextFyStart = fyOfStartYear(startYear + 1).from.slice(0, 7);
 
   const elReportTitle = 'EL Calculation Sheet — FY ' + startYear + '-' + String(startYear+1).slice(2);
   {
     const fileName = `EL Calculation Sheet - FY ${startYear}-${String(startYear+1).slice(2)}.csv`;
-    const content = toCsv(['Name','Opening EL','Present days (FY)','EL earned','EL used','Closing EL','Encashment per day','Encashment payable'],
-      rows.map(r => [r.name, r.opening, r.presentDays, r.earned, r.elUsed, r.closing, r.perDay, r.amount])
+    const content = toCsv(['Name','Opening EL','Present days (FY)','EL earned (→ next year)','EL used','Unused Opening (to encash)','Encashment per day','Encashment payable'],
+      rows.map(r => [r.name, r.opening, r.presentDays, r.earned, r.elUsed, r.unusedOpening, r.perDay, r.amount])
         .concat([['GRAND TOTAL','','','','','','', totalEncash]]));
     queueFileToDrive(hrYearPath(fyEnd, 'Reports', 'EL Calculation Sheet'), fileName, content, 'text/csv');
     stashReportShare(elReportTitle, fileName, content, 'text/csv',
@@ -13255,13 +13272,13 @@ async function renderElCalculationSheet(){
   const isCompact = isCompactSheetView();
   const elInner = isCompact ? `<div class="hr-sheet-cards">
       ${rows.map(r => hrCard(`<strong>${escapeHtml(r.name)}</strong>`,
-        hrRow('Opening EL', r.opening) + hrRow('Present days (FY)', r.presentDays) + hrRow('EL earned', r.earned) +
-        hrRow('EL used', r.elUsed) + hrRow('Closing EL', r.closing) + hrRow('Per day', '₹' + fmtMoney(r.perDay)) +
+        hrRow('Opening EL', r.opening) + hrRow('Present days (FY)', r.presentDays) + hrRow('EL earned (→ next year)', r.earned) +
+        hrRow('EL used', r.elUsed) + hrRow('Unused Opening (to encash)', r.unusedOpening) + hrRow('Per day', '₹' + fmtMoney(r.perDay)) +
         `<div class="hr-sheet-net"><span>Encashment</span><span>₹${fmtMoney(r.amount)}</span></div>`)).join('')}
       ${hrCard('<strong>Grand Total</strong>', hrRow('Encashment', '₹' + fmtMoney(totalEncash)), 'sal-grand-card')}
     </div>` : `<table class="sal-table">
-      <tr><th>Name</th><th class="num">Opening EL</th><th class="num">Present days (FY)</th><th class="num">EL earned</th><th class="num">EL used</th><th class="num">Closing EL</th><th class="num">Per day</th><th class="num">Encashment</th></tr>
-      ${rows.map(r => `<tr><td class="sal-name">${escapeHtml(r.name)}</td><td class="num">${r.opening}</td><td class="num">${r.presentDays}</td><td class="num">${r.earned}</td><td class="num">${r.elUsed}</td><td class="num">${r.closing}</td><td class="num">₹${fmtMoney(r.perDay)}</td><td class="num"><strong>₹${fmtMoney(r.amount)}</strong></td></tr>`).join('')}
+      <tr><th>Name</th><th class="num">Opening EL</th><th class="num">Present days (FY)</th><th class="num">EL earned<br><span class="th-sub">→ next year</span></th><th class="num">EL used</th><th class="num">Unused Opening<br><span class="th-sub">to encash</span></th><th class="num">Per day</th><th class="num">Encashment</th></tr>
+      ${rows.map(r => `<tr><td class="sal-name">${escapeHtml(r.name)}</td><td class="num">${r.opening}</td><td class="num">${r.presentDays}</td><td class="num">${r.earned}</td><td class="num">${r.elUsed}</td><td class="num">${r.unusedOpening}</td><td class="num">₹${fmtMoney(r.perDay)}</td><td class="num"><strong>₹${fmtMoney(r.amount)}</strong></td></tr>`).join('')}
       <tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total</strong></td><td colspan="6"></td><td class="num"><strong>₹${fmtMoney(totalEncash)}</strong></td></tr>
     </table>`;
   box.innerHTML = `
@@ -13270,37 +13287,43 @@ async function renderElCalculationSheet(){
     ${reportLogoHeader(elReportTitle)}
     ${elInner}
     </div>
-    <p style="font-size:11px;color:var(--muted);margin:10px 0;line-height:1.6;">FY ${startYear}-${String(startYear+1).slice(2)}: ${fyStart} to ${fyEnd}. EL earned = 1 day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} days present (present includes EL/SL days and half-day equivalents), floored. Closing = Opening + Earned − Used.
-      <br><strong style="color:var(--navy);">Encashment</strong> = closing days × ${headingPct(B.grossPct)} of ${escapeHtml(B.label)} ÷ ${B.dayDivisor}, worked out from each employee's Rate of Pay and salary heading. The ${B.dayDivisor} is the same figure that earns the leave — one day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} days of attendance. Policy is that unused PL is encashed at the year end and not carried forward, so the closing balance is a figure to pay.</p>
+    <p style="font-size:11px;color:var(--muted);margin:10px 0;line-height:1.6;">FY ${startYear}-${String(startYear+1).slice(2)}: ${fyStart} to ${fyEnd}. EL earned = 1 day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} days present (present includes EL/SL days and half-day equivalents), floored — earned this year, usable from next year, so it is never part of what this year pays out. Unused Opening = this year's opening balance − EL used, floored at nil.
+      <br><strong style="color:var(--navy);">Encashment</strong> = Unused Opening × ${headingPct(B.grossPct)} of ${escapeHtml(B.label)} ÷ ${B.dayDivisor}, worked out from each employee's Rate of Pay and salary heading. The ${B.dayDivisor} is the same figure that earns the leave — one day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} days of attendance.</p>
     <div class="row-inline" style="margin-bottom:0;">
-      <button class="btn" style="flex:1;" onclick='withBusy(this,"Working…",()=>encashAndResetEl(${JSON.stringify(rows.map(r=>({id:r.id,closing:r.closing,amount:r.amount})))}))'>Encash and start next year at nil</button>
-      <button class="btn ghost" style="flex:1;" onclick='withBusy(this,"Working…",()=>applyElClosingAsNextOpening(${JSON.stringify(rows.map(r=>({id:r.id,closing:r.closing})))}))'>Carry forward instead</button>
+      <button class="btn" style="flex:1;" onclick='withBusy(this,"Working…",()=>encashAndResetEl(${JSON.stringify(rows.map(r=>({id:r.id,amount:r.amount,nextOpening:r.nextOpening})))}, ${JSON.stringify(nextFyStart)}))'>Encash unused &amp; open next year automatically</button>
+      <button class="btn ghost" style="flex:1;" onclick='withBusy(this,"Working…",()=>applyElClosingAsNextOpening(${JSON.stringify(rows.map(r=>({id:r.id,closing:r.closing})))}))'>Carry whole balance forward (no cash)</button>
     </div>
-    <p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Carrying forward is kept for the years already run that way — the written policy says encash.</p>
+    <p style="font-size:11px;color:var(--muted);margin:8px 0 0;">The first button pays cash for Unused Opening only, then automatically sets next year's EL opening balance to what was earned this year (EL earned column) — the one-year lag the policy describes, applied without a second manual step. Carrying the whole balance forward is kept for years already run that way; the written policy is to encash.</p>
   `;
   openFullscreenView(elReportTitle, 'elCalcBox');
 }
 
-// Pays out the balance and opens next year at nil, which is what "cannot be
-// carried forward" means. The amounts are logged, because an encashment that
-// leaves no record of what was paid is not a settlement.
-async function encashAndResetEl(list){
+// Pays cash for whatever was left unused from what was already usable this
+// year, then automatically opens next year's EL balance at exactly what was
+// earned this year — the policy's one-year lag (earned in year 1, usable
+// from year 2) applied in one step, rather than a second manual action that
+// could hand back as fresh leave the same days just paid out in cash. The
+// amounts are logged, because an encashment that leaves no record of what
+// was paid is not a settlement.
+async function encashAndResetEl(list, nextFyStartMonth){
   const total = Math.round(list.reduce((t, c) => t + (Number(c.amount) || 0), 0) * 100) / 100;
   const paying = list.filter(c => (Number(c.amount) || 0) > 0).length;
-  if(!confirm('Encash unused PL for ' + paying + ' employee(s), ₹' + fmtMoney(total) + ' in total?\n\n' +
-    'Each of their EL opening balances is set to nil, so next year starts fresh. ' +
+  const carrying = list.filter(c => (Number(c.nextOpening) || 0) > 0).length;
+  if(!confirm('Encash unused EL for ' + paying + ' employee(s), ₹' + fmtMoney(total) + ' in total?\n\n' +
+    'Each employee\'s EL opening balance is then set to what they earned this year — ' + carrying +
+    ' employee(s) carry a balance into next year, usable from then. ' +
     'The amounts are recorded in the activity log and the sheet above is saved to Drive — ' +
     'pay them through your bank as you would the bonus.')) return;
   const employees = await getEmployees();
   list.forEach(c => {
     const emp = employees.find(e => e.id === c.id);
-    if(emp){ emp.elOpening = 0; emp.leaveOpeningFrom = ''; }
+    if(emp){ emp.elOpening = Number(c.nextOpening) || 0; emp.leaveOpeningFrom = nextFyStartMonth || ''; }
   });
   await saveEmployees(employees);
-  await addActivityLog('Encashed unused PL for ' + paying + ' employee(s), ₹' + fmtMoney(total) +
-                       ' total, and reset EL opening balances to nil');
+  await addActivityLog('Encashed unused EL for ' + paying + ' employee(s), ₹' + fmtMoney(total) +
+                       ' total, and opened next year\'s EL balance from what was earned this year');
   invalidateSharedRead('employees');
-  showSavedToast('Encashed ₹' + fmtMoney(total) + ' — EL opening balances reset to nil');
+  showSavedToast('Encashed ₹' + fmtMoney(total) + ' — next year\'s EL balance opened automatically');
   await renderElCalculationSheet();
 }
 
