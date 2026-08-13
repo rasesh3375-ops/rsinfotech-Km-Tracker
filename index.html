@@ -8997,10 +8997,18 @@ function roleReportContent(emp, typeKey){
 // a phone number, and so nothing here is invented — a field left blank is
 // simply left off the page instead of being filled with a plausible guess.
 const COMPANY_NAME = 'R.S. Infotech';
+// Real defaults rather than blanks — HR can still override each of these from
+// Generator > Company letterhead, but until they do, the logo on every
+// generated Letter and Role Report should carry the actual registered
+// address and contact details, not nothing.
+const COMPANY_ADDRESS_DEFAULT = '27, Horizone Complex, Opp. Agan Tower, Near Makarpura Police Station, Between Indra Complex and Bhavans School, Manjalpur, Baroda - 04, Gujarat, India';
+const COMPANY_EMAIL_DEFAULT = 'Info@rsinfotech.net';
+const COMPANY_WEBSITE_DEFAULT = 'www.rsinfotech.net';
 async function getCompanyProfile(){
   const v = await safeGet('company_profile', true);
   const saved = v ? JSON.parse(v) : {};
-  return Object.assign({ name: COMPANY_NAME, address:'', phone:'', email:'', website:'', hrSignatoryId:'' }, saved);
+  return Object.assign({ name: COMPANY_NAME, address: COMPANY_ADDRESS_DEFAULT, phone:'',
+    email: COMPANY_EMAIL_DEFAULT, website: COMPANY_WEBSITE_DEFAULT, hrSignatoryId:'' }, saved);
 }
 async function saveCompanyProfile(p){
   await safeSet('company_profile', JSON.stringify(p), true);
