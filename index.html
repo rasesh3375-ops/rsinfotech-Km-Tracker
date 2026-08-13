@@ -1616,16 +1616,11 @@
         <section class="block">
           <h2 style="margin:0 0 4px;">Employee Role Reports</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A branded A4 report built from one employee's job profile, responsibilities, designation and department — the measures, risks and recommendations change with the role. Fill in Job profile and Key responsibilities in Employee Master first; without them the report falls back to designation and department and says so.</p>
-          <div class="row-inline">
-            <div>
-              <label class="field">Employee</label>
-              <select class="field-input" id="roleRptEmp"></select>
-            </div>
-            <div>
-              <label class="field">Report</label>
-              <select class="field-input" id="roleRptType"></select>
-            </div>
-          </div>
+          <label class="field">Employee</label>
+          <select class="field-input" id="roleRptEmp"></select>
+          <div style="height:14px"></div>
+          <label class="field">Report type</label>
+          <div id="roleRptTypeList"></div>
           <div style="height:12px"></div>
           <button class="btn full" onclick="generateRoleReport()">Generate report</button>
           <div id="roleRptBox"></div>
@@ -7677,6 +7672,7 @@ function exportCompanyCSV(){
 // ============================================================
 
 let selectedLetterIdx = 0;
+let selectedRoleReportIdx = 0;
 let editingEmployeeId = null;
 let currentChecklistType = null;
 
@@ -11466,13 +11462,20 @@ async function renderReportsTab(){
 // ---- role report UI ----
 async function populateRoleReportPickers(){
   const empSel = document.getElementById('roleRptEmp');
-  const typeSel = document.getElementById('roleRptType');
-  if(!empSel || !typeSel) return;
+  const typeList = document.getElementById('roleRptTypeList');
+  if(!empSel || !typeList) return;
   const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
   empSel.innerHTML = employees.length
     ? employees.map(e => `<option value="${escapeHtml(e.id)}">${escapeHtml(e.name || '(unnamed)')}${e.designation ? ' — ' + escapeHtml(e.designation) : ''}</option>`).join('')
     : '<option value="">No employees on roll</option>';
-  typeSel.innerHTML = ROLE_REPORT_TYPES.map(t => `<option value="${t.key}">${t.label}</option>`).join('');
+  // Same numbered/bordered-card look as "Choose a letter" below, since both
+  // are "pick one of a few document types" pickers — kept as its own
+  // selectedRoleReportIdx/selectRoleReportType() rather than sharing
+  // selectedLetterIdx, so selecting one never disturbs the other.
+  typeList.innerHTML = ROLE_REPORT_TYPES.map((t,i) => `
+    <div class="letter-choice ${i===selectedRoleReportIdx?'active':''}" onclick="selectRoleReportType(${i})">
+      <span class="num">${String(i+1).padStart(2,'0')}</span> ${escapeHtml(t.label)}
+    </div>`).join('');
   const co = await getCompanyProfile();
   ['Address','Phone','Email','Website'].forEach(k => {
     const el = document.getElementById('co' + k);
@@ -11600,7 +11603,7 @@ async function saveCompanyProfileFromForm(){
 async function generateRoleReport(){
   const box = document.getElementById('roleRptBox');
   const empId = document.getElementById('roleRptEmp').value;
-  const typeKey = document.getElementById('roleRptType').value;
+  const typeKey = (ROLE_REPORT_TYPES[selectedRoleReportIdx] || ROLE_REPORT_TYPES[0]).key;
   if(!empId){ box.innerHTML = '<p class="dash-muted">Add an employee in Employee Master first.</p>'; return; }
   box.innerHTML = '<p class="dash-muted">Building report…</p>';
   const emp = (await getEmployees()).find(e => e.id === empId);
@@ -11616,6 +11619,7 @@ async function generateRoleReport(){
   box.innerHTML = `<div style="margin:14px 0 10px;">${reportActionBar(reportTitle, 'roleRptBox', `clearReportBox('roleRptBox')`)}</div>
     <div class="rpt-wrap">${html}</div>`;
   await addActivityLog('Role report generated: ' + (emp.name || empId));
+  openFullscreenView(reportTitle, 'roleRptBox');
 }
 
 function reportHasData(key, e){
@@ -11855,6 +11859,7 @@ async function renderLeaveEncashmentReport(){
       <tbody>${bodyRows}</tbody></table></div>
     ${nil ? `<p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">${nil} employee(s) have no leave left to encash and are not listed.</p>` : ''}
     <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(asAt))} &gt; Reports &gt; Leave Encashment. Use <em>Encash and start next year at nil</em> on the EL Calculation Sheet once these have been paid.</p>`;
+  openFullscreenView('Leave Encashment — FY ' + fyLabel, 'encashBox');
 }
 
 // Privilege leave earned, used and left for one financial year, with what the
@@ -11937,6 +11942,7 @@ async function renderElCalculationSheet(){
     </div>
     <p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Carrying forward is kept for the years already run that way — the written policy says encash.</p>
   `;
+  openFullscreenView(elReportTitle, 'elCalcBox');
 }
 
 // Pays out the balance and opens next year at nil, which is what "cannot be
@@ -12175,6 +12181,7 @@ async function generateHolidayListDoc(){
     'HR Management > ' + financialYearLabel(fyStart) + ' > Reports > Holiday List');
   document.getElementById('holidayListActionBar').innerHTML =
     reportActionBar('Holiday List — ' + fyLabel, 'holidayListOutput', `closeHolidayListOutput()`);
+  openFullscreenView('Holiday List — ' + fyLabel, 'holidayListOutput');
 }
 
 function closeHolidayListOutput(){
@@ -12868,8 +12875,15 @@ async function autoFillGeneratorFromEmployee(){
 }
 function selectLetterType(idx){
   selectedLetterIdx = idx;
-  document.querySelectorAll('.letter-choice').forEach((el,i) => el.classList.toggle('active', i===idx));
+  // Scoped to this list only — #roleRptTypeList has its own .letter-choice
+  // items above, and a global query here would toggle "active" on those by
+  // the same numeric index instead.
+  document.querySelectorAll('#letterChoiceList .letter-choice').forEach((el,i) => el.classList.toggle('active', i===idx));
   toggleGeneratorFieldsForType();
+}
+function selectRoleReportType(idx){
+  selectedRoleReportIdx = idx;
+  document.querySelectorAll('#roleRptTypeList .letter-choice').forEach((el,i) => el.classList.toggle('active', i===idx));
 }
 function toggleGeneratorFieldsForType(){
   const type = LETTER_TYPES[selectedLetterIdx];
@@ -13525,6 +13539,7 @@ async function generateLetter(){
   saveFileToDrive(hrYearPath(f.issueDate, 'Generator', safeType), letterFileName, text, 'text/plain');
   stashReportShare(type + ' — ' + name, letterFileName, text, 'text/plain',
     'HR Management > ' + financialYearLabel(f.issueDate) + ' > Generator > ' + safeType);
+  openFullscreenView(type + ' — ' + name, 'letterOutput');
 }
 
 // Everything user-entered goes through this before it reaches innerHTML.
