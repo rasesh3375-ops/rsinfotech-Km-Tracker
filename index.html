@@ -616,9 +616,11 @@
   .stat-card2 .n{font-family:"Courier New",monospace;font-size:26px;font-weight:700;color:var(--navy);}
   .stat-card2 .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-top:4px;}
 
+  /* Same underline convention as .hr-subtabs one level up — amber, not
+     amber-dark, so both sub-tab tiers read as the same kind of control. */
   .inner-tabs{display:flex;gap:22px;border-bottom:1px solid var(--line);margin-bottom:16px;}
   .inner-tabs button{background:none;border:none;color:var(--muted);font-size:13.5px;font-weight:600;padding:0 0 10px;cursor:pointer;border-bottom:2px solid transparent;}
-  .inner-tabs button.active{color:var(--navy);border-bottom-color:var(--amber-dark);}
+  .inner-tabs button.active{color:var(--navy);border-bottom-color:var(--amber);}
 
   .doc-card{background:var(--cream);border-radius:10px;padding:14px;margin-top:10px;}
 
@@ -1384,18 +1386,6 @@
       <!-- ===== Reports ===== -->
       <div id="hrSubReports" class="hidden">
         <section class="block">
-          <h2 style="margin:0 0 4px;">Open a new leave year</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Sets each employee's opening EL from what they earned last year — one day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} attendance days — and their SL to the yearly allowance. Resident Engineers and Work From Home staff are skipped, their policies being different, as are non-R.S. Infotech headings. Run once, in April.</p>
-          <label class="field">Year starts</label>
-          <input class="field-input" type="date" id="rolloverFy">
-          <div style="height:12px"></div>
-          <button class="btn full" onclick="rollOverLeaveYear()">Open leave year</button>
-          <div id="rolloverBox" style="margin-top:10px;"></div>
-        </section>
-
-        <div id="reportCardsBox"></div>
-
-        <section class="block">
           <h2 style="margin:0 0 4px;">Attendance</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Marked Present as soon as the engineer takes a check-in selfie that day — whether or not they end up recording a trip. Sundays are excluded automatically; add festivals or declared holidays below so they don't count as absent either.</p>
           <div class="row-inline">
@@ -1582,6 +1572,18 @@
           <button class="btn ghost full" onclick="renderOvertimeReport()">Show month</button>
           <div style="height:14px"></div>
           <div id="overtimeReportBox"></div>
+        </section>
+
+        <div id="reportCardsBox"></div>
+
+        <section class="block">
+          <h2 style="margin:0 0 4px;">Open a new leave year</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Sets each employee's opening EL from what they earned last year — one day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} attendance days — and their SL to the yearly allowance. Resident Engineers and Work From Home staff are skipped, their policies being different, as are non-R.S. Infotech headings. Run once, in April.</p>
+          <label class="field">Year starts</label>
+          <input class="field-input" type="date" id="rolloverFy">
+          <div style="height:12px"></div>
+          <button class="btn full" onclick="rollOverLeaveYear()">Open leave year</button>
+          <div id="rolloverBox" style="margin-top:10px;"></div>
         </section>
       </div>
 
@@ -8283,10 +8285,17 @@ const HR_PANELS = ['hrPageDashboard','hrTabTracking','hrTabMgmt','hrSubDash','hr
   'dashSubActivity','secManageTeam','secExpenseRate','secLiveTracking','secGeofence','secDocStorage','secTeamOverview',
   'secDailySummary','secByCompany','secBackendConn'];
 
+// Grouped rather than listed in the order each route was added: Dashboard on
+// its own, then everything under the Tracking tab together, then everything
+// under HR Management together, then Settings last — so the sidebar reads as
+// three sections instead of interleaving Team Overview and Daily Summary
+// (Tracking-side) after Reports and Office Documents (HR Management-side).
 const HR_ROUTES = {
   dashboard:  { label:'Dashboard',           icon:'🏠', show:['hrPageDashboard'], run:() => renderHrDashboardHome() },
   tracking:   { label:'Tracking',            icon:'📍', show:['hrTabTracking','secManageTeam','secLiveTracking','secByCompany'],
                 run:() => { loadHR(); loadCompanyReport(); setTimeout(invalidateLiveMaps, 60); } },
+  team:       { label:'Team Overview',       icon:'👤', show:['hrTabTracking','secTeamOverview'], run:() => loadHR() },
+  daily:      { label:'Daily Summary',       icon:'📬', show:['hrTabTracking','secDailySummary'] },
   employees:  { label:'Employee Master',     icon:'👥', show:['hrTabMgmt','hrSubMaster'], run:() => renderEmployeeList() },
   attendance: { label:'Attendance Sheet',    icon:'🗓️', show:['hrTabMgmt','hrSubDash','dashSubAttendance'], run:() => renderAttendanceSheet() },
   salary:     { label:'Salary Sheet',        icon:'₹',  show:['hrTabMgmt','hrSubDash','dashSubSalary'], run:() => renderSalarySheet() },
@@ -8296,8 +8305,6 @@ const HR_ROUTES = {
   reports:    { label:'Reports',             icon:'📊', show:['hrTabMgmt','hrSubReports'], run:() => renderReportsTab() },
   generator:  { label:'Generator',           icon:'✉️', show:['hrTabMgmt','hrSubGenerator'], run:() => renderGeneratorTab() },
   docs:       { label:'Office Documents',    icon:'🗂️', show:['hrTabMgmt','hrSubDocs'], run:() => renderOfficeDocumentsTab() },
-  team:       { label:'Team Overview',       icon:'👤', show:['hrTabTracking','secTeamOverview'], run:() => loadHR() },
-  daily:      { label:'Daily Summary',       icon:'📬', show:['hrTabTracking','secDailySummary'] },
   settings:   { label:'Settings',            icon:'⚙️', show:['hrTabTracking','secExpenseRate','secGeofence','secDocStorage','secBackendConn'],
                 run: async () => {
                   const el = document.getElementById('rateInput');
