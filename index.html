@@ -6005,11 +6005,11 @@ function discardAttendanceChanges(){
 }
 
 // ---- salary sheet ----
-function fmtMoney(n){ return (Math.round(n*100)/100).toLocaleString('en-IN'); }
-// Whole rupees, no paise — for the Salary Sheet specifically, where every
-// column is rounded. fmtMoney (with paise) is untouched everywhere else, so
-// this only changes what the Salary Sheet shows.
-function fmtMoneyWhole(n){ return Math.round(Number(n) || 0).toLocaleString('en-IN'); }
+// Whole rupees, no paise, everywhere an amount is shown — payroll here runs
+// in rupees, not paise, and a figure like ₹33,333.33 on screen only invited
+// the question of where the 33 paise went. CSV exports round the same way;
+// see the R()/Math.round() calls next to each csvRows.push.
+function fmtMoney(n){ return Math.round(Number(n) || 0).toLocaleString('en-IN'); }
 
 // Shared logo + current-date header for every report and generated document.
 function reportLogoHeader(title){
@@ -6570,38 +6570,38 @@ async function renderSalarySheet(){
     const sub = { rate:0, leaveAmount:0, policyHalfDays:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, loanEmi:0, loanBalance:0, retention:0, totalDeduction:0, conveyance:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0, directPaid:0, netBeforeDirect:0 };
     for(const emp of group){
       const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
-      bodyRows += `<tr><td>${srNo++}</td><td class="sal-name">${escapeHtml(emp.name)}</td><td>${fmtMoneyWhole(s.rate)}</td><td>${s.leaveDays}${s.sandwichDays ? ' <span class="pol-warn" title="' + escapeHtml(s.sandwichDates.join(', ')) + ' — sandwiched between two unpaid-absence days">(incl. ' + s.sandwichDays + ' sandwich)</span>' : ''}</td><td>${s.policyHalfDays ? '<span class="pol-warn">' + s.policyHalfDays + '</span>' : '—'}</td><td>${fmtMoneyWhole(s.leaveAmount)}</td>` +
-        `<td>${fmtMoneyWhole(s.basic)}</td><td>${fmtMoneyWhole(s.hra)}</td><td>${fmtMoneyWhole(s.lta)}</td><td>${fmtMoneyWhole(s.gross)}</td>` +
-        `<td>${fmtMoneyWhole(s.pf)}</td><td>${fmtMoneyWhole(s.esi)}</td><td>${fmtMoneyWhole(s.pt)}</td><td>${fmtMoneyWhole(s.advanceTemp)}</td><td>${fmtMoneyWhole(s.advance)}</td><td>${fmtMoneyWhole(s.loanEmi)}</td><td>${fmtMoneyWhole(s.retention)}</td>` +
-        `<td>${fmtMoneyWhole(s.totalDeduction)}</td><td>${s.conveyance ? '+' + fmtMoneyWhole(s.conveyance) : '—'}</td><td>${fmtMoneyWhole(s.netBeforeDirect)}</td>` +
-        `<td>${s.directPaid ? fmtMoneyWhole(s.directPaid) : '—'}</td><td><strong>${fmtMoneyWhole(s.netSalary)}</strong></td>` +
-        `<td>${fmtMoneyWhole(s.pen)}</td><td>${fmtMoneyWhole(s.employerPf)}</td><td>${fmtMoneyWhole(s.pfAdmin)}</td>` +
-        `<td>${fmtMoneyWhole(s.edli)}</td><td>${fmtMoneyWhole(s.esiEmployer)}</td><td>${fmtMoneyWhole(s.employerCont)}</td><td>${fmtMoneyWhole(s.ctc)}</td>` +
-        `<td>${fmtMoneyWhole(s.advanceBalance)}</td><td>${fmtMoneyWhole(s.loanBalance)}</td><td>${s.fullDayLeaveBal}</td><td>${s.halfDayLeaveBal}</td></tr>`;
+      bodyRows += `<tr><td>${srNo++}</td><td class="sal-name">${escapeHtml(emp.name)}</td><td>${fmtMoney(s.rate)}</td><td>${s.leaveDays}${s.sandwichDays ? ' <span class="pol-warn" title="' + escapeHtml(s.sandwichDates.join(', ')) + ' — sandwiched between two unpaid-absence days">(incl. ' + s.sandwichDays + ' sandwich)</span>' : ''}</td><td>${s.policyHalfDays ? '<span class="pol-warn">' + s.policyHalfDays + '</span>' : '—'}</td><td>${fmtMoney(s.leaveAmount)}</td>` +
+        `<td>${fmtMoney(s.basic)}</td><td>${fmtMoney(s.hra)}</td><td>${fmtMoney(s.lta)}</td><td>${fmtMoney(s.gross)}</td>` +
+        `<td>${fmtMoney(s.pf)}</td><td>${fmtMoney(s.esi)}</td><td>${fmtMoney(s.pt)}</td><td>${fmtMoney(s.advanceTemp)}</td><td>${fmtMoney(s.advance)}</td><td>${fmtMoney(s.loanEmi)}</td><td>${fmtMoney(s.retention)}</td>` +
+        `<td>${fmtMoney(s.totalDeduction)}</td><td>${s.conveyance ? '+' + fmtMoney(s.conveyance) : '—'}</td><td>${fmtMoney(s.netBeforeDirect)}</td>` +
+        `<td>${s.directPaid ? fmtMoney(s.directPaid) : '—'}</td><td><strong>${fmtMoney(s.netSalary)}</strong></td>` +
+        `<td>${fmtMoney(s.pen)}</td><td>${fmtMoney(s.employerPf)}</td><td>${fmtMoney(s.pfAdmin)}</td>` +
+        `<td>${fmtMoney(s.edli)}</td><td>${fmtMoney(s.esiEmployer)}</td><td>${fmtMoney(s.employerCont)}</td><td>${fmtMoney(s.ctc)}</td>` +
+        `<td>${fmtMoney(s.advanceBalance)}</td><td>${fmtMoney(s.loanBalance)}</td><td>${s.fullDayLeaveBal}</td><td>${s.halfDayLeaveBal}</td></tr>`;
       csvRows.push([srNo-1, emp.name, R(s.rate), s.leaveDays, s.policyHalfDays, R(s.leaveAmount), R(s.basic), R(s.hra), R(s.lta), R(s.gross), R(s.pf), R(s.esi), R(s.pt), R(s.advanceTemp), R(s.advance), R(s.loanEmi), R(s.retention), R(s.totalDeduction), R(s.conveyance), R(s.netBeforeDirect), R(s.directPaid), R(s.netSalary),
         R(s.pen), R(s.employerPf), R(s.pfAdmin), R(s.edli), R(s.esiEmployer), R(s.employerCont), R(s.ctc),
         R(s.advanceBalance), R(s.loanBalance), s.fullDayLeaveBal, s.halfDayLeaveBal]);
       ['rate','leaveAmount','policyHalfDays','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','loanEmi','retention','totalDeduction','conveyance','netSalary','pen','employerPf','pfAdmin','edli','employerCont','ctc','esiEmployer','advanceBalance','loanBalance','directPaid','netBeforeDirect'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; });
     }
-    bodyRows += `<tr class="sal-subtotal"><td></td><td>Subtotal</td><td>${fmtMoneyWhole(sub.rate)}</td><td></td><td>${sub.policyHalfDays || '—'}</td><td>${fmtMoneyWhole(sub.leaveAmount)}</td>` +
-      `<td>${fmtMoneyWhole(sub.basic)}</td><td>${fmtMoneyWhole(sub.hra)}</td><td>${fmtMoneyWhole(sub.lta)}</td><td>${fmtMoneyWhole(sub.gross)}</td>` +
-      `<td>${fmtMoneyWhole(sub.pf)}</td><td>${fmtMoneyWhole(sub.esi)}</td><td>${fmtMoneyWhole(sub.pt)}</td><td>${fmtMoneyWhole(sub.advanceTemp)}</td><td>${fmtMoneyWhole(sub.advance)}</td><td>${fmtMoneyWhole(sub.loanEmi)}</td><td>${fmtMoneyWhole(sub.retention)}</td>` +
-      `<td>${fmtMoneyWhole(sub.totalDeduction)}</td><td>${sub.conveyance ? '+' + fmtMoneyWhole(sub.conveyance) : '—'}</td><td>${fmtMoneyWhole(sub.netBeforeDirect)}</td>` +
-      `<td>${sub.directPaid ? fmtMoneyWhole(sub.directPaid) : '—'}</td><td>${fmtMoneyWhole(sub.netSalary)}</td>` +
-      `<td>${fmtMoneyWhole(sub.pen)}</td><td>${fmtMoneyWhole(sub.employerPf)}</td><td>${fmtMoneyWhole(sub.pfAdmin)}</td>` +
-      `<td>${fmtMoneyWhole(sub.edli)}</td><td>${fmtMoneyWhole(sub.esiEmployer)}</td><td>${fmtMoneyWhole(sub.employerCont)}</td><td>${fmtMoneyWhole(sub.ctc)}</td>` +
-      `<td>${fmtMoneyWhole(sub.advanceBalance)}</td><td>${fmtMoneyWhole(sub.loanBalance)}</td><td></td><td></td></tr>`;
+    bodyRows += `<tr class="sal-subtotal"><td></td><td>Subtotal</td><td>${fmtMoney(sub.rate)}</td><td></td><td>${sub.policyHalfDays || '—'}</td><td>${fmtMoney(sub.leaveAmount)}</td>` +
+      `<td>${fmtMoney(sub.basic)}</td><td>${fmtMoney(sub.hra)}</td><td>${fmtMoney(sub.lta)}</td><td>${fmtMoney(sub.gross)}</td>` +
+      `<td>${fmtMoney(sub.pf)}</td><td>${fmtMoney(sub.esi)}</td><td>${fmtMoney(sub.pt)}</td><td>${fmtMoney(sub.advanceTemp)}</td><td>${fmtMoney(sub.advance)}</td><td>${fmtMoney(sub.loanEmi)}</td><td>${fmtMoney(sub.retention)}</td>` +
+      `<td>${fmtMoney(sub.totalDeduction)}</td><td>${sub.conveyance ? '+' + fmtMoney(sub.conveyance) : '—'}</td><td>${fmtMoney(sub.netBeforeDirect)}</td>` +
+      `<td>${sub.directPaid ? fmtMoney(sub.directPaid) : '—'}</td><td>${fmtMoney(sub.netSalary)}</td>` +
+      `<td>${fmtMoney(sub.pen)}</td><td>${fmtMoney(sub.employerPf)}</td><td>${fmtMoney(sub.pfAdmin)}</td>` +
+      `<td>${fmtMoney(sub.edli)}</td><td>${fmtMoney(sub.esiEmployer)}</td><td>${fmtMoney(sub.employerCont)}</td><td>${fmtMoney(sub.ctc)}</td>` +
+      `<td>${fmtMoney(sub.advanceBalance)}</td><td>${fmtMoney(sub.loanBalance)}</td><td></td><td></td></tr>`;
     csvRows.push(['', 'Subtotal', R(sub.rate), '', sub.policyHalfDays, R(sub.leaveAmount), R(sub.basic), R(sub.hra), R(sub.lta), R(sub.gross), R(sub.pf), R(sub.esi), R(sub.pt), R(sub.advanceTemp), R(sub.advance), R(sub.loanEmi), R(sub.retention), R(sub.totalDeduction), R(sub.conveyance), R(sub.netSalary)]);
   }
 
-  bodyRows += `<tr class="sal-grandtotal"><td></td><td>Grand Total</td><td>${fmtMoneyWhole(grand.rate)}</td><td></td><td>${grand.policyHalfDays || '—'}</td><td>${fmtMoneyWhole(grand.leaveAmount)}</td>` +
-    `<td>${fmtMoneyWhole(grand.basic)}</td><td>${fmtMoneyWhole(grand.hra)}</td><td>${fmtMoneyWhole(grand.lta)}</td><td>${fmtMoneyWhole(grand.gross)}</td>` +
-    `<td>${fmtMoneyWhole(grand.pf)}</td><td>${fmtMoneyWhole(grand.esi)}</td><td>${fmtMoneyWhole(grand.pt)}</td><td>${fmtMoneyWhole(grand.advanceTemp)}</td><td>${fmtMoneyWhole(grand.advance)}</td><td>${fmtMoneyWhole(grand.loanEmi)}</td><td>${fmtMoneyWhole(grand.retention)}</td>` +
-    `<td>${fmtMoneyWhole(grand.totalDeduction)}</td><td>${grand.conveyance ? '+' + fmtMoneyWhole(grand.conveyance) : '—'}</td><td>${fmtMoneyWhole(grand.netBeforeDirect)}</td>` +
-    `<td>${grand.directPaid ? fmtMoneyWhole(grand.directPaid) : '—'}</td><td>${fmtMoneyWhole(grand.netSalary)}</td>` +
-    `<td>${fmtMoneyWhole(grand.pen)}</td><td>${fmtMoneyWhole(grand.employerPf)}</td><td>${fmtMoneyWhole(grand.pfAdmin)}</td>` +
-    `<td>${fmtMoneyWhole(grand.edli)}</td><td>${fmtMoneyWhole(grand.esiEmployer)}</td><td>${fmtMoneyWhole(grand.employerCont)}</td><td>${fmtMoneyWhole(grand.ctc)}</td>` +
-    `<td>${fmtMoneyWhole(grand.advanceBalance)}</td><td>${fmtMoneyWhole(grand.loanBalance)}</td><td></td><td></td></tr>`;
+  bodyRows += `<tr class="sal-grandtotal"><td></td><td>Grand Total</td><td>${fmtMoney(grand.rate)}</td><td></td><td>${grand.policyHalfDays || '—'}</td><td>${fmtMoney(grand.leaveAmount)}</td>` +
+    `<td>${fmtMoney(grand.basic)}</td><td>${fmtMoney(grand.hra)}</td><td>${fmtMoney(grand.lta)}</td><td>${fmtMoney(grand.gross)}</td>` +
+    `<td>${fmtMoney(grand.pf)}</td><td>${fmtMoney(grand.esi)}</td><td>${fmtMoney(grand.pt)}</td><td>${fmtMoney(grand.advanceTemp)}</td><td>${fmtMoney(grand.advance)}</td><td>${fmtMoney(grand.loanEmi)}</td><td>${fmtMoney(grand.retention)}</td>` +
+    `<td>${fmtMoney(grand.totalDeduction)}</td><td>${grand.conveyance ? '+' + fmtMoney(grand.conveyance) : '—'}</td><td>${fmtMoney(grand.netBeforeDirect)}</td>` +
+    `<td>${grand.directPaid ? fmtMoney(grand.directPaid) : '—'}</td><td>${fmtMoney(grand.netSalary)}</td>` +
+    `<td>${fmtMoney(grand.pen)}</td><td>${fmtMoney(grand.employerPf)}</td><td>${fmtMoney(grand.pfAdmin)}</td>` +
+    `<td>${fmtMoney(grand.edli)}</td><td>${fmtMoney(grand.esiEmployer)}</td><td>${fmtMoney(grand.employerCont)}</td><td>${fmtMoney(grand.ctc)}</td>` +
+    `<td>${fmtMoney(grand.advanceBalance)}</td><td>${fmtMoney(grand.loanBalance)}</td><td></td><td></td></tr>`;
   csvRows.push(['', 'Grand Total', R(grand.rate), '', grand.policyHalfDays, R(grand.leaveAmount), R(grand.basic), R(grand.hra), R(grand.lta), R(grand.gross), R(grand.pf), R(grand.esi), R(grand.pt), R(grand.advanceTemp), R(grand.advance), R(grand.loanEmi), R(grand.retention), R(grand.totalDeduction), R(grand.conveyance), R(grand.netBeforeDirect),
     R(grand.directPaid), R(grand.netSalary), R(grand.pen), R(grand.employerPf), R(grand.pfAdmin), R(grand.edli), R(grand.esiEmployer), R(grand.employerCont), R(grand.ctc),
     R(grand.advanceBalance), R(grand.loanBalance), '', '']);
@@ -6735,15 +6735,15 @@ async function renderStatutoryReport(key, label){
        'Leave/LOP Deduction','Final Payable Basic','Employee EPF','Employer EPF','Employer EPS',
        'EDLI','Admin Charges','Employee Total','Employer Total','Grand Total','Status','Rule Applied'],
       pfRows.map((x, i) => [i + 1, x.emp.name, x.emp.id, x.emp.uan || '', x.eligible, x.pfType,
-        x.wage + (x.leaveAmount || 0), x.leaveDays || 0, x.leaveAmount || 0, x.wage,
-        x.applicable ? x.employee : 0, x.applicable ? x.epf : 0, x.applicable ? x.eps : 0,
-        x.applicable ? x.edli : 0, x.applicable ? x.admin : 0,
-        x.applicable ? x.employeeTotal : 0, x.applicable ? x.employerTotal : 0,
-        x.applicable ? x.total : 0,
+        Math.round(x.wage + (x.leaveAmount || 0)), x.leaveDays || 0, Math.round(x.leaveAmount || 0), Math.round(x.wage),
+        x.applicable ? Math.round(x.employee) : 0, x.applicable ? Math.round(x.epf) : 0, x.applicable ? Math.round(x.eps) : 0,
+        x.applicable ? Math.round(x.edli) : 0, x.applicable ? Math.round(x.admin) : 0,
+        x.applicable ? Math.round(x.employeeTotal) : 0, x.applicable ? Math.round(x.employerTotal) : 0,
+        x.applicable ? Math.round(x.total) : 0,
         x.applicable ? 'Contributing' : (x.notConfigured ? 'Not configured' : 'PF Not Applicable'), x.reason])
-        .concat([['', 'GRAND TOTAL', '', '', '', '', '', '', '', pfTot.wage, pfTot.employee,
-                  pfTot.epf, pfTot.eps, pfTot.edli, pfTot.admin, pfTot.employee,
-                  pfTot.epf + pfTot.eps + pfTot.edli + pfTot.admin, pfTot.total, '', '']]));
+        .concat([['', 'GRAND TOTAL', '', '', '', '', '', '', '', Math.round(pfTot.wage), Math.round(pfTot.employee),
+                  Math.round(pfTot.epf), Math.round(pfTot.eps), Math.round(pfTot.edli), Math.round(pfTot.admin), Math.round(pfTot.employee),
+                  Math.round(pfTot.epf + pfTot.eps + pfTot.edli + pfTot.admin), Math.round(pfTot.total), '', '']]));
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'PF'), `PF Return - ${monthVal}.csv`, csv, 'text/csv');
     box.innerHTML = `${reportLogoHeader('Provident Fund Return — ' + monthLabel(monthVal))}
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Charged on ${
@@ -6791,10 +6791,10 @@ async function renderStatutoryReport(key, label){
       </tr>`).join('');
     const csv = toCsv(
       ['SR NO','Name','ESI Number','Gross Wages','Employee 0.75%','Employer 3.25%','Total','Status','Rule Applied'],
-      esiRows.map((x, i) => [i + 1, x.emp.name, x.emp.esiNumber || '', x.s.gross,
-        x.r.covered ? x.r.employee : 0, x.r.covered ? x.r.employer : 0, x.r.covered ? x.r.total : 0,
+      esiRows.map((x, i) => [i + 1, x.emp.name, x.emp.esiNumber || '', Math.round(x.s.gross),
+        x.r.covered ? Math.round(x.r.employee) : 0, x.r.covered ? Math.round(x.r.employer) : 0, x.r.covered ? Math.round(x.r.total) : 0,
         x.r.covered ? 'Covered' : 'Exempt', x.r.reason])
-        .concat([['', 'TOTAL', '', esiTot.gross, esiTot.employee, esiTot.employer, esiTot.total, '', '']]));
+        .concat([['', 'TOTAL', '', Math.round(esiTot.gross), Math.round(esiTot.employee), Math.round(esiTot.employer), Math.round(esiTot.total), '', '']]));
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'ESI'), `ESI Return - ${monthVal}.csv`, csv, 'text/csv');
     box.innerHTML = `${reportLogoHeader('ESI Contribution Return — ' + monthLabel(monthVal))}
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Contribution period ${escapeHtml(period.label)} ·
@@ -6828,8 +6828,8 @@ async function renderStatutoryReport(key, label){
       <table><tr><th>Name</th><th class="num">${key.toUpperCase()} Amount</th></tr>${tableRows}<tr class="sal-grandtotal"><td><strong>Grand Total</strong></td><td class="num"><strong>₹${fmtMoney(grandTotal)}</strong></td></tr></table>
     </div>`;
 
-  const csvRows = rows.map(r => [r[0], r[1]]);
-  csvRows.push(['Grand Total', grandTotal]);
+  const csvRows = rows.map(r => [r[0], Math.round(r[1])]);
+  csvRows.push(['Grand Total', Math.round(grandTotal)]);
   const fileName = `${label} - ${monthVal}.csv`;
   const content = toCsv(['Name', key.toUpperCase() + ' Amount'], csvRows);
   queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', cfg.folder), fileName, content, 'text/csv');
@@ -6869,6 +6869,7 @@ async function renderApprenticeSalaryReport(){
   // rather than a net figure nobody can reconcile.
   const cols = ['Name','Rate of Pay','Leave Days','Leave Amount','Basic','HRA','LTA','Gross','Advance Temp','Advance','Loan EMI','Retention','Total Deduction','Conveyance','Net Before Direct','Paid Directly','Net Payable'];
   const csvRows = [];
+  const R = v => Math.round(Number(v) || 0);
   let srNo = 1;
   const grand = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, advanceTemp:0, advance:0, loanEmi:0, retention:0, totalDeduction:0, conveyance:0, netBeforeDirect:0, directPaid:0, netSalary:0 };
   let bodyRows = '';
@@ -6879,7 +6880,7 @@ async function renderApprenticeSalaryReport(){
       `<td class="num">${fmtMoney(s.advanceTemp)}</td><td class="num">${fmtMoney(s.advance)}</td><td class="num">${fmtMoney(s.loanEmi)}</td><td class="num">${fmtMoney(s.retention)}</td><td class="num">${fmtMoney(s.totalDeduction)}</td>` +
       `<td class="num">${s.conveyance ? '+' + fmtMoney(s.conveyance) : '—'}</td><td class="num">${fmtMoney(s.netBeforeDirect)}</td><td class="num">${s.directPaid ? fmtMoney(s.directPaid) : '—'}</td>` +
       `<td class="num"><strong>${fmtMoney(s.netSalary)}</strong></td></tr>`;
-    csvRows.push([emp.name, s.rate, s.leaveDays, s.leaveAmount, s.basic, s.hra, s.lta, s.gross, s.advanceTemp, s.advance, s.loanEmi, s.retention, s.totalDeduction, s.conveyance, s.netBeforeDirect, s.directPaid, s.netSalary]);
+    csvRows.push([emp.name, R(s.rate), s.leaveDays, R(s.leaveAmount), R(s.basic), R(s.hra), R(s.lta), R(s.gross), R(s.advanceTemp), R(s.advance), R(s.loanEmi), R(s.retention), R(s.totalDeduction), R(s.conveyance), R(s.netBeforeDirect), R(s.directPaid), R(s.netSalary)]);
     ['rate','leaveAmount','basic','hra','lta','gross','advanceTemp','advance','loanEmi','retention','totalDeduction','conveyance','netBeforeDirect','directPaid','netSalary'].forEach(k => { grand[k]+=s[k]; });
   }
   bodyRows += `<tr class="sal-grandtotal"><td><strong>Grand Total</strong></td><td class="num">${fmtMoney(grand.rate)}</td><td></td><td class="num">${fmtMoney(grand.leaveAmount)}</td>` +
@@ -6887,7 +6888,7 @@ async function renderApprenticeSalaryReport(){
     `<td class="num">${fmtMoney(grand.advanceTemp)}</td><td class="num">${fmtMoney(grand.advance)}</td><td class="num">${fmtMoney(grand.loanEmi)}</td><td class="num">${fmtMoney(grand.retention)}</td><td class="num">${fmtMoney(grand.totalDeduction)}</td>` +
     `<td class="num">${grand.conveyance ? '+' + fmtMoney(grand.conveyance) : '—'}</td><td class="num">${fmtMoney(grand.netBeforeDirect)}</td><td class="num">${grand.directPaid ? fmtMoney(grand.directPaid) : '—'}</td>` +
     `<td class="num">${fmtMoney(grand.netSalary)}</td></tr>`;
-  csvRows.push(['Grand Total', grand.rate, '', grand.leaveAmount, grand.basic, grand.hra, grand.lta, grand.gross, grand.advanceTemp, grand.advance, grand.loanEmi, grand.retention, grand.totalDeduction, grand.conveyance, grand.netSalary]);
+  csvRows.push(['Grand Total', R(grand.rate), '', R(grand.leaveAmount), R(grand.basic), R(grand.hra), R(grand.lta), R(grand.gross), R(grand.advanceTemp), R(grand.advance), R(grand.loanEmi), R(grand.retention), R(grand.totalDeduction), R(grand.conveyance), R(grand.netSalary)]);
 
   box.innerHTML = `${reportActionBar('Apprentice Salary Report — ' + monthLabel(monthVal), 'apprenticeReportBox')}
     <div class="sal-sheet-wrap print-isolate" id="apprenticeReportPrintArea">
@@ -7001,16 +7002,16 @@ async function renderFinalSalarySheet(){
         <td>${escapeHtml(r.emp.ifsc || '—')}</td>
         <td class="num"><strong>${money(r.net)}</strong></td></tr>`;
       csvRows.push([sr, r.emp.name, r.emp.bankName || '', r.emp.accountNumber || '',
-                    r.emp.ifsc || '', Math.round(r.net * 100) / 100]);
+                    r.emp.ifsc || '', Math.round(r.net)]);
     });
     bodyRows += `<tr class="sal-subtotal"><td></td><td>${escapeHtml(label)} subtotal</td>
       <td colspan="3">${rows.length} employee(s)</td><td class="num">${money(sub)}</td></tr>`;
-    csvRows.push(['', label + ' subtotal', rows.length + ' employee(s)', '', '', Math.round(sub * 100) / 100]);
+    csvRows.push(['', label + ' subtotal', rows.length + ' employee(s)', '', '', Math.round(sub)]);
   }
 
   bodyRows += `<tr class="sal-grandtotal"><td></td><td>Grand Total</td>
     <td colspan="3">${grandCount} employee(s)</td><td class="num">${money(grand)}</td></tr>`;
-  csvRows.push(['', 'GRAND TOTAL', grandCount + ' employee(s)', '', '', Math.round(grand * 100) / 100]);
+  csvRows.push(['', 'GRAND TOTAL', grandCount + ' employee(s)', '', '', Math.round(grand)]);
 
   const cols = ['SR NO','Employee Name','Bank Name','Account Number','IFSC','Final Payable Salary'];
   {
@@ -7081,16 +7082,16 @@ async function renderBonusPaymentSheet(){
         <td>${escapeHtml(e.ifsc || '—')}</td>
         <td class="num"><strong>${money(amount)}</strong></td></tr>`;
       csvRows.push([sr, e.name, e.bankName || '', e.accountNumber || '', e.ifsc || '',
-                    Math.round(amount * 100) / 100]);
+                    Math.round(amount)]);
     });
     bodyRows += `<tr class="sal-subtotal"><td></td><td>${escapeHtml(label)} subtotal</td>
       <td colspan="3">${group.length} employee(s)</td><td class="num">${money(sub)}</td></tr>`;
-    csvRows.push(['', label + ' subtotal', group.length + ' employee(s)', '', '', Math.round(sub * 100) / 100]);
+    csvRows.push(['', label + ' subtotal', group.length + ' employee(s)', '', '', Math.round(sub)]);
   }
 
   bodyRows += `<tr class="sal-grandtotal"><td></td><td>Grand Total</td>
     <td colspan="3">${grandCount} employee(s)</td><td class="num">${money(grand)}</td></tr>`;
-  csvRows.push(['', 'GRAND TOTAL', grandCount + ' employee(s)', '', '', Math.round(grand * 100) / 100]);
+  csvRows.push(['', 'GRAND TOTAL', grandCount + ' employee(s)', '', '', Math.round(grand)]);
 
   const cols = ['SR NO','Employee Name','Bank Name','Account Number','IFSC','Bonus Payable'];
   {
@@ -7188,7 +7189,7 @@ async function renderConsultantReport(){
       emp.pfNo || '',
       emp.uan || 'NA',
       emp.esiNumber || '',
-      ratePayAsOf(emp, dateList[0]).ratePay,
+      Math.round(ratePayAsOf(emp, dateList[0]).ratePay),
       consultantDays(workingDays),
       consultantDays(weekOff),
       consultantDays(presentDays),
@@ -7198,7 +7199,7 @@ async function renderConsultantReport(){
       consultantDays(absentDays),
       consultantDays(payableDays),
       Number(emp.otherAllowances) ? fmtMoney(Number(emp.otherAllowances)) : 'NA',
-      deduction || '',
+      deduction ? Math.round(deduction) : '',
       loanLabel
     ]);
   }
@@ -7256,7 +7257,7 @@ function employedInMonth_(emp, ctx){
 }
 
 function fmtSigned_(n){
-  const v = Math.round(n * 100) / 100;
+  const v = Math.round(n);
   if(v === 0) return '₹0';
   return (v > 0 ? '+₹' : '−₹') + fmtMoney(Math.abs(v));
 }
@@ -7301,10 +7302,10 @@ async function renderSalaryComparisonReport(){
     csvRows.push([title, '', '']);
     items.forEach(i => {
       rowsHtml += `<tr><td class="sal-name">${escapeHtml(i.emp.name)}</td><td>${detailFor(i)}</td><td class="num">${fmtSigned_(i.amount)}</td></tr>`;
-      csvRows.push([i.emp.name, detailFor(i), Math.round(i.amount * 100) / 100]);
+      csvRows.push([i.emp.name, detailFor(i), Math.round(i.amount)]);
     });
     rowsHtml += `<tr class="sal-subtotal"><td></td><td>Subtotal</td><td class="num">${fmtSigned_(sub)}</td></tr>`;
-    csvRows.push(['', 'Subtotal', Math.round(sub * 100) / 100]);
+    csvRows.push(['', 'Subtotal', Math.round(sub)]);
   };
 
   group('New employees added', joined,
@@ -7346,11 +7347,11 @@ async function renderSalaryComparisonReport(){
 
   const csvHead = ['Employee', 'Reason', 'Effect on total'];
   const csvAll = [
-    [prev.label + ' (last month) total', '', Math.round(prevTotal * 100) / 100],
-    [curr.label + ' (this month) total', '', Math.round(currTotal * 100) / 100],
-    ['Difference', '', Math.round(difference * 100) / 100],
+    [prev.label + ' (last month) total', '', Math.round(prevTotal)],
+    [curr.label + ' (this month) total', '', Math.round(currTotal)],
+    ['Difference', '', Math.round(difference)],
     ['', '', '']
-  ].concat(csvRows, [['Grand Total', '', Math.round(difference * 100) / 100]]);
+  ].concat(csvRows, [['Grand Total', '', Math.round(difference)]]);
   {
     const fileName = `Month-wise Salary Comparison - ${monthVal}.csv`;
     const content = toCsv(csvHead, csvAll);
@@ -7526,8 +7527,8 @@ function exportCSV(){
       fmtKm(r.kmToday),
       fmtKm(r.km7),
       fmtKm(r.km15),
-      r.exp7.toFixed(2),
-      r.exp15.toFixed(2)
+      r.exp7.toFixed(0),
+      r.exp15.toFixed(0)
     ].join(','));
   });
   const csv = lines.join('\n');
@@ -7621,7 +7622,7 @@ function exportCompanyCSV(){
   }
   const lines = [['Company','Distance (km)','Expense (₹)'].join(',')];
   lastCompanyRows.forEach(r => {
-    lines.push(['"' + r.company.replace(/"/g,'""') + '"', fmtKm(r.km), r.expense.toFixed(2)].join(','));
+    lines.push(['"' + r.company.replace(/"/g,'""') + '"', fmtKm(r.km), r.expense.toFixed(0)].join(','));
   });
   const csv = lines.join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -10029,7 +10030,7 @@ function toggleStatutoryFieldsForHeading(){
           ? '<span class="pol-warn">⚠ ' + escapeHtml(pfr.reason) + ' — PF cannot be calculated until this is set.</span>'
           : '<span class="pol-ok">✓ ' + escapeHtml(pfr.reason) + '</span>';
       } else {
-        pfEl.value = Math.round(pfr.employee * 100) / 100;
+        pfEl.value = Math.round(pfr.employee);
         if(pfNote) pfNote.textContent = pfr.reason + ' — employee ₹' + fmtMoney(pfr.employeeTotal) +
           ', employer ₹' + fmtMoney(pfr.employerTotal) + ', total ₹' + fmtMoney(pfr.grandTotal) + '.';
       }
@@ -10048,7 +10049,7 @@ function toggleStatutoryFieldsForHeading(){
         isDisabled: (document.getElementById('f_esiDisabled') || {}).value === 'yes',
         coveredAtPeriodStart: (document.getElementById('f_esiCovered') || {}).value === 'yes'
       });
-      esiEl.value = Math.round(r.employee * 100) / 100;
+      esiEl.value = Math.round(r.employee);
       if(esiNote) esiNote.textContent = r.reason +
         (r.covered ? ' Employer pays ₹' + fmtMoney(r.employer) + '. Period: ' + r.period.label + '.' : '');
     }
@@ -10231,7 +10232,7 @@ function payrollValue(key){
     esi: Number((document.getElementById('f_esiDeduction') || {}).value) || 0
   };
   const c = computePayrollComponents(rate, headingKey, manual).find(x => x.key === key);
-  return c ? Math.round(c.value * 100) / 100 : 0;
+  return c ? Math.round(c.value) : 0;
 }
 
 // Refuses the save and names the heading, rather than storing an employee whose
@@ -11761,18 +11762,18 @@ async function renderLeaveEncashmentReport(){
         <td class="num">${money(r.perDay)}</td>
         <td class="num"><strong>${money(r.amount)}</strong></td></tr>`;
       csvRows.push([sr, r.name, r.emp.bankName || '', r.emp.accountNumber || '', r.emp.ifsc || '',
-                    r.pending, r.monthly, r.basis, r.perDay, r.amount]);
+                    r.pending, Math.round(r.monthly), Math.round(r.basis), Math.round(r.perDay), Math.round(r.amount)]);
     });
     bodyRows += `<tr class="sal-subtotal"><td></td><td>${escapeHtml(label)} subtotal</td>
       <td colspan="2">${group.length} employee(s)</td><td class="num">${subDays}</td>
       <td colspan="3"></td><td class="num">${money(subAmt)}</td></tr>`;
-    csvRows.push(['', label + ' subtotal', group.length + ' employee(s)', '', '', subDays, '', '', '', Math.round(subAmt * 100) / 100]);
+    csvRows.push(['', label + ' subtotal', group.length + ' employee(s)', '', '', subDays, '', '', '', Math.round(subAmt)]);
   }
 
   bodyRows += `<tr class="sal-grandtotal"><td></td><td>Grand Total</td>
     <td colspan="2">${payable.length} employee(s)</td><td class="num">${grandDays}</td>
     <td colspan="3"></td><td class="num">${money(grandAmt)}</td></tr>`;
-  csvRows.push(['', 'GRAND TOTAL', payable.length + ' employee(s)', '', '', grandDays, '', '', '', Math.round(grandAmt * 100) / 100]);
+  csvRows.push(['', 'GRAND TOTAL', payable.length + ' employee(s)', '', '', grandDays, '', '', '', Math.round(grandAmt)]);
 
   const cols = ['SR NO','Employee Name','Bank Name','Account Number','IFSC',
                 'Pending leave days', B.label + ' (monthly)',
@@ -12197,7 +12198,7 @@ async function viewReport(key, label){
       const d = new Date(e.nextIncrement);
       const monthName = d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
       const lastSalary = monthlyPayFor(e).gross;
-      csvRows.push([e.name, monthName, e.nextIncrement, lastSalary]);
+      csvRows.push([e.name, monthName, e.nextIncrement, Math.round(lastSalary)]);
       return `<tr><td>${escapeHtml(e.name)}</td><td>${monthName}</td><td>${e.nextIncrement}</td><td class="num">₹${lastSalary.toFixed(0)}</td></tr>`;
     }).join('');
     box.innerHTML = `<div style="margin-top:12px;">${reportLogoHeader(label)}<table><tr><th>Name</th><th>Increment month</th><th>Increment date</th><th class="num">Last salary (gross)</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table>${fsBtn}</div>`;
@@ -12234,7 +12235,7 @@ async function viewReport(key, label){
     rows = employees.map(e => {
       const p = monthlyPayFor(e);
       const gross = p.gross, deductions = p.deductions, net = p.net, conv = p.conveyance;
-      csvRows.push([e.name, gross, conv, deductions, net]);
+      csvRows.push([e.name, Math.round(gross), Math.round(conv), Math.round(deductions), Math.round(net)]);
       return `<tr><td>${escapeHtml(e.name)}</td><td class="num">₹${gross.toFixed(0)}</td>` +
         `<td class="num">${conv ? '+₹' + conv.toFixed(0) : '—'}</td>` +
         `<td class="num">−₹${deductions.toFixed(0)}</td><td class="num"><strong>₹${net.toFixed(0)}</strong></td></tr>`;
@@ -12247,7 +12248,7 @@ async function viewReport(key, label){
       const annualGross = monthlyGross * 12;
       const bonus = diwaliBonusFor(e);
       const annualCtc = annualGross + bonus;
-      csvRows.push([e.name, monthlyGross, annualGross, bonus, annualCtc]);
+      csvRows.push([e.name, Math.round(monthlyGross), Math.round(annualGross), Math.round(bonus), Math.round(annualCtc)]);
       return `<tr><td>${escapeHtml(e.name)}</td><td class="num">₹${monthlyGross.toFixed(0)}</td><td class="num">₹${annualGross.toFixed(0)}</td><td class="num">₹${bonus.toFixed(0)}</td><td class="num">₹${annualCtc.toFixed(0)}</td></tr>`;
     }).join('');
     box.innerHTML = `<div style="margin-top:12px;overflow-x:auto;">${reportLogoHeader(label)}<table><tr><th>Name</th><th class="num">Monthly gross</th><th class="num">Annual gross</th><th class="num">Diwali bonus</th><th class="num">Annual CTC</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table><p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Annual CTC = (Rate of Pay + Other allowances + Dress allowance + Mobile expense + Conveyance) × 12 + Diwali bonus. Rate of Pay is the whole Basic + HRA + LTA gross. PF, ESI and PT come out of it, so they are not added again. The employer's own PF and ESI are not included here either.</p>${fsBtn}</div>`;
@@ -12276,9 +12277,9 @@ async function viewReport(key, label){
       const note = l.status !== 'active' ? 'closed'
                  : stalled ? 'active — no recovery month set, nothing is being deducted' : 'active';
       const what = l.reason ? l.reason : 'Loan ' + (i + 1);
-      csvRows.push([e.name, what, amount, Number(l.instalment) || 0, started || '—',
-                    l.status === 'active' ? recovered : amount,
-                    l.status === 'active' ? bal : 0, note]);
+      csvRows.push([e.name, what, Math.round(amount), Math.round(Number(l.instalment) || 0), started || '—',
+                    Math.round(l.status === 'active' ? recovered : amount),
+                    Math.round(l.status === 'active' ? bal : 0), note]);
       return `<tr${stalled ? ' class="inc-overdue"' : ''}>
         <td>${escapeHtml(e.name)}<span class="inc-sub">${escapeHtml(what)}</span></td>
         <td class="num">₹${fmtMoney(amount)}</td>

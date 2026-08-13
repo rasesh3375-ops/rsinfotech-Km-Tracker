@@ -202,6 +202,16 @@ unrestricted throughout.
 
 ## Known constraints
 
+- **Every amount is whole rupees, no paise, everywhere.** `fmtMoney` rounds and
+  formats every figure shown on screen; CSV exports round with `Math.round()`
+  (or the same `R()` helper used in the Salary Sheet) right at the
+  `csvRows.push`/`stashReportShare` boundary, not in the underlying
+  calculation. Internal domain functions (`plEncashmentFor`, `diwaliBonusFor`,
+  loan/leave math) keep full precision — only the display and export layer
+  rounds — so rounding never compounds across a chain of calculations. There
+  used to be a separate `fmtMoneyWhole` for the Salary Sheet only; it was
+  folded into `fmtMoney` once every screen needed the same treatment, so there
+  is now one money formatter, not two.
 - The employee record shares one Google Sheets cell with a 50,000 character
   limit. Documents go to Drive and the record keeps only the link; there is a
   migration button in Admin Settings for older records that still hold images.
