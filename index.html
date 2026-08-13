@@ -14838,7 +14838,23 @@ function letterTemplate(type, f){
   }
 }
 
+// Both autoFillGeneratorFromEmployee (employee changed) and selectLetterType
+// (letter type changed) call generateLetter() without awaiting it, so
+// switching either one twice in quick succession — a corrected employee
+// pick, a changed mind on the letter type, both completely normal — starts
+// a second call before the first's backend round trips (letters log,
+// activity log, Drive save) have returned. Whichever finishes last used to
+// win regardless of which one the user actually meant, including a Close
+// pressed on the first letter while the second was still in flight: its
+// final openFullscreenView() still fired, reopening full screen with that
+// letter's title over a letterPaper/letterActionsBox already cleared to
+// empty by the Close. Each call takes a token and checks it still owns the
+// screen before touching anything visible; the backend calls below always
+// run to completion regardless, so the letters log, activity log and Drive
+// copy are never skipped just because the screen moved on.
+let generateLetterToken = 0;
 async function generateLetter(){
+  const myToken = ++generateLetterToken;
   const msg = document.getElementById('genMsg');
   const type = LETTER_TYPES[selectedLetterIdx];
   const isOffer = type === 'Offer Letter';
@@ -14957,20 +14973,27 @@ async function generateLetter(){
   company.name = f.company || company.name;
   const signatory = await getHrSignatory();
   const signOff = FORMAL_LETTERS.indexOf(type) !== -1 ? letterSignatureBlock(type, name, company, signatory) : '';
-  document.getElementById('letterPaper').innerHTML = `<div class="rpt-wrap"><div class="rpt-page">
+  // A newer call already owns the screen (or the letter was closed while
+  // this one was still working) — the backend calls below still need to
+  // run for this letter, but nothing here should paint over what is
+  // actually on screen right now.
+  const stillCurrent = myToken === generateLetterToken;
+  if(stillCurrent) document.getElementById('letterPaper').innerHTML = `<div class="rpt-wrap"><div class="rpt-page">
     ${letterHeader(company, type, niceDate_(f.issueDate) || f.issueDate)}
     <div class="rpt-body" style="white-space:pre-wrap;">${escapeHtml(text)}</div>
     ${signOff}
     ${roleReportFooter(company, 1, 1)}
   </div></div>`;
-  document.getElementById('letterOutput').classList.add('show');
-  document.getElementById('letterActionsBox').classList.remove('hidden');
-  // A letter always opens straight into full screen below, so its action bar
-  // skips the "Full screen" toggle (nothing for it to do) and the small
-  // standalone ✕ (the full-screen header's own Close already covers it) —
-  // just Print, Email and WhatsApp alongside the header's title and Close.
-  document.getElementById('letterActionsBox').innerHTML =
-    reportActionBar(type + ' — ' + name, 'letterOutput', `closeLetterOutput()`, { fullscreenBtn:false, topClose:false });
+  if(stillCurrent){
+    document.getElementById('letterOutput').classList.add('show');
+    document.getElementById('letterActionsBox').classList.remove('hidden');
+    // A letter always opens straight into full screen below, so its action bar
+    // skips the "Full screen" toggle (nothing for it to do) and the small
+    // standalone ✕ (the full-screen header's own Close already covers it) —
+    // just Print, Email and WhatsApp alongside the header's title and Close.
+    document.getElementById('letterActionsBox').innerHTML =
+      reportActionBar(type + ' — ' + name, 'letterOutput', `closeLetterOutput()`, { fullscreenBtn:false, topClose:false });
+  }
 
   // A generated leave form with dates on it is an application somebody has to
   // answer, so it is filed as one. A blank form printed to be filled in by hand
@@ -15015,7 +15038,11 @@ async function generateLetter(){
 
   const safeType = type.replace(/\//g, '-'); // matches the Drive folder name (no slashes in folder names)
   const letterFileName = `${name} - ${f.issueDate}.txt`;
+  // Saved to Drive regardless of staleness — this letter really was
+  // generated and the audit trail (this, the letters log and the activity
+  // log above) records that whether or not it is still what's on screen.
   saveFileToDrive(hrYearPath(f.issueDate, 'Generator', safeType), letterFileName, text, 'text/plain');
+  if(myToken !== generateLetterToken) return; // superseded — leave the current letter, and its Email/WhatsApp share content, alone
   stashReportShare(type + ' — ' + name, letterFileName, text, 'text/plain',
     'HR Management > ' + financialYearLabel(f.issueDate) + ' > Generator > ' + safeType);
   openFullscreenView(type + ' — ' + name, 'letterOutput');
