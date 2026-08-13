@@ -7977,10 +7977,7 @@ function mergeRoleField(domains, field, limit){
 // include irrelevant sections" is enforced here: a section with nothing to say
 // for this employee is not rendered at all.
 const ROLE_REPORT_TYPES = [
-  { key:'profile',    label:'Role & Responsibility Profile', sections:['summary','responsibilities','kpis','observations','recommendations','conclusion','signature'] },
-  { key:'performance',label:'Performance Review Report',     sections:['summary','responsibilities','kpis','observations','recommendations','conclusion','signature'] },
-  { key:'compliance', label:'Compliance & Risk Report',      sections:['summary','risks','compliance','checklist','observations','recommendations','conclusion','signature'] },
-  { key:'induction',  label:'Induction & Onboarding Report', sections:['summary','responsibilities','checklist','compliance','recommendations','conclusion','signature'] }
+  { key:'profile',    label:'Role & Responsibility Profile', sections:['summary','responsibilities','kpis','observations','recommendations','conclusion','signature'] }
 ];
 
 function roleReportContent(emp, typeKey){
