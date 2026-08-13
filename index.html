@@ -1941,8 +1941,8 @@
         <div id="rptSecLeaveRollover" class="hidden">
         <button type="button" class="gen-back-btn" onclick="showReportsLanding()">← Back to Reports</button>
         <section class="block">
-          <h2 style="margin:0 0 4px;">Leave Balance Generator for New Year</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Sets each employee's opening EL from what they earned last year — one day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} attendance days — and their SL to the yearly allowance. Resident Engineers and Work From Home staff are skipped, their policies being different, as are non-R.S. Infotech headings. Run once, in April.</p>
+          <h2 style="margin:0 0 4px;">Sick Leave Balance Generator for New Year</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Sets each employee's opening SL to the yearly allowance for their employee type. Resident Engineers and Work From Home staff are skipped, their policies being different, as are non-R.S. Infotech headings. Run once, in April. <strong>EL is not touched here</strong> — open it for the new year from the EL Calculation Sheet's "Encash and start next year at nil" or "Carry forward instead", so EL is only ever set from one place.</p>
           <label class="field">Year starts</label>
           <input class="field-input" type="date" id="rolloverFy">
           <div style="height:12px"></div>
@@ -12795,17 +12795,20 @@ async function migrateDocumentsToDrive(){
     Employee record is now ${(size/1024).toFixed(0)} KB of the 49 KB the sheet can hold.</p>`;
 }
 
-// Opens a new leave year. EL comes from what each employee actually earned —
-// one day per 25 attendance days, the rate in the policy — and SL is the
-// yearly allowance for their employee type. Nothing is carried over from the
-// closing balance, because the policy says unused leave is not carried forward.
+// Opens a new leave year for Sick Leave only — SL is reset to the flat
+// yearly allowance for the employee type, since the policy gives no
+// mechanism to encash or carry it. EL used to be set here too (one day per
+// 25 attendance days), but the EL Calculation Sheet's own "Encash and start
+// next year at nil" / "Carry forward instead" already work out and set the
+// new EL opening balance from that same attendance record — running both
+// meant EL could be paid out in cash by one and then handed straight back as
+// fresh usable leave by the other, for the same year's attendance. EL is
+// now only ever written from the EL Calculation Sheet, so there is one place
+// it can be set, not two that can disagree.
 async function rollOverLeaveYear(){
   const box = document.getElementById('rolloverBox');
   const fyStart = (document.getElementById('rolloverFy') || {}).value || nextFinancialYearStart();
   const label = financialYearLabel(fyStart);
-  // The year that is closing: the one containing the day before this one opens.
-  const prevEnd = new Date(new Date(fyStart + 'T12:00:00Z') - 86400000).toISOString().slice(0,10);
-  const prevStart = financialYearStart(prevEnd);
 
   const employees = await getEmployees();
   // Resident Engineers and Work From Home run on different policies, so they
@@ -12817,33 +12820,23 @@ async function rollOverLeaveYear(){
   const skipped = employees.filter(e => e.employmentStatus !== 'left' && eligible.indexOf(e) === -1);
 
   if(!eligible.length){ box.innerHTML = '<p class="dash-muted">No eligible employees.</p>'; return; }
-  box.innerHTML = '<p class="dash-muted">Reading attendance for ' + prevStart + ' to ' + prevEnd + '…</p>';
-  const attByEmp = await getAttendanceMany(eligible.map(e => e.id));
 
   const P = LEAVE_POLICY;
   const rows = eligible.map(e => {
-    const att = attByEmp[e.id] || {};
-    // Attendance days in the year just ended, on the same codes the policy
-    // counts as attendance.
-    let days = 0;
-    Object.keys(att).forEach(d => {
-      if(d < prevStart || d > prevEnd) return;
-      const c = (att[d] || {}).code;
-      if(c === 'P' || c === 'SHORT' || c === 'EL' || c === 'SL') days += 1;
-      else if(c === 'HEL' || c === 'HSL' || c === 'HLP') days += 0.5;
-    });
-    const el = Math.floor(days / P.privilegeLeave.earnedPerAttendanceDays);
     const sl = P.sickLeave.perYear[e.employeeType === 'part' ? 'part' : 'full'];
-    return { e, days, el, sl };
+    return { e, sl };
   });
 
-  const summary = rows.map(r => '• ' + (r.e.name || r.e.id) + ': ' + r.days +
-    ' attendance days → ' + r.el + ' EL, ' + r.sl + ' SL').join('\n');
+  const summary = rows.map(r => '• ' + (r.e.name || r.e.id) + ': ' + r.sl + ' SL').join('\n');
   if(!confirm('Open leave year ' + label + ' for ' + rows.length + ' employee(s)?\n\n' + summary +
-    '\n\nThis replaces their opening EL and SL. ' + skipped.length +
+    '\n\nThis replaces their opening SL. EL is not touched — open it separately from the EL Calculation ' +
+    'Sheet. ' + skipped.length +
     ' employee(s) are skipped — Resident Engineers, Work From Home and non-R.S. Infotech headings.')) return;
 
-  rows.forEach(r => { r.e.elOpening = r.el; r.e.slOpening = r.sl; r.e.leaveOpeningFrom = fyStart.slice(0, 7); });
+  // leaveOpeningFrom marks the month both opening balances are current as of,
+  // so it still moves forward here even though this only sets SL — it is the
+  // baseline leaveUsedThisFinancialYear reads for EL usage too.
+  rows.forEach(r => { r.e.slOpening = r.sl; r.e.leaveOpeningFrom = fyStart.slice(0, 7); });
   await saveEmployees(employees);
   invalidateSharedRead('employees');
   box.innerHTML = '<p class="dash-muted">✓ Leave year ' + escapeHtml(label) + ' opened for ' + rows.length +
