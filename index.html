@@ -753,6 +753,7 @@
   .rpt-sign-tbl{width:100%;border-collapse:collapse;margin-top:24px;font-size:9pt;}
   .rpt-sign-tbl td{width:33.3%;padding:0 10px;text-align:center;color:#5A6270;vertical-align:bottom;}
   .rpt-sign-line{border-bottom:1px solid var(--navy);height:34px;margin-bottom:5px;}
+  .rpt-sign-img{max-height:32px;max-width:150px;display:block;margin:0 auto;object-fit:contain;}
   .rpt-foot{border-top:1.5px solid var(--navy);margin-top:12px;padding-top:6px;
     display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:7.5pt;color:#5A6270;}
   .rpt-foot-l,.rpt-foot-r{display:flex;align-items:center;gap:9px;}
@@ -1705,10 +1706,10 @@
               <p>What is owed for unused privilege leave at the year end.</p>
               <span class="btn full">Generate</span>
             </button>
-            <button type="button" class="gen-card" onclick="openGeneratorCard('genSecLetterhead')">
+            <button type="button" class="gen-card" onclick="openLetterheadCard()">
               <div class="gen-card-icon t3">🏢</div>
               <h3>Company Letterhead</h3>
-              <p>Address, phone, email and website printed on every generated report.</p>
+              <p>Address, phone, email, website and the HR signatory printed on every generated report.</p>
               <span class="btn full">Open</span>
             </button>
             <button type="button" class="gen-card" onclick="openGeneratorCard('genSecOfficeDocuments')">
@@ -1752,6 +1753,10 @@
           <div style="height:10px"></div>
           <label class="field">Website</label>
           <input class="field-input" type="text" id="coWebsite" placeholder="www.example.com">
+          <div style="height:10px"></div>
+          <label class="field">HR Signatory</label>
+          <select class="field-input" id="coHrSignatory"></select>
+          <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Whoever is picked here signs every generated letter and the "Approved by (HR)" line on Role Reports — their name, specimen signature and mobile number come straight from their own Employee Master record, so update it there, not here.</p>
           <div style="height:12px"></div>
           <button class="btn full" onclick="withBusy(this,'Saving…',saveCompanyProfileFromForm)">Save letterhead</button>
           <div class="msg" id="coMsg"></div>
@@ -8384,10 +8389,24 @@ const COMPANY_NAME = 'R.S. Infotech';
 async function getCompanyProfile(){
   const v = await safeGet('company_profile', true);
   const saved = v ? JSON.parse(v) : {};
-  return Object.assign({ name: COMPANY_NAME, address:'', phone:'', email:'', website:'' }, saved);
+  return Object.assign({ name: COMPANY_NAME, address:'', phone:'', email:'', website:'', hrSignatoryId:'' }, saved);
 }
 async function saveCompanyProfile(p){
   await safeSet('company_profile', JSON.stringify(p), true);
+}
+
+// The one Employee Master record designated to sign as HR — there is a single
+// shared HR login, not one per person, so the app cannot tell who is typing.
+// Whoever is picked on the Company Letterhead screen is used everywhere a
+// letter or report needs an HR signature: their name, their specimen
+// signature image and their mobile number, all already on file for them as
+// an employee rather than typed in again here.
+async function getHrSignatory(){
+  const co = await getCompanyProfile();
+  if(!co.hrSignatoryId) return null;
+  const emp = (await getEmployees()).find(e => e.id === co.hrSignatoryId);
+  if(!emp) return null;
+  return { name: emp.name, phone: emp.phone, signatureImg: emp.signatureImg };
 }
 
 // ---- role report renderer ----
@@ -8449,7 +8468,12 @@ function roleReportFooter(company, page, total){
 
 // Section blocks, in the order the chosen report type asks for. Anything with
 // no content for this employee returns '' and never reaches the page.
-function roleReportBlocks(c, emp){
+function roleReportBlocks(c, emp, signatory){
+  const hrSigImg = signatory && signatory.signatureImg
+    ? `<img src="${escapeHtml(signatory.signatureImg)}" alt="Signature" class="rpt-sign-img">` : '';
+  const hrLine = signatory
+    ? `Approved by (HR)<br>${escapeHtml(signatory.name)}${signatory.phone ? '<br>' + escapeHtml(signatory.phone) : ''}`
+    : 'Approved by (HR)';
   const list = (title, items, cls) => items && items.length
     ? `<section class="rpt-sec ${cls || ''}"><h2>${title}</h2><ul>${items.map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul></section>` : '';
   const table = (title, items, head) => items && items.length
@@ -8472,7 +8496,7 @@ function roleReportBlocks(c, emp){
       <table class="rpt-sign-tbl"><tbody><tr>
         <td><div class="rpt-sign-line"></div>Reviewed by (Reporting Manager)</td>
         <td><div class="rpt-sign-line"></div>Acknowledged by (${escapeHtml(emp.name || 'Employee')})</td>
-        <td><div class="rpt-sign-line"></div>Approved by (HR)</td>
+        <td>${hrSigImg}<div class="rpt-sign-line"></div>${hrLine}</td>
       </tr></tbody></table></section>`
   };
   return c.type.sections.map(s => map[s]).filter(Boolean);
@@ -8513,7 +8537,8 @@ async function buildRoleReportHtml(emp, typeKey){
     generatedBy: 'HR — ' + COMPANY_NAME
   };
   const headHtml = roleReportHeader(company, emp, meta);
-  const blocks = roleReportBlocks(c, emp);
+  const signatory = await getHrSignatory();
+  const blocks = roleReportBlocks(c, emp, signatory);
   const pages = paginateRoleReport(blocks, headHtml, roleReportFooter(company, 1, 1));
   return pages.map((blks, i) => `<div class="rpt-page">
       ${headHtml}
@@ -12161,6 +12186,22 @@ async function rollOverLeaveYear(){
     'Reports from April onward file to Drive under HR Management &gt; ' + escapeHtml(label) + '.</p>';
 }
 
+// Opens the Company Letterhead card with its fields — including the HR
+// Signatory dropdown — showing what is actually saved, not blank. The
+// dropdown in particular is useless unless it can show the current pick.
+async function openLetterheadCard(){
+  openGeneratorCard('genSecLetterhead');
+  const co = await getCompanyProfile();
+  document.getElementById('coAddress').value = co.address;
+  document.getElementById('coPhone').value = co.phone;
+  document.getElementById('coEmail').value = co.email;
+  document.getElementById('coWebsite').value = co.website;
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
+  document.getElementById('coHrSignatory').innerHTML = '<option value="">— None selected —</option>' +
+    employees.map(e => `<option value="${e.id}"${e.id === co.hrSignatoryId ? ' selected' : ''}>${escapeHtml(e.name)}${e.designation ? ' — ' + escapeHtml(e.designation) : ''}</option>`).join('');
+  document.getElementById('coMsg').textContent = '';
+}
+
 // ---- bulk employee import ----
 async function saveCompanyProfileFromForm(){
   const msg = document.getElementById('coMsg');
@@ -12169,6 +12210,7 @@ async function saveCompanyProfileFromForm(){
   co.phone   = document.getElementById('coPhone').value.trim();
   co.email   = document.getElementById('coEmail').value.trim();
   co.website = document.getElementById('coWebsite').value.trim();
+  co.hrSignatoryId = document.getElementById('coHrSignatory').value;
   await saveCompanyProfile(co);
   msg.textContent = 'Letterhead saved — it will appear on every report from now on.';
   msg.classList.remove('error');
@@ -14103,8 +14145,13 @@ function letterHeader(company, title, dateStr){
 // side signs. Leave/Loan forms and the Salary Slip build their own
 // signature and approval lines into the body instead, since those already
 // need more than one box (HOD approval, sanctioned amount, and so on).
-function letterSignatureBlock(type, name, company){
-  const forCompany = `<div class="rpt-sign-line"></div>For ${escapeHtml(company.name)}<br>Authorised Signatory`;
+function letterSignatureBlock(type, name, company, signatory){
+  const sigImg = signatory && signatory.signatureImg
+    ? `<img src="${escapeHtml(signatory.signatureImg)}" alt="Signature" class="rpt-sign-img">` : '';
+  const signedBy = signatory
+    ? `${escapeHtml(signatory.name)}<br>Authorised Signatory${signatory.phone ? '<br>' + escapeHtml(signatory.phone) : ''}`
+    : 'Authorised Signatory';
+  const forCompany = `${sigImg}<div class="rpt-sign-line"></div>For ${escapeHtml(company.name)}<br>${signedBy}`;
   if(type === 'Offer Letter' || type === 'Appointment Letter'){
     return `<table class="rpt-sign-tbl"><tbody><tr>
       <td style="width:50%;">${forCompany}</td>
@@ -14315,7 +14362,8 @@ async function generateLetter(){
                           'Exit Letter', 'No Dues Letter', 'Full & Final Settlement Letter'];
   const company = await getCompanyProfile();
   company.name = f.company || company.name;
-  const signOff = FORMAL_LETTERS.indexOf(type) !== -1 ? letterSignatureBlock(type, name, company) : '';
+  const signatory = await getHrSignatory();
+  const signOff = FORMAL_LETTERS.indexOf(type) !== -1 ? letterSignatureBlock(type, name, company, signatory) : '';
   document.getElementById('letterPaper').innerHTML = `<div class="rpt-wrap"><div class="rpt-page">
     ${letterHeader(company, type, niceDate_(f.issueDate) || f.issueDate)}
     <div class="rpt-body" style="white-space:pre-wrap;">${escapeHtml(text)}</div>
