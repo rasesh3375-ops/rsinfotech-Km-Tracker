@@ -165,6 +165,15 @@ they fix. Read `git log` before writing one.
 allowances come from HR or the PF consultant. When a number is uncertain, say
 so plainly rather than picking a plausible one.
 
+**The backend is gated by role, as a whitelist.** `doGet`/`doPost` in
+`Code 2.js` check `validateSession_`'s role; an engineer's tracking login may
+only touch what `engineerMayRead_`/`engineerMayWrite_`/`ENGINEER_SHARED_READ`
+explicitly name — their own trips, check-ins, live-tracking and attendance,
+shared reference data, and adding to `leave_requests`. A key nobody has
+listed is refused, not allowed. If a new storage key needs engineer access,
+add it to the whitelist deliberately; do not widen the default. HR is
+unrestricted throughout.
+
 ## Deploying
 
 - **Frontend** — push to `main`. Vercel does the rest. Tell HR to hard-refresh,
@@ -179,16 +188,19 @@ so plainly rather than picking a plausible one.
 
 ## Known constraints
 
-- **The backend has no role gating.** A valid session token can read or write
-  any key, so an engineer's tracking login can in principle reach payroll data.
-  Pre-existing, and load-bearing now that payroll lives here. Worth fixing.
 - The employee record shares one Google Sheets cell with a 50,000 character
   limit. Documents go to Drive and the record keeps only the link; there is a
   migration button in Admin Settings for older records that still hold images.
-- Attendance saves are batched — one read and one write per employee, not per
-  cell. An earlier version made 620 backend calls for a month of ten staff and
-  silently lost most of them. Do not reintroduce per-cell writes, and do not
-  use `safeSet` where the caller needs to know whether the write succeeded — it
-  swallows errors. Use `remoteSet`, which returns a boolean.
+  Attendance now records check-in and check-out times too, and at that rate
+  hits the same limit in roughly 1.9 years from when that started. Fixing it
+  needs attendance split into one key per employee per financial year
+  (`attendance:<id>:<financial-year>`) instead of one key per employee
+  holding every day they have ever worked — not started.
+- Attendance saves are batched via `setMany` — one read and one write for the
+  whole save, not one per employee or per cell. An earlier version made 620
+  backend calls for a month of ten staff and silently lost most of them. Do
+  not reintroduce per-cell writes, and do not use `safeSet` where the caller
+  needs to know whether the write succeeded — it swallows errors. Use
+  `remoteSet`, which returns a boolean.
 - `position: sticky` works inside `.modal-box` because the overlay, not the
   box, is the scrolling element.
