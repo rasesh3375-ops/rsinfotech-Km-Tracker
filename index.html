@@ -724,6 +724,10 @@
        working section by section, banner or not. */
     .emp-step-group{display:grid;grid-template-columns:1fr 1fr;column-gap:24px;align-items:start;}
     .field-group-wide{grid-column:1 / -1;}
+    /* A section with nothing to pair with in its own group — computed by
+       updateEmpStepGroupSpans() — spans the full row instead of leaving an
+       empty box beside it, the way Rate of Pay/Loans/PF-ESI-PT already do. */
+    .emp-step-group .field-group.emp-solo{grid-column:1 / -1;}
   }
   @media (min-width: 1024px){
     #employeeModalOverlay .modal-box{max-width:920px;}
@@ -11575,6 +11579,33 @@ function initEmpStepper(){
   highlight();
 }
 
+// Each step group lays out its own field-groups two to a row, but CSS Grid
+// never backfills a gap — a regular (non-wide) field-group ends up alone,
+// with an empty box's worth of space beside it, whenever it is the last one
+// in its group, or whenever a field-group-wide section immediately follows
+// it and forces a new row before a second regular section can share this
+// one. .emp-solo (added here) stretches that lone section to the full row
+// width instead, the same as PF/ESI/PT and the other field-group-wide
+// sections already look. Family Information is the one section whose own
+// hidden state can flip without the whole form re-rendering (see
+// toggleFamilyFields()), which shifts who ends up alone after it — so this
+// runs again from there, not just once at render time.
+function updateEmpStepGroupSpans(){
+  document.querySelectorAll('.emp-step-group').forEach(group => {
+    const items = Array.from(group.children).filter(el =>
+      el.classList.contains('field-group') && !el.classList.contains('hidden'));
+    let pairedWithPrevious = false;
+    items.forEach((item, i) => {
+      item.classList.remove('emp-solo');
+      if(item.classList.contains('field-group-wide')){ pairedWithPrevious = false; return; }
+      if(pairedWithPrevious){ pairedWithPrevious = false; return; }
+      const next = items[i + 1];
+      if(next && !next.classList.contains('field-group-wide')){ pairedWithPrevious = true; }
+      else { item.classList.add('emp-solo'); }
+    });
+  });
+}
+
 function toggleTrackingFields(){
   const needsTracking = document.getElementById('f_needsTracking').value === 'yes';
   document.getElementById('trackingLoginFields').classList.toggle('hidden', !needsTracking);
@@ -11679,6 +11710,9 @@ function toggleFamilyFields(){
       if(el) el.value = '';
     });
   }
+  // Family Information joining or leaving the grid shifts which section
+  // after it ends up alone in its row.
+  updateEmpStepGroupSpans();
 }
 
 function toggleStatutoryFieldsForHeading(){
@@ -12644,6 +12678,7 @@ async function openAddEmployeeModal(id){
   renderLoanRows();
   renderAssetRows();
   initEmpStepper();
+  updateEmpStepGroupSpans();
 
   // Offer the draft back only when it belongs to this form — a half-finished
   // new employee must never be poured into someone else's record.
@@ -12782,6 +12817,7 @@ async function saveIncrement(id){
     document.getElementById('employeeModalRoot').innerHTML = employeeModalHtml(editingEmployeeDraft);
     toggleStatutoryFieldsForHeading();
     initEmpStepper();
+    updateEmpStepGroupSpans();
   }
   await renderEmployeeList();
 }
