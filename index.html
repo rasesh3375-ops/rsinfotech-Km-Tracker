@@ -701,6 +701,23 @@
   .field-group{margin-bottom:16px;}
   .field-group .sec-title{font-size:11.5px;font-weight:700;color:var(--amber-dark);text-transform:uppercase;letter-spacing:.5px;margin:18px 0 12px;padding-top:14px;border-top:1px dashed var(--line);}
 
+  /* Add Employee opens full screen — solid page, not a dialog floating over a
+     dimmed dashboard — the same treatment #fullscreenSheetRoot already gives
+     Salary/Attendance Sheet (same var(--paper) background, edge to edge).
+     Unlike those, this stays the existing .modal-overlay/.modal-box markup
+     (nothing to relocate into a separate root), so the override lives here
+     instead: kill the dim and the floating-card look, let the box fill the
+     viewport height. Applies at every width, not just mobile — the same
+     dashboard-behind-a-dimmed-form look was there on desktop too.
+     min-height:100vh, not align-items:stretch — stretching the flex item
+     broke the stepper's position:sticky (it stopped sticking and scrolled
+     off-screen with the content), a known sticky-inside-a-stretched-flex-
+     item interaction. 100vh fills the screen without touching how the box
+     is sized as a flex item, so the overlay's own align-items:flex-start
+     (unchanged) still applies and sticky keeps working. */
+  #employeeModalOverlay{background:var(--paper);padding:0;}
+  #employeeModalOverlay .modal-box{border-radius:0;margin:0;min-height:100vh;}
+
   /* Add Employee: on a screen wide enough to make use of it, related sections
      sit two to a row instead of one long single-column scroll — the same 22
      sections, same fields, same order, just using the width a tablet or
@@ -11573,6 +11590,13 @@ function initEmpStepper(){
     banners.forEach((b, i) => {
       if(b.getBoundingClientRect().top - overlayTop <= stepperH + 20) activeIdx = i;
     });
+    // Scrolled to the very bottom: the last step is unambiguously the one in
+    // view even if its banner never quite clears the sticky strip's
+    // threshold — a short final section (or no trailing whitespace, now that
+    // the modal fills the screen edge to edge) can leave a few px of gap.
+    if(overlay.scrollTop + overlay.clientHeight >= overlay.scrollHeight - 2){
+      activeIdx = banners.length - 1;
+    }
     steps.forEach((s, i) => s.classList.toggle('active', i === activeIdx));
   };
   overlay.addEventListener('scroll', () => window.requestAnimationFrame(highlight), { passive:true });
