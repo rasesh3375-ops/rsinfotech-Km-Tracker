@@ -12777,6 +12777,23 @@ function applyEmployeeDraft(fields){
   updateBonusPreview();
 }
 
+// A record's trackingUsername can end up pointing at a login that no longer
+// exists — a backend write that silently failed partway through "mark as
+// left" or the Tracking tab's Delete button (safeSet swallows errors), a
+// direct edit to the sheet, or similar drift. The form used to trust
+// trackingUsername blindly and show "Tracking login already created:
+// @username" with no way to actually create one — even with "Does this
+// employee need km tracking" set to Yes, the fields to enter a fresh
+// username/password never appeared, because which of the two the template
+// shows is decided once, from this field, not from whether a login is
+// actually there. This checks the real users list and clears the stale
+// reference so the form falls back to asking for a new login normally.
+async function reconcileTrackingUsername(draft){
+  if(!draft || !draft.trackingUsername) return;
+  const users = await getUsers();
+  if(!users.some(u => u.username === draft.trackingUsername)) draft.trackingUsername = '';
+}
+
 async function openAddEmployeeModal(id){
   editingEmployeeId = id || null;
   if(id){
@@ -12792,6 +12809,7 @@ async function openAddEmployeeModal(id){
   // there; this list only ever shows real items, so those padding slots are
   // dropped rather than rendered as blank rows.
   editingEmployeeDraft.assets = (editingEmployeeDraft.assets || []).filter(a => a && a.item);
+  await reconcileTrackingUsername(editingEmployeeDraft);
   document.getElementById('employeeModalRoot').innerHTML = employeeModalHtml(editingEmployeeDraft);
   toggleStatutoryFieldsForHeading();
   renderLoanRows();
@@ -12933,6 +12951,7 @@ async function saveIncrement(id){
   // Refresh the edit form behind it, if open, so the new figure shows at once.
   if(editingEmployeeId === id){
     editingEmployeeDraft = JSON.parse(JSON.stringify(emp));
+    await reconcileTrackingUsername(editingEmployeeDraft);
     document.getElementById('employeeModalRoot').innerHTML = employeeModalHtml(editingEmployeeDraft);
     toggleStatutoryFieldsForHeading();
     initEmpStepper();
