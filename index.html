@@ -8708,8 +8708,9 @@ async function loadHR(){
   const today = todayStr();
   const since7 = daysAgoStr(6);
   const since15 = daysAgoStr(14);
+  const since30 = daysAgoStr(29);
 
-  let totalToday = 0, total7 = 0, total15 = 0;
+  let totalToday = 0, total7 = 0, total15 = 0, total30 = 0;
   let rowsHtml = '';
   lastHRRows = [];
   const infos = [];
@@ -8738,9 +8739,11 @@ async function loadHR(){
     const kmToday = sumKmInRange(trips, today) + (active ? active.accumulatedKm : 0);
     const km7 = sumKmInRange(trips, since7) + (active ? active.accumulatedKm : 0);
     const km15 = sumKmInRange(trips, since15) + (active ? active.accumulatedKm : 0);
-    totalToday += kmToday; total7 += km7; total15 += km15;
+    const km30 = sumKmInRange(trips, since30) + (active ? active.accumulatedKm : 0);
+    totalToday += kmToday; total7 += km7; total15 += km15; total30 += km30;
     const exp7 = km7 * rate;
     const exp15 = km15 * rate;
+    const exp30 = km30 * rate;
     let pillClass, pillLabel;
     if(u.enabled === false){
       pillClass = 'disabled'; pillLabel = 'disabled';
@@ -8756,10 +8759,12 @@ async function loadHR(){
       <td class="num">${fmtKm(kmToday)}</td>
       <td class="num">${fmtKm(km7)}</td>
       <td class="num">${fmtKm(km15)}</td>
+      <td class="num">${fmtKm(km30)}</td>
       <td class="num">₹${exp7.toFixed(0)}</td>
       <td class="num">₹${exp15.toFixed(0)}</td>
+      <td class="num">₹${exp30.toFixed(0)}</td>
     </tr>`;
-    lastHRRows.push({ name: label, status: pillLabel, kmToday, km7, km15, exp7, exp15 });
+    lastHRRows.push({ name: label, status: pillLabel, kmToday, km7, km15, km30, exp7, exp15, exp30 });
   }
 
   renderLiveStatus(infos);
@@ -8769,6 +8774,7 @@ async function loadHR(){
       <div class="stat"><div class="n">${fmtKm(totalToday)}</div><div class="l">Today km (all)</div></div>
       <div class="stat"><div class="n">${fmtKm(total7)}</div><div class="l">7-day km (all)</div></div>
       <div class="stat"><div class="n">${fmtKm(total15)}</div><div class="l">15-day km (all)</div></div>
+      <div class="stat"><div class="n">${fmtKm(total30)}</div><div class="l">30-day km (all)</div></div>
     </div>`;
 
   const table = document.getElementById('hrTable');
@@ -8777,7 +8783,7 @@ async function loadHR(){
     return;
   }
   table.innerHTML = `<table>
-    <tr><th>Engineer</th><th class="num">Today</th><th class="num">7-day</th><th class="num">15-day</th><th class="num">7-day ₹</th><th class="num">15-day ₹</th></tr>
+    <tr><th>Engineer</th><th class="num">Today</th><th class="num">7-day</th><th class="num">15-day</th><th class="num">30-day</th><th class="num">7-day ₹</th><th class="num">15-day ₹</th><th class="num">30-day ₹</th></tr>
     ${rowsHtml}
   </table>`;
 }
@@ -8787,7 +8793,7 @@ function exportCSV(){
     alert('No data to export yet.');
     return;
   }
-  const header = ['Engineer','Status','Today (km)','7-day (km)','15-day (km)','7-day expense (₹)','15-day expense (₹)'];
+  const header = ['Engineer','Status','Today (km)','7-day (km)','15-day (km)','30-day (km)','7-day expense (₹)','15-day expense (₹)','30-day expense (₹)'];
   const lines = [header.join(',')];
   lastHRRows.forEach(r => {
     lines.push([
@@ -8796,8 +8802,10 @@ function exportCSV(){
       fmtKm(r.kmToday),
       fmtKm(r.km7),
       fmtKm(r.km15),
+      fmtKm(r.km30),
       r.exp7.toFixed(0),
-      r.exp15.toFixed(0)
+      r.exp15.toFixed(0),
+      r.exp30.toFixed(0)
     ].join(','));
   });
   const csv = lines.join('\n');
