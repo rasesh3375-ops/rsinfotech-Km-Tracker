@@ -956,7 +956,18 @@
      put while it does (see the sticky th rule two lines down). */
   .att-sheet-wrap{overflow-x:auto;overflow-y:auto;max-height:70vh;-webkit-overflow-scrolling:touch;}
   @media print{ .att-sheet-wrap{max-height:none;overflow:visible;} }
-  #fullscreenBody .att-sheet-wrap{max-height:none;}
+  /* overflow:visible, not just max-height:none — an ancestor with
+     overflow-y:auto is still a valid position:sticky containing block even
+     when it never actually overflows itself (its own scrollTop just never
+     moves), so the sticky header row and frozen SR NO/Name columns were
+     stuck relative to a wrap that wasn't the thing actually scrolling —
+     #fullscreenBody was — and just drifted off screen with everything else
+     as soon as it did. overflow-x:auto and overflow-y:visible together
+     would have been silently upgraded back to overflow-y:auto by the
+     browser (the CSS overflow spec forces both axes non-visible the moment
+     either one is), so both axes need to go, moving horizontal scrolling to
+     #fullscreenBody too — see scrollSheetView()'s full-screen branch. */
+  #fullscreenBody .att-sheet-wrap{max-height:none;overflow:visible;}
   table.att-table{border-collapse:collapse;font-size:12px;white-space:nowrap;}
   table.att-table th, table.att-table td{border:1px solid var(--line);padding:3px 3px;text-align:center;}
   table.att-table th{background:var(--navy);color:#fff;font-size:10.5px;text-transform:uppercase;position:sticky;top:0;z-index:2;}
@@ -988,11 +999,15 @@
      keep an inline table from pushing the rest of the page off-screen only
      wastes space there — a report showing a fraction of its rows in a small
      scrollbox, with the rest of the fullscreen view sitting empty below it. */
-  #fullscreenBody .sal-sheet-wrap{max-height:none;}
+  /* overflow:visible too, same reasoning as .att-sheet-wrap above — leaving
+     overflow-y:auto in place kept this wrap as the position:sticky reference
+     for the header row and frozen columns even though it never actually
+     scrolls itself in full screen, so they stuck to the wrong element. */
+  #fullscreenBody .sal-sheet-wrap{max-height:none;overflow:visible;}
   /* Same reasoning for .inc-scroll, reused by the PF/ESI report tables from
      the small increment-reminder dashboard widget it was built for — its
      290px cap belongs to that widget, not to a full report shown full screen. */
-  #fullscreenBody .inc-scroll{max-height:none;}
+  #fullscreenBody .inc-scroll{max-height:none;overflow:visible;}
   table.sal-table{border-collapse:collapse;font-size:12px;white-space:nowrap;width:100%;}
   table.sal-table th, table.sal-table td{border:1px solid var(--line);padding:4px 6px;text-align:right;}
   table.sal-table th{background:var(--navy);color:#fff;font-size:10.5px;text-transform:uppercase;text-align:center;position:sticky;top:0;z-index:2;
@@ -6838,28 +6853,20 @@ function inlineSheetWrap(){
   return null;
 }
 // Full screen and the plain inline view scroll differently: full screen's
-// wrap has its height cap lifted (#fullscreenBody .att-sheet-wrap{max-height:none})
-// so #fullscreenBody itself is what scrolls vertically there, while the wrap
-// keeps handling horizontal scroll either way. Inline, the wrap still has
-// its own max-height and handles both axes itself — there is no taller
-// ancestor to hand vertical scrolling off to.
+// wrap is overflow:visible (see the CSS rules above — max-height:none alone
+// left it a live position:sticky reference for a scroll position that never
+// moved), so #fullscreenBody is the one true scroll container there, on
+// both axes. Inline, the wrap still has its own max-height and genuinely
+// scrolls itself both ways — there is no taller ancestor to hand off to.
 function scrollSheetView(direction){
   const fsBody = fullscreenActiveId ? document.getElementById('fullscreenBody') : null;
-  if(direction === 'top' || direction === 'bottom'){
-    const target = fsBody || inlineSheetWrap();
-    if(!target) return;
-    target.scrollTo({ top: direction === 'top' ? 0 : target.scrollHeight, behavior: 'smooth' });
-    return;
-  }
-  let target;
-  if(fsBody){
-    const wrap = fsBody.querySelector('.att-sheet-wrap, .sal-sheet-wrap, .inc-scroll');
-    target = (wrap && wrap.scrollWidth > wrap.clientWidth) ? wrap : fsBody;
-  } else {
-    target = inlineSheetWrap();
-  }
+  const target = fsBody || inlineSheetWrap();
   if(!target) return;
-  target.scrollTo({ left: direction === 'left' ? 0 : target.scrollWidth, behavior: 'smooth' });
+  if(direction === 'top' || direction === 'bottom'){
+    target.scrollTo({ top: direction === 'top' ? 0 : target.scrollHeight, behavior: 'smooth' });
+  } else {
+    target.scrollTo({ left: direction === 'left' ? 0 : target.scrollWidth, behavior: 'smooth' });
+  }
 }
 // Shown whenever there is actually something for it to scroll: full screen
 // open (any report), or the Attendance/Salary Sheet rendered inline — hidden
