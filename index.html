@@ -6375,7 +6375,7 @@ async function renderAttendanceSheet(){
     const content = toCsv(csvHeader, csvRows);
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Attendance Sheet'), fileName, content, 'text/csv');
     stashReportShare('Attendance Sheet — ' + monthLabel(monthVal), fileName, content, 'text/csv',
-      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Dashboard > Attendance Sheet');
+      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Dashboard > Attendance Sheet', 'attendanceSheetBox');
   }
 
   const attSheetInner = isCompact
@@ -6884,10 +6884,18 @@ let fullscreenOriginalNextSibling = null;
 function openFullscreenView(title, sourceId){
   const el = document.getElementById(sourceId);
   if(!el) return;
-  // Every report/letter calls stashReportShare() immediately before this, so
-  // whichever box was just opened full screen is the one Email/WhatsApp
-  // should turn into a PDF — recorded here rather than adding a parameter to
-  // every one of those call sites.
+  // stashReportShare() now takes sourceId itself, at every call site — this
+  // used to be the ONLY place it got set (every report/letter calls
+  // stashReportShare() immediately before this, so whichever box was just
+  // opened full screen was assumed to be the one Email/WhatsApp should turn
+  // into a PDF). That assumption broke for anything that can stash a share
+  // without full screen necessarily following right after — the Salary
+  // Sheet and Attendance Sheet only go full screen on an explicit manual tap,
+  // and the Overtime Report re-stashes after every add/delete without going
+  // full screen at all — so Email/WhatsApp silently sent the bare CSV
+  // instead of the branded PDF in those cases. Left in place as a harmless
+  // backstop for full screen actually being opened from somewhere other than
+  // straight after a stashReportShare() call.
   if(currentReportShare) currentReportShare.sourceId = sourceId;
   const fsBody = document.getElementById('fullscreenBody');
   // A different report is already showing full screen — restore it to its
@@ -7078,7 +7086,19 @@ function cancelSalarySheetView(){
 // plain-text shares carry the company name and date as text instead, the
 // closest either format can get to the same thing.
 let currentReportShare = null;
-function stashReportShare(title, fileName, content, mimeType, folderLabel){
+// sourceId is the report's own box element — the same id passed to that
+// report's reportActionBar()/openFullscreenView() — so shareCurrentReport()
+// below can turn it into a branded PDF via reportToPdfBlob() the same way
+// the PDF button already does, instead of falling back to the bare CSV/text
+// file. This used to only get set as a side effect of openFullscreenView()
+// running afterward (see the comment there) — which covers most reports,
+// since they auto-open full screen the moment they're generated, but not
+// the Salary Sheet or Attendance Sheet (full screen there is an optional
+// manual tap) or the Overtime Report (re-stashes after every add/delete
+// without going full screen). Passed explicitly here now so every report's
+// Email/WhatsApp share attaches the real PDF regardless of whether or when
+// full screen happens to open.
+function stashReportShare(title, fileName, content, mimeType, folderLabel, sourceId){
   const dateStr = new Date().toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' });
   const headerLines = ['R.S. Infotech', title, 'Generated ' + dateStr];
   const type = mimeType || 'text/csv';
@@ -7088,7 +7108,7 @@ function stashReportShare(title, fileName, content, mimeType, folderLabel){
   const shareContent = type === 'text/csv'
     ? headerLines.map(csvEscape).join('\n') + '\n\n' + content
     : headerLines.join('\n') + '\n\n' + content;
-  currentReportShare = { title, fileName, content: shareContent, mimeType: type, folderLabel, headerLines };
+  currentReportShare = { title, fileName, content: shareContent, mimeType: type, folderLabel, headerLines, sourceId };
 }
 // sourceId is the report's own box element — the same one openFullscreenView
 // relocates, so this works whether the report is being viewed full screen or
@@ -7920,7 +7940,7 @@ async function renderSalarySheet(){
     const content = toCsv(cols, csvRows);
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Salary Sheet'), fileName, content, 'text/csv');
     stashReportShare('Salary Sheet — ' + monthLabel(monthVal), fileName, content, 'text/csv',
-      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Dashboard > Salary Sheet');
+      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Dashboard > Salary Sheet', 'salarySheetBox');
   }
 
   const salSheetInner = isCompact
@@ -8175,7 +8195,7 @@ async function renderStatutoryReport(key, label){
         total remittance <strong>${money(pfTot.total)}</strong>. Saved to Drive under HR Management &gt; Reports &gt; PF.</p>
       </div>`;
     stashReportShare('Provident Fund Return — ' + monthLabel(monthVal), `PF Return - ${monthVal}.csv`, csv, 'text/csv',
-      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > PF');
+      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > PF', cfg.box);
     openFullscreenView('Provident Fund Return — ' + monthLabel(monthVal), cfg.box);
     return;
   }
@@ -8251,7 +8271,7 @@ async function renderStatutoryReport(key, label){
       <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; Reports &gt; ESI.</p>
       </div>`;
     stashReportShare('ESI Contribution Return — ' + monthLabel(monthVal), `ESI Return - ${monthVal}.csv`, csv, 'text/csv',
-      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > ESI');
+      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > ESI', cfg.box);
     openFullscreenView('ESI Contribution Return — ' + monthLabel(monthVal), cfg.box);
     return;
   }
@@ -8289,7 +8309,7 @@ async function renderStatutoryReport(key, label){
   const content = toCsv(['Name', key.toUpperCase() + ' Amount'], csvRows);
   queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', cfg.folder), fileName, content, 'text/csv');
   stashReportShare(label + ' — ' + monthLabel(monthVal), fileName, content, 'text/csv',
-    'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > ' + cfg.folder);
+    'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > ' + cfg.folder, cfg.box);
   openFullscreenView(label + ' — ' + monthLabel(monthVal), cfg.box);
 }
 
@@ -8384,7 +8404,7 @@ async function renderApprenticeSalaryReport(){
     const content = toCsv(cols, csvRows);
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Apprentice Salary Report'), fileName, content, 'text/csv');
     stashReportShare('Apprentice Salary Report — ' + monthLabel(monthVal), fileName, content, 'text/csv',
-      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > Apprentice Salary Report');
+      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > Apprentice Salary Report', 'apprenticeReportBox');
   }
   openFullscreenView('Apprentice Salary Report — ' + monthLabel(monthVal), 'apprenticeReportBox');
 }
@@ -8526,7 +8546,7 @@ async function renderFinalSalarySheet(){
     const content = toCsv(cols, csvRows);
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Final Salary Sheet'), fileName, content, 'text/csv');
     stashReportShare(rptTitle + ' — ' + monthLabel(monthVal), fileName, content, 'text/csv',
-      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Dashboard > Final Salary Sheet');
+      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Dashboard > Final Salary Sheet', 'finalSalaryBox');
   }
 
   const finalSalaryInner = isCompact ? `<div class="hr-sheet-cards">${bodyRows}</div>` :
@@ -8631,7 +8651,7 @@ async function renderBonusPaymentSheet(){
     const content = toCsv(cols, csvRows);
     queueFileToDrive(hrYearPath(paidOn, 'Dashboard', 'Diwali Bonus Payment Sheet'), fileName, content, 'text/csv');
     stashReportShare('Diwali Bonus Payment Sheet — paid ' + paidOn, fileName, content, 'text/csv',
-      'HR Management > ' + financialYearLabel(paidOn) + ' > Dashboard > Diwali Bonus Payment Sheet');
+      'HR Management > ' + financialYearLabel(paidOn) + ' > Dashboard > Diwali Bonus Payment Sheet', 'bonusPaymentBox');
   }
 
   // Anyone left out is named rather than silently missing — "why is he not on
@@ -8758,7 +8778,7 @@ async function renderConsultantReport(){
     const content = toCsv(CONSULTANT_REPORT_COLS, rows);
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Consultant Report'), fileName, content, 'text/csv');
     stashReportShare('Consultant Report — ' + monthLabel(monthVal), fileName, content, 'text/csv',
-      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > Consultant Report');
+      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > Consultant Report', 'consultantReportBox');
   }
   openFullscreenView('Consultant Report — ' + monthLabel(monthVal), 'consultantReportBox');
 }
@@ -8913,7 +8933,7 @@ async function renderSalaryComparisonReport(){
     const content = toCsv(csvHead, csvAll);
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Salary Comparison'), fileName, content, 'text/csv');
     stashReportShare('Month-wise Salary Comparison — ' + curr.label, fileName, content, 'text/csv',
-      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > Salary Comparison');
+      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > Salary Comparison', 'salCompareBox');
   }
   openFullscreenView('Month-wise Salary Comparison — ' + curr.label, 'salCompareBox');
 }
@@ -10815,7 +10835,7 @@ async function renderIncrementReminders(){
       upcoming.map(e => [e.name, e.designation||'', e.nextIncrement, Math.ceil((new Date(e.nextIncrement) - now) / 86400000)]));
     queueFileToDrive(hrYearPath(todayStr(), 'Dashboard', 'Increment Reminders'), fileName, content, 'text/csv');
     stashReportShare('Increment Reminders — ' + todayStr(), fileName, content, 'text/csv',
-      'HR Management > ' + financialYearLabel(todayStr()) + ' > Dashboard > Increment Reminders');
+      'HR Management > ' + financialYearLabel(todayStr()) + ' > Dashboard > Increment Reminders', 'incrementReminderList');
   }
   box.innerHTML = reportActionBar('Increment Reminders', 'incrementReminderList') +
     `<div class="print-isolate" id="incrementRemindersPrintArea">${reportLogoHeader('Increment Reminders')}` +
@@ -13596,11 +13616,11 @@ async function generateRoleReport(){
   const html = await buildRoleReportHtml(emp, typeKey);
   const typeLabel = (ROLE_REPORT_TYPES.find(t => t.key === typeKey) || ROLE_REPORT_TYPES[0]).label;
   const reportTitle = (emp.name || empId) + ' — ' + typeLabel;
-  // Not saved to Drive and not a CSV like the other reports, so there is
-  // nothing meaningful to attach as a file — WhatsApp/Email fall back to a
-  // text summary naming the report, same as they would for any report on a
-  // device without the Web Share API.
-  stashReportShare(reportTitle, reportTitle.replace(/[^\w .-]/g, '') + '.txt', reportTitle, 'text/plain', '');
+  // Not saved to Drive and not a CSV like the other reports, but sourceId
+  // still lets shareCurrentReport() capture the rendered box into a proper
+  // PDF — the same reportToPdfBlob() every other report now uses — rather
+  // than falling all the way back to the bare .txt this used to always send.
+  stashReportShare(reportTitle, reportTitle.replace(/[^\w .-]/g, '') + '.txt', reportTitle, 'text/plain', '', 'roleRptBox');
   box.innerHTML = `<div style="margin:14px 0 10px;">${reportActionBar(reportTitle, 'roleRptBox', `clearReportBox('roleRptBox')`)}</div>
     <div class="rpt-wrap">${html}</div>`;
   await addActivityLog('Role report generated: ' + (emp.name || empId));
@@ -13714,7 +13734,7 @@ async function loadAttendanceCalendar(){
   const content = toCsv(['Date','Status'], csvRows);
   queueFileToDrive(hrYearPath(monthStr + '-01', 'Reports', 'Attendance'), fileName, content, 'text/csv');
   stashReportShare(title, fileName, content, 'text/csv',
-    'HR Management > ' + financialYearLabel(monthStr + '-01') + ' > Reports > Attendance');
+    'HR Management > ' + financialYearLabel(monthStr + '-01') + ' > Reports > Attendance', 'attendanceCalendarBox');
   openFullscreenView(title, 'attendanceCalendarBox');
 }
 
@@ -13872,7 +13892,7 @@ async function renderLeaveEncashmentReport(){
     const content = toCsv(cols, csvRows);
     queueFileToDrive(hrYearPath(asAt, 'Reports', 'Leave Encashment'), fileName, content, 'text/csv');
     stashReportShare('Leave Encashment — FY ' + fyLabel, fileName, content, 'text/csv',
-      'HR Management > ' + financialYearLabel(asAt) + ' > Reports > Leave Encashment');
+      'HR Management > ' + financialYearLabel(asAt) + ' > Reports > Leave Encashment', 'encashBox');
   }
 
   const nil = rows.length - payable.length;
@@ -13982,7 +14002,7 @@ async function renderElCalculationSheet(){
         .concat([['GRAND TOTAL','','','','','','', totalEncash]]));
     queueFileToDrive(hrYearPath(fyEnd, 'Reports', 'EL Calculation Sheet'), fileName, content, 'text/csv');
     stashReportShare(elReportTitle, fileName, content, 'text/csv',
-      'HR Management > ' + financialYearLabel(fyEnd) + ' > Reports > EL Calculation Sheet');
+      'HR Management > ' + financialYearLabel(fyEnd) + ' > Reports > EL Calculation Sheet', 'elCalcBox');
   }
 
   const isCompact = isCompactSheetView();
@@ -14119,7 +14139,7 @@ async function renderMonthlyLeaveReport(){
     // Filed under the financial year the report covers.
     queueFileToDrive(hrYearPath(fyOfStartYear(startYear).from, 'Reports', 'Monthly Leave Report'), fileName, content, 'text/csv');
     stashReportShare(reportTitle, fileName, content, 'text/csv',
-      'HR Management > ' + fyOfStartYear(startYear).label + ' > Reports > Monthly Leave Report');
+      'HR Management > ' + fyOfStartYear(startYear).label + ' > Reports > Monthly Leave Report', 'monthlyLeaveReportBox');
   }
   openFullscreenView(reportTitle, 'monthlyLeaveReportBox');
 }
@@ -14196,7 +14216,7 @@ async function renderMonthlyLeaveDetailReport(){
     const content = toCsv(csvHeader, csvRows);
     queueFileToDrive(hrYearPath(dateList[0], 'Reports', 'Monthly Leave Detail Report'), fileName, content, 'text/csv');
     stashReportShare(reportTitle, fileName, content, 'text/csv',
-      'HR Management > ' + financialYearLabel(dateList[0]) + ' > Reports > Monthly Leave Detail Report');
+      'HR Management > ' + financialYearLabel(dateList[0]) + ' > Reports > Monthly Leave Detail Report', 'monthlyLeaveDetailReportBox');
   }
   openFullscreenView(reportTitle, 'monthlyLeaveDetailReportBox');
 }
@@ -14267,7 +14287,7 @@ async function renderYearlyLeaveDetailReport(){
     const content = csvBlocks.join('\n\n');
     queueFileToDrive(hrYearPath(fyOfStartYear(startYear).from, 'Reports', 'Yearly Leave Detail Report'), fileName, content, 'text/csv');
     stashReportShare(reportTitle, fileName, content, 'text/csv',
-      'HR Management > ' + fyOfStartYear(startYear).label + ' > Reports > Yearly Leave Detail Report');
+      'HR Management > ' + fyOfStartYear(startYear).label + ' > Reports > Yearly Leave Detail Report', 'yearlyLeaveDetailReportBox');
   }
   openFullscreenView(reportTitle, 'yearlyLeaveDetailReportBox');
 }
@@ -14344,7 +14364,7 @@ async function renderOvertimeReport(){
     const content = toCsv(['Name','Date','Hours','Note'], log.map(o => [o.name, o.date, o.hours, o.note||'']));
     queueFileToDrive(hrYearPath(monthStr + '-01', 'Reports', 'Overtime Report'), fileName, content, 'text/csv');
     stashReportShare(reportTitle, fileName, content, 'text/csv',
-      'HR Management > ' + financialYearLabel(monthStr + '-01') + ' > Reports > Overtime Report');
+      'HR Management > ' + financialYearLabel(monthStr + '-01') + ' > Reports > Overtime Report', 'overtimeReportBox');
   }
   const isCompact = isCompactSheetView();
   const overtimeInner = isCompact ? `<div class="hr-sheet-cards">${log.map(o => hrCard(
@@ -14429,7 +14449,7 @@ async function generateHolidayListDoc(){
   const fileName = `Holiday List - ${fyLabel}.txt`;
   saveFileToDrive(hrYearPath(fyStart, 'Reports', 'Holiday List'), fileName, lastHolidayListText, 'text/plain');
   stashReportShare('R.S. Infotech — Holiday List (' + fyLabel + ')', fileName, lastHolidayListText, 'text/plain',
-    'HR Management > ' + financialYearLabel(fyStart) + ' > Reports > Holiday List');
+    'HR Management > ' + financialYearLabel(fyStart) + ' > Reports > Holiday List', 'holidayListOutput');
   document.getElementById('holidayListActionBar').innerHTML =
     reportActionBar('Holiday List — ' + fyLabel, 'holidayListOutput', `closeHolidayListOutput()`);
   openFullscreenView('Holiday List — ' + fyLabel, 'holidayListOutput');
@@ -14510,7 +14530,7 @@ async function viewReport(key, label, monthFilter){
       const content = toCsv(csvHeader, csvRows);
       queueFileToDrive(hrYearPath('', 'Reports', 'Assets'), fileName, content, 'text/csv');
       stashReportShare('Employee Assets — issued and outstanding', fileName, content, 'text/csv',
-        'HR Management > ' + financialYearLabel(todayStr()) + ' > Reports > Assets');
+        'HR Management > ' + financialYearLabel(todayStr()) + ' > Reports > Assets', 'reportBox_' + key);
     }
     openFullscreenView(label, 'reportBox_' + key);
     return;
@@ -14745,7 +14765,7 @@ async function viewReport(key, label, monthFilter){
     const content = toCsv(csvHeader, csvRows);
     queueFileToDrive(hrYearPath('', 'Reports', label), fileName, content, 'text/csv');
     stashReportShare(label, fileName, content, 'text/csv',
-      'HR Management > ' + financialYearLabel(todayStr()) + ' > Reports > ' + label);
+      'HR Management > ' + financialYearLabel(todayStr()) + ' > Reports > ' + label, 'reportBox_' + key);
   }
   openFullscreenView(label, 'reportBox_' + key);
 }
@@ -16123,7 +16143,7 @@ async function generateLetter(){
   saveFileToDrive(hrYearPath(f.issueDate, 'Generator', safeType), letterFileName, text, 'text/plain');
   if(myToken !== generateLetterToken) return; // superseded — leave the current letter, and its Email/WhatsApp share content, alone
   stashReportShare(type + ' — ' + name, letterFileName, text, 'text/plain',
-    'HR Management > ' + financialYearLabel(f.issueDate) + ' > Generator > ' + safeType);
+    'HR Management > ' + financialYearLabel(f.issueDate) + ' > Generator > ' + safeType, 'letterOutput');
   openFullscreenView(type + ' — ' + name, 'letterOutput');
 }
 
