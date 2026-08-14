@@ -6025,6 +6025,16 @@ function isCompactSheetView(){
   return window.matchMedia('(max-width: 760px)').matches;
 }
 
+// The whole "give the data more room" feature set below — collapsing the
+// top controls and sidebar, the small icon close button, the floating
+// scroll-jump buttons — was only ever asked for on laptop/desktop. HR
+// confirmed mobile AND tablet are both already fine as they are, so this is
+// deliberately >1024px, not just "not mobile": isCompactSheetView() alone
+// would have let tablet (761–1024px) pick up every one of these too.
+function isSheetDeclutterView(){
+  return window.matchMedia('(min-width: 1025px)').matches;
+}
+
 // Collapses the "pick a month, then Load" controls above the Attendance and
 // Salary Sheets once one is actually on screen, so a laptop/desktop viewport
 // spends its height on the data instead of on controls already used — the
@@ -6038,7 +6048,7 @@ function isCompactSheetView(){
 // own doing, never overriding a choice HR actually made.
 let sheetAutoCollapsedSidebar = false;
 function collapseSheetTopControls(id){
-  if(isCompactSheetView()) return;
+  if(!isSheetDeclutterView()) return;
   const el = document.getElementById(id);
   if(el) el.classList.add('hidden');
   // Both sheets are wide enough that the sidebar's ~240px is worth giving
@@ -6859,7 +6869,7 @@ function scrollSheetView(direction){
 function updateSheetScrollNavVisibility(){
   const nav = document.getElementById('sheetScrollNav');
   if(!nav) return;
-  const show = !isCompactSheetView() && (!!fullscreenActiveId || !!inlineSheetWrap());
+  const show = isSheetDeclutterView() && (!!fullscreenActiveId || !!inlineSheetWrap());
   nav.classList.toggle('hidden', !show);
 }
 function closeFullscreenView(){
@@ -6928,14 +6938,14 @@ function closeSalarySheetAction(save){
   // the browser's print dialog is dismissed, so the close below runs after.
   if(save) window.print();
   if(fullscreenActiveId) closeFullscreenView();
-  // Mobile keeps its original behaviour exactly — Close has always left the
-  // Salary Sheet tab entirely there. On a laptop/desktop screen it now stays
-  // on the tab and brings back the month/year picker instead, since that is
-  // what collapseSheetTopControls hid the moment the sheet rendered — leaving
-  // via hrNavigate would have landed on an unrelated Dashboard with nothing
-  // to undo the collapse.
-  else if(isCompactSheetView()) hrNavigate('dashboard');
-  else cancelSalarySheetView();
+  // Mobile AND tablet keep their original behaviour exactly — Close has
+  // always left the Salary Sheet tab entirely there. Only on laptop/desktop
+  // does it now stay on the tab and bring back the month/year picker
+  // instead, since that is what collapseSheetTopControls hid the moment the
+  // sheet rendered there — leaving via hrNavigate would have landed on an
+  // unrelated Dashboard with nothing to undo the collapse.
+  else if(isSheetDeclutterView()) cancelSalarySheetView();
+  else hrNavigate('dashboard');
 }
 function cancelSalarySheetView(){
   const box = document.getElementById('salarySheetBox');
@@ -7808,20 +7818,20 @@ async function renderSalarySheet(){
         const cls = [i===0 ? 'sal-sr-h' : '', i===1 ? 'sal-name-h' : '', secondaryClass(c).trim()].filter(Boolean).join(' ');
         return `<th${cls ? ` class="${cls}"` : ''}>${c}</th>`;
       }).join('')}</tr>${bodyRows}</table>`;
-  // Desktop gets a small icon-only close, top-right, out of the way of the
-  // data it sits above — the full-width "✕ Close" button ate a whole row
-  // for one tap that is used once per sheet. Mobile keeps the original
-  // full-width button unchanged; a small icon is a worse touch target there,
-  // and the sheet is already a single column of cards with nothing beside it
-  // to make room for.
+  // Laptop/desktop gets a small icon-only close, top-right, out of the way
+  // of the data it sits above — the full-width "✕ Close" button ate a whole
+  // row for one tap that is used once per sheet. Mobile AND tablet keep the
+  // original full-width button unchanged — a small icon is a worse touch
+  // target on mobile, and this whole "give the data more room" set of
+  // changes was only ever asked for on laptop/desktop.
   // rpt-actions-top on the desktop wrapper: same reasoning as reportActionBar's
   // own use of that class — this close icon is redundant once the sheet is
   // sitting inside the full-screen viewer, which already has the one close
   // button that matters right above it, so the shared #fullscreenBody
   // .rpt-actions-top{display:none} rule hides it there for free.
-  const closeBtnHtml = isCompact
-    ? `<div class="row-inline" style="margin-bottom:10px;"><button class="btn ghost full" onclick="confirmCloseSalarySheet()">✕ Close</button></div>`
-    : `<div class="row-inline rpt-actions-top" style="margin-bottom:6px;"><button class="rpt-close-btn" onclick="confirmCloseSalarySheet()" title="Close" aria-label="Close">✕</button></div>`;
+  const closeBtnHtml = isSheetDeclutterView()
+    ? `<div class="row-inline rpt-actions-top" style="margin-bottom:6px;"><button class="rpt-close-btn" onclick="confirmCloseSalarySheet()" title="Close" aria-label="Close">✕</button></div>`
+    : `<div class="row-inline" style="margin-bottom:10px;"><button class="btn ghost full" onclick="confirmCloseSalarySheet()">✕ Close</button></div>`;
   box.innerHTML = `${closeBtnHtml}
     <div class="sal-sheet-wrap print-isolate" id="salaryPrintArea">
       ${reportLogoHeader('Salary Sheet — ' + monthLabel(monthVal))}
