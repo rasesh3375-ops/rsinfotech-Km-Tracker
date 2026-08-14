@@ -958,16 +958,32 @@
   #fullscreenBody .inc-scroll{max-height:none;}
   table.sal-table{border-collapse:collapse;font-size:12px;white-space:nowrap;width:100%;}
   table.sal-table th, table.sal-table td{border:1px solid var(--line);padding:5px 7px;text-align:right;}
-  table.sal-table th{background:var(--navy);color:#fff;font-size:10.5px;text-transform:uppercase;text-align:center;position:sticky;top:0;z-index:2;}
+  table.sal-table th{background:var(--navy);color:#fff;font-size:10.5px;text-transform:uppercase;text-align:center;position:sticky;top:0;z-index:2;
+    /* Headers wrap onto two lines instead of forcing every column as wide as
+       its longest label ("Full Day Leave Bal" etc.) — numbers underneath stay
+       nowrap so amounts never break awkwardly. */
+    white-space:normal;line-height:1.2;}
   /* Same sticky-name-column treatment .att-table already had — the row you
      scrolled right to find is worthless if you can no longer see whose row
      it is. Given its own background per row type (paper for a person, the
      subtotal/grand-total tint for those rows) so the sticky cell matches the
-     row it belongs to instead of always showing plain white through it. */
-  table.sal-table td.sal-name{text-align:left;font-weight:600;position:sticky;left:0;background:var(--paper);z-index:1;}
-  table.sal-table th.sal-name-h{text-align:left;position:sticky;left:0;z-index:3;}
+     row it belongs to instead of always showing plain white through it.
+     SR NO freezes alongside it, at left:0 — Name is shifted over by exactly
+     the SR NO column's fixed width so the two sit side by side with nothing
+     overlapping underneath. */
+  table.sal-table td.sal-sr, table.sal-table th.sal-sr-h{width:34px;min-width:34px;max-width:34px;text-align:center;position:sticky;left:0;}
+  table.sal-table td.sal-sr{background:var(--paper);z-index:1;}
+  /* th already gets navy/white from the general th rule above — must not be
+     overridden here, or the header text and its own background become the
+     same colour and the "SR NO" label disappears. */
+  table.sal-table th.sal-sr-h{z-index:3;}
+  table.sal-table td.sal-name{text-align:left;font-weight:600;position:sticky;left:34px;background:var(--paper);z-index:1;}
+  table.sal-table th.sal-name-h{text-align:left;position:sticky;left:34px;z-index:3;}
+  table.sal-table tr.sal-subtotal td.sal-sr,
   table.sal-table tr.sal-subtotal td.sal-name{background:var(--cream);}
+  table.sal-table tr.sal-grandtotal td.sal-sr,
   table.sal-table tr.sal-grandtotal td.sal-name{background:var(--navy);color:#fff;}
+  table.sal-table tr.sal-new-emp td.sal-sr,
   table.sal-table tr.sal-new-emp td.sal-name{background:#DDF3E4;}
   table.sal-table tr.sal-heading td{background:#92D050;color:#16213E;font-weight:800;text-align:left;font-size:13px;text-transform:uppercase;letter-spacing:.3px;}
   table.sal-table tr.sal-subtotal td{background:var(--cream);font-weight:700;}
@@ -985,8 +1001,23 @@
   table.sal-table td.cell-changed{background:#FDECC8;box-shadow:inset 0 0 0 1px var(--amber-dark);font-weight:700;}
   table.sal-table tr.sal-new-emp td{background:#DDF3E4;}
   .pill.new{background:#DDF3E4;color:var(--green);}
+  /* Every column is still on the sheet and in the CSV either way — this only
+     hides/shows them on screen. Essential is the default: SR NO, Name, Rate
+     of Pay, Leave Days, Basic, HRA, LTA, Gross and Net Salary, the figures
+     asked for most often. "Show all columns" reveals PF/ESI/PT, the employer
+     side and every balance column, still reachable in one tap, not deleted. */
+  table.sal-table.sal-essential .sal-col-2nd{display:none;}
+  .sal-col-toggle{white-space:nowrap;}
 
-  /* ===== Attendance & Salary sheets: tablet and mobile ===== */
+  /* ===== Attendance & Salary sheets: laptop, tablet and mobile ===== */
+  /* Laptop: a middle tier between the roomy desktop default and the tighter
+     tablet one below — most laptop screens are wide enough for every primary
+     column at full comfort, but not wide enough to also spare full desktop
+     padding on top of the sidebar. */
+  @media (min-width: 1025px) and (max-width: 1440px){
+    table.sal-table{font-size:11.5px;}
+    table.sal-table th, table.sal-table td{padding:4px 6px;}
+  }
   /* Tablet: same table, tighter — a little less padding and a smaller font
      buys back enough width that the sideways scroll most columns still need
      is short, without shrinking text to the point it is hard to read. */
@@ -1490,20 +1521,22 @@
 
         <div id="dashSubAttendance">
           <section class="block">
-            <h2 style="margin:0 0 4px;">Attendance Sheet</h2>
-            <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Auto-marks Present when an engineer checks in with their selfie. Everything else — leave, holidays, half-days — is entered or corrected by HR. Resident Engineers are excluded from the leave/late-coming rules; their days just track Present/Absent/Holiday.</p>
-            <div class="row-inline">
-              <div>
-                <label class="field">Month</label>
-                <select class="field-input" id="attSheetMonthSel"></select>
+            <div id="attTopControls">
+              <h2 style="margin:0 0 4px;">Attendance Sheet</h2>
+              <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Auto-marks Present when an engineer checks in with their selfie. Everything else — leave, holidays, half-days — is entered or corrected by HR. Resident Engineers are excluded from the leave/late-coming rules; their days just track Present/Absent/Holiday.</p>
+              <div class="row-inline">
+                <div>
+                  <label class="field">Month</label>
+                  <select class="field-input" id="attSheetMonthSel"></select>
+                </div>
+                <div>
+                  <label class="field">Year</label>
+                  <select class="field-input" id="attSheetYearSel"></select>
+                </div>
               </div>
-              <div>
-                <label class="field">Year</label>
-                <select class="field-input" id="attSheetYearSel"></select>
-              </div>
+              <button class="btn full" onclick="withBusy(this,'Loading…',renderAttendanceSheet)">Load attendance sheet</button>
+              <div style="height:14px"></div>
             </div>
-            <button class="btn full" onclick="withBusy(this,'Loading…',renderAttendanceSheet)">Load attendance sheet</button>
-            <div style="height:14px"></div>
             <div id="policyOverrideLog"></div>
             <div id="attSaveBar" class="att-save-bar hidden">
               <span id="attSaveCount">0 unsaved changes</span>
@@ -1518,20 +1551,22 @@
 
         <div id="dashSubSalary" class="hidden">
           <section class="block">
-            <h2 style="margin:0 0 4px;">Salary Sheet</h2>
-            <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by heading — set once per employee in Employee Master, and the Basic/HRA/LTA formula for that heading applies automatically every month. Leave days are pulled from the Attendance Sheet (Absent + LP days) for the month selected.</p>
-            <div class="row-inline">
-              <div>
-                <label class="field">Month</label>
-                <select class="field-input" id="salSheetMonthSel"></select>
+            <div id="salTopControls">
+              <h2 style="margin:0 0 4px;">Salary Sheet</h2>
+              <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by heading — set once per employee in Employee Master, and the Basic/HRA/LTA formula for that heading applies automatically every month. Leave days are pulled from the Attendance Sheet (Absent + LP days) for the month selected.</p>
+              <div class="row-inline">
+                <div>
+                  <label class="field">Month</label>
+                  <select class="field-input" id="salSheetMonthSel"></select>
+                </div>
+                <div>
+                  <label class="field">Year</label>
+                  <select class="field-input" id="salSheetYearSel"></select>
+                </div>
               </div>
-              <div>
-                <label class="field">Year</label>
-                <select class="field-input" id="salSheetYearSel"></select>
-              </div>
+              <button class="btn full" onclick="withBusy(this,'Loading…',renderSalarySheet)">Load salary sheet</button>
+              <div style="height:14px"></div>
             </div>
-            <button class="btn full" onclick="withBusy(this,'Loading…',renderSalarySheet)">Load salary sheet</button>
-            <div style="height:14px"></div>
             <div id="salarySheetBox"></div>
           </section>
         </div>
@@ -5933,6 +5968,23 @@ function isCompactSheetView(){
   return window.matchMedia('(max-width: 760px)').matches;
 }
 
+// Collapses the "pick a month, then Load" controls above the Attendance and
+// Salary Sheets once one is actually on screen, so a laptop/desktop viewport
+// spends its height on the data instead of on controls already used — the
+// small ✕ (cancelAttendanceSheetView / cancelSalarySheetView) brings them
+// back. Left alone on phones: the sheet already collapses into a single
+// column of cards there, and the controls above it were never the problem
+// the way a 30-column table cut off on the right was.
+function collapseSheetTopControls(id){
+  if(isCompactSheetView()) return;
+  const el = document.getElementById(id);
+  if(el) el.classList.add('hidden');
+}
+function showSheetTopControls(id){
+  const el = document.getElementById(id);
+  if(el) el.classList.remove('hidden');
+}
+
 // Reacts only to the view actually flipping between table and card — not
 // every pixel of a drag-resize, and not the address-bar show/hide "resize"
 // iOS fires on ordinary scrolling — and only for whichever of the two
@@ -6005,6 +6057,7 @@ async function renderAttendanceSheet(){
   const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
   if(!employees.length){
     box.innerHTML = '<div class="empty">Add employees in Employee Master first.</div>';
+    collapseSheetTopControls('attTopControls');
     return;
   }
   const holidays = await getHolidays();
@@ -6132,7 +6185,7 @@ async function renderAttendanceSheet(){
   const attSheetInner = isCompact
     ? `<div class="hr-sheet-cards">${bodyRows}</div>`
     : `<table class="att-table">${headerRow}${bodyRows}</table>`;
-  box.innerHTML = `${reportActionBar('Attendance Sheet — ' + monthLabel(monthVal), 'attendanceSheetBox', null, { print: false })}
+  box.innerHTML = `${reportActionBar('Attendance Sheet — ' + monthLabel(monthVal), 'attendanceSheetBox', 'cancelAttendanceSheetView()', { print: false })}
     <div class="att-sheet-wrap print-isolate" id="attendanceSheetPrintArea">${reportLogoHeader('Attendance Sheet — ' + monthLabel(monthVal))}${attSheetInner}</div>
     <div class="att-legend">
       <span><strong>P</strong> Present</span><span><strong>A</strong> Absent</span><span><strong>H</strong> Holiday</span>
@@ -6147,6 +6200,24 @@ async function renderAttendanceSheet(){
   // Now the sheet is on screen, fill in the dropdowns nobody has touched.
   hydrateAttCodeSelects();
   if(restored) showSavedToast(restored + ' unsaved attendance change(s) recovered — press Save attendance to store them');
+  collapseSheetTopControls('attTopControls');
+}
+// The small ✕ on the Attendance Sheet itself (reportActionBar's own close,
+// wired here instead of its plain default) — on a laptop/desktop screen this
+// also brings back the month/year picker that collapseSheetTopControls hid
+// once the sheet rendered, so cancelling returns to "pick a month" rather
+// than leaving a blank space where the controls used to be. Unsaved edits
+// are never discarded silently — same confirmation discardAttendanceChanges
+// already uses, since this is another way of throwing them away.
+function cancelAttendanceSheetView(){
+  if(attendanceDirtyCount() && !confirm(attendanceDirtyCount() + ' attendance change(s) have not been saved. Discard them and go back?')) return;
+  if(attendanceDirtyCount()){
+    pendingAttendance = {};
+    persistPendingAttendance();
+    updateAttendanceSaveBar();
+  }
+  closeReportView('attendanceSheetBox');
+  showSheetTopControls('attTopControls');
 }
 
 // Edits are collected here and written when Save is pressed. Every change used
@@ -6683,7 +6754,19 @@ function closeSalarySheetAction(save){
   // the browser's print dialog is dismissed, so the close below runs after.
   if(save) window.print();
   if(fullscreenActiveId) closeFullscreenView();
-  else hrNavigate('dashboard');
+  // Mobile keeps its original behaviour exactly — Close has always left the
+  // Salary Sheet tab entirely there. On a laptop/desktop screen it now stays
+  // on the tab and brings back the month/year picker instead, since that is
+  // what collapseSheetTopControls hid the moment the sheet rendered — leaving
+  // via hrNavigate would have landed on an unrelated Dashboard with nothing
+  // to undo the collapse.
+  else if(isCompactSheetView()) hrNavigate('dashboard');
+  else cancelSalarySheetView();
+}
+function cancelSalarySheetView(){
+  const box = document.getElementById('salarySheetBox');
+  if(box) box.innerHTML = '';
+  showSheetTopControls('salTopControls');
 }
 
 // ---- shared report footer: Close, Full screen, Print, WhatsApp, Email ----
@@ -7434,6 +7517,7 @@ async function renderSalarySheet(){
   const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
   if(!employees.length){
     box.innerHTML = '<div class="empty">Add employees in Employee Master first.</div>';
+    collapseSheetTopControls('salTopControls');
     return;
   }
   const holidays = await getHolidays();
@@ -7453,6 +7537,13 @@ async function renderSalarySheet(){
     'PF','ESI','PT','Advance Temp','Advance','Loan EMI','Retention','Total Deduction','Conveyance','Net Before Direct','Paid Directly','Net Salary',
     'PEN','Employer PF','PF Admin','EDLI','ESI Employer','Employer Cont.','CTC',
     'Advance Balance','Loan Balance','Full Day Leave Bal','Half Day Leave Bal'];
+  // Everything NOT in this primary set is a secondary column, hidden by
+  // default (see .sal-essential in the stylesheet) and reachable with the
+  // "Show all columns" toggle below the table — the figures HR asked to see
+  // first (SR NO, Name, Rate of Pay, Leave Days, Basic, HRA, LTA, Gross, Net
+  // Salary) stay visible without any scrolling on a laptop-width screen.
+  const SAL_PRIMARY_COLS = new Set(['SR NO','Name','Rate of Pay','Leave Days','Basic','HRA','LTA','Gross','Net Salary']);
+  const secondaryClass = label => SAL_PRIMARY_COLS.has(label) ? '' : ' sal-col-2nd';
   const isCompact = isCompactSheetView();
   let bodyRows = '';
   let srNo = 1;
@@ -7470,7 +7561,7 @@ async function renderSalarySheet(){
     if(!group.length) continue;
     bodyRows += isCompact
       ? `<div class="hr-sheet-card sal-heading-card">${SALARY_HEADINGS[headingKey].label}</div>`
-      : `<tr class="sal-heading"><td colspan="30">${SALARY_HEADINGS[headingKey].label}</td></tr>`;
+      : `<tr class="sal-heading"><td colspan="${cols.length}">${SALARY_HEADINGS[headingKey].label}</td></tr>`;
     csvRows.push([SALARY_HEADINGS[headingKey].label]);
     const sub = { rate:0, leaveAmount:0, policyHalfDays:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, loanEmi:0, loanBalance:0, retention:0, totalDeduction:0, conveyance:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0, directPaid:0, netBeforeDirect:0 };
     for(const emp of group){
@@ -7490,39 +7581,39 @@ async function renderSalarySheet(){
       if(isCompact){
         bodyRows += salaryMobileCard(srNo++, emp, s, isNewThisMonth, rateChanged);
       } else {
-        bodyRows += `<tr${rowCls}><td>${srNo++}</td><td class="sal-name">${escapeHtml(emp.name)}${isNewThisMonth ? ' <span class="pill new">new</span>' : ''}</td><td class="${rateCellCls}">${fmtMoney(s.rate)}</td><td>${s.leaveDays}${s.sandwichDays ? ' <span class="pol-warn" title="' + escapeHtml(s.sandwichDates.join(', ')) + ' — sandwiched between two unpaid-absence days">(incl. ' + s.sandwichDays + ' sandwich)</span>' : ''}</td><td>${s.policyHalfDays ? '<span class="pol-warn">' + s.policyHalfDays + '</span>' : '—'}</td><td>${fmtMoney(s.leaveAmount)}</td>` +
+        bodyRows += `<tr${rowCls}><td class="sal-sr">${srNo++}</td><td class="sal-name">${escapeHtml(emp.name)}${isNewThisMonth ? ' <span class="pill new">new</span>' : ''}</td><td class="${rateCellCls}">${fmtMoney(s.rate)}</td><td>${s.leaveDays}${s.sandwichDays ? ' <span class="pol-warn" title="' + escapeHtml(s.sandwichDates.join(', ')) + ' — sandwiched between two unpaid-absence days">(incl. ' + s.sandwichDays + ' sandwich)</span>' : ''}</td><td class="sal-col-2nd">${s.policyHalfDays ? '<span class="pol-warn">' + s.policyHalfDays + '</span>' : '—'}</td><td class="sal-col-2nd">${fmtMoney(s.leaveAmount)}</td>` +
           `<td>${fmtMoney(s.basic)}</td><td>${fmtMoney(s.hra)}</td><td>${fmtMoney(s.lta)}</td><td>${fmtMoney(s.gross)}</td>` +
-          `<td>${fmtMoney(s.pf)}</td><td>${fmtMoney(s.esi)}</td><td>${fmtMoney(s.pt)}</td><td>${fmtMoney(s.advanceTemp)}</td><td>${fmtMoney(s.advance)}</td><td>${fmtMoney(s.loanEmi)}</td><td>${fmtMoney(s.retention)}</td>` +
-          `<td>${fmtMoney(s.totalDeduction)}</td><td>${s.conveyance ? '+' + fmtMoney(s.conveyance) : '—'}</td><td>${fmtMoney(s.netBeforeDirect)}</td>` +
-          `<td>${s.directPaid ? fmtMoney(s.directPaid) : '—'}</td><td><strong>${fmtMoney(s.netSalary)}</strong></td>` +
-          `<td>${fmtMoney(s.pen)}</td><td>${fmtMoney(s.employerPf)}</td><td>${fmtMoney(s.pfAdmin)}</td>` +
-          `<td>${fmtMoney(s.edli)}</td><td>${fmtMoney(s.esiEmployer)}</td><td>${fmtMoney(s.employerCont)}</td><td>${fmtMoney(s.ctc)}</td>` +
-          `<td>${fmtMoney(s.advanceBalance)}</td><td>${fmtMoney(s.loanBalance)}</td><td>${s.fullDayLeaveBal}</td><td>${s.halfDayLeaveBal}</td></tr>`;
+          `<td class="sal-col-2nd">${fmtMoney(s.pf)}</td><td class="sal-col-2nd">${fmtMoney(s.esi)}</td><td class="sal-col-2nd">${fmtMoney(s.pt)}</td><td class="sal-col-2nd">${fmtMoney(s.advanceTemp)}</td><td class="sal-col-2nd">${fmtMoney(s.advance)}</td><td class="sal-col-2nd">${fmtMoney(s.loanEmi)}</td><td class="sal-col-2nd">${fmtMoney(s.retention)}</td>` +
+          `<td class="sal-col-2nd">${fmtMoney(s.totalDeduction)}</td><td class="sal-col-2nd">${s.conveyance ? '+' + fmtMoney(s.conveyance) : '—'}</td><td class="sal-col-2nd">${fmtMoney(s.netBeforeDirect)}</td>` +
+          `<td class="sal-col-2nd">${s.directPaid ? fmtMoney(s.directPaid) : '—'}</td><td><strong>${fmtMoney(s.netSalary)}</strong></td>` +
+          `<td class="sal-col-2nd">${fmtMoney(s.pen)}</td><td class="sal-col-2nd">${fmtMoney(s.employerPf)}</td><td class="sal-col-2nd">${fmtMoney(s.pfAdmin)}</td>` +
+          `<td class="sal-col-2nd">${fmtMoney(s.edli)}</td><td class="sal-col-2nd">${fmtMoney(s.esiEmployer)}</td><td class="sal-col-2nd">${fmtMoney(s.employerCont)}</td><td class="sal-col-2nd">${fmtMoney(s.ctc)}</td>` +
+          `<td class="sal-col-2nd">${fmtMoney(s.advanceBalance)}</td><td class="sal-col-2nd">${fmtMoney(s.loanBalance)}</td><td class="sal-col-2nd">${s.fullDayLeaveBal}</td><td class="sal-col-2nd">${s.halfDayLeaveBal}</td></tr>`;
       }
       csvRows.push([srNo-1, emp.name, R(s.rate), s.leaveDays, s.policyHalfDays, R(s.leaveAmount), R(s.basic), R(s.hra), R(s.lta), R(s.gross), R(s.pf), R(s.esi), R(s.pt), R(s.advanceTemp), R(s.advance), R(s.loanEmi), R(s.retention), R(s.totalDeduction), R(s.conveyance), R(s.netBeforeDirect), R(s.directPaid), R(s.netSalary),
         R(s.pen), R(s.employerPf), R(s.pfAdmin), R(s.edli), R(s.esiEmployer), R(s.employerCont), R(s.ctc),
         R(s.advanceBalance), R(s.loanBalance), s.fullDayLeaveBal, s.halfDayLeaveBal]);
       ['rate','leaveAmount','policyHalfDays','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','loanEmi','retention','totalDeduction','conveyance','netSalary','pen','employerPf','pfAdmin','edli','employerCont','ctc','esiEmployer','advanceBalance','loanBalance','directPaid','netBeforeDirect'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; });
     }
-    bodyRows += isCompact ? salaryMobileTotalsCard('Subtotal', sub, 'sal-total-card') : `<tr class="sal-subtotal"><td></td><td class="sal-name">Subtotal</td><td>${fmtMoney(sub.rate)}</td><td></td><td>${sub.policyHalfDays || '—'}</td><td>${fmtMoney(sub.leaveAmount)}</td>` +
+    bodyRows += isCompact ? salaryMobileTotalsCard('Subtotal', sub, 'sal-total-card') : `<tr class="sal-subtotal"><td class="sal-sr"></td><td class="sal-name">Subtotal</td><td>${fmtMoney(sub.rate)}</td><td></td><td class="sal-col-2nd">${sub.policyHalfDays || '—'}</td><td class="sal-col-2nd">${fmtMoney(sub.leaveAmount)}</td>` +
       `<td>${fmtMoney(sub.basic)}</td><td>${fmtMoney(sub.hra)}</td><td>${fmtMoney(sub.lta)}</td><td>${fmtMoney(sub.gross)}</td>` +
-      `<td>${fmtMoney(sub.pf)}</td><td>${fmtMoney(sub.esi)}</td><td>${fmtMoney(sub.pt)}</td><td>${fmtMoney(sub.advanceTemp)}</td><td>${fmtMoney(sub.advance)}</td><td>${fmtMoney(sub.loanEmi)}</td><td>${fmtMoney(sub.retention)}</td>` +
-      `<td>${fmtMoney(sub.totalDeduction)}</td><td>${sub.conveyance ? '+' + fmtMoney(sub.conveyance) : '—'}</td><td>${fmtMoney(sub.netBeforeDirect)}</td>` +
-      `<td>${sub.directPaid ? fmtMoney(sub.directPaid) : '—'}</td><td>${fmtMoney(sub.netSalary)}</td>` +
-      `<td>${fmtMoney(sub.pen)}</td><td>${fmtMoney(sub.employerPf)}</td><td>${fmtMoney(sub.pfAdmin)}</td>` +
-      `<td>${fmtMoney(sub.edli)}</td><td>${fmtMoney(sub.esiEmployer)}</td><td>${fmtMoney(sub.employerCont)}</td><td>${fmtMoney(sub.ctc)}</td>` +
-      `<td>${fmtMoney(sub.advanceBalance)}</td><td>${fmtMoney(sub.loanBalance)}</td><td></td><td></td></tr>`;
+      `<td class="sal-col-2nd">${fmtMoney(sub.pf)}</td><td class="sal-col-2nd">${fmtMoney(sub.esi)}</td><td class="sal-col-2nd">${fmtMoney(sub.pt)}</td><td class="sal-col-2nd">${fmtMoney(sub.advanceTemp)}</td><td class="sal-col-2nd">${fmtMoney(sub.advance)}</td><td class="sal-col-2nd">${fmtMoney(sub.loanEmi)}</td><td class="sal-col-2nd">${fmtMoney(sub.retention)}</td>` +
+      `<td class="sal-col-2nd">${fmtMoney(sub.totalDeduction)}</td><td class="sal-col-2nd">${sub.conveyance ? '+' + fmtMoney(sub.conveyance) : '—'}</td><td class="sal-col-2nd">${fmtMoney(sub.netBeforeDirect)}</td>` +
+      `<td class="sal-col-2nd">${sub.directPaid ? fmtMoney(sub.directPaid) : '—'}</td><td>${fmtMoney(sub.netSalary)}</td>` +
+      `<td class="sal-col-2nd">${fmtMoney(sub.pen)}</td><td class="sal-col-2nd">${fmtMoney(sub.employerPf)}</td><td class="sal-col-2nd">${fmtMoney(sub.pfAdmin)}</td>` +
+      `<td class="sal-col-2nd">${fmtMoney(sub.edli)}</td><td class="sal-col-2nd">${fmtMoney(sub.esiEmployer)}</td><td class="sal-col-2nd">${fmtMoney(sub.employerCont)}</td><td class="sal-col-2nd">${fmtMoney(sub.ctc)}</td>` +
+      `<td class="sal-col-2nd">${fmtMoney(sub.advanceBalance)}</td><td class="sal-col-2nd">${fmtMoney(sub.loanBalance)}</td><td class="sal-col-2nd"></td><td class="sal-col-2nd"></td></tr>`;
     csvRows.push(['', 'Subtotal', R(sub.rate), '', sub.policyHalfDays, R(sub.leaveAmount), R(sub.basic), R(sub.hra), R(sub.lta), R(sub.gross), R(sub.pf), R(sub.esi), R(sub.pt), R(sub.advanceTemp), R(sub.advance), R(sub.loanEmi), R(sub.retention), R(sub.totalDeduction), R(sub.conveyance), R(sub.netSalary)]);
   }
 
-  bodyRows += isCompact ? salaryMobileTotalsCard('Grand Total', grand, 'sal-grand-card') : `<tr class="sal-grandtotal"><td></td><td class="sal-name">Grand Total</td><td>${fmtMoney(grand.rate)}</td><td></td><td>${grand.policyHalfDays || '—'}</td><td>${fmtMoney(grand.leaveAmount)}</td>` +
+  bodyRows += isCompact ? salaryMobileTotalsCard('Grand Total', grand, 'sal-grand-card') : `<tr class="sal-grandtotal"><td class="sal-sr"></td><td class="sal-name">Grand Total</td><td>${fmtMoney(grand.rate)}</td><td></td><td class="sal-col-2nd">${grand.policyHalfDays || '—'}</td><td class="sal-col-2nd">${fmtMoney(grand.leaveAmount)}</td>` +
     `<td>${fmtMoney(grand.basic)}</td><td>${fmtMoney(grand.hra)}</td><td>${fmtMoney(grand.lta)}</td><td>${fmtMoney(grand.gross)}</td>` +
-    `<td>${fmtMoney(grand.pf)}</td><td>${fmtMoney(grand.esi)}</td><td>${fmtMoney(grand.pt)}</td><td>${fmtMoney(grand.advanceTemp)}</td><td>${fmtMoney(grand.advance)}</td><td>${fmtMoney(grand.loanEmi)}</td><td>${fmtMoney(grand.retention)}</td>` +
-    `<td>${fmtMoney(grand.totalDeduction)}</td><td>${grand.conveyance ? '+' + fmtMoney(grand.conveyance) : '—'}</td><td>${fmtMoney(grand.netBeforeDirect)}</td>` +
-    `<td>${grand.directPaid ? fmtMoney(grand.directPaid) : '—'}</td><td>${fmtMoney(grand.netSalary)}</td>` +
-    `<td>${fmtMoney(grand.pen)}</td><td>${fmtMoney(grand.employerPf)}</td><td>${fmtMoney(grand.pfAdmin)}</td>` +
-    `<td>${fmtMoney(grand.edli)}</td><td>${fmtMoney(grand.esiEmployer)}</td><td>${fmtMoney(grand.employerCont)}</td><td>${fmtMoney(grand.ctc)}</td>` +
-    `<td>${fmtMoney(grand.advanceBalance)}</td><td>${fmtMoney(grand.loanBalance)}</td><td></td><td></td></tr>`;
+    `<td class="sal-col-2nd">${fmtMoney(grand.pf)}</td><td class="sal-col-2nd">${fmtMoney(grand.esi)}</td><td class="sal-col-2nd">${fmtMoney(grand.pt)}</td><td class="sal-col-2nd">${fmtMoney(grand.advanceTemp)}</td><td class="sal-col-2nd">${fmtMoney(grand.advance)}</td><td class="sal-col-2nd">${fmtMoney(grand.loanEmi)}</td><td class="sal-col-2nd">${fmtMoney(grand.retention)}</td>` +
+    `<td class="sal-col-2nd">${fmtMoney(grand.totalDeduction)}</td><td class="sal-col-2nd">${grand.conveyance ? '+' + fmtMoney(grand.conveyance) : '—'}</td><td class="sal-col-2nd">${fmtMoney(grand.netBeforeDirect)}</td>` +
+    `<td class="sal-col-2nd">${grand.directPaid ? fmtMoney(grand.directPaid) : '—'}</td><td>${fmtMoney(grand.netSalary)}</td>` +
+    `<td class="sal-col-2nd">${fmtMoney(grand.pen)}</td><td class="sal-col-2nd">${fmtMoney(grand.employerPf)}</td><td class="sal-col-2nd">${fmtMoney(grand.pfAdmin)}</td>` +
+    `<td class="sal-col-2nd">${fmtMoney(grand.edli)}</td><td class="sal-col-2nd">${fmtMoney(grand.esiEmployer)}</td><td class="sal-col-2nd">${fmtMoney(grand.employerCont)}</td><td class="sal-col-2nd">${fmtMoney(grand.ctc)}</td>` +
+    `<td class="sal-col-2nd">${fmtMoney(grand.advanceBalance)}</td><td class="sal-col-2nd">${fmtMoney(grand.loanBalance)}</td><td class="sal-col-2nd"></td><td class="sal-col-2nd"></td></tr>`;
   csvRows.push(['', 'Grand Total', R(grand.rate), '', grand.policyHalfDays, R(grand.leaveAmount), R(grand.basic), R(grand.hra), R(grand.lta), R(grand.gross), R(grand.pf), R(grand.esi), R(grand.pt), R(grand.advanceTemp), R(grand.advance), R(grand.loanEmi), R(grand.retention), R(grand.totalDeduction), R(grand.conveyance), R(grand.netBeforeDirect),
     R(grand.directPaid), R(grand.netSalary), R(grand.pen), R(grand.employerPf), R(grand.pfAdmin), R(grand.edli), R(grand.esiEmployer), R(grand.employerCont), R(grand.ctc),
     R(grand.advanceBalance), R(grand.loanBalance), '', '']);
@@ -7537,13 +7628,27 @@ async function renderSalarySheet(){
 
   const salSheetInner = isCompact
     ? `<div class="hr-sheet-cards">${bodyRows}</div>`
-    : `<table class="sal-table"><tr>${cols.map((c,i)=>i===1?`<th class="sal-name-h">${c}</th>`:`<th>${c}</th>`).join('')}</tr>${bodyRows}</table>`;
-  box.innerHTML = `<div class="row-inline" style="margin-bottom:10px;">
-      <button class="btn ghost full" onclick="confirmCloseSalarySheet()">✕ Close</button>
-    </div>
+    : `<table class="sal-table sal-essential" id="salSheetTable"><tr>${cols.map((c,i) => {
+        const cls = [i===0 ? 'sal-sr-h' : '', i===1 ? 'sal-name-h' : '', secondaryClass(c).trim()].filter(Boolean).join(' ');
+        return `<th${cls ? ` class="${cls}"` : ''}>${c}</th>`;
+      }).join('')}</tr>${bodyRows}</table>`;
+  // Desktop gets a small icon-only close, top-right, out of the way of the
+  // data it sits above — the full-width "✕ Close" button ate a whole row
+  // for one tap that is used once per sheet. Mobile keeps the original
+  // full-width button unchanged; a small icon is a worse touch target there,
+  // and the sheet is already a single column of cards with nothing beside it
+  // to make room for.
+  const closeBtnHtml = isCompact
+    ? `<div class="row-inline" style="margin-bottom:10px;"><button class="btn ghost full" onclick="confirmCloseSalarySheet()">✕ Close</button></div>`
+    : `<div class="row-inline" style="justify-content:flex-end;margin-bottom:6px;"><button class="rpt-close-btn" onclick="confirmCloseSalarySheet()" title="Close" aria-label="Close">✕</button></div>`;
+  box.innerHTML = `${closeBtnHtml}
     <div class="sal-sheet-wrap print-isolate" id="salaryPrintArea">
       ${reportLogoHeader('Salary Sheet — ' + monthLabel(monthVal))}
       <p style="font-size:11px;margin:0 0 8px;"><span class="pill new" style="margin-right:6px;">new</span>joined this month &nbsp; <span style="display:inline-block;width:11px;height:11px;background:#FDECC8;box-shadow:inset 0 0 0 1px var(--amber-dark);vertical-align:middle;margin-right:5px;"></span>Rate of Pay changed since last month</p>
+      ${isCompact ? '' : `<div class="row-inline" style="margin:0 0 8px;align-items:center;">
+        <button class="btn ghost sal-col-toggle" id="salColToggleBtn" onclick="toggleSalarySheetColumns()">Show all columns</button>
+        <span style="font-size:11px;color:var(--muted);">Showing SR NO, Name, Rate of Pay, Leave Days, Basic, HRA, LTA, Gross and Net Salary. Every other column is still on the sheet and in the CSV — one tap away.</span>
+      </div>`}
       ${salSheetInner}
     </div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0;">PT = ₹200 if Gross &gt; ₹12,000, else ₹0. Leave Days = Absent + LP days for the month (EL/SL count as present, no deduction). PF, ESI, Advance are entered per employee in Employee Master. Apprentices and Contractors have no PF, ESI, or PT. R.S.IT Solution has no PF or ESI, but PT still applies. Retention is the monthly bond retention deduction, if configured.</p>
@@ -7555,6 +7660,19 @@ async function renderSalarySheet(){
       <button class="btn ghost" style="flex:1;" onclick="shareCurrentReport('whatsapp')">📱 WhatsApp</button>
       <button class="btn ghost" style="flex:1;" onclick="shareCurrentReport('email')">✉️ Email</button>
     </div>`;
+  collapseSheetTopControls('salTopControls');
+}
+
+// Flips the Salary Sheet between the default "essential" columns and every
+// column — a CSS class toggle on the already-rendered table, not a re-render,
+// so it is instant and does not re-fetch a month's worth of attendance just
+// to show or hide a column.
+function toggleSalarySheetColumns(){
+  const table = document.getElementById('salSheetTable');
+  const btn = document.getElementById('salColToggleBtn');
+  if(!table || !btn) return;
+  const nowEssential = table.classList.toggle('sal-essential');
+  btn.textContent = nowEssential ? 'Show all columns' : 'Show essential columns';
 }
 
 // ---- PF / ESI / PT reports: each is Name + amount + Grand Total, month/year wise, pulled from the Salary Sheet formulas ----
@@ -9447,7 +9565,11 @@ const HR_ROUTES = {
   daily:      { label:'Daily Summary',       icon:'📬', show:['hrTabTracking','secDailySummary'] },
   employees:  { label:'Employee Master',     icon:'👥', show:['hrTabMgmt','hrSubMaster'], run:() => renderEmployeeList() },
   attendance: { label:'Attendance Sheet',    icon:'🗓️', show:['hrTabMgmt','hrSubDash','dashSubAttendance'], run:() => renderAttendanceSheet() },
-  salary:     { label:'Salary Sheet',        icon:'₹',  show:['hrTabMgmt','hrSubDash','dashSubSalary'], run:() => renderSalarySheet() },
+  // No auto-run: the Salary Sheet used to load the current month the instant
+  // this tab opened, before anyone had chosen a month — HR asked for this to
+  // stop. Picking a month and pressing "Load salary sheet" is what renders it
+  // now, same as every other report in the app already works.
+  salary:     { label:'Salary Sheet',        icon:'₹',  show:['hrTabMgmt','hrSubDash','dashSubSalary'] },
   reminders:  { label:'Increment Reminders', icon:'📈', show:['hrTabMgmt','hrSubDash','dashSubReminders'], run:() => refreshDashboard() },
   expiry:     { label:'Document Expiry',     icon:'📄', show:['hrTabMgmt','hrSubDash','dashSubExpiry'], run:() => renderDocExpiryList() },
   activity:   { label:'Activity Log',        icon:'🕘', show:['hrTabMgmt','hrSubDash','dashSubActivity'], run:() => renderActivityLogList() },
