@@ -1402,7 +1402,10 @@
 
           <div id="engLeavePreview" class="bonus-callout" style="margin-top:12px;"></div>
           <div style="height:12px"></div>
-          <button class="btn full" id="engLeaveSubmitBtn" onclick="submitEngLeaveRequest()">Send to HR</button>
+          <div class="row-inline">
+            <button class="btn ghost" style="flex:1;" onclick="toggleEngLeaveForm()">Cancel</button>
+            <button class="btn" style="flex:1;" id="engLeaveSubmitBtn" onclick="submitEngLeaveRequest()">Send to HR</button>
+          </div>
           <div class="msg" id="engLeaveMsg"></div>
         </div>
         <div id="engLeaveList" style="margin-top:14px;"></div>
