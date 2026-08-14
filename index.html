@@ -792,6 +792,9 @@
     color:var(--navy);font-size:16px;line-height:1;cursor:pointer;box-shadow:0 2px 6px rgba(22,33,62,.18);
   }
   .fs-scroll-btn:hover{background:#00000008;border-color:var(--navy);}
+  /* Splits the up/down pair from the left/right pair so four buttons in one
+     column still reads as two separate controls, not one confusing group of four. */
+  .fs-scroll-gap{height:4px;}
 
   /* ===== Role reports: real A4 sheets, branded on every page ===== */
   .rpt-page-probe{position:absolute;left:-10000px;top:0;width:718px;visibility:hidden;}
@@ -2453,6 +2456,9 @@
     <div class="fs-scroll-nav">
       <button class="fs-scroll-btn" onclick="scrollFullscreenBody('top')" title="Scroll to top" aria-label="Scroll to top">▲</button>
       <button class="fs-scroll-btn" onclick="scrollFullscreenBody('bottom')" title="Scroll to bottom" aria-label="Scroll to bottom">▼</button>
+      <div class="fs-scroll-gap"></div>
+      <button class="fs-scroll-btn" onclick="scrollFullscreenBody('left')" title="Scroll to first column" aria-label="Scroll to first column">◀</button>
+      <button class="fs-scroll-btn" onclick="scrollFullscreenBody('right')" title="Scroll to last column" aria-label="Scroll to last column">▶</button>
     </div>
   </div>
 
@@ -6790,7 +6796,20 @@ function openFullscreenView(title, sourceId){
 function scrollFullscreenBody(direction){
   const body = document.getElementById('fullscreenBody');
   if(!body) return;
-  body.scrollTo({ top: direction === 'top' ? 0 : body.scrollHeight, behavior: 'smooth' });
+  if(direction === 'top' || direction === 'bottom'){
+    body.scrollTo({ top: direction === 'top' ? 0 : body.scrollHeight, behavior: 'smooth' });
+    return;
+  }
+  // The day grid that actually needs to move sideways is the report's own
+  // bounded-scroll wrap (.att-sheet-wrap/.sal-sheet-wrap/.inc-scroll), not
+  // #fullscreenBody — that wrap keeps its own overflow-x:auto in full screen
+  // (only its height cap is lifted there), so it is the element that is
+  // actually wider than what is on screen, while #fullscreenBody itself
+  // never grows past the viewport's width. Falls back to #fullscreenBody for
+  // any report with no such wrap, or one that overflows the body directly.
+  const wrap = body.querySelector('.att-sheet-wrap, .sal-sheet-wrap, .inc-scroll');
+  const target = (wrap && wrap.scrollWidth > wrap.clientWidth) ? wrap : body;
+  target.scrollTo({ left: direction === 'left' ? 0 : target.scrollWidth, behavior: 'smooth' });
 }
 function closeFullscreenView(){
   if(fullscreenActiveId){
