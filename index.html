@@ -11609,12 +11609,12 @@ function employeeModalHtml(emp){
       </div>
       </div>
 
+      <div class="msg" id="empSaveMsg"></div>
       <div class="modal-actions">
         <button class="btn ghost" onclick="closeEmployeeModal()" title="Cancel" aria-label="Cancel">✕</button>
         <button class="btn" onclick="saveEmployeeForm()">Save employee</button>
         <span id="empDraftNote" class="draft-note"></span>
       </div>
-      <div class="msg" id="empSaveMsg"></div>
     </div>
   </div>`;
 }
@@ -12947,20 +12947,32 @@ async function saveIncrement(id){
 // created a second record. One at a time, with the button showing it.
 let employeeSaveInFlight = false;
 
-async function saveEmployeeForm(){
+// #empSaveMsg used to sit below the Save button, at the very bottom of a long
+// multi-step form — on a phone, pressing Save and getting refused (a
+// duplicate ID, a tracking username already taken, a payroll figure that
+// never computed) looked exactly like the button doing nothing, since the
+// reason was off-screen below it. Moved above the button in the template;
+// this scrolls it into view every time, so pressing Save always immediately
+// shows why it didn't work, on whichever step of the form you're on.
+function showEmpSaveError(text){
   const msg = document.getElementById('empSaveMsg');
+  if(!msg) return;
+  msg.textContent = text;
+  msg.classList.add('error');
+  msg.scrollIntoView({ behavior:'smooth', block:'center' });
+}
+
+async function saveEmployeeForm(){
   if(employeeSaveInFlight) return;
   const id = document.getElementById('f_id').value.trim();
   const name = document.getElementById('f_name').value.trim();
   if(!id || !name){
-    msg.textContent = 'Employee ID and full name are required.';
-    msg.classList.add('error');
+    showEmpSaveError('Employee ID and full name are required.');
     return;
   }
   const employees = await getEmployees();
   if(!editingEmployeeId && employees.some(e => e.id === id)){
-    msg.textContent = 'That Employee ID is already in use.';
-    msg.classList.add('error');
+    showEmpSaveError('That Employee ID is already in use.');
     return;
   }
   // Every heading the master says is derivable has to have actually produced a
@@ -12992,8 +13004,7 @@ async function saveEmployeeForm(){
 
   const payrollErrors = payrollBlockingErrors();
   if(payrollErrors.length){
-    msg.textContent = payrollBlockingMessage();
-    msg.classList.add('error');
+    showEmpSaveError(payrollBlockingMessage());
     return;
   }
   const needsTracking = document.getElementById('f_needsTracking').value;
@@ -13004,19 +13015,16 @@ async function saveEmployeeForm(){
     const trackingUsername = document.getElementById('f_trackingUsername')?.value.trim();
     const trackingPassword = document.getElementById('f_trackingPassword')?.value;
     if(!trackingUsername || !trackingPassword){
-      msg.textContent = 'Enter a username and temporary password to create their tracking login.';
-      msg.classList.add('error');
+      showEmpSaveError('Enter a username and temporary password to create their tracking login.');
       return;
     }
     if(trackingPassword.length < 4){
-      msg.textContent = 'Tracking password should be at least 4 characters.';
-      msg.classList.add('error');
+      showEmpSaveError('Tracking password should be at least 4 characters.');
       return;
     }
     const result = await createUser(trackingUsername, trackingPassword, name);
     if(!result.ok){
-      msg.textContent = 'That tracking username is already taken — choose another.';
-      msg.classList.add('error');
+      showEmpSaveError('That tracking username is already taken — choose another.');
       return;
     }
     draft.trackingUsername = normUsername(trackingUsername);
@@ -13131,8 +13139,7 @@ async function saveEmployeeForm(){
     if(!merged) await saveEmployees(employees);
     saved = true;
   }catch(err){
-    msg.textContent = 'Could not save: ' + (err && err.message ? err.message : 'the server did not respond') + '. Nothing was lost — press Save again.';
-    msg.classList.add('error');
+    showEmpSaveError('Could not save: ' + (err && err.message ? err.message : 'the server did not respond') + '. Nothing was lost — press Save again.');
   }finally{
     // Always released, so a failed save never leaves the form permanently
     // locked with no way to retry.
