@@ -5975,14 +5975,37 @@ function isCompactSheetView(){
 // back. Left alone on phones: the sheet already collapses into a single
 // column of cards there, and the controls above it were never the problem
 // the way a 30-column table cut off on the right was.
+// Tracks whether the sidebar was collapsed BY this — as opposed to HR having
+// already collapsed it themselves via the rail button before ever opening a
+// sheet — so leaving the sheet only re-expands it when that was this code's
+// own doing, never overriding a choice HR actually made.
+let sheetAutoCollapsedSidebar = false;
 function collapseSheetTopControls(id){
   if(isCompactSheetView()) return;
   const el = document.getElementById(id);
   if(el) el.classList.add('hidden');
+  // Both sheets are wide enough that the sidebar's ~240px is worth giving
+  // back too, on top of the picker above. Same rail toggleHrSidebar() uses,
+  // set directly on the body class rather than through that function —
+  // toggleHrSidebar() also writes HR's remembered rail preference to
+  // localStorage, and this collapse is temporary, tied to the sheet being
+  // open, not something to remember as a preference.
+  if(!document.body.classList.contains('hr-rail')){
+    document.body.classList.add('hr-rail');
+    const railBtn = document.getElementById('hrRail');
+    if(railBtn) railBtn.textContent = '⯈';
+    sheetAutoCollapsedSidebar = true;
+  }
 }
 function showSheetTopControls(id){
   const el = document.getElementById(id);
   if(el) el.classList.remove('hidden');
+  if(sheetAutoCollapsedSidebar){
+    document.body.classList.remove('hr-rail');
+    const railBtn = document.getElementById('hrRail');
+    if(railBtn) railBtn.textContent = '⯇';
+    sheetAutoCollapsedSidebar = false;
+  }
 }
 
 // Reacts only to the view actually flipping between table and card — not
