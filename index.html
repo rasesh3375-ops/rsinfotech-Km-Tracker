@@ -767,16 +767,25 @@
   /* ===== Role reports: real A4 sheets, branded on every page ===== */
   .rpt-page-probe{position:absolute;left:-10000px;top:0;width:718px;visibility:hidden;}
   .rpt-wrap{background:#E9E9E4;padding:16px;overflow-x:auto;}
-  .rpt-page{width:210mm;min-height:297mm;box-sizing:border-box;padding:14mm 16mm;margin:0 auto 16px;
+  .rpt-page{width:210mm;min-height:297mm;box-sizing:border-box;padding:12mm 16mm;margin:0 auto 16px;
     background:#fff;color:#16213E;font-family:Georgia,'Times New Roman',serif;font-size:11pt;line-height:1.5;
     box-shadow:0 2px 10px rgba(22,33,62,.16);display:flex;flex-direction:column;}
   .rpt-body{flex:1;}
-  .rpt-head{border-bottom:2.5px solid var(--navy);padding-bottom:9px;margin-bottom:14px;}
+  .rpt-head{border-bottom:2.5px solid var(--navy);padding-bottom:6px;margin-bottom:10px;}
   .rpt-head-top{display:flex;align-items:flex-start;gap:14px;}
-  .rpt-logo{width:52px;height:52px;object-fit:contain;flex-shrink:0;}
+  .rpt-logo{width:44px;height:44px;object-fit:contain;flex-shrink:0;}
   .rpt-head-mid{flex:1;text-align:center;}
-  .rpt-company{font-size:17pt;font-weight:700;color:var(--navy);letter-spacing:.3px;}
-  .rpt-addr{font-size:8.5pt;color:#5A6270;margin-top:2px;}
+  .rpt-company{font-size:15pt;font-weight:700;color:var(--navy);letter-spacing:.3px;}
+  /* The registered address is long enough to wrap across several lines once
+     it is on the letterhead at all — kept small and tight-leaded so that
+     doesn't push an ordinary one-page letter (a Salary Slip, say) past the
+     single physical page .rpt-page assumes it has (see the print stylesheet
+     below: a .rpt-page that overflows one page renders a corrupted,
+     duplicate-looking second page in Chromium's print engine — flex
+     containers don't fragment across a page boundary the way block content
+     does, and there is no clean way to make that safe here, so the header is
+     kept short enough that it doesn't need to). */
+  .rpt-addr{font-size:7pt;line-height:1.25;color:#5A6270;margin-top:2px;}
   .rpt-head-right{text-align:right;min-width:130px;}
   .rpt-title{font-size:11pt;font-weight:700;color:var(--amber-dark);text-transform:uppercase;letter-spacing:.5px;}
   .rpt-when{font-size:8pt;color:#5A6270;margin-top:3px;}
@@ -6800,6 +6809,36 @@ async function reportToPdfBlob(sourceId){
     return pdf.output('blob');
   }catch(e){ return null; }
 }
+// The PDF button used to call window.print() straight into the OS's native
+// print dialog — printer selection, page ranges, paper size — none of which
+// is "save a PDF" on a phone, and the browser's own print pagination could
+// occasionally hand back an extra page for content close to a page boundary.
+// This builds the PDF itself, the same way Email/WhatsApp sharing already
+// does (see reportToPdfBlob), and hands it straight to the device to save —
+// through the native Save/Share sheet where one is available, a plain
+// download otherwise — rather than opening a print dialog at all.
+async function downloadReportPdf(btn, sourceId, title){
+  if(!btn || btn.disabled) return;
+  btn.disabled = true;
+  try{
+    const pdfBlob = await reportToPdfBlob(sourceId);
+    if(!pdfBlob){ window.print(); return; } // capture failed — fall back to the old behaviour rather than do nothing
+    const fileName = (title || 'Report').replace(/[^\w .-]/g, '_') + '.pdf';
+    let file = null;
+    try{ file = new File([pdfBlob], fileName, { type: 'application/pdf' }); }catch(e){}
+    if(file && navigator.canShare && navigator.canShare({ files: [file] })){
+      try{ await navigator.share({ files: [file], title: title || 'Report' }); return; }
+      catch(e){ if(e && e.name === 'AbortError') return; } // cancelled from the share sheet — not a failure to fall back on
+    }
+    const url = URL.createObjectURL(pdfBlob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fileName;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } finally {
+    btn.disabled = false;
+  }
+}
 // Disables the icon button for as long as sharing takes — building the PDF
 // alone can take a couple of seconds on a long report — without touching its
 // textContent the way withBusy does. withBusy relabels a button by
@@ -6885,7 +6924,7 @@ function reportActionBar(title, sourceId, closeAttr, opts){
     </div>
     <div class="rpt-actions-row">
       ${opts.fullscreenBtn === false ? '' : `<button class="rpt-icon-btn" onclick="openFullscreenView('${safeTitle}','${sourceId}')" title="Full screen"><span class="ic">⛶</span><span class="lbl">Full screen</span></button>`}
-      ${opts.print === false ? '' : `<button class="rpt-icon-btn" onclick="window.print()" title="Print / Save PDF"><span class="ic">📄</span><span class="lbl">PDF</span></button>`}
+      ${opts.print === false ? '' : `<button class="rpt-icon-btn" onclick="downloadReportPdf(this,'${sourceId}','${safeTitle}')" title="Save PDF"><span class="ic">📄</span><span class="lbl">PDF</span></button>`}
       <button class="rpt-icon-btn" onclick="shareIconBusy(this,'email')" title="Email"><span class="ic">✉️</span><span class="lbl">Email</span></button>
       <button class="rpt-icon-btn" onclick="shareIconBusy(this,'whatsapp')" title="WhatsApp"><span class="ic">📱</span><span class="lbl">WhatsApp</span></button>
     </div>
