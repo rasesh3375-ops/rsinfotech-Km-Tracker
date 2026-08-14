@@ -3682,6 +3682,37 @@ async function toggleUserEnabled(username){
   await addActivityLog((user.enabled ? 'Enabled' : 'Disabled') + ' tracking login @' + user.username);
 }
 
+// Marking an employee as left only disables their login (markEmployeeLeft) —
+// the username itself stays reserved forever, with no way to free it back
+// up for reuse. This is the one place that actually removes a username from
+// the users list without deleting the whole employee record, for test
+// accounts and departed engineers HR wants to fully clear out. Refuses to
+// touch a login still attached to an active employee, so this can't be used
+// to accidentally lock someone currently working out of their own account —
+// "Disable" (toggleUserEnabled) is the right tool for that instead.
+async function deleteUser(username){
+  const uname = normUsername(username);
+  const employees = await getEmployees();
+  const owner = employees.find(e => e.trackingUsername === uname);
+  if(owner && owner.employmentStatus !== 'left'){
+    alert('This login belongs to ' + owner.name + ', who is still an active employee. ' +
+      'Mark them as left first, or use "Disable" instead of deleting.');
+    return;
+  }
+  if(!confirm('Permanently delete the login @' + uname + '?\n\n' +
+    (owner ? 'This does not delete ' + owner.name + '\'s employee record — only the login itself, ' +
+      'freeing @' + uname + ' up to be used again.' : 'This account is not linked to any employee record.') +
+    '\n\nThis cannot be undone.')) return;
+  const users = await getUsers();
+  await saveUsers(users.filter(u => u.username !== uname));
+  if(owner){
+    owner.trackingUsername = '';
+    await saveEmployees(employees);
+  }
+  await addActivityLog('Deleted km-tracking login @' + uname + (owner ? ' (' + owner.name + ')' : ''));
+  await renderUserList();
+}
+
 async function resetPassword(username){
   const newPass = prompt('Enter a new temporary password for ' + username + ':');
   if(!newPass) return;
@@ -3787,6 +3818,7 @@ async function renderUserList(){
         <span class="pill ${u.enabled === false ? 'disabled' : 'live'}">${u.enabled === false ? 'disabled' : 'active'}</span>
         <button class="btn ghost" onclick="resetPassword('${escapeHtml(u.username)}')">Reset password</button>
         <button class="btn ghost" onclick="toggleUserEnabled('${escapeHtml(u.username)}')">${u.enabled === false ? 'Enable' : 'Disable'}</button>
+        <button class="btn ghost btn-danger" onclick="deleteUser('${escapeHtml(u.username)}')">Delete</button>
       </div>
     </div>`).join('');
 }
