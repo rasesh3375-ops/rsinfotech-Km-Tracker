@@ -786,7 +786,12 @@
   /* Two floating buttons, pinned to the middle of the viewport rather than
      the top or bottom, so jumping from wherever you are to either end of a
      long table never needs the scrollbar dragged the full distance by hand. */
-  .fs-scroll-nav{position:fixed;right:14px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:8px;z-index:5;}
+  /* Now a standalone element (not nested inside #fullscreenSheetRoot, so it
+     can also float over the plain inline sheet view), so it needs its own
+     z-index above --z-fullscreen (200) to still clear the full-screen
+     overlay when that is open — sitting below --z-modal-top (300) so an
+     actual confirm dialog still wins over it. */
+  .fs-scroll-nav{position:fixed;right:14px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:8px;z-index:210;}
   .fs-scroll-btn{
     width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:var(--paper);
     color:var(--navy);font-size:16px;line-height:1;cursor:pointer;box-shadow:0 2px 6px rgba(22,33,62,.18);
@@ -2453,13 +2458,20 @@
       <button class="fs-close-btn" onclick="closeFullscreenHeaderButton()" title="Close" aria-label="Close">✕</button>
     </div>
     <div class="fullscreen-body" id="fullscreenBody"></div>
-    <div class="fs-scroll-nav">
-      <button class="fs-scroll-btn" onclick="scrollFullscreenBody('top')" title="Scroll to top" aria-label="Scroll to top">▲</button>
-      <button class="fs-scroll-btn" onclick="scrollFullscreenBody('bottom')" title="Scroll to bottom" aria-label="Scroll to bottom">▼</button>
-      <div class="fs-scroll-gap"></div>
-      <button class="fs-scroll-btn" onclick="scrollFullscreenBody('left')" title="Scroll to first column" aria-label="Scroll to first column">◀</button>
-      <button class="fs-scroll-btn" onclick="scrollFullscreenBody('right')" title="Scroll to last column" aria-label="Scroll to last column">▶</button>
-    </div>
+  </div>
+  <!-- Standalone, not nested inside #fullscreenSheetRoot — the Attendance and
+       Salary Sheets each already have their own bounded-height, both-ways
+       scrolling box (.att-sheet-wrap/.sal-sheet-wrap) sitting right in the
+       page, full screen or not, so this needs to work identically either
+       way. sheetScrollNavVisibility() shows it whenever full screen is open
+       OR one of those two sheets has rendered content inline; scrollSheetView()
+       resolves which element to actually scroll for each case. -->
+  <div class="fs-scroll-nav hidden" id="sheetScrollNav">
+    <button class="fs-scroll-btn" onclick="scrollSheetView('top')" title="Scroll to top" aria-label="Scroll to top">▲</button>
+    <button class="fs-scroll-btn" onclick="scrollSheetView('bottom')" title="Scroll to bottom" aria-label="Scroll to bottom">▼</button>
+    <div class="fs-scroll-gap"></div>
+    <button class="fs-scroll-btn" onclick="scrollSheetView('left')" title="Scroll to first column" aria-label="Scroll to first column">◀</button>
+    <button class="fs-scroll-btn" onclick="scrollSheetView('right')" title="Scroll to last column" aria-label="Scroll to last column">▶</button>
   </div>
 
   <!-- Uses --z-modal-top (300), above #fullscreenSheetRoot's --z-fullscreen
@@ -6126,6 +6138,7 @@ async function renderAttendanceSheet(){
   if(!employees.length){
     box.innerHTML = '<div class="empty">Add employees in Employee Master first.</div>';
     collapseSheetTopControls('attTopControls');
+    updateSheetScrollNavVisibility();
     return;
   }
   const holidays = await getHolidays();
@@ -6269,6 +6282,7 @@ async function renderAttendanceSheet(){
   hydrateAttCodeSelects();
   if(restored) showSavedToast(restored + ' unsaved attendance change(s) recovered — press Save attendance to store them');
   collapseSheetTopControls('attTopControls');
+  updateSheetScrollNavVisibility();
 }
 // The small ✕ on the Attendance Sheet itself (reportActionBar's own close,
 // wired here instead of its plain default) — on a laptop/desktop screen this
@@ -6318,6 +6332,7 @@ async function closeAttendanceSheetAction(mode){
 function finishCloseAttendanceSheet(){
   closeReportView('attendanceSheetBox');
   showSheetTopControls('attTopControls');
+  updateSheetScrollNavVisibility();
 }
 
 // Edits are collected here and written when Save is pressed. Every change used
@@ -6784,32 +6799,68 @@ function openFullscreenView(title, sourceId){
   fsBody.appendChild(el);
   document.getElementById('fullscreenSheetRoot').classList.remove('hidden');
   document.body.style.overflow = 'hidden';
-  try{
-    const overlayEl = document.getElementById('fullscreenSheetRoot');
-    if(overlayEl.requestFullscreen) overlayEl.requestFullscreen().catch(()=>{});
-  }catch(e){}
+  updateSheetScrollNavVisibility();
+  // Deliberately NOT calling the native Fullscreen API here (requestFullscreen()
+  // used to be called on #fullscreenSheetRoot) — the CSS overlay already
+  // covers the whole viewport on its own (position:fixed;inset:0), so it was
+  // only ever a cosmetic extra hiding the browser's own address bar. The
+  // native API promotes its element to the browser's "top layer", where only
+  // that element's own descendants ever render — #sheetScrollNav sits beside
+  // #fullscreenSheetRoot, not inside it, specifically so the same floating
+  // buttons work for the plain inline Attendance/Salary Sheet too, and the
+  // top layer made it invisible and unclickable behind the table whenever
+  // real fullscreen was engaged.
 }
 // The two floating buttons pinned to the middle of the full-screen viewer —
 // a long table (a full month of attendance, every employee on the Salary
 // Sheet) can be many screens tall, and dragging the scrollbar the whole way
 // by hand every time was the actual complaint, not the table's height itself.
-function scrollFullscreenBody(direction){
-  const body = document.getElementById('fullscreenBody');
-  if(!body) return;
+// The Attendance/Salary Sheet's own bounded-scroll wrap, whichever of the two
+// is actually showing inline right now — not hidden behind a collapsed
+// section, and not the copy sitting inertly inside #fullscreenBody while
+// full screen is closed. offsetParent is null on a display:none ancestor,
+// which is the cheapest real "is this actually on screen" check available.
+function inlineSheetWrap(){
+  const att = document.querySelector('#attendanceSheetBox .att-sheet-wrap');
+  if(att && att.offsetParent !== null) return att;
+  const sal = document.querySelector('#salarySheetBox .sal-sheet-wrap');
+  if(sal && sal.offsetParent !== null) return sal;
+  return null;
+}
+// Full screen and the plain inline view scroll differently: full screen's
+// wrap has its height cap lifted (#fullscreenBody .att-sheet-wrap{max-height:none})
+// so #fullscreenBody itself is what scrolls vertically there, while the wrap
+// keeps handling horizontal scroll either way. Inline, the wrap still has
+// its own max-height and handles both axes itself — there is no taller
+// ancestor to hand vertical scrolling off to.
+function scrollSheetView(direction){
+  const fsBody = fullscreenActiveId ? document.getElementById('fullscreenBody') : null;
   if(direction === 'top' || direction === 'bottom'){
-    body.scrollTo({ top: direction === 'top' ? 0 : body.scrollHeight, behavior: 'smooth' });
+    const target = fsBody || inlineSheetWrap();
+    if(!target) return;
+    target.scrollTo({ top: direction === 'top' ? 0 : target.scrollHeight, behavior: 'smooth' });
     return;
   }
-  // The day grid that actually needs to move sideways is the report's own
-  // bounded-scroll wrap (.att-sheet-wrap/.sal-sheet-wrap/.inc-scroll), not
-  // #fullscreenBody — that wrap keeps its own overflow-x:auto in full screen
-  // (only its height cap is lifted there), so it is the element that is
-  // actually wider than what is on screen, while #fullscreenBody itself
-  // never grows past the viewport's width. Falls back to #fullscreenBody for
-  // any report with no such wrap, or one that overflows the body directly.
-  const wrap = body.querySelector('.att-sheet-wrap, .sal-sheet-wrap, .inc-scroll');
-  const target = (wrap && wrap.scrollWidth > wrap.clientWidth) ? wrap : body;
+  let target;
+  if(fsBody){
+    const wrap = fsBody.querySelector('.att-sheet-wrap, .sal-sheet-wrap, .inc-scroll');
+    target = (wrap && wrap.scrollWidth > wrap.clientWidth) ? wrap : fsBody;
+  } else {
+    target = inlineSheetWrap();
+  }
+  if(!target) return;
   target.scrollTo({ left: direction === 'left' ? 0 : target.scrollWidth, behavior: 'smooth' });
+}
+// Shown whenever there is actually something for it to scroll: full screen
+// open (any report), or the Attendance/Salary Sheet rendered inline — hidden
+// on mobile, where both sheets are a single column of cards with nothing to
+// jump sideways through, and vertical scrolling a phone screen by hand was
+// never the complaint this was built for.
+function updateSheetScrollNavVisibility(){
+  const nav = document.getElementById('sheetScrollNav');
+  if(!nav) return;
+  const show = !isCompactSheetView() && (!!fullscreenActiveId || !!inlineSheetWrap());
+  nav.classList.toggle('hidden', !show);
 }
 function closeFullscreenView(){
   if(fullscreenActiveId){
@@ -6822,6 +6873,7 @@ function closeFullscreenView(){
   document.getElementById('fullscreenSheetRoot').classList.add('hidden');
   document.body.style.overflow = '';
   fullscreenActiveId = null;
+  updateSheetScrollNavVisibility();
   try{ if(document.fullscreenElement) document.exitFullscreen().catch(()=>{}); }catch(e){}
 }
 // The full-screen header's own Close button, generic across every use of
@@ -6889,6 +6941,7 @@ function cancelSalarySheetView(){
   const box = document.getElementById('salarySheetBox');
   if(box) box.innerHTML = '';
   showSheetTopControls('salTopControls');
+  updateSheetScrollNavVisibility();
 }
 
 // ---- shared report footer: Close, Full screen, Print, WhatsApp, Email ----
@@ -7640,6 +7693,7 @@ async function renderSalarySheet(){
   if(!employees.length){
     box.innerHTML = '<div class="empty">Add employees in Employee Master first.</div>';
     collapseSheetTopControls('salTopControls');
+    updateSheetScrollNavVisibility();
     return;
   }
   const holidays = await getHolidays();
@@ -7788,6 +7842,7 @@ async function renderSalarySheet(){
       <button class="btn ghost" style="flex:1;" onclick="shareCurrentReport('email')">✉️ Email</button>
     </div>`;
   collapseSheetTopControls('salTopControls');
+  updateSheetScrollNavVisibility();
 }
 
 // Flips the Salary Sheet between the default "essential" columns and every
@@ -9791,6 +9846,11 @@ function hrNavigate(route){
     const el = document.getElementById(id);
     if(el) el.classList.remove('hidden');
   });
+  // Blanket safety net for every way of leaving the Attendance/Salary Sheet
+  // that isn't its own Close button (sidebar, breadcrumb) — those never clear
+  // the box, only hide its ancestor panel, so this re-checks actual on-screen
+  // state rather than trusting whatever the nav was last explicitly set to.
+  updateSheetScrollNavVisibility();
   const title = document.getElementById('hrPageTitle');
   if(title){
     // A breadcrumb rather than a bare heading: the Dashboard is always one tap
