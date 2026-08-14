@@ -878,3 +878,156 @@ function clearLoginLockouts() {
   CacheService.getScriptCache().removeAll(names.map(function (n) { return 'fail_' + n; }));
   Logger.log('Cleared login lockouts for: ' + names.join(', '));
 }
+
+// ===== NEW: daily HR digest email =====
+// The frontend cannot send this itself — nothing in index.html runs unless
+// somebody actually has the app open, so a "send every day at 9 PM" report
+// has to live here, driven by a time-based trigger instead of a browser tab.
+// Reads the same 'employees' and attendance:<id>:<year> keys the app itself
+// reads (through the same mergedAttendanceForId_/fyLabelForDateStr_ helpers
+// doGetAttendanceRange_ uses), so this can never show a different picture of
+// today from what HR sees on screen.
+//
+// One-time setup: open this project in the Apps Script editor, select
+// createDailyDigestTrigger from the function dropdown and press Run. That's
+// the only step — from then on sendDailyDigestEmail fires on its own, once a
+// day, with no browser or tab open anywhere. Re-running createDailyDigestTrigger
+// is safe: it removes its own previous trigger first, so it never ends up
+// sending two emails a day.
+var DAILY_DIGEST_EMAIL = 'rasesh@rsinfotech.net';
+var DAILY_DIGEST_HOUR = 21; // 9 PM. Apps Script fires a daily trigger sometime
+                             // within the chosen hour, not to the exact minute.
+
+function createDailyDigestTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'sendDailyDigestEmail') {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+  ScriptApp.newTrigger('sendDailyDigestEmail')
+    .timeBased()
+    .everyDays(1)
+    .atHour(DAILY_DIGEST_HOUR)
+    .inTimezone('Asia/Kolkata')
+    .create();
+  Logger.log('Daily digest trigger created — sendDailyDigestEmail will now run once a day, around ' +
+    DAILY_DIGEST_HOUR + ':00 IST, with nobody needing the app open.');
+}
+
+// Undoes createDailyDigestTrigger — stops the daily email without touching
+// anything else. Run from the editor the same way.
+function removeDailyDigestTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var removed = 0;
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'sendDailyDigestEmail') {
+      ScriptApp.deleteTrigger(triggers[i]);
+      removed++;
+    }
+  }
+  Logger.log('Removed ' + removed + ' daily digest trigger(s).');
+}
+
+function todayIso_() {
+  return Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+}
+
+// The function the trigger actually calls. Also safe to run by hand from the
+// editor at any time, to see today's digest immediately rather than waiting
+// for the trigger.
+function sendDailyDigestEmail() {
+  var sheet = getSheet_();
+  var rows = sheet.getDataRange().getValues();
+  var map = {};
+  for (var i = 0; i < rows.length; i++) map[rows[i][0]] = rows[i][1];
+
+  var today = todayIso_();
+  var empRaw = map['employees'];
+  var employees = [];
+  if (empRaw) { try { employees = JSON.parse(empRaw) || []; } catch (e) { employees = []; } }
+  // Resident Engineers sit outside the ordinary attendance rules everywhere
+  // else in the app (see CLAUDE.md) — excluded here for the same reason a
+  // "who is absent today" question does not apply to them.
+  var active = employees.filter(function (e) {
+    return e && e.employmentStatus !== 'left' && e.employeeType !== 'resident';
+  });
+
+  var fyLabel = fyLabelForDateStr_(today);
+  var absent = [];
+  var notMarked = [];
+  active.forEach(function (e) {
+    var att = mergedAttendanceForId_(map, e.id, [fyLabel]);
+    var rec = att[today];
+    var code = rec && rec.code;
+    if (code === 'A') absent.push(e.name || e.id);
+    else if (!code) notMarked.push(e.name || e.id);
+  });
+
+  // activity_log stores ts as toISOString() — UTC, not IST — so "today" has
+  // to be compared in IST after parsing, not by matching the raw string
+  // prefix, or entries logged in the first few hours of the IST day would be
+  // silently dropped (their UTC date is still yesterday).
+  var logRaw = map['activity_log'];
+  var log = [];
+  if (logRaw) { try { log = JSON.parse(logRaw) || []; } catch (e) { log = []; } }
+  var todayLog = log.filter(function (l) {
+    if (!l || !l.ts) return false;
+    var d = new Date(l.ts);
+    return Utilities.formatDate(d, 'Asia/Kolkata', 'yyyy-MM-dd') === today;
+  });
+  // addActivityLog unshifts (newest first); the email reads oldest first, the
+  // order the day actually happened in.
+  todayLog.reverse();
+
+  var niceDate = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMMM yyyy');
+  var esc = function (s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  };
+  var listOrNone = function (names) {
+    return names.length ? names.map(esc).join(', ') : 'None';
+  };
+
+  var html =
+    '<div style="font-family:Arial,sans-serif;color:#16213E;font-size:14px;line-height:1.6;">' +
+    '<h2 style="margin:0 0 4px;">R.S. Infotech — Daily HR Digest</h2>' +
+    '<p style="margin:0 0 18px;color:#5A6270;">' + esc(niceDate) + '</p>' +
+    '<h3 style="margin:0 0 6px;">Absent today (' + absent.length + ' of ' + active.length + ')</h3>' +
+    '<p style="margin:0 0 16px;">' + listOrNone(absent) + '</p>' +
+    (notMarked.length
+      ? '<h3 style="margin:0 0 6px;">Attendance not marked yet (' + notMarked.length + ')</h3>' +
+        '<p style="margin:0 0 16px;">' + listOrNone(notMarked) + '</p>'
+      : '') +
+    '<h3 style="margin:0 0 6px;">Activity log (' + todayLog.length + ')</h3>' +
+    (todayLog.length
+      ? '<ul style="margin:0 0 16px;padding-left:18px;">' +
+        todayLog.map(function (l) {
+          var time = Utilities.formatDate(new Date(l.ts), 'Asia/Kolkata', 'HH:mm');
+          return '<li>' + time + ' — ' + esc(l.text) + '</li>';
+        }).join('') +
+        '</ul>'
+      : '<p style="margin:0 0 16px;color:#5A6270;">Nothing logged today.</p>') +
+    '<p style="margin:20px 0 0;font-size:11px;color:#5A6270;">Sent automatically every day around ' +
+    DAILY_DIGEST_HOUR + ':00 IST. Manage this from the Apps Script project — see createDailyDigestTrigger / removeDailyDigestTrigger.</p>' +
+    '</div>';
+
+  var plain = 'R.S. Infotech — Daily HR Digest — ' + niceDate + '\n\n' +
+    'Absent today (' + absent.length + ' of ' + active.length + '): ' + listOrNone(absent) + '\n\n' +
+    (notMarked.length ? 'Attendance not marked yet (' + notMarked.length + '): ' + listOrNone(notMarked) + '\n\n' : '') +
+    'Activity log (' + todayLog.length + '):\n' +
+    (todayLog.length
+      ? todayLog.map(function (l) {
+          var time = Utilities.formatDate(new Date(l.ts), 'Asia/Kolkata', 'HH:mm');
+          return '  ' + time + ' — ' + l.text;
+        }).join('\n')
+      : '  Nothing logged today.');
+
+  MailApp.sendEmail({
+    to: DAILY_DIGEST_EMAIL,
+    subject: 'R.S. Infotech — Daily HR Digest — ' + niceDate,
+    body: plain,
+    htmlBody: html
+  });
+  Logger.log('Daily digest sent to ' + DAILY_DIGEST_EMAIL + ' — ' + absent.length + ' absent, ' +
+    todayLog.length + ' activity log entr(y/ies).');
+}
