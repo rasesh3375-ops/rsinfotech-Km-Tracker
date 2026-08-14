@@ -7812,6 +7812,15 @@ async function renderSalarySheet(){
   const holidayMap = {};
   holidays.forEach(h => { holidayMap[h.date] = h.name; });
 
+  // Prime the shared read cache for every employee's attendance in one batched
+  // call before the loop below asks computeSalaryForEmployee for each of them
+  // one at a time — each of those calls getAttendance(emp.id) itself, and
+  // without this, a sheet of even 30-40 employees meant 30-40 sequential
+  // backend round trips (each employee waiting on the previous one to finish)
+  // instead of one. Same fix already used by the PF/ESI report and the other
+  // per-employee reports below.
+  await getAttendanceMany(employees.map(e => e.id));
+
   // Previous month's first date, for the Rate of Pay comparison below — plain
   // integer month math, not a Date object, so there is no UTC-midnight rollover
   // (see CLAUDE.md on new Date(dateStr).getMonth()).
