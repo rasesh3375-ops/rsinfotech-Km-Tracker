@@ -761,8 +761,37 @@
   #fullscreenSheetRoot{position:fixed;inset:0;background:var(--paper);z-index:var(--z-fullscreen);display:flex;flex-direction:column;}
   .fullscreen-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line);background:var(--navy);color:#fff;flex-shrink:0;}
   .fullscreen-header strong{font-size:15px;}
-  .fullscreen-header .btn.ghost{color:#fff;border:1px solid rgba(255,255,255,.4);}
-  .fullscreen-body{flex:1;overflow:auto;padding:16px;-webkit-overflow-scrolling:touch;}
+  /* Icon-only, not "✕ Close" — a report already carries its own close button
+     (reportActionBar's .rpt-close-btn) which this delegates to, so the label
+     here was two close buttons arguing about wording for one action. */
+  .fs-close-btn{
+    width:32px;height:32px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+    border:1px solid rgba(255,255,255,.4);border-radius:50%;background:transparent;color:#fff;
+    font-size:14px;line-height:1;cursor:pointer;
+  }
+  .fs-close-btn:hover{background:rgba(255,255,255,.12);}
+  .fullscreen-body{flex:1;overflow:auto;padding:16px;-webkit-overflow-scrolling:touch;position:relative;}
+  /* A report's own small ✕ (.rpt-actions-top) and "Full screen" toggle both
+     stop meaning anything once that report is already sitting inside this
+     full-screen viewer — the header above already has the one close button
+     that matters (closeFullscreenHeaderButton() delegates to the very same
+     .rpt-close-btn this hides), and there is nowhere left for "Full screen"
+     to go. Showing them anyway was a near-empty row eating vertical space
+     for one small icon in the corner, on every report opened full screen.
+     CSS-only, scoped to here: the normal inline view (where the small ✕ is
+     the only close control there is) is untouched, and so is PDF/print
+     capture, which only ever reads .print-isolate — a sibling of .rpt-actions,
+     never a descendant of it. */
+  #fullscreenBody .rpt-actions-top, #fullscreenBody .rpt-fullscreen-btn{display:none;}
+  /* Two floating buttons, pinned to the middle of the viewport rather than
+     the top or bottom, so jumping from wherever you are to either end of a
+     long table never needs the scrollbar dragged the full distance by hand. */
+  .fs-scroll-nav{position:fixed;right:14px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:8px;z-index:5;}
+  .fs-scroll-btn{
+    width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:var(--paper);
+    color:var(--navy);font-size:16px;line-height:1;cursor:pointer;box-shadow:0 2px 6px rgba(22,33,62,.18);
+  }
+  .fs-scroll-btn:hover{background:#00000008;border-color:var(--navy);}
 
   /* ===== Role reports: real A4 sheets, branded on every page ===== */
   .rpt-page-probe{position:absolute;left:-10000px;top:0;width:718px;visibility:hidden;}
@@ -921,11 +950,11 @@
   @media print{ .att-sheet-wrap{max-height:none;overflow:visible;} }
   #fullscreenBody .att-sheet-wrap{max-height:none;}
   table.att-table{border-collapse:collapse;font-size:12px;white-space:nowrap;}
-  table.att-table th, table.att-table td{border:1px solid var(--line);padding:4px 3px;text-align:center;}
+  table.att-table th, table.att-table td{border:1px solid var(--line);padding:3px 3px;text-align:center;}
   table.att-table th{background:var(--navy);color:#fff;font-size:10.5px;text-transform:uppercase;position:sticky;top:0;z-index:2;}
   table.att-table td.att-name{text-align:left;font-weight:600;min-width:120px;position:sticky;left:0;background:var(--paper);z-index:1;}
   table.att-table th.att-name-h{text-align:left;position:sticky;left:0;z-index:3;}
-  table.att-table select.att-code{width:52px;font-size:11px;padding:3px 2px;border:1px solid var(--line);border-radius:4px;background:var(--paper);}
+  table.att-table select.att-code{width:46px;font-size:10.5px;padding:2px 2px;border:1px solid var(--line);border-radius:4px;background:var(--paper);}
   table.att-table select.att-code.code-P{background:#E7F4EC;}
   table.att-table select.att-code.code-A{background:#FDECEA;}
   table.att-table select.att-code.code-H{background:#EDEDE7;}
@@ -1017,6 +1046,12 @@
   @media (min-width: 1025px) and (max-width: 1440px){
     table.sal-table{font-size:11.5px;}
     table.sal-table th, table.sal-table td{padding:4px 6px;}
+    /* Attendance never got this tier — it kept the roomy desktop-default day
+       columns even on a laptop, so a full month of 31 always meant sideways
+       scroll here regardless of how wide the screen actually was. */
+    table.att-table{font-size:11px;}
+    table.att-table th, table.att-table td{padding:2px 2px;}
+    table.att-table select.att-code{width:38px;font-size:10px;}
   }
   /* Tablet: same table, tighter — a little less padding and a smaller font
      buys back enough width that the sideways scroll most columns still need
@@ -2412,9 +2447,13 @@
   <div id="fullscreenSheetRoot" class="hidden">
     <div class="fullscreen-header">
       <strong id="fullscreenTitle"></strong>
-      <button class="btn ghost" onclick="closeFullscreenHeaderButton()">✕ Close</button>
+      <button class="fs-close-btn" onclick="closeFullscreenHeaderButton()" title="Close" aria-label="Close">✕</button>
     </div>
     <div class="fullscreen-body" id="fullscreenBody"></div>
+    <div class="fs-scroll-nav">
+      <button class="fs-scroll-btn" onclick="scrollFullscreenBody('top')" title="Scroll to top" aria-label="Scroll to top">▲</button>
+      <button class="fs-scroll-btn" onclick="scrollFullscreenBody('bottom')" title="Scroll to bottom" aria-label="Scroll to bottom">▼</button>
+    </div>
   </div>
 
   <!-- Uses --z-modal-top (300), above #fullscreenSheetRoot's --z-fullscreen
@@ -6232,13 +6271,45 @@ async function renderAttendanceSheet(){
 // than leaving a blank space where the controls used to be. Unsaved edits
 // are never discarded silently — same confirmation discardAttendanceChanges
 // already uses, since this is another way of throwing them away.
+// A plain confirm() used to just ask "discard?" — this is where attendance is
+// actually typed in, so closing with unsaved changes on the screen needs an
+// actual choice to save them, not just a yes/no on throwing them away.
 function cancelAttendanceSheetView(){
-  if(attendanceDirtyCount() && !confirm(attendanceDirtyCount() + ' attendance change(s) have not been saved. Discard them and go back?')) return;
-  if(attendanceDirtyCount()){
+  if(!attendanceDirtyCount()){ finishCloseAttendanceSheet(); return; }
+  document.getElementById('closeSheetModalRoot').innerHTML = `<div class="modal-overlay" style="z-index:var(--z-modal-top);" onclick="if(event.target===this)dismissCloseAttendanceModal()">
+    <div class="modal-box">
+      <h2>Close Attendance Sheet</h2>
+      <p class="hint">${attendanceDirtyCount()} attendance change(s) have not been saved. Save them before closing?</p>
+      <div class="modal-actions" style="flex-direction:column;align-items:stretch;">
+        <button class="btn full" onclick="closeAttendanceSheetAction('save')">Save attendance, then close</button>
+        <div style="height:8px"></div>
+        <button class="btn ghost full" onclick="closeAttendanceSheetAction('discard')">Discard changes and close</button>
+        <div style="height:8px"></div>
+        <button class="btn ghost full" onclick="dismissCloseAttendanceModal()" title="Cancel" aria-label="Cancel">✕</button>
+      </div>
+    </div>
+  </div>`;
+}
+function dismissCloseAttendanceModal(){
+  document.getElementById('closeSheetModalRoot').innerHTML = '';
+}
+async function closeAttendanceSheetAction(mode){
+  dismissCloseAttendanceModal();
+  if(mode === 'discard'){
     pendingAttendance = {};
     persistPendingAttendance();
     updateAttendanceSaveBar();
+    finishCloseAttendanceSheet();
+    return;
   }
+  // saveAttendanceChanges() already runs the policy gate, alerts if any cell
+  // failed to write, and leaves failed ones in pendingAttendance so Save can
+  // be pressed again — closing only once nothing is left unsaved matches that
+  // same failure handling instead of discarding a failed write silently.
+  await saveAttendanceChanges();
+  if(!attendanceDirtyCount()) finishCloseAttendanceSheet();
+}
+function finishCloseAttendanceSheet(){
   closeReportView('attendanceSheetBox');
   showSheetTopControls('attTopControls');
 }
@@ -6712,6 +6783,15 @@ function openFullscreenView(title, sourceId){
     if(overlayEl.requestFullscreen) overlayEl.requestFullscreen().catch(()=>{});
   }catch(e){}
 }
+// The two floating buttons pinned to the middle of the full-screen viewer —
+// a long table (a full month of attendance, every employee on the Salary
+// Sheet) can be many screens tall, and dragging the scrollbar the whole way
+// by hand every time was the actual complaint, not the table's height itself.
+function scrollFullscreenBody(direction){
+  const body = document.getElementById('fullscreenBody');
+  if(!body) return;
+  body.scrollTo({ top: direction === 'top' ? 0 : body.scrollHeight, behavior: 'smooth' });
+}
 function closeFullscreenView(){
   if(fullscreenActiveId){
     const el = document.getElementById(fullscreenActiveId);
@@ -7029,7 +7109,7 @@ function reportActionBar(title, sourceId, closeAttr, opts){
       <button class="rpt-close-btn" onclick="${close}" title="Close" aria-label="Close">✕</button>
     </div>
     <div class="rpt-actions-row">
-      ${opts.fullscreenBtn === false ? '' : `<button class="rpt-icon-btn" onclick="openFullscreenView('${safeTitle}','${sourceId}')" title="Full screen"><span class="ic">⛶</span><span class="lbl">Full screen</span></button>`}
+      ${opts.fullscreenBtn === false ? '' : `<button class="rpt-icon-btn rpt-fullscreen-btn" onclick="openFullscreenView('${safeTitle}','${sourceId}')" title="Full screen"><span class="ic">⛶</span><span class="lbl">Full screen</span></button>`}
       ${opts.print === false ? '' : `<button class="rpt-icon-btn" onclick="downloadReportPdf(this,'${sourceId}','${safeTitle}')" title="Save PDF"><span class="ic">📄</span><span class="lbl">PDF</span></button>`}
       <button class="rpt-icon-btn" onclick="shareIconBusy(this,'email')" title="Email"><span class="ic">✉️</span><span class="lbl">Email</span></button>
       <button class="rpt-icon-btn" onclick="shareIconBusy(this,'whatsapp')" title="WhatsApp"><span class="ic">📱</span><span class="lbl">WhatsApp</span></button>
@@ -7661,9 +7741,14 @@ async function renderSalarySheet(){
   // full-width button unchanged; a small icon is a worse touch target there,
   // and the sheet is already a single column of cards with nothing beside it
   // to make room for.
+  // rpt-actions-top on the desktop wrapper: same reasoning as reportActionBar's
+  // own use of that class — this close icon is redundant once the sheet is
+  // sitting inside the full-screen viewer, which already has the one close
+  // button that matters right above it, so the shared #fullscreenBody
+  // .rpt-actions-top{display:none} rule hides it there for free.
   const closeBtnHtml = isCompact
     ? `<div class="row-inline" style="margin-bottom:10px;"><button class="btn ghost full" onclick="confirmCloseSalarySheet()">✕ Close</button></div>`
-    : `<div class="row-inline" style="justify-content:flex-end;margin-bottom:6px;"><button class="rpt-close-btn" onclick="confirmCloseSalarySheet()" title="Close" aria-label="Close">✕</button></div>`;
+    : `<div class="row-inline rpt-actions-top" style="margin-bottom:6px;"><button class="rpt-close-btn" onclick="confirmCloseSalarySheet()" title="Close" aria-label="Close">✕</button></div>`;
   box.innerHTML = `${closeBtnHtml}
     <div class="sal-sheet-wrap print-isolate" id="salaryPrintArea">
       ${reportLogoHeader('Salary Sheet — ' + monthLabel(monthVal))}
@@ -7676,7 +7761,7 @@ async function renderSalarySheet(){
     </div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0;">PT = ₹200 if Gross &gt; ₹12,000, else ₹0. Leave Days = Absent + LP days for the month (EL/SL count as present, no deduction). PF, ESI, Advance are entered per employee in Employee Master. Apprentices and Contractors have no PF, ESI, or PT. R.S.IT Solution has no PF or ESI, but PT still applies. Retention is the monthly bond retention deduction, if configured.</p>
     <div class="row-inline" style="margin-bottom:0;">
-      <button class="btn ghost" style="flex:1;" onclick="openFullscreenView('Salary Sheet','salarySheetBox')">⛶ Full screen</button>
+      <button class="btn ghost rpt-fullscreen-btn" style="flex:1;" onclick="openFullscreenView('Salary Sheet','salarySheetBox')">⛶ Full screen</button>
       <button class="btn" style="flex:1;" onclick="window.print()">Print / Save PDF</button>
     </div>
     <div class="row-inline" style="margin-top:8px;">
