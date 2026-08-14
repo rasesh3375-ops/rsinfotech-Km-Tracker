@@ -12593,8 +12593,6 @@ async function renderEmployeeList(){
                   title="Give this employee a new Rate of Pay effective from a chosen date. Reports before that date keep showing what they were on.">📈 Increment</button>
           <button class="btn ghost" onclick="markEmployeeLeft('${e.id}')"
                   title="Someone who worked here and has now left. Keeps the record, attendance and documents; removes them from every active report.">Mark as left</button>
-          <button class="btn ghost btn-danger" onclick="deleteEmployee('${e.id}')"
-                  title="Only for test rows and mistakes — records that were never a real person. Erases attendance, tracking login and history.">Delete</button>
         </div>
       </div>`).join('');
   }
