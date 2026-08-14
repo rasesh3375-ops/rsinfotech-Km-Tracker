@@ -6574,6 +6574,11 @@ let fullscreenOriginalNextSibling = null;
 function openFullscreenView(title, sourceId){
   const el = document.getElementById(sourceId);
   if(!el) return;
+  // Every report/letter calls stashReportShare() immediately before this, so
+  // whichever box was just opened full screen is the one Email/WhatsApp
+  // should turn into a PDF — recorded here rather than adding a parameter to
+  // every one of those call sites.
+  if(currentReportShare) currentReportShare.sourceId = sourceId;
   const fsBody = document.getElementById('fullscreenBody');
   // A different report is already showing full screen — restore it to its
   // own place first. Every report now auto-opens full screen on generate,
@@ -6730,14 +6735,101 @@ function clearReportBox(boxId){
   const box = document.getElementById(boxId);
   if(box) box.innerHTML = '';
 }
+// html2canvas + jsPDF, fetched only the first time a PDF is actually needed
+// rather than on every page load. Same CDN-script approach already used for
+// Leaflet, just lazy instead of eager since sharing is not on every visit.
+let pdfLibsPromise = null;
+function ensurePdfLibs(){
+  if(window.jspdf && window.html2canvas) return Promise.resolve();
+  if(pdfLibsPromise) return pdfLibsPromise;
+  const load = src => new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = resolve; s.onerror = () => reject(new Error('Failed to load ' + src));
+    document.head.appendChild(s);
+  });
+  pdfLibsPromise = Promise.all([
+    window.html2canvas ? Promise.resolve() : load('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'),
+    window.jspdf ? Promise.resolve() : load('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js')
+  ]);
+  return pdfLibsPromise;
+}
+// Turns whatever is currently rendered in a report/letter box into a real
+// PDF page image — the logo, address and layout already on screen (every
+// report's own reportLogoHeader()/letterHeader() already carries them),
+// captured into an actual file instead of the plain CSV/text a WhatsApp or
+// Email share used to send. Plain text cannot hold an image, which is why
+// the logo never travelled before. Returns null rather than throwing if
+// anything about the capture fails, so the caller can fall back to the old
+// text share instead of the button silently doing nothing.
+async function reportToPdfBlob(sourceId){
+  const el = document.getElementById(sourceId);
+  if(!el || !el.innerHTML.trim()) return null;
+  try{
+    await ensurePdfLibs();
+    // The print-isolated wrapper if the report built one (every report and
+    // letter does), so the PDF matches "Print / Save PDF" — action buttons
+    // and Close/Full screen controls left out, same as printing does.
+    const target = el.querySelector('.print-isolate') || el.querySelector('.rpt-wrap') || el;
+    const canvas = await window.html2canvas(target, {
+      scale: 2, useCORS: true, backgroundColor: '#ffffff',
+      windowWidth: target.scrollWidth, width: target.scrollWidth
+    });
+    const { jsPDF } = window.jspdf;
+    const landscape = canvas.width > canvas.height;
+    const pdf = new jsPDF({ orientation: landscape ? 'landscape' : 'portrait', unit: 'pt', format: 'a4' });
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const imgW = pageW;
+    const imgH = canvas.height * (imgW / canvas.width);
+    const imgData = canvas.toDataURL('image/png');
+    if(imgH <= pageH){
+      pdf.addImage(imgData, 'PNG', 0, 0, imgW, imgH);
+    } else {
+      // Wide/tall reports sliced across as many pages as they need, the
+      // same image shifted up by one page height each time.
+      let heightLeft = imgH, position = 0;
+      pdf.addImage(imgData, 'PNG', 0, position, imgW, imgH);
+      heightLeft -= pageH;
+      while(heightLeft > 0){
+        position -= pageH;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, imgW, imgH);
+        heightLeft -= pageH;
+      }
+    }
+    return pdf.output('blob');
+  }catch(e){ return null; }
+}
+// Disables the icon button for as long as sharing takes — building the PDF
+// alone can take a couple of seconds on a long report — without touching its
+// textContent the way withBusy does. withBusy relabels a button by
+// overwriting textContent; these buttons hold their icon and label in two
+// separate <span>s for CSS to style independently, and overwriting that
+// would collapse them into one plain text node and never restore the
+// original markup on the way back out.
+async function shareIconBusy(btn, via){
+  if(!btn || btn.disabled) return;
+  btn.disabled = true;
+  try{ await shareCurrentReport(via); }
+  finally{ btn.disabled = false; }
+}
 async function shareCurrentReport(via){
   const s = currentReportShare;
   if(!s) return;
   let file = null;
-  try{
-    const blob = new Blob([s.content], { type: s.mimeType });
-    file = new File([blob], s.fileName, { type: s.mimeType });
-  }catch(e){}
+  if(s.sourceId){
+    const pdfBlob = await reportToPdfBlob(s.sourceId);
+    if(pdfBlob){
+      const pdfName = s.fileName.replace(/\.(csv|txt)$/i, '') + '.pdf';
+      try{ file = new File([pdfBlob], pdfName, { type: 'application/pdf' }); }catch(e){}
+    }
+  }
+  if(!file){
+    try{
+      const blob = new Blob([s.content], { type: s.mimeType });
+      file = new File([blob], s.fileName, { type: s.mimeType });
+    }catch(e){}
+  }
   const summary = s.headerLines.join('\n') + (s.folderLabel ? '\nSaved to Drive: ' + s.folderLabel : '');
   if(file && navigator.canShare && navigator.canShare({ files: [file] })){
     try{ await navigator.share({ files: [file], title: s.title, text: summary }); return; }
@@ -6794,8 +6886,8 @@ function reportActionBar(title, sourceId, closeAttr, opts){
     <div class="rpt-actions-row">
       ${opts.fullscreenBtn === false ? '' : `<button class="rpt-icon-btn" onclick="openFullscreenView('${safeTitle}','${sourceId}')" title="Full screen"><span class="ic">⛶</span><span class="lbl">Full screen</span></button>`}
       ${opts.print === false ? '' : `<button class="rpt-icon-btn" onclick="window.print()" title="Print / Save PDF"><span class="ic">📄</span><span class="lbl">PDF</span></button>`}
-      <button class="rpt-icon-btn" onclick="shareCurrentReport('email')" title="Email"><span class="ic">✉️</span><span class="lbl">Email</span></button>
-      <button class="rpt-icon-btn" onclick="shareCurrentReport('whatsapp')" title="WhatsApp"><span class="ic">📱</span><span class="lbl">WhatsApp</span></button>
+      <button class="rpt-icon-btn" onclick="shareIconBusy(this,'email')" title="Email"><span class="ic">✉️</span><span class="lbl">Email</span></button>
+      <button class="rpt-icon-btn" onclick="shareIconBusy(this,'whatsapp')" title="WhatsApp"><span class="ic">📱</span><span class="lbl">WhatsApp</span></button>
     </div>
   </div>`;
 }
