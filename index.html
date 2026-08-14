@@ -13335,17 +13335,23 @@ async function markEmployeeLeft(id){
   emp.employmentStatus = 'left';
   emp.leftDate = leftDate;
   await archiveEmployeeDocuments(emp);
-  // Disable their km-tracking login, if they had one — their full record stays on file.
-  if(emp.trackingUsername){
+  // Delete their km-tracking login outright, if they had one — their
+  // employee record stays on file either way. Used to only disable it
+  // (leaving the username permanently reserved, with no way to free it back
+  // up), which is exactly what let a departed test account block a real new
+  // hire from ever registering the same username again. Deleting here means
+  // the username is free again the moment someone leaves, and if the same
+  // person (or anyone) needs tracking again later, "Does this employee need
+  // km tracking" on the Edit form asks for a fresh username/password the
+  // normal way, same as any new employee.
+  const uname = emp.trackingUsername;
+  if(uname){
     const users = await getUsers();
-    const user = users.find(u => u.username === emp.trackingUsername);
-    if(user){
-      user.enabled = false;
-      await saveUsers(users);
-    }
+    await saveUsers(users.filter(u => u.username !== uname));
+    emp.trackingUsername = '';
   }
   await saveEmployees(employees);
-  await addActivityLog(emp.name + ' marked as left (' + leftDate + ')' + (emp.trackingUsername ? ' — km tracking disabled' : ''));
+  await addActivityLog(emp.name + ' marked as left (' + leftDate + ')' + (uname ? ' — km-tracking login @' + uname + ' deleted' : ''));
   await renderEmployeeList();
   await refreshDashboard();
   await renderUserList();
@@ -13355,7 +13361,13 @@ async function reactivateEmployee(id){
   const employees = await getEmployees();
   const emp = employees.find(e => e.id === id);
   if(!emp) return;
-  if(!confirm('Reactivate ' + emp.name + ' as a current employee? Their km-tracking login (if any) will be re-enabled.')) return;
+  // markEmployeeLeft now deletes the login outright rather than disabling
+  // it, so there is usually nothing left here to re-enable — this only
+  // still matters for a record marked left before that change, which kept
+  // its (disabled) login intact.
+  if(!confirm('Reactivate ' + emp.name + ' as a current employee?' +
+    (emp.trackingUsername ? ' Their existing km-tracking login will be re-enabled.' :
+      ' If they need km tracking again, set that up on the Edit form the usual way.'))) return;
   emp.employmentStatus = 'active';
   emp.leftDate = '';
   if(emp.trackingUsername){
