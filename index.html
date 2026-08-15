@@ -1680,11 +1680,11 @@
 
     <section class="block" id="secDocStorage">
       <h2 style="margin:0 0 4px;">Document storage</h2>
-      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">New documents go straight to Google Drive, filed per employee, and the record keeps only the link. Records saved earlier still hold their images inside the sheet — which shares one cell with a 50,000 character limit. Move them out here.</p>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">New documents go straight to Google Drive, filed per employee, and the record keeps only the link. Records saved earlier still hold their images inside that employee's own record — which has a 50,000 character limit. Move them out here.</p>
       <button class="btn full" onclick="withBusy(this,'Working…',migrateDocumentsToDrive)">Move stored documents to Drive</button>
       <div id="docMigrateBox" style="margin-top:10px;"></div>
       <div style="height:14px"></div>
-      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Every employee's record shares that same one 49 KB cell — not only documents. If a save is refused with nothing left to move, this shows what is actually filling it.</p>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Every employee's record has that same 49 KB limit of its own — not only documents. If a save is refused with nothing left to move, this shows what is actually filling that employee's record.</p>
       <button class="btn ghost full" onclick="withBusy(this,'Working…',showEmployeeStorageBreakdown)">Show what's taking up space</button>
       <div id="empStorageBreakdownBox" style="margin-top:10px;overflow-x:auto;"></div>
       <div style="height:14px"></div>
@@ -2931,7 +2931,30 @@ function onSessionExpired(){
 // HR see the same data — stored in your own Google Sheet, no Claude account involved.
 // Uses text/plain content-type on purpose: it avoids a CORS preflight request,
 // which Apps Script Web Apps don't handle. This is a standard, well-known workaround.
+// Every employee lives in its own employee:<id> key on the backend now (see
+// migrateEmployeesToPerRecordKeys in Code 2.js) rather than the whole
+// company sharing one 'employees' cell — this is the one place that has to
+// know that. Everything downstream (safeGet, getEmployees(), the
+// sharedReadCache, primeSharedRead/invalidateSharedRead('employees')) still
+// addresses one logical 'employees' entry exactly as before; only what
+// fetches it on a cache miss changed.
+async function remoteGetAllEmployees_(){
+  try{
+    const res = await apiFetch(API_URL + '?action=getAllEmployees&token=' + encodeURIComponent(sessionToken || ''));
+    const text = await res.text();
+    let data;
+    try{ data = JSON.parse(text); }
+    catch(parseErr){
+      lastBackendError = 'GET returned non-JSON (status ' + res.status + '): ' + text.slice(0, 200);
+      return null;
+    }
+    if(data && data.error === 'unauthorized'){ onSessionExpired(); return null; }
+    if(!data || !data.ok) return null;
+    return { value: JSON.stringify(data.employees || []) };
+  }catch(e){ lastBackendError = 'GET network error: ' + e.message; return null; }
+}
 async function remoteGet(key){
+  if(key === 'employees') return remoteGetAllEmployees_();
   try{
     const res = await apiFetch(API_URL + '?action=get&key=' + encodeURIComponent(key) + '&token=' + encodeURIComponent(sessionToken || ''));
     const text = await res.text();
@@ -10093,15 +10116,12 @@ async function getEmployees(){
   const v = await safeGet('employees', true);
   return v ? JSON.parse(v) : [];
 }
-// One Google Sheets cell holds this whole record, and a cell tops out at
-// 50,000 characters. Attached documents are stored base64 inside it, so a few
-// scans can push the record past what the backend can physically write — and
-// it fails at the sheet, after the upload, where nothing tells the user. This
-// says so plainly instead, before the write is attempted.
-// Asks the backend to merge one record into the stored array itself. Returns
-// false when the deployed backend does not understand setItem, so the caller
-// falls back to sending the whole array and an app running against an older
-// deployment keeps working unchanged.
+// Asks the backend to merge one record into a shared array itself. Still
+// used for 'leave_requests' (one shared list an engineer can add their own
+// application to without overwriting anyone else's) — kept fully generic.
+// 'employees' no longer goes through this: each employee has their own key
+// now (see saveOneEmployee_ below), so there is no shared array left to race
+// against and nothing left for a server-side merge to protect.
 async function remoteSetItem(key, item, idField){
   try{
     const res = await apiFetch(API_URL, {
@@ -10116,17 +10136,48 @@ async function remoteSetItem(key, item, idField){
   }catch(e){ return false; }
 }
 
+// Every employee record shares a 50,000-character ceiling with only itself
+// now, not with the rest of the company (see migrateEmployeesToPerRecordKeys
+// in Code 2.js) — a save can only ever fail because of what THIS employee
+// is carrying. Attached documents are stored base64 inline until they reach
+// Drive, so a few large scans can still push one record past the limit on
+// its own; this says so plainly, naming the employee, before the write is
+// attempted.
 const SHEET_CELL_LIMIT = 50000;
-async function saveEmployees(list){
-  const payload = JSON.stringify(list);
+function employeeSizeCheck_(e){
+  const payload = JSON.stringify(e);
   if(payload.length > SHEET_CELL_LIMIT){
-    const mb = (payload.length / 1024).toFixed(0);
-    throw new Error('Employee records are ' + mb + ' KB, over the ' +
-      (SHEET_CELL_LIMIT / 1024).toFixed(0) + ' KB the backend can store in one cell. ' +
-      'This is caused by attached document images. Remove some attachments, or ask for ' +
-      'documents to be moved to their own storage, before saving again.');
+    const kb = (payload.length / 1024).toFixed(0);
+    throw new Error((e.name || e.id) + '\'s own record is ' + kb + ' KB, over the ' +
+      (SHEET_CELL_LIMIT / 1024).toFixed(0) + ' KB one employee can store. This is caused by ' +
+      'attached document images. Remove some attachments, or ask for documents to be moved ' +
+      'to their own storage, before saving again.');
   }
-  await safeSet('employees', payload, true);
+  return payload;
+}
+// Writes one employee to their own employee:<id> key. Replaces the old
+// remoteSetItem('employees', ...) + saveEmployees(...) fallback dance at
+// every single-record save site — that existed only to solve a shared-array
+// race between two people saving different employees at once, which cannot
+// happen anymore once each employee has an independent key.
+async function saveOneEmployee_(emp){
+  const payload = employeeSizeCheck_(emp);
+  const ok = await remoteSet('employee:' + emp.id, payload);
+  if(!ok) throw new Error('Could not save — the server did not respond.');
+  invalidateSharedRead('employees');
+}
+// Writes every employee in the given list to its own key, in one batched
+// request — for save flows that touch several employees at once (a leave
+// year rollover, EL encashment) and admin tools that sweep every record
+// (compaction, document migration). remoteSetMany already invalidates each
+// individual employee:<id> key it wrote; the aggregate 'employees' entry
+// getEmployees() reads through needs its own explicit invalidation on top.
+async function saveEmployees(list){
+  const entries = {};
+  for(const e of list) entries['employee:' + e.id] = employeeSizeCheck_(e);
+  const saved = await remoteSetMany(entries);
+  if(!saved) throw new Error('Could not save — the server did not respond.');
+  invalidateSharedRead('employees');
 }
 // Loan and advance requests, from the moment the form is generated to the
 // moment somebody decides. Kept apart from the employee record because a
@@ -12746,19 +12797,20 @@ async function retryInlineDocumentsToDrive(draft){
 // can't be shrunk the way an oversized photo already is (see
 // readDocForDrive — a canvas can only resize an actual image), so nothing
 // before this point can rescue it. Without this, one such document — still
-// sitting inline after every retry — blocked the ENTIRE employee record
-// from saving, however small everything else about that person was: the
-// record is one Google Sheets cell shared by every employee, and
-// saveEmployees refuses to write past 50,000 characters for anyone, no
-// matter whose data is pushing it over. Rather than holding a whole
-// record hostage over one attachment, this drops whichever still-inline
-// document fields are large enough to be the actual problem — largest
-// first — until what's left comfortably fits, and returns their labels so
-// the person saving finds out exactly what didn't make it in and why,
-// rather than the record silently missing a document with no explanation.
-function dropOversizedInlineDocuments(draft, otherEmployees){
+// sitting inline after every retry — blocked this employee's whole record
+// from saving, however small everything else about them was: each employee
+// now has their own independent 50,000-character slot (see
+// migrateEmployeesToPerRecordKeys in Code 2.js), so the budget here is only
+// ever this one record's own limit, never anyone else's data pushing it
+// over. Rather than holding a whole record hostage over one attachment,
+// this drops whichever still-inline document fields are large enough to be
+// the actual problem — largest first — until what's left comfortably fits,
+// and returns their labels so the person saving finds out exactly what
+// didn't make it in and why, rather than the record silently missing a
+// document with no explanation.
+function dropOversizedInlineDocuments(draft){
   const dropped = [];
-  const budget = SHEET_CELL_LIMIT - JSON.stringify(otherEmployees).length - 500;
+  const budget = SHEET_CELL_LIMIT - 500;
   const inlineDocEntries = () => {
     const list = EMPLOYEE_DOC_FIELDS
       .filter(f => draft[f] && !/^https?:/.test(draft[f]))
@@ -12772,7 +12824,7 @@ function dropOversizedInlineDocuments(draft, otherEmployees){
   };
   while(JSON.stringify(draft).length > budget){
     const list = inlineDocEntries();
-    if(!list.length) break; // nothing left inline to drop — saveEmployees' own check is the final backstop
+    if(!list.length) break; // nothing left inline to drop — saveOneEmployee_'s own size check is the final backstop
     list[0].clear();
     dropped.push(list[0].label);
   }
@@ -13485,13 +13537,7 @@ async function saveIncrement(id){
   emp.ratePay = nowRate.ratePay;
   emp.salaryHeading = nowRate.salaryHeading;
 
-  const merged = await remoteSetItem('employees', emp, 'id');
-  if(!merged){
-    const idx = employees.findIndex(e => e.id === id);
-    employees[idx] = emp;
-    await saveEmployees(employees);
-  }
-  invalidateSharedRead('employees');
+  await saveOneEmployee_(emp);
   await addActivityLog('Recorded increment for ' + (emp.name || id) + ': ₹' + fmtMoney(before.ratePay) +
     ' → ₹' + fmtMoney(ratePay) + ' effective ' + fmtDateIN(from) +
     (salaryHeading !== before.salaryHeading ? ', heading changed to ' + ((SALARY_HEADINGS[salaryHeading]||{}).label || salaryHeading) : ''));
@@ -13708,10 +13754,10 @@ async function saveEmployeeForm(){
     await retryInlineDocumentsToDrive(draft);
     // Anything still inline after that retry is either a genuine one-off
     // failure or too large for Drive to ever accept — drop whatever is
-    // actually pushing this record over the shared cell limit rather than
+    // actually pushing this record over its own limit rather than
     // blocking this employee's entire record (name, salary, PF, bank
     // details, none of which are the problem) from saving at all.
-    droppedDocs = dropOversizedInlineDocuments(draft, employees.filter(e => e.id !== draft.id));
+    droppedDocs = dropOversizedInlineDocuments(draft);
     // Only what's actually written is compacted — editingEmployeeDraft
     // itself (the form's own live state, referenced by `draft`) is left
     // exactly as it was, so nothing on screen changes; this only shrinks
@@ -13719,53 +13765,11 @@ async function saveEmployeeForm(){
     const toStore = compactEmployeeRecord_(draft);
     if(isNew) employees.push(toStore);
     else employees[employees.findIndex(e => e.id === editingEmployeeId)] = toStore;
-    // One record over the wire when the backend can merge it, the whole array
-    // when it cannot. The merge path also removes the lost-update window: two
-    // people editing different employees no longer overwrite each other.
-    const merged = await remoteSetItem('employees', toStore, 'id');
-    if(!merged){
-      try{
-        await saveEmployees(employees);
-      }catch(sizeErr){
-        // dropOversizedInlineDocuments above only ever cleans up THIS
-        // employee's own record, but the 49KB ceiling is shared by every
-        // employee in the sheet — so a brand-new record with nothing of its
-        // own left to drop (or nothing attached at all) can still be
-        // blocked purely by OTHER employees' documents that were saved
-        // before Drive uploads existed and never migrated. Rather than a
-        // message that reads as if this employee's own attachments are the
-        // problem, try the same rescue "Move stored documents to Drive" in
-        // Admin Settings already does by hand — automatically, before
-        // giving up.
-        if(saveBtn) saveBtn.textContent = 'Freeing up space…';
-        const { moved, failed } = await migrateInlineDocumentsInPlace_(employees);
-        if(moved){
-          try{
-            await saveEmployees(employees);
-          }catch(stillTooBig){
-            // Documents WERE the problem, some were actually moved, and it is
-            // STILL too big — so whatever is left over is no longer a stuck
-            // document at all. Says so plainly rather than repeating the
-            // same "attached document images" line, which would now be
-            // actively misleading and send HR looking in the wrong place a
-            // second time.
-            throw new Error(stillTooBig.message + ' Moved ' + moved + ' older document(s) to Drive just now' +
-              (failed ? ' (' + failed + ' more could not be moved)' : '') +
-              ', but the employee list is still too large even so — the list itself has grown past what one ' +
-              'sheet cell can hold, not a stuck document. This needs a structural fix, not another Save.');
-          }
-        } else {
-          // Nothing was found to move at all: either every document is
-          // already a Drive link (and the list itself is just too large on
-          // its own), or every move attempt failed just now. Distinguishing
-          // those two here means the next report of this says which one,
-          // instead of restarting the same guesswork.
-          throw new Error(sizeErr.message + (failed
-            ? ' ' + failed + ' older document(s) could not be moved to Drive just now — try Save again in a moment.'
-            : ' No stuck documents were found to move, so the employee list itself has grown past what one sheet cell can hold — this needs a structural fix, not another Save.'));
-        }
-      }
-    }
+    // Each employee has their own key now (see saveOneEmployee_), so saving
+    // one person can never be blocked by anyone else's data — the merge
+    // path this used to fall back through only ever existed to solve a
+    // shared-array race that no longer applies.
+    await saveOneEmployee_(toStore);
     saved = true;
   }catch(err){
     showEmpSaveError('Could not save: ' + (err && err.message ? err.message : 'the server did not respond') + '. Nothing was lost — press Save again.');
@@ -13900,7 +13904,7 @@ async function archiveEmployeeRecordToDrive(emp){
 // the person disappeared from the roster but kept surfacing in reports built
 // from those keys.
 async function deleteEmployee(id){
-  let employees = await getEmployees();
+  const employees = await getEmployees();
   const emp = employees.find(e => e.id === id);
   if(!emp) return;
   const uname = emp.trackingUsername || '';
@@ -13941,8 +13945,12 @@ async function deleteEmployee(id){
     if(kept.length !== log.length) await saveLettersLog(kept);
   }catch(e){}
 
-  employees = employees.filter(e => e.id !== id);
-  await saveEmployees(employees);
+  // Each employee is their own key now — deleting means removing that one
+  // key outright, not rewriting everyone else's data with this one missing.
+  // saveEmployees only ever writes what it's given; it never infers a
+  // deletion from an employee being absent from a list, since that would be
+  // a footgun for every other caller that passes a filtered/partial list.
+  await remoteDelete('employee:' + id);
   await archiveEmployeeDocuments(emp);
   // The activity log is deliberately kept and added to. It is the audit trail
   // of who deleted what, and erasing that alongside the data would leave no
@@ -14265,10 +14273,11 @@ async function migrateInlineDocumentsInPlace_(employees, onProgress){
   return { moved, failed };
 }
 
-// Moves documents already embedded in the employees record out to Drive and
+// Moves documents already embedded in an employee record out to Drive and
 // replaces each with its link. Existing records were saved before documents
-// went to Drive, so without this they keep occupying the one cell everything
-// shares — and that cell is what fails at 50,000 characters.
+// went to Drive, so without this they keep occupying that employee's own
+// 50,000-character slot — plenty of room normally, but a large scan or two
+// can still fill it.
 async function migrateDocumentsToDrive(){
   const box = document.getElementById('docMigrateBox');
   const employees = await getEmployees();
@@ -14277,28 +14286,30 @@ async function migrateDocumentsToDrive(){
     box.innerHTML = '<p class="dash-muted">✓ Nothing to move — every stored document is already a Drive link.</p>';
     return;
   }
-  if(!confirm(pending.length + ' employee record(s) still hold documents inside the sheet.\n\n' +
+  if(!confirm(pending.length + ' employee record(s) still hold documents inside their own record.\n\n' +
     'Move them to Drive now? Each becomes a link, which is what frees the space. Nothing is deleted.')) return;
 
   const { moved, failed } = await migrateInlineDocumentsInPlace_(pending, (e, label) => {
     box.innerHTML = '<p class="dash-muted">Moving ' + escapeHtml(e.name || e.id) + ' — ' + escapeHtml(String(label)) + '…</p>';
   });
-  // Written once at the end: a save per document would multiply the very
-  // oversized write this exists to prevent.
-  if(moved) await saveEmployees(employees);
+  // Written once at the end, per affected employee — a save per document
+  // would multiply the very oversized write this exists to prevent.
+  if(moved) await saveEmployees(pending);
   invalidateSharedRead('employees');
-  const size = JSON.stringify(employees).length;
-  box.innerHTML = `<p class="dash-muted">Moved ${moved} document(s)${failed ? ', ' + failed + ' could not be moved' : ''}.
-    Employee record is now ${(size/1024).toFixed(0)} KB of the 49 KB the sheet can hold.</p>`;
+  box.innerHTML = `<p class="dash-muted">Moved ${moved} document(s)${failed ? ', ' + failed + ' could not be moved' : ''} across ${pending.length} employee record(s).</p>`;
 }
 
-// A save can now be refused with every document already a Drive link — see
-// saveEmployeeForm's rescue — meaning the 49KB ceiling is being filled by
-// ordinary employee data, not attachments at all. Rather than guessing at
-// what to trim, this shows both the "what" (which field, added across
-// every employee, actually accounts for the size) and the "who" (which
-// individual records are largest), read-only — nothing here is changed or
-// saved.
+// Each employee has their own 50,000-character slot now (see
+// migrateEmployeesToPerRecordKeys in Code 2.js), not a share of one cell
+// the whole company fights over — so the number that actually matters is
+// whether any single record is getting close to ITS OWN limit, not a
+// company-wide total. Still useful for spotting waste though: a save can
+// be refused with every document already a Drive link, meaning whatever
+// filled that one employee's slot was ordinary field data, not an
+// attachment — this shows both the "what" (which field, added across every
+// employee, accounts for the most space company-wide) and the "who" (which
+// individual records are largest, and how close to their own limit),
+// read-only — nothing here is changed or saved.
 async function showEmployeeStorageBreakdown(){
   const box = document.getElementById('empStorageBreakdownBox');
   const employees = await getEmployees();
@@ -14361,29 +14372,32 @@ async function showEmployeeStorageBreakdown(){
         shownFields.map(([k, v]) => fieldTr(k, v)).join('')}${
         restFieldsTotal ? `<tr><td>Everything else (${allFields.length - 20} more field(s))</td><td class="num">${(restFieldsTotal/1024).toFixed(2)} KB</td><td class="num">—</td></tr>` : ''}</tbody></table>`;
 
+  const pctOfLimit = size => Math.round(size / SHEET_CELL_LIMIT * 100);
   const empRows = isCompact
     ? `<div class="hr-sheet-cards">${byEmployee.slice(0, 15).map(r => hrCard(
         `<strong>${escapeHtml(r.name)}</strong><span class="id">${escapeHtml(r.id)}${r.left ? ' — left' : ''}</span>`,
-        hrRow('Size', (r.size/1024).toFixed(2) + ' KB') + hrRow('Stuck documents', r.stuckDocs ? r.stuckDocs + ' field(s) still inline' : '—')
+        hrRow('Size', (r.size/1024).toFixed(2) + ' KB') + hrRow('Of their own limit', pctOfLimit(r.size) + '%') +
+        hrRow('Stuck documents', r.stuckDocs ? r.stuckDocs + ' field(s) still inline' : '—')
       )).join('')}</div>`
-    : `<table class="sal-table"><thead><tr><th>Employee</th><th class="num">Size</th><th>Stuck documents</th></tr></thead>
-      <tbody>${byEmployee.slice(0, 15).map(r => `<tr><td class="sal-name">${escapeHtml(r.name)}${r.left ? ' <span class="pol-warn">(left)</span>' : ''}<span class="inc-sub">${escapeHtml(r.id)}</span></td><td class="num">${(r.size/1024).toFixed(2)} KB</td><td>${r.stuckDocs ? r.stuckDocs + ' field(s) still inline' : '—'}</td></tr>`).join('')}</tbody></table>`;
+    : `<table class="sal-table"><thead><tr><th>Employee</th><th class="num">Size</th><th class="num">Of their own limit</th><th>Stuck documents</th></tr></thead>
+      <tbody>${byEmployee.slice(0, 15).map(r => `<tr><td class="sal-name">${escapeHtml(r.name)}${r.left ? ' <span class="pol-warn">(left)</span>' : ''}<span class="inc-sub">${escapeHtml(r.id)}</span></td><td class="num">${(r.size/1024).toFixed(2)} KB</td><td class="num">${pctOfLimit(r.size)}%</td><td>${r.stuckDocs ? r.stuckDocs + ' field(s) still inline' : '—'}</td></tr>`).join('')}</tbody></table>`;
 
   box.innerHTML = `
-    <p class="dash-muted">Employee list is ${(total/1024).toFixed(1)} KB of the 49 KB the sheet can hold, across ${employees.length} employee(s)${employees.length ? ' — ' + (total/employees.length/1024).toFixed(2) + ' KB on average' : ''}${leftCount ? '. ' + leftCount + ' of them have left' : ''}.</p>
-    <p style="font-weight:700;font-size:12.5px;margin:14px 0 6px;">Which field, added across every employee, takes up the most space (${allFields.length} field(s) in total)</p>
+    <p class="dash-muted">${employees.length} employee record(s), ${(total/1024).toFixed(1)} KB total${employees.length ? ' — ' + (total/employees.length/1024).toFixed(2) + ' KB on average' : ''}${leftCount ? ', ' + leftCount + ' of them left' : ''}. Each has their own ${(SHEET_CELL_LIMIT/1024).toFixed(0)} KB limit now, not a share of one company-wide cell — what matters below is any single record's own percentage, not the total.</p>
+    <p style="font-weight:700;font-size:12.5px;margin:14px 0 6px;">Which field, added across every employee, takes up the most space company-wide (${allFields.length} field(s) in total)</p>
     ${fieldRows}
     <p style="font-weight:700;font-size:12.5px;margin:14px 0 6px;">Largest individual employee records</p>
     ${empRows}`;
 }
 
-// The breakdown above is what showed most of the shared cell was going to
-// field names and JSON punctuation, not content — fields added to the form
-// over the years that are blank on most employees but still cost their own
-// key's worth of space on every one of them. This runs compactEmployeeRecord_
-// (the same compaction saveEmployeeForm now applies to every future save)
-// once over every EXISTING record, so the space it frees is available
-// immediately rather than only as new saves happen to touch each employee.
+// The breakdown above is what showed most of each record's own space was
+// going to field names and JSON punctuation, not content — fields added to
+// the form over the years that are blank on most employees but still cost
+// their own key's worth of space on every one of them. This runs
+// compactEmployeeRecord_ (the same compaction saveEmployeeForm now applies
+// to every future save) once over every EXISTING record, so the space it
+// frees is available immediately rather than only as new saves happen to
+// touch each employee.
 async function compactAllEmployeeRecords(){
   const box = document.getElementById('empCompactBox');
   const employees = await getEmployees();
@@ -14399,9 +14413,13 @@ async function compactAllEmployeeRecords(){
     'freeing about ' + (freed/1024).toFixed(1) + ' KB. Nothing in use is touched — only fields already blank ' +
     'for that employee. Continue?')) return;
 
-  await saveEmployees(compacted);
+  // Only records that actually shrank need writing back — compaction only
+  // ever removes keys, so an unchanged length means nothing was removed and
+  // that employee's own key would be saved as exactly what it already is.
+  const changed = compacted.filter((e, i) => JSON.stringify(e).length !== JSON.stringify(employees[i]).length);
+  await saveEmployees(changed);
   invalidateSharedRead('employees');
-  box.innerHTML = `<p class="dash-muted">Freed ${(freed/1024).toFixed(1)} KB. Employee list is now ${(after/1024).toFixed(1)} KB of the 49 KB the sheet can hold.</p>`;
+  box.innerHTML = `<p class="dash-muted">Freed ${(freed/1024).toFixed(1)} KB across ${changed.length} employee record(s).</p>`;
 }
 
 // Opens a new leave year for Sick Leave only — SL is reset to the flat
@@ -16373,8 +16391,7 @@ async function approveLoanRequest(id){
   req.decidedOn = new Date().toISOString();
   req.startMonth = start.trim();
 
-  const merged = await remoteSetItem('employees', emp, 'id');
-  if(!merged) await saveEmployees(employees);
+  await saveOneEmployee_(emp);
   const savedJson = JSON.stringify(employees);
   localStorage.setItem('kmt_shared_employees', savedJson);
   primeSharedRead('employees', savedJson);

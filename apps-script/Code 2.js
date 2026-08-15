@@ -407,6 +407,32 @@ function engineerScopedKeys_(username) {
   return ['trips:' + username, 'checkins:' + username, 'active:' + username];
 }
 
+// Every employee, one per `employee:<id>` key, instead of the whole company
+// sharing one `employees` cell — same reason and same shape as attendance's
+// own `attendance:<id>:<financial-year>` split (see migrateAttendanceToFY /
+// mergedAttendanceForId_). The legacy `employees` key is left untouched
+// forever as a frozen pre-migration snapshot; nothing reads it after
+// migrateEmployeesToPerRecordKeys has been run once. Shared by every
+// function below that used to read `map['employees']` directly, so there is
+// one place that knows what an employee key looks like, not four.
+//
+// `rows` is the whole KV sheet's getDataRange().getValues(), read once by
+// the caller — same convention doGetAttendanceAll_/doGetAttendanceRange_
+// already use for `map`, avoiding a second whole-sheet read for what is
+// already in memory.
+function allEmployeesFromRows_(rows) {
+  var list = [];
+  for (var i = 0; i < rows.length; i++) {
+    var key = rows[i][0];
+    if (typeof key !== 'string' || key.indexOf('employee:') !== 0) continue;
+    try {
+      var emp = JSON.parse(rows[i][1]);
+      if (emp) list.push(emp);
+    } catch (e) { /* one bad row skipped, not fatal to the rest */ }
+  }
+  return list;
+}
+
 // An engineer's own employee id, so they can read their own attendance and
 // nobody else's. Cached briefly: this is on the path of every request they
 // make, and it is a whole-sheet read otherwise.
@@ -416,15 +442,11 @@ function employeeIdForTrackingUser_(username) {
   var hit = cache.get('empid_' + username);
   if (hit) return hit === '-' ? null : hit;
   var sheet = getSheet_();
-  var row = findRow_(sheet, 'employees');
+  var rows = sheet.getDataRange().getValues();
+  var list = allEmployeesFromRows_(rows);
   var id = null;
-  if (row !== -1) {
-    try {
-      var list = JSON.parse(sheet.getRange(row, 2).getValue() || '[]');
-      for (var i = 0; i < list.length; i++) {
-        if (list[i] && list[i].trackingUsername === username) { id = list[i].id; break; }
-      }
-    } catch (e) { id = null; }
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && list[i].trackingUsername === username) { id = list[i].id; break; }
   }
   cache.put('empid_' + username, id || '-', 300);
   return id;
@@ -457,42 +479,42 @@ function forbidden_() {
 // and bank detail in the company — to find these six fields.
 function doGetMyProfile_(auth) {
   var sheet = getSheet_();
-  var row = findRow_(sheet, 'employees');
+  // One whole-sheet read serves both lookups below, instead of the two
+  // separate findRow_ calls (each its own getDataRange()) this used to make.
+  var rows = sheet.getDataRange().getValues();
+  var list = allEmployeesFromRows_(rows);
   var emp = null;
-  if (row !== -1) {
-    try {
-      var list = JSON.parse(sheet.getRange(row, 2).getValue() || '[]');
-      for (var i = 0; i < list.length; i++) {
-        if (list[i] && list[i].trackingUsername === auth.username) {
-          emp = {
-            id: list[i].id,
-            name: list[i].name || '',
-            employeeType: list[i].employeeType || '',
-            elOpening: list[i].elOpening,
-            slOpening: list[i].slOpening,
-            leaveOpeningFrom: list[i].leaveOpeningFrom || ''
-          };
-          break;
-        }
-      }
-    } catch (e) { emp = null; }
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && list[i].trackingUsername === auth.username) {
+      emp = {
+        id: list[i].id,
+        name: list[i].name || '',
+        employeeType: list[i].employeeType || '',
+        elOpening: list[i].elOpening,
+        slOpening: list[i].slOpening,
+        leaveOpeningFrom: list[i].leaveOpeningFrom || ''
+      };
+      break;
+    }
   }
   // Whether the tracking login is still switched on. The app used to answer
   // this by reading the whole users list, which carries everyone's password
   // salt and hash.
   var enabled = true, displayName = '';
-  var urow = findRow_(sheet, 'users');
-  if (urow !== -1) {
-    try {
-      var users = JSON.parse(sheet.getRange(urow, 2).getValue() || '[]');
-      for (var j = 0; j < users.length; j++) {
-        if (users[j] && users[j].username === auth.username) {
-          enabled = users[j].enabled !== false;
-          displayName = users[j].displayName || '';
-          break;
+  for (var r = 1; r < rows.length; r++) {
+    if (rows[r][0] === 'users') {
+      try {
+        var users = JSON.parse(rows[r][1] || '[]');
+        for (var j = 0; j < users.length; j++) {
+          if (users[j] && users[j].username === auth.username) {
+            enabled = users[j].enabled !== false;
+            displayName = users[j].displayName || '';
+            break;
+          }
         }
-      }
-    } catch (e) {}
+      } catch (e) {}
+      break;
+    }
   }
   return { ok: true, enabled: enabled, displayName: displayName, employee: emp };
 }
@@ -569,6 +591,55 @@ function migrateAttendanceToFY() {
     stats.yearKeys + ' year key(s), ' + stats.days + ' day(s) total' +
     (stats.skippedEntries ? ', ' + stats.skippedEntries + ' non-date entry(ies) left out of the split' : '') +
     '. attendance:<id> left untouched.';
+  Logger.log(msg);
+  return msg;
+}
+
+// One `employee:<id>` key per person instead of the whole company sharing
+// one `employees` cell — the same fix as migrateAttendanceToFY above, for
+// the same reason: one Sheets cell tops out at 50,000 characters, and that
+// ceiling was being hit by the company's total headcount, not any one
+// person's own data. Reads the current `employees` array once and writes
+// each entry to its own key; `employees` itself is never touched, exactly
+// like attendance:<id> stays in place as a frozen baseline after its own
+// split — nothing reads it again once the app is deployed reading
+// employee:<id> keys, but it remains the pre-migration backup forever.
+// Safe to re-run: it always recomputes every employee:<id> key from
+// whatever is currently in the legacy `employees` array.
+//
+// Run it from the Apps Script editor: select migrateEmployeesToPerRecordKeys
+// and press Run. Run this AFTER deploying the updated Code.js (so
+// getAllEmployees exists) and BEFORE pushing the updated frontend (so
+// nothing reads employee:<id> keys before they exist).
+function migrateEmployeesToPerRecordKeys() {
+  var sheet = getSheet_();
+  var row = findRow_(sheet, 'employees');
+  var list = [];
+  if (row !== -1) {
+    try { list = JSON.parse(sheet.getRange(row, 2).getValue() || '[]') || []; }
+    catch (e) { list = []; }
+  }
+  if (!(list instanceof Array)) list = [];
+
+  var toWrite = {};
+  var skipped = 0;
+  for (var i = 0; i < list.length; i++) {
+    var emp = list[i];
+    if (!emp || !emp.id) { skipped++; continue; }
+    toWrite['employee:' + emp.id] = JSON.stringify(emp);
+  }
+
+  var rows = sheet.getDataRange().getValues();
+  var index = {};
+  for (var r = 1; r < rows.length; r++) index[rows[r][0]] = r + 1;
+  for (var k in toWrite) {
+    if (index[k]) sheet.getRange(index[k], 2).setValue(toWrite[k]);
+    else sheet.appendRow([k, toWrite[k]]);
+  }
+
+  var msg = 'Split ' + Object.keys(toWrite).length + ' employee(s) into their own employee:<id> key(s)' +
+    (skipped ? ', ' + skipped + ' record(s) with no id left out of the split' : '') +
+    '. employees left untouched as the pre-migration backup.';
   Logger.log(msg);
   return msg;
 }
@@ -688,6 +759,20 @@ function doGet(e) {
     const row = findRow_(sheet, key);
     const value = row === -1 ? null : sheet.getRange(row, 2).getValue();
     return jsonOut_({ value: value });
+  }
+
+  // Every employee, one per `employee:<id>` key, in one call — the read side
+  // of the same split attendance already went through (see
+  // allEmployeesFromRows_). Never available to engineers: the plain
+  // `employees` key never was either, and every field on an employee record
+  // is pay data.
+  if (action === 'getAllEmployees') {
+    const auth = validateSession_(token);
+    if (!auth) return jsonOut_({ error: 'unauthorized' });
+    if (auth.role === 'engineer') return forbidden_();
+    const sheet = getSheet_();
+    const rows = sheet.getDataRange().getValues();
+    return jsonOut_({ ok: true, employees: allEmployeesFromRows_(rows) });
   }
 
   return jsonOut_({ error: 'unknown action' });
@@ -1015,9 +1100,7 @@ function sendDailyDigestEmail() {
   for (var i = 0; i < rows.length; i++) map[rows[i][0]] = rows[i][1];
 
   var today = todayIso_();
-  var empRaw = map['employees'];
-  var employees = [];
-  if (empRaw) { try { employees = JSON.parse(empRaw) || []; } catch (e) { employees = []; } }
+  var employees = allEmployeesFromRows_(rows);
   // Resident Engineers sit outside the ordinary attendance rules everywhere
   // else in the app (see CLAUDE.md) — excluded here for the same reason a
   // "who is absent today" question does not apply to them.
