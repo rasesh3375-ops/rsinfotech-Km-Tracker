@@ -838,6 +838,18 @@
     border-radius:10px;background:#FAFBFD;padding:12px 13px;}
   .pay-head{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
     color:var(--green);margin-bottom:8px;}
+  /* The Salary breakdown fold-card's own trigger, not .pay-head's quiet
+     small-caps label — that stays exactly as it is for the Annual CTC
+     header right below it, which is never a toggle. Collapsed by default
+     (see renderPayrollBreakdown), so this has to read as an obvious button
+     on its own rather than something to skim past: full-width colour bar,
+     real body-text size, bold navy — not a 10.5px green caption. */
+  .pay-fold-summary{
+    font-size:14px;font-weight:700;color:var(--navy);text-transform:none;
+    letter-spacing:normal;background:#EAF6EE;border-bottom:1px solid #CFE5D8;
+    border-radius:9px 9px 0 0;padding:12px 13px;margin:-12px -13px 10px;
+  }
+  .pay-fold-summary::after{font-size:13px;}
   .pay-table{width:100%;border-collapse:collapse;font-size:12px;}
   .pay-table td{padding:5px 4px;border-bottom:1px solid #E7EAF0;vertical-align:top;}
   .pay-table td.num{text-align:right;white-space:nowrap;font-weight:600;}
@@ -12366,7 +12378,7 @@ function renderPayrollBreakdown(){
   // the time.
   const wasOpen = (box.querySelector('details.pay-box') || {}).open;
   box.innerHTML = `<details class="pay-box fold-card"${wasOpen ? ' open' : ''}>
-    <summary class="pay-head">Salary breakdown — worked out from Rate of Pay</summary>
+    <summary class="pay-fold-summary">💰 Salary breakdown — Basic, HRA, LTA, Gross and more</summary>
     <table class="pay-table"><tbody>${rows}</tbody></table>
     ${na.length ? `<p class="calc-note">Not applicable to this heading: ${escapeHtml(na.join(', '))}.</p>` : ''}
     ${missing.length ? `<p class="pay-warn">No formula configured for: <strong>${escapeHtml(missing.join(', '))}</strong>. Fix the payroll master before saving.</p>` : ''}
