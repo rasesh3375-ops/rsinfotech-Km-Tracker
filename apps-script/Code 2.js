@@ -236,6 +236,28 @@ function doUploadDocument_(body) {
   return { ok: true, fileUrl: file.getUrl() };
 }
 
+// Reads a document back out of Drive and hands its bytes to the app, so it
+// can be shown inside the app itself instead of sending whoever's looking
+// at it to a Drive link directly — which needs their own Google account
+// with explicit sharing access to that one file. This script already has
+// Drive access (it runs as whoever deployed it, regardless of who is
+// calling the web app), so it reads the file on their behalf and returns
+// it over the same session they are already using.
+function doGetDriveFile_(body) {
+  try {
+    const file = DriveApp.getFileById(body.fileId);
+    const blob = file.getBlob();
+    return {
+      ok: true,
+      fileName: file.getName(),
+      mimeType: blob.getContentType(),
+      base64Data: Utilities.base64Encode(blob.getBytes())
+    };
+  } catch (err) {
+    return { ok: false, error: 'Could not read that file from Drive.' };
+  }
+}
+
 // ===== one-off: file everything dated under its financial year =====
 // Reports, generated letters and uploaded office documents used to be written
 // straight under HR Management > Dashboard / Reports / Generator / Office
@@ -759,6 +781,13 @@ function doPost(e) {
       return forbidden_();
     }
     return jsonOut_(doUploadDocument_(body));
+  }
+
+  if (body.action === 'getDriveFile') {
+    // Employee documents (Aadhaar, PAN, cheques, ...) are HR data — the
+    // engineer app has no legitimate reason to read any of them.
+    if (isEngineer) return forbidden_();
+    return jsonOut_(doGetDriveFile_(body));
   }
 
   // Writes. An engineer may write their own trip, check-in and live-tracking

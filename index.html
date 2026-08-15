@@ -669,6 +669,12 @@
   .inner-tabs button.active{color:var(--navy);border-bottom-color:var(--amber);}
 
   .doc-card{background:var(--cream);border-radius:10px;padding:14px;margin-top:10px;}
+  /* A stored document opens inside the app now (see viewEmployeeDocument),
+     not as a link straight to Drive — that used to need whoever clicked it
+     to have their own Google account with explicit access to that one
+     file. Resets a <button> back to looking exactly like the plain block
+     .doc-card already was as a <div>/<a>. */
+  button.doc-card{display:block;width:100%;text-align:left;border:none;font:inherit;color:inherit;cursor:pointer;}
 
   .emp-search-row{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
   .emp-search-row input{flex:2;min-width:160px;}
@@ -2616,6 +2622,14 @@
       <button class="fs-scroll-btn" onclick="scrollSheetView('right')" title="Scroll to last column" aria-label="Scroll to last column">▶</button>
     </div>
   </div>
+
+  <!-- Standalone for the same reason as #sheetScrollNav above — the Add
+       Employee modal that a document is normally viewed from can be closed
+       (and its whole innerHTML thrown away) while this is still showing
+       full screen. openFullscreenView() moves this element into
+       #fullscreenBody and viewEmployeeDocument() fills it in; empty and
+       hidden the rest of the time. -->
+  <div id="docViewerRoot" class="hidden"></div>
 
   <!-- Uses --z-modal-top (300), above #fullscreenSheetRoot's --z-fullscreen
        (200), since this can be opened from the Salary Sheet's Close button
@@ -11652,7 +11666,7 @@ function employeeModalHtml(emp){
         <input type="file" accept="image/*" id="f_chequeFile" onchange="handleChequeUpload(event)">
         <div id="chequePreview">${!emp.chequeImg ? '' :
           (/^https?:/.test(emp.chequeImg)
-            ? docCardHtml(emp.chequeImg)
+            ? docCardHtml(emp.chequeImg, 'Cancelled cheque')
             : `<img class="cheque-img" src="${emp.chequeImg}" alt="Cancelled cheque">`)}</div>
         <p style="font-size:11.5px;color:var(--muted);margin:6px 0 12px;">The cheque stays on screen while you fill in the fields below, so the account number and IFSC are copied from the document rather than from memory. The IFSC is checked against the bank name as you type.</p>
         <label class="field">PAN number</label>
@@ -11692,31 +11706,31 @@ function employeeModalHtml(emp){
         <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Tap to scan with your camera, choose a photo from your gallery, or pick a PDF for an already-scanned document. Documents are saved as soon as you upload them.</p>
         <label class="field">Aadhaar card</label>
         <input type="file" accept="image/*,application/pdf" id="f_aadhaarFile" onchange="handleDocUpload(event,'aadhaarCardImg')">
-        ${docCardHtml(emp.aadhaarCardImg)}
+        ${docCardHtml(emp.aadhaarCardImg, 'Aadhaar card')}
         <div style="height:12px"></div>
         <label class="field">PAN card</label>
         <input type="file" accept="image/*,application/pdf" id="f_panFile" onchange="handleDocUpload(event,'panCardImg')">
-        ${docCardHtml(emp.panCardImg)}
+        ${docCardHtml(emp.panCardImg, 'PAN card')}
         <div style="height:12px"></div>
         <label class="field">Passport photo</label>
         <input type="file" accept="image/*" id="f_photoFile" onchange="handleDocUpload(event,'photoImg')">
-        ${docCardHtml(emp.photoImg)}
+        ${docCardHtml(emp.photoImg, 'Passport photo')}
         <div style="height:12px"></div>
         <label class="field">Residence proof</label>
         <input type="file" accept="image/*,application/pdf" id="f_residenceFile" onchange="handleDocUpload(event,'residenceProofImg')">
-        ${docCardHtml(emp.residenceProofImg)}
+        ${docCardHtml(emp.residenceProofImg, 'Residence proof')}
         <div style="height:12px"></div>
         <label class="field">Last salary slip</label>
         <input type="file" accept="image/*,application/pdf" id="f_lastSlipFile" onchange="handleDocUpload(event,'lastSalarySlipImg')">
-        ${docCardHtml(emp.lastSalarySlipImg)}
+        ${docCardHtml(emp.lastSalarySlipImg, 'Last salary slip')}
         <div style="height:12px"></div>
         <label class="field">Education certificate</label>
         <input type="file" accept="image/*,application/pdf" id="f_educationFile" onchange="handleDocUpload(event,'educationCertImg')">
-        ${docCardHtml(emp.educationCertImg)}
+        ${docCardHtml(emp.educationCertImg, 'Education certificate')}
         <div style="height:12px"></div>
         <label class="field">Specimen signature</label>
         <input type="file" accept="image/*" id="f_signatureFile" onchange="handleDocUpload(event,'signatureImg')">
-        ${docCardHtml(emp.signatureImg)}
+        ${docCardHtml(emp.signatureImg, 'Specimen signature')}
         <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">A photo of the signature on plain paper is enough — it is what the bank and PF forms are checked against.</p>
         <div style="height:12px"></div>
         <label class="field">Other documents</label>
@@ -12559,12 +12573,64 @@ async function retryInlineDocumentsToDrive(draft){
 }
 
 // A stored document is either a Drive link (new) or an inline image (older
-// records). Both are shown; neither is broken by the change.
+// records). A Drive link opens inside the app itself (see
+// viewEmployeeDocument), not as a link straight to Drive — that used to
+// need whoever clicked it to have their own Google account with explicit
+// sharing access to that one file, which HR does not have and should never
+// need for something the app already uploaded on her behalf.
 function docCardHtml(v, label){
   if(!v) return '';
+  const safeLabel = (label || 'Document').replace(/'/g, "\\'");
   return /^https?:/.test(v)
-    ? '<a class="doc-card" href="' + escapeHtml(v) + '" target="_blank" rel="noopener">✓ Saved in Drive — view</a>'
+    ? '<button type="button" class="doc-card" onclick="viewEmployeeDocument(\'' + v.replace(/'/g, "\\'") + '\',\'' + safeLabel + '\')">✓ Saved — view</button>'
     : '<div class="doc-card">✓ Saved (stored in the record)</div>';
+}
+
+function base64ToBlob_(base64, mimeType){
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for(let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mimeType });
+}
+
+// Shows a document inside the app instead of sending whoever clicked it to
+// Drive directly — see docCardHtml above for why. The backend already has
+// Drive access (it runs as whoever deployed it, not as whoever is using
+// the app), so it reads the file and hands the bytes back over the same
+// session already in use here; nothing about this needs a Google account
+// on this end at all. driveUrl is whatever uploadEmployeeDocToDrive
+// returned when the document was uploaded, e.g.
+// https://drive.google.com/file/d/<id>/view.
+async function viewEmployeeDocument(driveUrl, label){
+  const m = /\/d\/([^/]+)/.exec(driveUrl || '');
+  const box = document.getElementById('docViewerRoot');
+  if(!m || !box){ alert('Could not open that document.'); return; }
+  box.innerHTML = '<div class="empty">Opening ' + escapeHtml(label) + '…</div>';
+  openFullscreenView(label, 'docViewerRoot');
+  try{
+    const res = await apiFetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'getDriveFile', token: sessionToken, fileId: m[1] })
+    });
+    const data = await res.json();
+    if(!data || !data.ok){
+      box.innerHTML = '<div class="empty pol-warn">Could not open that document. Try again, or ask HR to re-upload it.</div>';
+      return;
+    }
+    const objectUrl = URL.createObjectURL(base64ToBlob_(data.base64Data, data.mimeType));
+    const isPdf = /pdf/.test(data.mimeType);
+    box.innerHTML = `<div style="padding:16px;display:flex;flex-direction:column;gap:12px;height:100%;box-sizing:border-box;">
+      <a class="btn ghost" style="align-self:flex-start;" href="${objectUrl}" download="${escapeHtml(data.fileName || label)}">⬇ Download</a>
+      <div style="flex:1;overflow:auto;display:flex;align-items:flex-start;justify-content:center;">
+        ${isPdf
+          ? `<embed src="${objectUrl}" type="application/pdf" style="width:100%;height:100%;min-height:70vh;border:1px solid var(--line);border-radius:8px;">`
+          : `<img src="${objectUrl}" alt="${escapeHtml(label)}" style="max-width:100%;height:auto;border-radius:8px;border:1px solid var(--line);">`}
+      </div>
+    </div>`;
+  }catch(e){
+    box.innerHTML = '<div class="empty pol-warn">Could not open that document — check your connection and try again.</div>';
+  }
 }
 
 async function handleDocUpload(event, field){
