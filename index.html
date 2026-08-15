@@ -2670,6 +2670,65 @@
 </div>
 
 <script>
+// ============================================================
+// Update detection — no build step and no service worker means there is no
+// version number to compare and nothing telling an already-open tab that a
+// fix has shipped. An installed PWA window (this app, on a desktop or a
+// phone home screen) can sit running the exact same code in memory for
+// days, with the only way back to the latest version being to notice
+// something is wrong and manually close and reopen it — which is exactly
+// what happened once already: a save-reliability fix had already shipped,
+// but a window that had been open since before it kept hitting the old
+// failure until it was closed and reopened by hand.
+//
+// This fetches this same page fresh — cache:'no-store' plus a timestamp
+// query string, so neither the browser's own cache nor a CDN edge cache
+// serves back the copy already running — and compares its raw text
+// against what was fetched the same way right when this tab/window opened.
+// A difference means a newer deploy exists. Checked on every return to the
+// tab (visibilitychange, the moment someone is about to actually use it)
+// and every few minutes it stays open and in the foreground, so a window
+// left open overnight or over a weekend catches up on its own the next
+// time it is looked at — no cache to clear, nothing to remember.
+//
+// A banner rather than a silent reload: this is where payroll is entered,
+// and reloading out from under someone mid-task could cost unsaved work on
+// a screen that has no draft-autosave of its own.
+let pageSourceAtLoad = null;
+async function fetchFreshPageSource_(){
+  const res = await fetch(location.pathname + '?_v=' + Date.now(), { cache: 'no-store' });
+  return res.text();
+}
+(async function captureInitialPageSource_(){
+  try{ pageSourceAtLoad = await fetchFreshPageSource_(); }catch(e){ /* offline at load */ }
+})();
+function showUpdateAvailableBanner_(){
+  if(document.getElementById('kmtUpdateBanner')) return;
+  const bar = document.createElement('div');
+  bar.id = 'kmtUpdateBanner';
+  bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99999;'
+    + 'background:var(--navy);color:#fff;text-align:center;font:600 13.5px -apple-system,sans-serif;'
+    + 'padding:12px 16px;display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;'
+    + 'box-shadow:0 -4px 16px rgba(0,0,0,.18);';
+  bar.innerHTML = '<span>A newer version of this app is available.</span>'
+    + '<button type="button" style="background:var(--amber);color:var(--navy);border:none;border-radius:8px;'
+    + 'padding:8px 18px;font-weight:700;font-size:13.5px;cursor:pointer;font-family:inherit;" '
+    + 'onclick="location.reload()">Reload now</button>';
+  document.body.appendChild(bar);
+}
+async function checkForNewerVersion_(){
+  if(!pageSourceAtLoad) return; // initial fetch hasn't resolved yet — next check will catch it
+  if(document.getElementById('kmtUpdateBanner')) return; // already told, no need to keep checking
+  try{
+    const latest = await fetchFreshPageSource_();
+    if(latest && latest !== pageSourceAtLoad) showUpdateAvailableBanner_();
+  }catch(e){ /* offline — try again next time */ }
+}
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible') checkForNewerVersion_();
+});
+setInterval(() => { if(document.visibilityState === 'visible') checkForNewerVersion_(); }, 5 * 60 * 1000);
+
 let currentRole = null;
 let engineerName = null;
 let engineerDisplayName = null;
