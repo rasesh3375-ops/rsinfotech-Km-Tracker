@@ -12526,6 +12526,13 @@ async function readDocForDrive(file){
 // own in both, since it can hold any number of entries rather than one.
 const EMPLOYEE_DOC_FIELDS = ['aadhaarCardImg','panCardImg','photoImg','residenceProofImg',
                              'lastSalarySlipImg','chequeImg','educationCertImg','signatureImg'];
+// Human labels for the same fields — used when telling HR which document
+// had to be dropped, in dropOversizedInlineDocuments below.
+const DOC_FIELD_LABELS = {
+  aadhaarCardImg:'Aadhaar card', panCardImg:'PAN card', photoImg:'Passport photo',
+  residenceProofImg:'Residence proof', lastSalarySlipImg:'Last salary slip',
+  chequeImg:'Cancelled cheque', educationCertImg:'Education certificate', signatureImg:'Specimen signature'
+};
 async function uploadEmployeeDocToDrive(label, dataUrl, empId, empName){
   const emp = editingEmployeeDraft || {};
   const id = empId || (document.getElementById('f_id') || {}).value || emp.id || 'unfiled';
@@ -12570,6 +12577,45 @@ async function retryInlineDocumentsToDrive(draft){
       if(url) d.dataUrl = url;
     }catch(e){}
   }
+}
+
+// Retrying at Drive above fixes a document that failed because of a
+// passing network problem — it does nothing for one that keeps failing
+// because it is genuinely too large to reach Drive at all. A big PDF scan
+// can't be shrunk the way an oversized photo already is (see
+// readDocForDrive — a canvas can only resize an actual image), so nothing
+// before this point can rescue it. Without this, one such document — still
+// sitting inline after every retry — blocked the ENTIRE employee record
+// from saving, however small everything else about that person was: the
+// record is one Google Sheets cell shared by every employee, and
+// saveEmployees refuses to write past 50,000 characters for anyone, no
+// matter whose data is pushing it over. Rather than holding a whole
+// record hostage over one attachment, this drops whichever still-inline
+// document fields are large enough to be the actual problem — largest
+// first — until what's left comfortably fits, and returns their labels so
+// the person saving finds out exactly what didn't make it in and why,
+// rather than the record silently missing a document with no explanation.
+function dropOversizedInlineDocuments(draft, otherEmployees){
+  const dropped = [];
+  const budget = SHEET_CELL_LIMIT - JSON.stringify(otherEmployees).length - 500;
+  const inlineDocEntries = () => {
+    const list = EMPLOYEE_DOC_FIELDS
+      .filter(f => draft[f] && !/^https?:/.test(draft[f]))
+      .map(f => ({ label: DOC_FIELD_LABELS[f] || f, size: draft[f].length, clear: () => { draft[f] = ''; } }));
+    (draft.otherDocs || []).forEach(d => {
+      if(d && d.dataUrl && !/^https?:/.test(d.dataUrl)){
+        list.push({ label: d.name || 'Other document', size: d.dataUrl.length, clear: () => { d.dataUrl = ''; } });
+      }
+    });
+    return list.sort((a, b) => b.size - a.size);
+  };
+  while(JSON.stringify(draft).length > budget){
+    const list = inlineDocEntries();
+    if(!list.length) break; // nothing left inline to drop — saveEmployees' own check is the final backstop
+    list[0].clear();
+    dropped.push(list[0].label);
+  }
+  return dropped;
 }
 
 // A stored document is either a Drive link (new) or an inline image (older
@@ -13489,6 +13535,7 @@ async function saveEmployeeForm(){
   // single save. Those screens rebuild when they are next opened instead.
   const isNew = !editingEmployeeId;
   let saved = false;
+  let droppedDocs = [];
   try{
     // Whatever failed to reach Drive the first time — a network blip while
     // it was chosen, a slow connection, anything transient — gets one more
@@ -13498,6 +13545,12 @@ async function saveEmployeeForm(){
     // already sitting inline, in whatever format it is already in; nothing
     // here re-encodes anything a second time.
     await retryInlineDocumentsToDrive(draft);
+    // Anything still inline after that retry is either a genuine one-off
+    // failure or too large for Drive to ever accept — drop whatever is
+    // actually pushing this record over the shared cell limit rather than
+    // blocking this employee's entire record (name, salary, PF, bank
+    // details, none of which are the problem) from saving at all.
+    droppedDocs = dropOversizedInlineDocuments(draft, employees.filter(e => e.id !== draft.id));
     if(isNew) employees.push(draft);
     else employees[employees.findIndex(e => e.id === editingEmployeeId)] = draft;
     // One record over the wire when the backend can merge it, the whole array
@@ -13537,6 +13590,15 @@ async function saveEmployeeForm(){
   try{ clearEmployeeDraft(); }catch(e){}
   closeEmployeeModal(true);
   showSavedToast((isNew ? 'Added ' : 'Updated ') + name + ' (' + id + ')');
+  // A toast fades on its own in a few seconds — fine for confirming the
+  // save, not for telling HR a document silently didn't make it in. This
+  // needs to actually be seen and acted on, so it's a real alert instead.
+  if(droppedDocs.length){
+    alert(name + ' was saved, but could not save ' + (droppedDocs.length === 1 ? 'this document' : 'these documents') +
+      ' — too large to store: ' + droppedDocs.join(', ') + '.\n\n' +
+      'Everything else was saved. Open ' + name + ' and upload ' +
+      (droppedDocs.length === 1 ? 'it' : 'them') + ' again — a smaller scan or photo should go through.');
+  }
 
   // The log is a record, not something the user is waiting on.
   addActivityLog(isNew ? ('Added employee ' + name + ' (' + id + ')')
