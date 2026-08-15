@@ -11425,7 +11425,7 @@ function employeeModalHtml(emp){
             <div class="field-group">
         <div class="sec-title">Basic details</div>
         <label class="field">Employee ID</label>
-        <input type="text" id="f_id" placeholder="EMP-1001" value="${emp.id}">
+        <input type="text" id="f_id" placeholder="EMP-1001" value="${escapeHtml(emp.id)}">
         <div style="height:12px"></div>
         <label class="field">Full name</label>
         <input type="text" id="f_name" placeholder="Employee full name" value="${escapeHtml(emp.name)}">
@@ -11480,10 +11480,10 @@ function employeeModalHtml(emp){
       <div class="field-group">
         <div class="sec-title">Emergency &amp; medical</div>
         <label class="field">Contact name</label>
-        <input type="text" id="f_emergencyName" placeholder="Full name" value="${emp.emergencyName}">
+        <input type="text" id="f_emergencyName" placeholder="Full name" value="${escapeHtml(emp.emergencyName)}">
         <div style="height:12px"></div>
         <label class="field">Contact number</label>
-        <input type="text" id="f_emergencyNumber" placeholder="10-digit mobile number" value="${emp.emergencyNumber}">
+        <input type="text" id="f_emergencyNumber" placeholder="10-digit mobile number" value="${escapeHtml(emp.emergencyNumber)}">
         <div style="height:12px"></div>
         <label class="field">Blood group</label>
         <select class="field-input" id="f_bloodGroup">
@@ -11869,29 +11869,29 @@ function employeeModalHtml(emp){
             : `<img class="cheque-img" src="${emp.chequeImg}" alt="Cancelled cheque">`)}</div>
         <p style="font-size:11.5px;color:var(--muted);margin:6px 0 12px;">The cheque stays on screen while you fill in the fields below, so the account number and IFSC are copied from the document rather than from memory. The IFSC is checked against the bank name as you type.</p>
         <label class="field">PAN number</label>
-        <input type="text" id="f_pan" placeholder="ABCDE1234F" value="${emp.pan}">
+        <input type="text" id="f_pan" placeholder="ABCDE1234F" value="${escapeHtml(emp.pan)}">
         <div style="height:12px"></div>
         <label class="field">Aadhaar number</label>
-        <input type="text" id="f_aadhaar" placeholder="XXXX XXXX XXXX" value="${emp.aadhaar}">
+        <input type="text" id="f_aadhaar" placeholder="XXXX XXXX XXXX" value="${escapeHtml(emp.aadhaar)}">
         <div style="height:12px"></div>
         <div id="uanWrap">
           <label class="field">UAN (PF number)</label>
-          <input type="text" id="f_uan" placeholder="10-digit UAN" value="${emp.uan}">
+          <input type="text" id="f_uan" placeholder="10-digit UAN" value="${escapeHtml(emp.uan)}">
           <div style="height:12px"></div>
         </div>
         <div id="esiNumberWrap">
           <label class="field">ESI number</label>
-          <input type="text" id="f_esiNumber" placeholder="ESI number" value="${emp.esiNumber}">
+          <input type="text" id="f_esiNumber" placeholder="ESI number" value="${escapeHtml(emp.esiNumber)}">
           <div style="height:12px"></div>
         </div>
         <label class="field">Bank name</label>
-        <input type="text" oninput="checkBankFieldsLive()" id="f_bankName" placeholder="e.g. HDFC Bank" value="${emp.bankName}">
+        <input type="text" oninput="checkBankFieldsLive()" id="f_bankName" placeholder="e.g. HDFC Bank" value="${escapeHtml(emp.bankName)}">
         <div style="height:12px"></div>
         <label class="field">IFSC code</label>
-        <input type="text" oninput="checkBankFieldsLive()" id="f_ifsc" placeholder="e.g. HDFC0001234" value="${emp.ifsc}">
+        <input type="text" oninput="checkBankFieldsLive()" id="f_ifsc" placeholder="e.g. HDFC0001234" value="${escapeHtml(emp.ifsc)}">
         <div style="height:12px"></div>
         <label class="field">Bank account number</label>
-        <input type="text" id="f_accountNumber" placeholder="Account number" value="${emp.accountNumber}">
+        <input type="text" id="f_accountNumber" placeholder="Account number" value="${escapeHtml(emp.accountNumber)}">
       </div>
       </div>
 
@@ -12974,10 +12974,15 @@ async function handleDocUpload(event, field){
   if(event.target.nextElementSibling && event.target.nextElementSibling.classList.contains('doc-card')){
     event.target.nextElementSibling.remove();
   }
-  const card = document.createElement('div');
-  card.className = 'doc-card';
-  card.textContent = '✓ Saved';
-  event.target.insertAdjacentElement('afterend', card);
+  // Was a plain "✓ Saved" div with no way to open what had just been
+  // uploaded — reopening the employee record afterwards rendered the exact
+  // same value through docCardHtml() and got a working "✓ Saved — view"
+  // button, so the document was never actually unreachable, only unreachable
+  // until the next time the record was opened. Reusing docCardHtml() here
+  // makes the card identical either way, so "view" works immediately.
+  const label = (event.target.previousElementSibling && event.target.previousElementSibling.tagName === 'LABEL')
+    ? event.target.previousElementSibling.textContent : 'Document';
+  event.target.insertAdjacentHTML('afterend', docCardHtml(editingEmployeeDraft[field], label));
 }
 
 // ---- loan ledger, employee form ----
@@ -13293,14 +13298,14 @@ async function handleOtherDocUpload(event, idx){
   }
   // This field never showed any on-screen confirmation at all before, even
   // within the same session — silent success looked identical to silent
-  // failure. Same "✓ Saved" badge the other document fields already use.
+  // failure. Same docCardHtml() badge the eight named document fields use,
+  // so a Drive upload here gets the same working "✓ Saved — view" button
+  // instead of inert text.
   if(event.target.nextElementSibling && event.target.nextElementSibling.classList.contains('doc-card')){
     event.target.nextElementSibling.remove();
   }
-  const card = document.createElement('div');
-  card.className = 'doc-card';
-  card.textContent = '✓ Saved';
-  event.target.insertAdjacentElement('afterend', card);
+  const label = editingEmployeeDraft.otherDocs[idx].name || 'Document';
+  event.target.insertAdjacentHTML('afterend', docCardHtml(editingEmployeeDraft.otherDocs[idx].dataUrl, label));
 }
 
 // ---- employee form draft ----
