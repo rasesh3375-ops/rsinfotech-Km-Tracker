@@ -7296,6 +7296,12 @@ function closeFullscreenView(){
       if(fullscreenOriginalNextSibling) fullscreenOriginalParent.insertBefore(el, fullscreenOriginalNextSibling);
       else fullscreenOriginalParent.appendChild(el);
     }
+    // #docViewerRoot is the one box here that has no visible life of its own
+    // outside full screen (every report box does — it's just where that
+    // report normally sits on its own tab) — put back exactly as
+    // viewEmployeeDocument/viewEmployeeHandbook found it, or it would sit in
+    // the page as a bare, unstyled block the moment full screen closes.
+    if(el && fullscreenActiveId === 'docViewerRoot') el.classList.add('hidden');
   }
   document.getElementById('fullscreenSheetRoot').classList.add('hidden');
   document.body.style.overflow = '';
@@ -12886,6 +12892,14 @@ async function viewEmployeeDocument(driveUrl, label){
   const m = /\/d\/([^/]+)/.exec(driveUrl || '');
   const box = document.getElementById('docViewerRoot');
   if(!m || !box){ alert('Could not open that document.'); return; }
+  // #docViewerRoot carries class="hidden" (display:none) in the static markup
+  // so it stays invisible the rest of the time — moving it into the fullscreen
+  // overlay does not by itself undo that, so without this the overlay chrome
+  // (title bar, close button) opened correctly but the content area stayed
+  // display:none underneath it: a blank white screen with a working close
+  // button, no matter how well the fetch below succeeded. closeFullscreenView
+  // puts it back.
+  box.classList.remove('hidden');
   box.innerHTML = '<div class="empty">Opening ' + escapeHtml(label) + '…</div>';
   openFullscreenView(label, 'docViewerRoot');
   try{
@@ -12910,6 +12924,8 @@ async function viewEmployeeDocument(driveUrl, label){
 async function viewEmployeeHandbook(label){
   const box = document.getElementById('docViewerRoot');
   if(!box) return;
+  // See viewEmployeeDocument's identical line above for why this is needed.
+  box.classList.remove('hidden');
   box.innerHTML = '<div class="empty">Opening ' + escapeHtml(label) + '…</div>';
   openFullscreenView(label, 'docViewerRoot');
   try{
