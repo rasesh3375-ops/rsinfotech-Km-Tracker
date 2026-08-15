@@ -1683,6 +1683,10 @@
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">New documents go straight to Google Drive, filed per employee, and the record keeps only the link. Records saved earlier still hold their images inside the sheet — which shares one cell with a 50,000 character limit. Move them out here.</p>
       <button class="btn full" onclick="withBusy(this,'Working…',migrateDocumentsToDrive)">Move stored documents to Drive</button>
       <div id="docMigrateBox" style="margin-top:10px;"></div>
+      <div style="height:14px"></div>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Every employee's record shares that same one 49 KB cell — not only documents. If a save is refused with nothing left to move, this shows what is actually filling it.</p>
+      <button class="btn ghost full" onclick="withBusy(this,'Working…',showEmployeeStorageBreakdown)">Show what's taking up space</button>
+      <div id="empStorageBreakdownBox" style="margin-top:10px;overflow-x:auto;"></div>
     </section>
 
     <section class="block" id="secTeamOverview">
@@ -14248,6 +14252,43 @@ async function migrateDocumentsToDrive(){
   const size = JSON.stringify(employees).length;
   box.innerHTML = `<p class="dash-muted">Moved ${moved} document(s)${failed ? ', ' + failed + ' could not be moved' : ''}.
     Employee record is now ${(size/1024).toFixed(0)} KB of the 49 KB the sheet can hold.</p>`;
+}
+
+// A save can now be refused with every document already a Drive link — see
+// saveEmployeeForm's rescue — meaning the 49KB ceiling is being filled by
+// ordinary employee data, not attachments at all. Rather than guessing at
+// what to trim, this shows both the "what" (which field, added across
+// every employee, actually accounts for the size) and the "who" (which
+// individual records are largest), read-only — nothing here is changed or
+// saved.
+async function showEmployeeStorageBreakdown(){
+  const box = document.getElementById('empStorageBreakdownBox');
+  const employees = await getEmployees();
+  const total = JSON.stringify(employees).length;
+
+  const byEmployee = employees.map(e => {
+    const size = JSON.stringify(e).length;
+    const stuckDocs = EMPLOYEE_DOC_FIELDS.filter(f => e[f] && !/^https?:/.test(e[f])).length +
+      (e.otherDocs || []).filter(d => d && d.dataUrl && !/^https?:/.test(d.dataUrl)).length;
+    return { id: e.id, name: e.name || e.id, size, stuckDocs };
+  }).sort((a, b) => b.size - a.size);
+
+  const fieldTotals = {};
+  employees.forEach(e => {
+    Object.keys(e).forEach(k => {
+      fieldTotals[k] = (fieldTotals[k] || 0) + JSON.stringify(e[k]).length;
+    });
+  });
+  const byField = Object.entries(fieldTotals).sort((a, b) => b[1] - a[1]).slice(0, 12);
+
+  box.innerHTML = `
+    <p class="dash-muted">Employee list is ${(total/1024).toFixed(1)} KB of the 49 KB the sheet can hold, across ${employees.length} employee(s)${employees.length ? ' — ' + (total/employees.length/1024).toFixed(2) + ' KB on average' : ''}.</p>
+    <p style="font-weight:700;font-size:12.5px;margin:14px 0 6px;">Which field, added across every employee, takes up the most space</p>
+    <table class="sal-table"><thead><tr><th>Field</th><th class="num">Total size</th></tr></thead>
+      <tbody>${byField.map(([k, v]) => `<tr><td>${escapeHtml(k)}</td><td class="num">${(v/1024).toFixed(2)} KB</td></tr>`).join('')}</tbody></table>
+    <p style="font-weight:700;font-size:12.5px;margin:14px 0 6px;">Largest individual employee records</p>
+    <table class="sal-table"><thead><tr><th>Employee</th><th class="num">Size</th><th>Stuck documents</th></tr></thead>
+      <tbody>${byEmployee.slice(0, 15).map(r => `<tr><td class="sal-name">${escapeHtml(r.name)}<span class="inc-sub">${escapeHtml(r.id)}</span></td><td class="num">${(r.size/1024).toFixed(2)} KB</td><td>${r.stuckDocs ? r.stuckDocs + ' field(s) still inline' : '—'}</td></tr>`).join('')}</tbody></table>`;
 }
 
 // Opens a new leave year for Sick Leave only — SL is reset to the flat
