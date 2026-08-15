@@ -12409,10 +12409,11 @@ async function handleChequeUpload(event){
   if(box) box.innerHTML = '<p class="dash-muted">Reading cheque…</p>';
   let originalDataUrl;
   try{
-    // Read exactly as chosen, same reasoning as handleDocUpload — Drive gets
-    // the original, full-quality photo; the 1400px/72% compressed copy is
-    // reserved for the fallback below, if Drive upload fails.
-    originalDataUrl = await fileToDataUrl(file);
+    // Untouched unless it is unusually large (see readDocForDrive) — Drive
+    // gets the photo essentially as chosen; the tighter 1400px/72%
+    // compressed copy stays reserved for the fallback below, if Drive
+    // upload fails outright.
+    originalDataUrl = await readDocForDrive(file);
   }catch(e){
     if(box) box.innerHTML = '<p class="pol-warn">Could not read that image — choose a JPG or PNG photo of the cheque.</p>';
     return;
@@ -12476,10 +12477,32 @@ function extForDocMime_(mime){
   if(m.indexOf('gif') !== -1) return 'gif';
   return 'jpg';
 }
-async function uploadEmployeeDocToDrive(label, dataUrl){
+// An unprocessed phone photo can be several megabytes — worth keeping at
+// full detail, but also slower and more likely to fail the round trip to
+// Drive than it needs to be. A failed Drive upload falls back to a
+// compressed copy stored inline instead (see handleDocUpload below), and
+// the employee record is one shared Google Sheets cell with a 50,000
+// character ceiling across every employee combined (see saveEmployees) —
+// several documents falling back to inline storage on the same employee at
+// once, from a run of failed Drive uploads, is what actually pushes that
+// cell over the edge. A file already under this size is left completely
+// untouched, its own exact bytes; only a genuinely large original gets
+// resized here, and generously — 1800px at 90% quality is still far
+// clearer than the old 640px/55% floor that started all this, just bounded
+// to a size that reaches Drive reliably.
+const LARGE_ORIGINAL_LIMIT = 1.5 * 1024 * 1024;
+async function readDocForDrive(file){
+  if(!/^image\//.test(file.type) || file.size <= LARGE_ORIGINAL_LIMIT) return fileToDataUrl(file);
+  return compressDocumentFile(file, 1800, 0.9);
+}
+// empId/empName are only needed by migrateDocumentsToDrive, moving a
+// document that belongs to some other employee entirely, not whichever one
+// (if any) happens to be open in the Add Employee form right now — every
+// other caller leaves them out and gets the form's own employee, as before.
+async function uploadEmployeeDocToDrive(label, dataUrl, empId, empName){
   const emp = editingEmployeeDraft || {};
-  const id = (document.getElementById('f_id') || {}).value || emp.id || 'unfiled';
-  const name = (document.getElementById('f_name') || {}).value || emp.name || '';
+  const id = empId || (document.getElementById('f_id') || {}).value || emp.id || 'unfiled';
+  const name = empName || (document.getElementById('f_name') || {}).value || emp.name || '';
   const folderPath = ['HR Management', 'Employee Documents', (name ? name + ' ' : '') + '(' + id + ')'];
   const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl || '');
   if(!m) return null;
@@ -12510,16 +12533,17 @@ async function handleDocUpload(event, field){
   if(!file) return;
   let originalDataUrl;
   try{
-    // Read exactly as chosen — no canvas re-encoding here. Every image used
-    // to be forced through compressDocumentFile unconditionally, which drew
-    // it onto a canvas and re-exported as image/jpeg at 640px/55% quality —
+    // Untouched unless it is unusually large (see readDocForDrive) — no
+    // more unconditional canvas re-encoding here. Every image used to be
+    // forced through compressDocumentFile no matter its size, which drew it
+    // onto a canvas and re-exported as image/jpeg at 640px/55% quality —
     // fine for a thumbnail, not for reading an Aadhaar number back off a
-    // scan, and it silently turned a PNG upload into a JPEG file. Drive has
-    // no meaningful size ceiling for one document, so what actually gets
-    // uploaded there is the file exactly as chosen, same format and same
-    // quality; compression is reserved for the one case that still needs
-    // it, below.
-    originalDataUrl = await fileToDataUrl(file);
+    // scan, and it silently turned a PNG upload into a JPEG file. A
+    // reasonably-sized upload is untouched, byte for byte; a genuinely
+    // large one is resized generously rather than left completely raw, so
+    // the Drive upload it is about to go through stays reliable. Full
+    // compression is reserved for the one case that still needs it, below.
+    originalDataUrl = await readDocForDrive(file);
   }catch(e){
     alert('Could not read that file. Choose a JPG/PNG photo, or a PDF for a scanned document.');
     event.target.value = '';
@@ -12847,11 +12871,11 @@ async function handleOtherDocUpload(event, idx){
   if(!file) return;
   let originalDataUrl;
   try{
-    // Same treatment as handleDocUpload — Drive gets the file exactly as
-    // chosen, not a recompressed copy. This one field never attempted a
-    // Drive upload at all before, unlike its seven siblings above (Aadhaar,
-    // PAN, etc.), so it always stored a compressed inline copy regardless.
-    originalDataUrl = await fileToDataUrl(file);
+    // Same treatment as handleDocUpload above. This one field never
+    // attempted a Drive upload at all before, unlike its seven siblings
+    // (Aadhaar, PAN, etc.), so it always stored a compressed inline copy
+    // regardless.
+    originalDataUrl = await readDocForDrive(file);
   }catch(e){
     alert('Could not read that file. Choose a JPG/PNG photo, or a PDF.');
     event.target.value = '';
@@ -13763,7 +13787,8 @@ async function migrateDocumentsToDrive(){
   const FIELDS = ['aadhaarCardImg','panCardImg','photoImg','residenceProofImg',
                   'lastSalarySlipImg','chequeImg','educationCertImg','signatureImg'];
   const employees = await getEmployees();
-  const pending = employees.filter(e => FIELDS.some(f => e[f] && !/^https?:/.test(e[f])));
+  const hasInlineOtherDoc = e => (e.otherDocs || []).some(d => d && d.dataUrl && !/^https?:/.test(d.dataUrl));
+  const pending = employees.filter(e => FIELDS.some(f => e[f] && !/^https?:/.test(e[f])) || hasInlineOtherDoc(e));
   if(!pending.length){
     box.innerHTML = '<p class="dash-muted">✓ Nothing to move — every stored document is already a Drive link.</p>';
     return;
@@ -13777,19 +13802,25 @@ async function migrateDocumentsToDrive(){
       const v = e[f];
       if(!v || /^https?:/.test(v)) continue;
       box.innerHTML = '<p class="dash-muted">Moving ' + escapeHtml(e.name || e.id) + ' — ' + f + '…</p>';
+      // Shares uploadEmployeeDocToDrive with the live upload handlers above
+      // instead of its own copy of the same POST — the copy that used to
+      // live here only ever recognised png/else-jpg, silently mislabelling
+      // every PDF (and anything else) it moved as a .jpg.
       try{
-        const m = /^data:([^;]+);base64,(.*)$/.exec(v);
-        if(!m){ failed++; continue; }
-        const res = await apiFetch(API_URL, {
-          method:'POST', headers:{ 'Content-Type':'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action:'uploadDocument', token: sessionToken,
-            folderPath:['HR Management','Employee Documents',(e.name ? e.name + ' ' : '') + '(' + e.id + ')'],
-            fileName: f + (m[1].indexOf('png') !== -1 ? '.png' : '.jpg'),
-            mimeType: m[1], base64Data: m[2] })
-        });
-        const data = await res.json();
-        if(data && data.ok && data.fileUrl){ e[f] = data.fileUrl; moved++; }
-        else failed++;
+        const url = await uploadEmployeeDocToDrive(f, v, e.id, e.name);
+        if(url){ e[f] = url; moved++; } else failed++;
+      }catch(err){ failed++; }
+    }
+    // "Other documents" never went through Drive at all before — see
+    // handleOtherDocUpload — so any added before that fix sat here inline
+    // same as the eight named fields above, and belong in this sweep too.
+    for(let i = 0; i < (e.otherDocs || []).length; i++){
+      const d = e.otherDocs[i];
+      if(!d || !d.dataUrl || /^https?:/.test(d.dataUrl)) continue;
+      box.innerHTML = '<p class="dash-muted">Moving ' + escapeHtml(e.name || e.id) + ' — ' + escapeHtml(d.name || 'other document') + '…</p>';
+      try{
+        const url = await uploadEmployeeDocToDrive('other-' + (d.name || i), d.dataUrl, e.id, e.name);
+        if(url){ d.dataUrl = url; moved++; } else failed++;
       }catch(err){ failed++; }
     }
   }
