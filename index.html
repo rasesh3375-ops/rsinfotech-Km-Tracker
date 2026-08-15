@@ -6332,7 +6332,7 @@ async function renderAttendanceSheet(){
   const isCompact = isCompactSheetView();
 
   let headerRow = '<tr><th>S.No</th><th class="att-name-h">Name</th>' +
-    dateList.map(d => `<th>${parseInt(d.slice(8),10)}</th>`).join('') +
+    dateList.map(d => `<th data-date="${d}">${parseInt(d.slice(8),10)}</th>`).join('') +
     '<th>Present</th><th>Absent</th><th>EL</th><th>SL</th><th>LP</th><th>Half</th><th>Short</th><th>Late</th></tr>';
   // Policy columns follow the day grid, so the export carries the same
   // judgement the on-screen panel shows rather than raw codes alone.
@@ -6464,6 +6464,32 @@ async function renderAttendanceSheet(){
   if(restored) showSavedToast(restored + ' unsaved attendance change(s) recovered — press Save attendance to store them');
   collapseSheetTopControls('attTopControls');
   updateSheetScrollNavVisibility();
+  scrollAttendanceSheetToToday();
+}
+// Opening the sheet on day 22 used to always start at day 1 — every column
+// between had to be scrolled past by hand before today's entry was even on
+// screen. Brings today's column near the right edge of whatever width the
+// screen actually has instead, so the recent past leading up to today is
+// what fills the rest — a trailing window, not a dead run of blank future
+// days a plain center would have wasted the space on. A no-op on a past/
+// future month (no th for a date outside dateList) and on mobile's compact
+// card view (day cells there are <div>s in a wrapping grid, not <th>s in a
+// horizontally-scrolled row, so there is nothing to scroll to).
+function scrollAttendanceSheetToToday(){
+  const todayTh = document.querySelector('#attendanceSheetPrintArea th[data-date="' + todayStr() + '"]');
+  if(!todayTh) return;
+  const wrap = fullscreenActiveId ? document.getElementById('fullscreenBody') : inlineSheetWrap();
+  if(!wrap) return;
+  const wrapRect = wrap.getBoundingClientRect();
+  const thRect = todayTh.getBoundingClientRect();
+  const thRightInContent = (thRect.right - wrapRect.left) + wrap.scrollLeft;
+  // One column's width of breathing room past today, so it does not sit
+  // flush against the very edge of the screen. The sticky Name column only
+  // covers the left edge of the view, so it never needs accounting for here
+  // — this is positioning against the right edge.
+  const target = thRightInContent + thRect.width - wrapRect.width;
+  const maxScroll = Math.max(0, wrap.scrollWidth - wrapRect.width);
+  wrap.scrollLeft = Math.max(0, Math.min(target, maxScroll));
 }
 // The small ✕ on the Attendance Sheet itself (reportActionBar's own close,
 // wired here instead of its plain default) — on a laptop/desktop screen this
