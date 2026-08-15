@@ -56,16 +56,21 @@ function getSessionSheet_() {
   let sheet = ss.getSheetByName(SESSION_SHEET_NAME);
   if (!sheet) {
     sheet = ss.insertSheet(SESSION_SHEET_NAME);
-    sheet.appendRow(['token', 'role', 'username', 'expiresAt']);
+    sheet.appendRow(['tokenHash', 'role', 'username', 'expiresAt']);
   }
   return sheet;
 }
 
+// The sheet stores only a hash of the token, never the token itself — the
+// same reasoning as password storage. Anyone who can read the SESSIONS sheet
+// (a Drive share, an HR account compromise) used to get a live bearer token
+// good for 30 days; now they get a hash that's useless for calling the API.
+// The plaintext token still goes to the client once, at login, same as before.
 function createSession_(role, username, ttlMs) {
   const sheet = getSessionSheet_();
   const token = Utilities.getUuid() + '-' + Utilities.getUuid();
   const expiresAt = Date.now() + (ttlMs || SESSION_LIFETIME_MS);
-  sheet.appendRow([token, role, username, expiresAt]);
+  sheet.appendRow([sha256Hex_(token), role, username, expiresAt]);
   return { token: token, expiresAt: expiresAt };
 }
 const RECOVERY_TOKEN_TTL_MS = 10 * 60 * 1000; // 10 minutes to finish a password reset
@@ -75,8 +80,9 @@ function validateSession_(token) {
   const sheet = getSessionSheet_();
   const data = sheet.getDataRange().getValues();
   const now = Date.now();
+  const tokenHash = sha256Hex_(token);
   for (let i = 1; i < data.length; i++) {
-    if (data[i][0] === token) {
+    if (data[i][0] === tokenHash) {
       if (Number(data[i][3]) < now) return null; // expired
       return { role: data[i][1], username: data[i][2] };
     }
@@ -87,8 +93,9 @@ function validateSession_(token) {
 function deleteSession_(token) {
   const sheet = getSessionSheet_();
   const data = sheet.getDataRange().getValues();
+  const tokenHash = sha256Hex_(token);
   for (let i = data.length - 1; i >= 1; i--) {
-    if (data[i][0] === token) sheet.deleteRow(i + 1);
+    if (data[i][0] === tokenHash) sheet.deleteRow(i + 1);
   }
 }
 

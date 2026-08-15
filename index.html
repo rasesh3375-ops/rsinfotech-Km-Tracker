@@ -2699,7 +2699,33 @@ function fmtKm(v){ return (Math.round(v*100)/100).toFixed(2); }
 // PASTE YOUR APPS SCRIPT WEB APP URL BELOW (ends in /exec)
 // See the setup instructions for how to get this.
 // ============================================================
-const API_URL = 'https://script.google.com/macros/s/AKfycbzKoHlUbRmffb8gtvmuo-QzANK2F1WoCZlSpOSRTSAECTSFzabrcBJbwQFtUG9EeG_xnA/exec';
+const PROD_API_URL = 'https://script.google.com/macros/s/AKfycbzKoHlUbRmffb8gtvmuo-QzANK2F1WoCZlSpOSRTSAECTSFzabrcBJbwQFtUG9EeG_xnA/exec';
+
+// Lets a staging Apps Script deployment be tested from this same production
+// page — visit once with ?stagingBackend=<url> and the override sticks in
+// this browser via localStorage; visit with ?stagingBackend= (empty) to
+// clear it. Nobody else's session is affected, and the default with no
+// override is always the production URL above. A loud banner below makes
+// sure a staging session is never mistaken for the real payroll data.
+(function(){
+  const params = new URLSearchParams(location.search);
+  if(params.has('stagingBackend')){
+    const v = params.get('stagingBackend');
+    if(v) localStorage.setItem('kmt_staging_backend_url', v);
+    else localStorage.removeItem('kmt_staging_backend_url');
+  }
+})();
+const API_URL = localStorage.getItem('kmt_staging_backend_url') || PROD_API_URL;
+const IS_STAGING_BACKEND = API_URL !== PROD_API_URL;
+if(IS_STAGING_BACKEND){
+  const stagingBar = document.createElement('div');
+  stagingBar.textContent = '⚠ STAGING BACKEND — this is test data, not the live payroll sheet';
+  stagingBar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;'
+    + 'background:#B23A32;color:#fff;text-align:center;font:700 12.5px -apple-system,sans-serif;'
+    + 'padding:7px 12px;letter-spacing:.2px;';
+  document.body.prepend(stagingBar);
+  document.body.style.paddingTop = '32px';
+}
 
 // Session token from server-side login (see serverLogin below). Required by
 // the backend for every action except login/setupHr/recoverHr/logout.

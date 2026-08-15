@@ -200,6 +200,34 @@ unrestricted throughout.
   to the backend. If a redeploy is genuinely needed, use Manage deployments →
   edit the existing one → New version, which keeps the URL.
 
+### Testing against a staging backend
+
+There is no staging environment by default — every push to `main` is live
+production within a minute, against the one real "RS Tracker Backend" sheet.
+For a change risky enough to want to try against real-shaped data first
+without touching payroll:
+
+1. Make a copy of the "RS Tracker Backend" Google Sheet (File → Make a copy).
+   Copying it also copies its bound Apps Script project.
+2. Open the copy's Apps Script editor and change `SPREADSHEET_ID` to the
+   copy's own ID (find it in the copy's URL). This is the one line that has
+   to differ from production — everything else can stay identical.
+3. Deploy the copy as its own Web App (Deploy → New deployment). This is a
+   genuinely separate deployment for a separate script project, so it does
+   not conflict with the "never create a new deployment" rule above, which
+   is only about the single production deployment's URL staying fixed.
+4. On the live site, visit it once with `?stagingBackend=<the staging /exec
+   URL>` appended. `index.html` remembers that in `localStorage` for that
+   browser only — nobody else's session is affected, and the production
+   default (no override) is untouched. A red banner ("STAGING BACKEND — this
+   is test data, not the live payroll sheet") stays on screen the whole time
+   an override is active, so it can't be mistaken for the real thing.
+5. Visit again with `?stagingBackend=` (empty) to clear the override and go
+   back to production.
+
+This does not need setting up in advance — it costs nothing until the day a
+change is worth testing this way.
+
 ## Known constraints
 
 - **Every amount is whole rupees, no paise, everywhere.** `fmtMoney` rounds and
