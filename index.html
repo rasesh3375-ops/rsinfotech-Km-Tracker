@@ -13710,7 +13710,30 @@ async function saveEmployeeForm(){
     // when it cannot. The merge path also removes the lost-update window: two
     // people editing different employees no longer overwrite each other.
     const merged = await remoteSetItem('employees', draft, 'id');
-    if(!merged) await saveEmployees(employees);
+    if(!merged){
+      try{
+        await saveEmployees(employees);
+      }catch(sizeErr){
+        // dropOversizedInlineDocuments above only ever cleans up THIS
+        // employee's own record, but the 49KB ceiling is shared by every
+        // employee in the sheet — so a brand-new record with nothing of its
+        // own left to drop (or nothing attached at all) can still be
+        // blocked purely by OTHER employees' documents that were saved
+        // before Drive uploads existed and never migrated. That is exactly
+        // what happened here: the same "too large to save" error kept
+        // recurring for a different employee each time, because the actual
+        // bloat was never this employee's to begin with. Rather than a
+        // message that reads as if this employee's own attachments are the
+        // problem, try the same rescue "Move stored documents to Drive" in
+        // Admin Settings already does by hand — automatically, before
+        // giving up — so this never again needs someone to notice that
+        // button exists.
+        if(saveBtn) saveBtn.textContent = 'Freeing up space…';
+        const { moved } = await migrateInlineDocumentsInPlace_(employees);
+        if(!moved) throw sizeErr;
+        await saveEmployees(employees);
+      }
+    }
     saved = true;
   }catch(err){
     showEmpSaveError('Could not save: ' + (err && err.message ? err.message : 'the server did not respond') + '. Nothing was lost — press Save again.');
@@ -14138,30 +14161,26 @@ async function populateRoleReportPickers(){
   });
 }
 
-// Moves documents already embedded in the employees record out to Drive and
-// replaces each with its link. Existing records were saved before documents
-// went to Drive, so without this they keep occupying the one cell everything
-// shares — and that cell is what fails at 50,000 characters.
-async function migrateDocumentsToDrive(){
-  const box = document.getElementById('docMigrateBox');
-  const employees = await getEmployees();
-  const hasInlineOtherDoc = e => (e.otherDocs || []).some(d => d && d.dataUrl && !/^https?:/.test(d.dataUrl));
-  const pending = employees.filter(e => EMPLOYEE_DOC_FIELDS.some(f => e[f] && !/^https?:/.test(e[f])) || hasInlineOtherDoc(e));
-  if(!pending.length){
-    box.innerHTML = '<p class="dash-muted">✓ Nothing to move — every stored document is already a Drive link.</p>';
-    return;
-  }
-  if(!confirm(pending.length + ' employee record(s) still hold documents inside the sheet.\n\n' +
-    'Move them to Drive now? Each becomes a link, which is what frees the space. Nothing is deleted.')) return;
+const hasInlineOtherDoc_ = e => (e.otherDocs || []).some(d => d && d.dataUrl && !/^https?:/.test(d.dataUrl));
 
+// Every inline (non-Drive) document across the given employees, moved to
+// Drive in place — shared by the manual "Move stored documents to Drive"
+// button below and by saveEmployeeForm's own automatic rescue, so the two
+// only ever contain one copy of this loop between them. Mutates the
+// employee objects directly rather than returning new ones, same as the
+// single-record retryInlineDocumentsToDrive it mirrors; the caller decides
+// when to actually write the result. Never deletes anything — a document
+// that fails to move is left exactly as it was, same as any other upload
+// failure elsewhere in this file.
+async function migrateInlineDocumentsInPlace_(employees, onProgress){
   let moved = 0, failed = 0;
-  for(const e of pending){
+  for(const e of employees){
     for(const f of EMPLOYEE_DOC_FIELDS){
       const v = e[f];
       if(!v || /^https?:/.test(v)) continue;
-      box.innerHTML = '<p class="dash-muted">Moving ' + escapeHtml(e.name || e.id) + ' — ' + f + '…</p>';
+      if(onProgress) onProgress(e, f);
       // Shares uploadEmployeeDocToDrive with the live upload handlers above
-      // instead of its own copy of the same POST — the copy that used to
+      // instead of its own copy of the same POST — an old copy that used to
       // live here only ever recognised png/else-jpg, silently mislabelling
       // every PDF (and anything else) it moved as a .jpg.
       try{
@@ -14175,13 +14194,34 @@ async function migrateDocumentsToDrive(){
     for(let i = 0; i < (e.otherDocs || []).length; i++){
       const d = e.otherDocs[i];
       if(!d || !d.dataUrl || /^https?:/.test(d.dataUrl)) continue;
-      box.innerHTML = '<p class="dash-muted">Moving ' + escapeHtml(e.name || e.id) + ' — ' + escapeHtml(d.name || 'other document') + '…</p>';
+      if(onProgress) onProgress(e, d.name || 'other document');
       try{
         const url = await uploadEmployeeDocToDrive('other-' + (d.name || i), d.dataUrl, e.id, e.name);
         if(url){ d.dataUrl = url; moved++; } else failed++;
       }catch(err){ failed++; }
     }
   }
+  return { moved, failed };
+}
+
+// Moves documents already embedded in the employees record out to Drive and
+// replaces each with its link. Existing records were saved before documents
+// went to Drive, so without this they keep occupying the one cell everything
+// shares — and that cell is what fails at 50,000 characters.
+async function migrateDocumentsToDrive(){
+  const box = document.getElementById('docMigrateBox');
+  const employees = await getEmployees();
+  const pending = employees.filter(e => EMPLOYEE_DOC_FIELDS.some(f => e[f] && !/^https?:/.test(e[f])) || hasInlineOtherDoc_(e));
+  if(!pending.length){
+    box.innerHTML = '<p class="dash-muted">✓ Nothing to move — every stored document is already a Drive link.</p>';
+    return;
+  }
+  if(!confirm(pending.length + ' employee record(s) still hold documents inside the sheet.\n\n' +
+    'Move them to Drive now? Each becomes a link, which is what frees the space. Nothing is deleted.')) return;
+
+  const { moved, failed } = await migrateInlineDocumentsInPlace_(pending, (e, label) => {
+    box.innerHTML = '<p class="dash-muted">Moving ' + escapeHtml(e.name || e.id) + ' — ' + escapeHtml(String(label)) + '…</p>';
+  });
   // Written once at the end: a save per document would multiply the very
   // oversized write this exists to prevent.
   if(moved) await saveEmployees(employees);
