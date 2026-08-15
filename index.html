@@ -873,23 +873,35 @@
      capture, which only ever reads .print-isolate — a sibling of .rpt-actions,
      never a descendant of it. */
   #fullscreenBody .rpt-actions-top, #fullscreenBody .rpt-fullscreen-btn{display:none;}
-  /* Two floating buttons, pinned to the middle of the viewport rather than
-     the top or bottom, so jumping from wherever you are to either end of a
-     long table never needs the scrollbar dragged the full distance by hand. */
-  /* Now a standalone element (not nested inside #fullscreenSheetRoot, so it
+  /* Four floating buttons so jumping from wherever you are to either end of
+     a long table, or either edge of a wide one, never needs the scrollbar
+     dragged the full distance by hand. Pinned to the bottom-right corner —
+     the one spot a wide report table almost never reaches — rather than the
+     previous middle-of-the-right-edge, which sat directly on top of a
+     report's rightmost column on anything wide enough to reach that far
+     (HR reported the buttons covering real figures on the Monthly Leave
+     Detail Report and "almost all" wide reports). A 2x2 square instead of a
+     tall column of four also halves how much space it occupies, and sitting
+     at low opacity until hovered keeps it out of the way of the page under
+     it without needing to hunt for it — the same corner-plus-fade
+     combination chat widgets and "scroll to top" buttons use everywhere.
+     Now a standalone element (not nested inside #fullscreenSheetRoot, so it
      can also float over the plain inline sheet view), so it needs its own
      z-index above --z-fullscreen (200) to still clear the full-screen
      overlay when that is open — sitting below --z-modal-top (300) so an
      actual confirm dialog still wins over it. */
-  .fs-scroll-nav{position:fixed;right:14px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:8px;z-index:210;}
+  .fs-scroll-nav{
+    position:fixed;right:20px;bottom:20px;
+    display:grid;grid-template-columns:repeat(2,1fr);gap:6px;
+    z-index:210;opacity:.35;transition:opacity .15s ease;
+  }
+  .fs-scroll-nav:hover,.fs-scroll-nav:focus-within{opacity:1;}
+  @media (prefers-reduced-motion: reduce){ .fs-scroll-nav{transition:none;} }
   .fs-scroll-btn{
     width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:var(--paper);
     color:var(--navy);font-size:16px;line-height:1;cursor:pointer;box-shadow:0 2px 6px rgba(22,33,62,.18);
   }
   .fs-scroll-btn:hover{background:#00000008;border-color:var(--navy);}
-  /* Splits the up/down pair from the left/right pair so four buttons in one
-     column still reads as two separate controls, not one confusing group of four. */
-  .fs-scroll-gap{height:4px;}
 
   /* ===== Role reports: real A4 sheets, branded on every page ===== */
   .rpt-page-probe{position:absolute;left:-10000px;top:0;width:718px;visibility:hidden;}
@@ -2577,7 +2589,6 @@
   <div class="fs-scroll-nav hidden" id="sheetScrollNav">
     <button class="fs-scroll-btn" onclick="scrollSheetView('top')" title="Scroll to top" aria-label="Scroll to top">▲</button>
     <button class="fs-scroll-btn" onclick="scrollSheetView('bottom')" title="Scroll to bottom" aria-label="Scroll to bottom">▼</button>
-    <div class="fs-scroll-gap"></div>
     <button class="fs-scroll-btn" onclick="scrollSheetView('left')" title="Scroll to first column" aria-label="Scroll to first column">◀</button>
     <button class="fs-scroll-btn" onclick="scrollSheetView('right')" title="Scroll to last column" aria-label="Scroll to last column">▶</button>
   </div>
