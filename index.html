@@ -12407,19 +12407,28 @@ async function handleChequeUpload(event){
   if(!file) return;
   const box = document.getElementById('chequePreview');
   if(box) box.innerHTML = '<p class="dash-muted">Reading cheque…</p>';
-  let dataUrl;
+  let originalDataUrl;
   try{
-    dataUrl = await compressDocumentFile(file, 1400, 0.72);
+    // Read exactly as chosen, same reasoning as handleDocUpload — Drive gets
+    // the original, full-quality photo; the 1400px/72% compressed copy is
+    // reserved for the fallback below, if Drive upload fails.
+    originalDataUrl = await fileToDataUrl(file);
   }catch(e){
     if(box) box.innerHTML = '<p class="pol-warn">Could not read that image — choose a JPG or PNG photo of the cheque.</p>';
     return;
   }
   let stored = null;
-  try{ stored = await uploadEmployeeDocToDrive('cancelled-cheque', dataUrl); }catch(e){}
-  editingEmployeeDraft.chequeImg = stored || dataUrl;
-  // The freshly captured image is previewed either way — a Drive link needs
-  // sign-in to render inline, and the point is reading it while typing.
-  if(box) box.innerHTML = '<img class="cheque-img" src="' + dataUrl + '" alt="Cancelled cheque">'
+  try{ stored = await uploadEmployeeDocToDrive('cancelled-cheque', originalDataUrl); }catch(e){}
+  if(stored){
+    editingEmployeeDraft.chequeImg = stored;
+  } else {
+    try{ editingEmployeeDraft.chequeImg = await compressDocumentFile(file, 1400, 0.72); }
+    catch(e){ editingEmployeeDraft.chequeImg = originalDataUrl; }
+  }
+  // The freshly captured image is previewed either way, at full quality —
+  // a Drive link needs sign-in to render inline, and the point is reading
+  // the account number and IFSC back off it while typing.
+  if(box) box.innerHTML = '<img class="cheque-img" src="' + originalDataUrl + '" alt="Cancelled cheque">'
     + (stored ? '<p class="calc-note">Saved to Drive.</p>' : '');
   scheduleEmployeeDraftSave();
   checkBankFieldsLive();
@@ -12452,6 +12461,21 @@ function checkBankFieldsLive(){
 // move — which relocates a whole employee folder in one step — would have
 // nothing single to move. Everything dated goes through hrYearPath; this does
 // not, on purpose.
+// Was png/pdf/else-jpg, which only ever mattered while every image got
+// forced through a canvas first (see handleDocUpload) — canvas output is
+// always real image/jpeg, so the "else" branch was never actually wrong.
+// Now that the original file's own bytes go to Drive untouched, a HEIC photo
+// (the default camera format on iPhone) or a WebP one needs its own real
+// extension too, not a jpg label on bytes that are not actually a JPEG.
+function extForDocMime_(mime){
+  const m = (mime || '').toLowerCase();
+  if(m.indexOf('pdf') !== -1) return 'pdf';
+  if(m.indexOf('png') !== -1) return 'png';
+  if(m.indexOf('heic') !== -1 || m.indexOf('heif') !== -1) return 'heic';
+  if(m.indexOf('webp') !== -1) return 'webp';
+  if(m.indexOf('gif') !== -1) return 'gif';
+  return 'jpg';
+}
 async function uploadEmployeeDocToDrive(label, dataUrl){
   const emp = editingEmployeeDraft || {};
   const id = (document.getElementById('f_id') || {}).value || emp.id || 'unfiled';
@@ -12459,7 +12483,7 @@ async function uploadEmployeeDocToDrive(label, dataUrl){
   const folderPath = ['HR Management', 'Employee Documents', (name ? name + ' ' : '') + '(' + id + ')'];
   const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl || '');
   if(!m) return null;
-  const ext = m[1].indexOf('png') !== -1 ? 'png' : m[1].indexOf('pdf') !== -1 ? 'pdf' : 'jpg';
+  const ext = extForDocMime_(m[1]);
   const res = await apiFetch(API_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -12484,26 +12508,42 @@ function docCardHtml(v, label){
 async function handleDocUpload(event, field){
   const file = event.target.files[0];
   if(!file) return;
-  let dataUrl;
+  let originalDataUrl;
   try{
-    // compressDocumentFile draws the file onto a canvas, which only works for
-    // an actual image — handing it a PDF (Aadhaar/PAN/salary-slip scans are
-    // routinely PDFs, not photos) made the canvas Image element fail to
-    // decode it and reject with nothing catching that, so choosing a PDF
-    // here looked exactly like nothing had happened at all. PDFs are passed
-    // through as-is instead, same as the sick-leave certificate upload
-    // already does.
-    dataUrl = /^image\//.test(file.type) ? await compressDocumentFile(file) : await fileToDataUrl(file);
+    // Read exactly as chosen — no canvas re-encoding here. Every image used
+    // to be forced through compressDocumentFile unconditionally, which drew
+    // it onto a canvas and re-exported as image/jpeg at 640px/55% quality —
+    // fine for a thumbnail, not for reading an Aadhaar number back off a
+    // scan, and it silently turned a PNG upload into a JPEG file. Drive has
+    // no meaningful size ceiling for one document, so what actually gets
+    // uploaded there is the file exactly as chosen, same format and same
+    // quality; compression is reserved for the one case that still needs
+    // it, below.
+    originalDataUrl = await fileToDataUrl(file);
   }catch(e){
     alert('Could not read that file. Choose a JPG/PNG photo, or a PDF for a scanned document.');
     event.target.value = '';
     return;
   }
-  // Drive first; only if that fails does the image go into the record, so a
-  // backend blip costs storage headroom rather than the document itself.
+  // Drive first; only if that fails does anything go into the record inline
+  // instead, since the record is one Google Sheets cell with a 50,000
+  // character limit — an image is compressed for that fallback specifically
+  // (as before), a PDF is stored exactly as read (as before; a PDF was
+  // never run through the canvas compressor, since a canvas can only draw
+  // an actual image).
   let stored = null;
-  try{ stored = await uploadEmployeeDocToDrive(field, dataUrl); }catch(e){}
-  editingEmployeeDraft[field] = stored || dataUrl;
+  try{ stored = await uploadEmployeeDocToDrive(field, originalDataUrl); }catch(e){}
+  if(stored){
+    editingEmployeeDraft[field] = stored;
+  } else {
+    try{
+      editingEmployeeDraft[field] = /^image\//.test(file.type) ? await compressDocumentFile(file) : originalDataUrl;
+    }catch(e){
+      alert('Could not save that file — try again, or a smaller scan.');
+      event.target.value = '';
+      return;
+    }
+  }
   // All seven document inputs (Aadhaar, PAN, photo, ...) are siblings inside
   // one shared field-group, so parentElement.querySelector('.doc-card') found
   // the FIRST "✓ Saved" badge in the whole section rather than this input's
@@ -12805,13 +12845,42 @@ function addOtherDocSlot(){
 async function handleOtherDocUpload(event, idx){
   const file = event.target.files[0];
   if(!file) return;
+  let originalDataUrl;
   try{
-    editingEmployeeDraft.otherDocs[idx].dataUrl =
-      /^image\//.test(file.type) ? await compressDocumentFile(file) : await fileToDataUrl(file);
+    // Same treatment as handleDocUpload — Drive gets the file exactly as
+    // chosen, not a recompressed copy. This one field never attempted a
+    // Drive upload at all before, unlike its seven siblings above (Aadhaar,
+    // PAN, etc.), so it always stored a compressed inline copy regardless.
+    originalDataUrl = await fileToDataUrl(file);
   }catch(e){
     alert('Could not read that file. Choose a JPG/PNG photo, or a PDF.');
     event.target.value = '';
+    return;
   }
+  let stored = null;
+  try{ stored = await uploadEmployeeDocToDrive('other-' + (editingEmployeeDraft.otherDocs[idx].name || idx), originalDataUrl); }catch(e){}
+  if(stored){
+    editingEmployeeDraft.otherDocs[idx].dataUrl = stored;
+  } else {
+    try{
+      editingEmployeeDraft.otherDocs[idx].dataUrl =
+        /^image\//.test(file.type) ? await compressDocumentFile(file) : originalDataUrl;
+    }catch(e){
+      alert('Could not save that file — try again, or a smaller scan.');
+      event.target.value = '';
+      return;
+    }
+  }
+  // This field never showed any on-screen confirmation at all before, even
+  // within the same session — silent success looked identical to silent
+  // failure. Same "✓ Saved" badge the other document fields already use.
+  if(event.target.nextElementSibling && event.target.nextElementSibling.classList.contains('doc-card')){
+    event.target.nextElementSibling.remove();
+  }
+  const card = document.createElement('div');
+  card.className = 'doc-card';
+  card.textContent = '✓ Saved';
+  event.target.insertAdjacentElement('afterend', card);
 }
 
 // ---- employee form draft ----
