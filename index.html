@@ -4492,7 +4492,7 @@ async function renderEmployeeHandbookForEngineer(){
   } else {
     const handbook = await getEmployeeHandbook();
     if(handbook && handbook.fileUrl){
-      body.innerHTML = `<a class="btn ghost full" href="${handbook.fileUrl}" target="_blank">View Employee Handbook${handbook.year ? ' (' + handbook.year + ')' : ''}</a>`;
+      body.innerHTML = `<button type="button" class="btn ghost full" onclick="viewEmployeeHandbook('Employee Handbook${handbook.year ? ' (' + handbook.year + ')' : ''}')">View Employee Handbook${handbook.year ? ' (' + handbook.year + ')' : ''}</button>`;
     } else {
       body.innerHTML = `<div style="font-size:12.5px;color:var(--muted);">Not uploaded yet — check with HR.</div>`;
     }
@@ -12593,14 +12593,36 @@ function base64ToBlob_(base64, mimeType){
   return new Blob([bytes], { type: mimeType });
 }
 
+// Shared by every "view a document inside the app" entry point below —
+// takes whatever a getDriveFile/getEmployeeHandbookFile response already
+// resolved to and draws it into the (already-open) full-screen viewer.
+function renderDocInViewer_(box, data, label){
+  if(!data || !data.ok){
+    box.innerHTML = '<div class="empty pol-warn">' + escapeHtml(data && data.error ? data.error : 'Could not open that document.') + '</div>';
+    return;
+  }
+  const objectUrl = URL.createObjectURL(base64ToBlob_(data.base64Data, data.mimeType));
+  const isPdf = /pdf/.test(data.mimeType);
+  box.innerHTML = `<div style="padding:16px;display:flex;flex-direction:column;gap:12px;height:100%;box-sizing:border-box;">
+    <a class="btn ghost" style="align-self:flex-start;" href="${objectUrl}" download="${escapeHtml(data.fileName || label)}">⬇ Download</a>
+    <div style="flex:1;overflow:auto;display:flex;align-items:flex-start;justify-content:center;">
+      ${isPdf
+        ? `<embed src="${objectUrl}" type="application/pdf" style="width:100%;height:100%;min-height:70vh;border:1px solid var(--line);border-radius:8px;">`
+        : `<img src="${objectUrl}" alt="${escapeHtml(label)}" style="max-width:100%;height:auto;border-radius:8px;border:1px solid var(--line);">`}
+    </div>
+  </div>`;
+}
+
 // Shows a document inside the app instead of sending whoever clicked it to
 // Drive directly — see docCardHtml above for why. The backend already has
 // Drive access (it runs as whoever deployed it, not as whoever is using
 // the app), so it reads the file and hands the bytes back over the same
 // session already in use here; nothing about this needs a Google account
-// on this end at all. driveUrl is whatever uploadEmployeeDocToDrive
-// returned when the document was uploaded, e.g.
-// https://drive.google.com/file/d/<id>/view.
+// on this end at all. driveUrl is whatever uploadEmployeeDocToDrive /
+// uploadDocumentToDrive returned when the document was uploaded, e.g.
+// https://drive.google.com/file/d/<id>/view. HR-only on the backend —
+// every one of these belongs to one specific employee or is HR's own
+// office paperwork, unlike the employee handbook below.
 async function viewEmployeeDocument(driveUrl, label){
   const m = /\/d\/([^/]+)/.exec(driveUrl || '');
   const box = document.getElementById('docViewerRoot');
@@ -12613,23 +12635,33 @@ async function viewEmployeeDocument(driveUrl, label){
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'getDriveFile', token: sessionToken, fileId: m[1] })
     });
-    const data = await res.json();
-    if(!data || !data.ok){
-      box.innerHTML = '<div class="empty pol-warn">Could not open that document. Try again, or ask HR to re-upload it.</div>';
-      return;
-    }
-    const objectUrl = URL.createObjectURL(base64ToBlob_(data.base64Data, data.mimeType));
-    const isPdf = /pdf/.test(data.mimeType);
-    box.innerHTML = `<div style="padding:16px;display:flex;flex-direction:column;gap:12px;height:100%;box-sizing:border-box;">
-      <a class="btn ghost" style="align-self:flex-start;" href="${objectUrl}" download="${escapeHtml(data.fileName || label)}">⬇ Download</a>
-      <div style="flex:1;overflow:auto;display:flex;align-items:flex-start;justify-content:center;">
-        ${isPdf
-          ? `<embed src="${objectUrl}" type="application/pdf" style="width:100%;height:100%;min-height:70vh;border:1px solid var(--line);border-radius:8px;">`
-          : `<img src="${objectUrl}" alt="${escapeHtml(label)}" style="max-width:100%;height:auto;border-radius:8px;border:1px solid var(--line);">`}
-      </div>
-    </div>`;
+    renderDocInViewer_(box, await res.json(), label);
   }catch(e){
     box.innerHTML = '<div class="empty pol-warn">Could not open that document — check your connection and try again.</div>';
+  }
+}
+
+// The one Drive-backed document engineers may read the actual content of,
+// not just its stored link — the handbook is shared company-wide reading
+// (see ENGINEER_SHARED_READ's 'employee_handbook' entry on the backend),
+// unlike every other document in Drive, which belongs to one specific
+// employee and is HR's alone. No fileId is sent from here at all — the
+// backend looks up whatever the current handbook actually is itself, so
+// this can never be pointed at anything else.
+async function viewEmployeeHandbook(label){
+  const box = document.getElementById('docViewerRoot');
+  if(!box) return;
+  box.innerHTML = '<div class="empty">Opening ' + escapeHtml(label) + '…</div>';
+  openFullscreenView(label, 'docViewerRoot');
+  try{
+    const res = await apiFetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'getEmployeeHandbookFile', token: sessionToken })
+    });
+    renderDocInViewer_(box, await res.json(), label);
+  }catch(e){
+    box.innerHTML = '<div class="empty pol-warn">Could not open the handbook — check your connection and try again.</div>';
   }
 }
 
@@ -15446,7 +15478,7 @@ async function renderHandbookSection(){
   const handbook = await getEmployeeHandbook();
   const info = document.getElementById('handbookCurrentInfo');
   if(handbook && handbook.fileUrl){
-    info.innerHTML = `<div class="doc-card">✓ Current: <a href="${handbook.fileUrl}" target="_blank">${handbook.fileName}</a>${handbook.year ? ' (' + handbook.year + ')' : ''}</div>`;
+    info.innerHTML = `<button type="button" class="doc-card" onclick="viewEmployeeHandbook('${(handbook.fileName || 'Employee Handbook').replace(/'/g,"\\'")}')">✓ Current: ${escapeHtml(handbook.fileName)}${handbook.year ? ' (' + escapeHtml(String(handbook.year)) + ')' : ''}</button>`;
   } else {
     info.innerHTML = '<div class="empty">No handbook uploaded yet.</div>';
   }
@@ -15532,7 +15564,7 @@ async function renderPayrollDocList(){
       <div class="head"><strong>${d.type}</strong><span class="id">${d.month}</span></div>
       <div class="sub">${d.fileName}</div>
       <div class="actions">
-        <a class="btn ghost" href="${d.url}" target="_blank">Open</a>
+        <button type="button" class="btn ghost" onclick="viewEmployeeDocument('${(d.url||'').replace(/'/g,"\\'")}','${(d.fileName||d.type||'Document').replace(/'/g,"\\'")}')">Open</button>
         <button class="btn ghost" onclick="deletePayrollDoc('${d.id}')">Remove</button>
       </div>
     </div>`).join('');
@@ -15592,7 +15624,7 @@ async function renderApprenticeDocList(){
       <div class="head"><strong>${d.category}</strong>${d.employeeName ? `<span class="id">${d.employeeName}</span>` : ''}</div>
       <div class="sub">${d.fileName}${d.note ? ' · ' + d.note : ''}</div>
       <div class="actions">
-        <a class="btn ghost" href="${d.url}" target="_blank">Open</a>
+        <button type="button" class="btn ghost" onclick="viewEmployeeDocument('${(d.url||'').replace(/'/g,"\\'")}','${(d.fileName||d.category||'Document').replace(/'/g,"\\'")}')">Open</button>
         <button class="btn ghost" onclick="deleteApprenticeDoc('${d.id}')">Remove</button>
       </div>
     </div>`).join('');
@@ -15656,7 +15688,7 @@ async function renderCompanyDocList(category){
       <div class="head"><strong>${escapeHtml(d.name)}</strong></div>
       <div class="sub">${d.fileName}</div>
       <div class="actions">
-        <a class="btn ghost" href="${d.url}" target="_blank">Open</a>
+        <button type="button" class="btn ghost" onclick="viewEmployeeDocument('${(d.url||'').replace(/'/g,"\\'")}','${(d.fileName||d.name||'Document').replace(/'/g,"\\'")}')">Open</button>
         <button class="btn ghost" onclick="deleteCompanyDoc('${category}','${d.id}')">Remove</button>
       </div>
     </div>`).join('');
@@ -15720,7 +15752,7 @@ async function renderUniformIdForm(employeeId){
       <div style="height:10px"></div>
       <label class="field">Supporting document (ID photo, receipt, etc.)</label>
       <input type="file" accept=".pdf,.jpg,.jpeg,.png" onchange="uploadUniformDoc('${e.id}','${e.name.replace(/'/g,"\\'")}', event)">
-      ${u.docUrl ? `<div class="doc-card">✓ <a href="${u.docUrl}" target="_blank">${u.docName}</a></div>` : ''}
+      ${u.docUrl ? `<button type="button" class="doc-card" onclick="viewEmployeeDocument('${u.docUrl.replace(/'/g,"\\'")}','${(u.docName||'Document').replace(/'/g,"\\'")}')">✓ ${escapeHtml(u.docName)}</button>` : ''}
     </div>`;
 }
 async function updateUniformField(employeeId, employeeName, field, value){
@@ -16075,7 +16107,7 @@ async function renderPendingLeaveRequests(){
           ${escapeHtml(r.typeLabel)} · ${escapeHtml(r.from)}${r.to && r.to !== r.from ? ' to ' + escapeHtml(r.to) : ''}${r.lateTime ? ' at ' + escapeHtml(r.lateTime) : ''}
           ${r.reason ? ' · ' + escapeHtml(r.reason) : ''}
           <br>Applied ${escapeHtml(String(r.requestedOn || '').slice(0, 10))}${r.source === 'employee' ? ' by the employee' : ''}
-          ${r.certificateUrl ? '<br><a href="' + escapeHtml(r.certificateUrl) + '" target="_blank" rel="noopener" style="color:var(--amber-dark);font-weight:600;">View medical certificate</a>' : ''}
+          ${r.certificateUrl ? '<br><button type="button" style="background:none;border:none;padding:0;font:inherit;cursor:pointer;color:var(--amber-dark);font-weight:600;" onclick="viewEmployeeDocument(\'' + r.certificateUrl.replace(/'/g,"\\'") + '\',\'Medical certificate — ' + (r.employeeName || '').replace(/'/g,"\\'") + '\')">View medical certificate</button>' : ''}
         </p>
         <div class="row-inline" style="margin:10px 0 0;">
           <button class="btn" style="flex:1;" onclick="approveLeaveRequest('${escapeHtml(r.id)}')">Approve</button>

@@ -258,6 +258,36 @@ function doGetDriveFile_(body) {
   }
 }
 
+// The one Drive-backed document engineers may read the actual content of,
+// not just its stored link (see ENGINEER_SHARED_READ's 'employee_handbook'
+// entry) — every other document belongs to one specific employee and is
+// HR's alone. Deliberately takes no fileId from the caller at all: it
+// looks up whatever the CURRENT handbook actually is from the sheet
+// itself, so this action can never be pointed at anything other than the
+// one handbook on file, however it's called.
+function doGetEmployeeHandbookFile_() {
+  const sheet = getSheet_();
+  const row = findRow_(sheet, 'employee_handbook');
+  if (row === -1) return { ok: false, error: 'No handbook on file.' };
+  let rec;
+  try { rec = JSON.parse(sheet.getRange(row, 2).getValue() || '{}'); }
+  catch (e) { return { ok: false, error: 'No handbook on file.' }; }
+  const m = /\/d\/([^/]+)/.exec(rec.fileUrl || '');
+  if (!m) return { ok: false, error: 'No handbook on file.' };
+  try {
+    const file = DriveApp.getFileById(m[1]);
+    const blob = file.getBlob();
+    return {
+      ok: true,
+      fileName: file.getName(),
+      mimeType: blob.getContentType(),
+      base64Data: Utilities.base64Encode(blob.getBytes())
+    };
+  } catch (err) {
+    return { ok: false, error: 'Could not read the handbook from Drive.' };
+  }
+}
+
 // ===== one-off: file everything dated under its financial year =====
 // Reports, generated letters and uploaded office documents used to be written
 // straight under HR Management > Dashboard / Reports / Generator / Office
@@ -788,6 +818,12 @@ function doPost(e) {
     // engineer app has no legitimate reason to read any of them.
     if (isEngineer) return forbidden_();
     return jsonOut_(doGetDriveFile_(body));
+  }
+
+  if (body.action === 'getEmployeeHandbookFile') {
+    // Allowed for both roles — see doGetEmployeeHandbookFile_'s own
+    // comment for why this one is safe to leave open to engineers.
+    return jsonOut_(doGetEmployeeHandbookFile_());
   }
 
   // Writes. An engineer may write their own trip, check-in and live-tracking
