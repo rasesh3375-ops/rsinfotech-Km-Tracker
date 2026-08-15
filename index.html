@@ -4273,7 +4273,13 @@ async function handleEngSickCert(event){
   status.textContent = 'Uploading…';
   try{
     const emp = await findEmployeeByTrackingUsername(engineerName);
-    const dataUrl = /^image\//.test(file.type) ? await compressDocumentFile(file) : await fileToDataUrl(file);
+    // Same treatment as the Add Employee document uploads — untouched
+    // unless genuinely large (see readDocForDrive). This goes straight to
+    // Drive with nothing kept in a shared record afterward, so there is no
+    // 50,000-character cell to worry about here; only Drive's own upload
+    // reliability, which a multi-megabyte unprocessed phone photo works
+    // against just as much here as it does there.
+    const dataUrl = await readDocForDrive(file);
     const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl || '');
     if(!m) throw new Error('unreadable');
     const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.') + 1) : 'jpg';
@@ -12499,6 +12505,13 @@ async function readDocForDrive(file){
 // document that belongs to some other employee entirely, not whichever one
 // (if any) happens to be open in the Add Employee form right now — every
 // other caller leaves them out and gets the form's own employee, as before.
+// The employee record's eight single-document fields — shared by
+// retryInlineDocumentsToDrive (below) and migrateDocumentsToDrive, so the
+// list of what counts as a document field only ever lives in one place.
+// "Other documents" is a separate array field (otherDocs), handled on its
+// own in both, since it can hold any number of entries rather than one.
+const EMPLOYEE_DOC_FIELDS = ['aadhaarCardImg','panCardImg','photoImg','residenceProofImg',
+                             'lastSalarySlipImg','chequeImg','educationCertImg','signatureImg'];
 async function uploadEmployeeDocToDrive(label, dataUrl, empId, empName){
   const emp = editingEmployeeDraft || {};
   const id = empId || (document.getElementById('f_id') || {}).value || emp.id || 'unfiled';
@@ -12517,6 +12530,32 @@ async function uploadEmployeeDocToDrive(label, dataUrl, empId, empName){
   });
   const data = await res.json();
   return (data && data.ok && data.fileUrl) ? data.fileUrl : null;
+}
+
+// Called from saveEmployeeForm, right before the write. Anything that is
+// still inline (a data: URL rather than a Drive https:// link) gets one
+// more attempt to reach Drive here, silently — a document only ever ends
+// up permanently stuck inline because every attempt to move it failed, not
+// because of one bad attempt. A failure here is left exactly as it already
+// was; the record still saves, and the existing 49KB check below is the
+// backstop if it's still too large after this.
+async function retryInlineDocumentsToDrive(draft){
+  for(const f of EMPLOYEE_DOC_FIELDS){
+    const v = draft[f];
+    if(!v || /^https?:/.test(v)) continue;
+    try{
+      const url = await uploadEmployeeDocToDrive(f, v, draft.id, draft.name);
+      if(url) draft[f] = url;
+    }catch(e){}
+  }
+  for(let i = 0; i < (draft.otherDocs || []).length; i++){
+    const d = draft.otherDocs[i];
+    if(!d || !d.dataUrl || /^https?:/.test(d.dataUrl)) continue;
+    try{
+      const url = await uploadEmployeeDocToDrive('other-' + (d.name || i), d.dataUrl, draft.id, draft.name);
+      if(url) d.dataUrl = url;
+    }catch(e){}
+  }
 }
 
 // A stored document is either a Drive link (new) or an inline image (older
@@ -13353,6 +13392,14 @@ async function saveEmployeeForm(){
   const isNew = !editingEmployeeId;
   let saved = false;
   try{
+    // Whatever failed to reach Drive the first time — a network blip while
+    // it was chosen, a slow connection, anything transient — gets one more
+    // try right here, silently, as part of pressing Save, instead of
+    // staying stuck inline until someone finds "Move stored documents to
+    // Drive" in Admin Settings and runs it by hand. Only ever moves what is
+    // already sitting inline, in whatever format it is already in; nothing
+    // here re-encodes anything a second time.
+    await retryInlineDocumentsToDrive(draft);
     if(isNew) employees.push(draft);
     else employees[employees.findIndex(e => e.id === editingEmployeeId)] = draft;
     // One record over the wire when the backend can merge it, the whole array
@@ -13784,11 +13831,9 @@ async function populateRoleReportPickers(){
 // shares — and that cell is what fails at 50,000 characters.
 async function migrateDocumentsToDrive(){
   const box = document.getElementById('docMigrateBox');
-  const FIELDS = ['aadhaarCardImg','panCardImg','photoImg','residenceProofImg',
-                  'lastSalarySlipImg','chequeImg','educationCertImg','signatureImg'];
   const employees = await getEmployees();
   const hasInlineOtherDoc = e => (e.otherDocs || []).some(d => d && d.dataUrl && !/^https?:/.test(d.dataUrl));
-  const pending = employees.filter(e => FIELDS.some(f => e[f] && !/^https?:/.test(e[f])) || hasInlineOtherDoc(e));
+  const pending = employees.filter(e => EMPLOYEE_DOC_FIELDS.some(f => e[f] && !/^https?:/.test(e[f])) || hasInlineOtherDoc(e));
   if(!pending.length){
     box.innerHTML = '<p class="dash-muted">✓ Nothing to move — every stored document is already a Drive link.</p>';
     return;
@@ -13798,7 +13843,7 @@ async function migrateDocumentsToDrive(){
 
   let moved = 0, failed = 0;
   for(const e of pending){
-    for(const f of FIELDS){
+    for(const f of EMPLOYEE_DOC_FIELDS){
       const v = e[f];
       if(!v || /^https?:/.test(v)) continue;
       box.innerHTML = '<p class="dash-muted">Moving ' + escapeHtml(e.name || e.id) + ' — ' + f + '…</p>';
