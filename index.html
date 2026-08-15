@@ -13719,19 +13719,38 @@ async function saveEmployeeForm(){
         // employee in the sheet — so a brand-new record with nothing of its
         // own left to drop (or nothing attached at all) can still be
         // blocked purely by OTHER employees' documents that were saved
-        // before Drive uploads existed and never migrated. That is exactly
-        // what happened here: the same "too large to save" error kept
-        // recurring for a different employee each time, because the actual
-        // bloat was never this employee's to begin with. Rather than a
+        // before Drive uploads existed and never migrated. Rather than a
         // message that reads as if this employee's own attachments are the
         // problem, try the same rescue "Move stored documents to Drive" in
         // Admin Settings already does by hand — automatically, before
-        // giving up — so this never again needs someone to notice that
-        // button exists.
+        // giving up.
         if(saveBtn) saveBtn.textContent = 'Freeing up space…';
-        const { moved } = await migrateInlineDocumentsInPlace_(employees);
-        if(!moved) throw sizeErr;
-        await saveEmployees(employees);
+        const { moved, failed } = await migrateInlineDocumentsInPlace_(employees);
+        if(moved){
+          try{
+            await saveEmployees(employees);
+          }catch(stillTooBig){
+            // Documents WERE the problem, some were actually moved, and it is
+            // STILL too big — so whatever is left over is no longer a stuck
+            // document at all. Says so plainly rather than repeating the
+            // same "attached document images" line, which would now be
+            // actively misleading and send HR looking in the wrong place a
+            // second time.
+            throw new Error(stillTooBig.message + ' Moved ' + moved + ' older document(s) to Drive just now' +
+              (failed ? ' (' + failed + ' more could not be moved)' : '') +
+              ', but the employee list is still too large even so — the list itself has grown past what one ' +
+              'sheet cell can hold, not a stuck document. This needs a structural fix, not another Save.');
+          }
+        } else {
+          // Nothing was found to move at all: either every document is
+          // already a Drive link (and the list itself is just too large on
+          // its own), or every move attempt failed just now. Distinguishing
+          // those two here means the next report of this says which one,
+          // instead of restarting the same guesswork.
+          throw new Error(sizeErr.message + (failed
+            ? ' ' + failed + ' older document(s) could not be moved to Drive just now — try Save again in a moment.'
+            : ' No stuck documents were found to move, so the employee list itself has grown past what one sheet cell can hold — this needs a structural fix, not another Save.'));
+        }
       }
     }
     saved = true;
