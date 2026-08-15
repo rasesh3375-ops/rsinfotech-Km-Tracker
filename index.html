@@ -14274,10 +14274,20 @@ async function showEmployeeStorageBreakdown(){
     return { id: e.id, name: e.name || e.id, size, stuckDocs, left: e.employmentStatus === 'left' };
   }).sort((a, b) => b.size - a.size);
 
+  // A field actually holding something — not present as an empty default
+  // ('', 0, false, [], {}) — vs. a field that merely exists on the record.
+  // A field every employee carries but almost nobody uses is exactly what
+  // "drop empty fields before saving" would reclaim.
+  const isEmptyValue = v => v === '' || v === null || v === undefined || v === 0 || v === false ||
+    (Array.isArray(v) && v.length === 0) ||
+    (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0);
+
   const fieldTotals = {};
+  const fieldUsed = {};
   employees.forEach(e => {
     Object.keys(e).forEach(k => {
       fieldTotals[k] = (fieldTotals[k] || 0) + JSON.stringify(e[k]).length;
+      if(!isEmptyValue(e[k])) fieldUsed[k] = (fieldUsed[k] || 0) + 1;
     });
   });
   // Every field, not just the biggest few — a dozen "biggest" fields can
@@ -14287,14 +14297,31 @@ async function showEmployeeStorageBreakdown(){
   const allFields = Object.entries(fieldTotals).sort((a, b) => b[1] - a[1]);
   const shownFields = allFields.slice(0, 20);
   const restFieldsTotal = allFields.slice(20).reduce((s, [, v]) => s + v, 0);
+  // JSON.stringify of a whole record also spends characters on every key
+  // name, its quotes and colon, and the commas between fields — none of
+  // which belongs to any one field's own value, so a per-field breakdown
+  // can never add up to the real total on its own. Naming that gap
+  // explicitly is what the previous version of this tool got wrong: it
+  // silently under-counted by exactly this amount instead of admitting it
+  // couldn't see it. With this many optional fields, every one that exists
+  // on a record — even empty — pays this cost again, which is real space
+  // an "omit empty fields before saving" change would get back.
+  const structuralOverhead = total - allFields.reduce((s, [, v]) => s + v, 0);
+
+  const fieldCard = (k, v) => hrCard(escapeHtml(k),
+    hrRow('Total size', (v/1024).toFixed(2) + ' KB') + hrRow('In use', (fieldUsed[k] || 0) + ' of ' + employees.length));
+  const fieldTr = (k, v) => `<tr><td>${escapeHtml(k)}</td><td class="num">${(v/1024).toFixed(2)} KB</td><td class="num">${fieldUsed[k] || 0} / ${employees.length}</td></tr>`;
+  const overheadLabel = 'Field names & JSON punctuation (not any one field\'s own data)';
 
   const isCompact = isCompactSheetView();
   const fieldRows = isCompact
-    ? `<div class="hr-sheet-cards">${shownFields.map(([k, v]) => hrCard(escapeHtml(k), hrRow('Total size', (v/1024).toFixed(2) + ' KB'))).join('')}${
+    ? `<div class="hr-sheet-cards">${hrCard(overheadLabel, hrRow('Total size', (structuralOverhead/1024).toFixed(2) + ' KB'))}${
+        shownFields.map(([k, v]) => fieldCard(k, v)).join('')}${
         restFieldsTotal ? hrCard('Everything else (' + (allFields.length - 20) + ' more field(s))', hrRow('Total size', (restFieldsTotal/1024).toFixed(2) + ' KB')) : ''}</div>`
-    : `<table class="sal-table"><thead><tr><th>Field</th><th class="num">Total size</th></tr></thead>
-      <tbody>${shownFields.map(([k, v]) => `<tr><td>${escapeHtml(k)}</td><td class="num">${(v/1024).toFixed(2)} KB</td></tr>`).join('')}${
-        restFieldsTotal ? `<tr><td>Everything else (${allFields.length - 20} more field(s))</td><td class="num">${(restFieldsTotal/1024).toFixed(2)} KB</td></tr>` : ''}</tbody></table>`;
+    : `<table class="sal-table"><thead><tr><th>Field</th><th class="num">Total size</th><th class="num">In use</th></tr></thead>
+      <tbody><tr><td>${escapeHtml(overheadLabel)}</td><td class="num">${(structuralOverhead/1024).toFixed(2)} KB</td><td class="num">—</td></tr>${
+        shownFields.map(([k, v]) => fieldTr(k, v)).join('')}${
+        restFieldsTotal ? `<tr><td>Everything else (${allFields.length - 20} more field(s))</td><td class="num">${(restFieldsTotal/1024).toFixed(2)} KB</td><td class="num">—</td></tr>` : ''}</tbody></table>`;
 
   const empRows = isCompact
     ? `<div class="hr-sheet-cards">${byEmployee.slice(0, 15).map(r => hrCard(
