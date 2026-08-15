@@ -1691,6 +1691,10 @@
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Fields added to Employee Master over time — Workman Compensation, insurance, checklists and the rest — are stored on every employee even when left blank for them, and that unused space adds up across everyone on file. This removes only genuinely empty fields (blank text, empty lists) from every record. Nothing in use on any employee is touched, and no document, salary, PF, ESI, PT or leave figure changes.</p>
       <button class="btn ghost full" onclick="withBusy(this,'Working…',compactAllEmployeeRecords)">Remove unused empty fields from every employee</button>
       <div id="empCompactBox" style="margin-top:10px;"></div>
+      <div style="height:14px"></div>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A now-fixed bug could show the placeholder text "undefined" in a blank UAN, ESI number, PAN, Aadhaar, bank name, IFSC or account number box, and saving through the warning it then caused wrote that placeholder in as if it were a real value — which then falsely flagged as a duplicate against any other employee in the same state. Run this once to clear it off any record it reached.</p>
+      <button class="btn ghost full" onclick="withBusy(this,'Working…',cleanupCorruptedEmployeeFields)">Clear placeholder "undefined" text from every employee</button>
+      <div id="empUndefinedCleanupBox" style="margin-top:10px;"></div>
     </section>
 
     <section class="block" id="secTeamOverview">
@@ -14441,6 +14445,50 @@ async function compactAllEmployeeRecords(){
   await saveEmployees(changed);
   invalidateSharedRead('employees');
   box.innerHTML = `<p class="dash-muted">Freed ${(freed/1024).toFixed(1)} KB across ${changed.length} employee record(s).</p>`;
+}
+
+// A one-time repair for exactly the corruption the false-duplicate-warning
+// bug caused: before it was fixed, an employee record with a blank UAN,
+// ESI number, PAN, Aadhaar, bank name, IFSC or account number rendered the
+// literal text "undefined" into that field's input box (a missing JS value
+// interpolated straight into an HTML attribute), and clicking "Save anyway"
+// on the false duplicate warning it then triggered wrote that placeholder
+// text into the record as if it were a real value. Clears any field whose
+// value is exactly "undefined" or "null" back to blank — an exact-match
+// check, so a field that genuinely happens to contain that text nowhere
+// near this bug's reach is never touched.
+function cleanCorruptedUndefinedFields_(e){
+  const out = {};
+  Object.keys(e).forEach(k => {
+    const v = e[k];
+    out[k] = (typeof v === 'string' && (v === 'undefined' || v === 'null')) ? '' : v;
+  });
+  return out;
+}
+
+async function cleanupCorruptedEmployeeFields(){
+  const box = document.getElementById('empUndefinedCleanupBox');
+  const employees = await getEmployees();
+  const cleaned = employees.map(cleanCorruptedUndefinedFields_);
+  const affected = cleaned
+    .map((e, i) => ({ e, i }))
+    .filter(({ e, i }) => JSON.stringify(e) !== JSON.stringify(employees[i]))
+    .map(({ e }) => e);
+  if(!affected.length){
+    box.innerHTML = '<p class="dash-muted">✓ Nothing found — no employee record has the placeholder text "undefined" or "null" stored in a field.</p>';
+    return;
+  }
+  const names = affected.map(e => e.name || e.id).join(', ');
+  if(!confirm('Found ' + affected.length + ' employee record(s) with the placeholder text "undefined" or "null" ' +
+    'stored where a field was actually left blank: ' + names + '.\n\nThis clears just those fields back to blank ' +
+    '— nothing else on any record changes, and no document, salary, PF, ESI, PT or leave figure is touched. Continue?')) return;
+  // Compacted the same way compactAllEmployeeRecords does — a field just
+  // cleared to '' is exactly the kind of genuinely-empty field that
+  // belongs stripped from storage, not left behind as a blank key.
+  const toSave = affected.map(compactEmployeeRecord_);
+  await saveEmployees(toSave);
+  invalidateSharedRead('employees');
+  box.innerHTML = '<p class="dash-muted">✓ Cleared placeholder text from ' + affected.length + ' employee record(s): ' + escapeHtml(names) + '.</p>';
 }
 
 // Opens a new leave year for Sick Leave only — SL is reset to the flat
