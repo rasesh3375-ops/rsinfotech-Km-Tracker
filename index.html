@@ -11647,7 +11647,7 @@ function employeeModalHtml(emp){
 
       <div class="msg" id="empSaveMsg"></div>
       <div class="modal-actions">
-        <button class="btn ghost" onclick="closeEmployeeModal()" title="Cancel" aria-label="Cancel">✕</button>
+        <button class="btn ghost" onclick="closeEmployeeModal()">Cancel</button>
         <button class="btn" onclick="saveEmployeeForm()">Save employee</button>
         <span id="empDraftNote" class="draft-note"></span>
       </div>
@@ -12927,7 +12927,7 @@ async function openIncrementModal(id){
       </select>
       <p id="incMsg" class="hint" style="min-height:18px;"></p>
       <div class="modal-actions">
-        <button class="btn ghost" onclick="closeIncrementModal()" title="Cancel" aria-label="Cancel">✕</button>
+        <button class="btn ghost" onclick="closeIncrementModal()">Cancel</button>
         <button class="btn" onclick="withBusy(this,'Saving…',()=>saveIncrement('${id}'))">Save increment</button>
       </div>
     </div>
