@@ -809,6 +809,15 @@
   .calc-card{margin-top:12px;border:1px solid var(--line);border-left:3px solid var(--amber);
     border-radius:10px;background:#FAFBFD;padding:14px 15px;}
   .calc-head{font-size:13px;font-weight:700;color:var(--navy);margin-bottom:12px;}
+  /* This card's own .fold-summary-bar (see the shared rule above) — amber
+     to match .calc-card's own left-border accent, and its own negative
+     margin to bleed to this card's edges (14px/15px padding, not .pay-box's
+     12px/13px). Same amber tone the rest of the app already uses for
+     amber-toned cards (.kpi[data-tone="amber"]). */
+  .calc-card .fold-summary-bar{
+    --fold-tint-bg:#FDEFD8; --fold-tint:#F0DFC0;
+    margin:-14px -15px 12px;
+  }
   .calc-sec{margin-bottom:13px;}
   .calc-sec:last-child{margin-bottom:0;}
   .calc-label{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
@@ -838,18 +847,22 @@
     border-radius:10px;background:#FAFBFD;padding:12px 13px;}
   .pay-head{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
     color:var(--green);margin-bottom:8px;}
-  /* The Salary breakdown fold-card's own trigger, not .pay-head's quiet
-     small-caps label — that stays exactly as it is for the Annual CTC
-     header right below it, which is never a toggle. Collapsed by default
-     (see renderPayrollBreakdown), so this has to read as an obvious button
-     on its own rather than something to skim past: full-width colour bar,
-     real body-text size, bold navy — not a 10.5px green caption. */
-  .pay-fold-summary{
+  /* Shared trigger style for every collapsed-by-default fold-card that
+     needs to read as an obvious button, not something to skim past — a
+     full-width colour bar, real body-text size, bold navy, instead of a
+     small quiet caption. --fold-tint-bg/--fold-tint pick the bar's own
+     colour so it can match whichever card it sits in — payroll's boxes are
+     green-bordered, the heading calculation card is amber-bordered — rather
+     than forcing one colour everywhere regardless of context. Green is the
+     default since most callers (the payroll boxes) want it; .calc-card
+     below sets its own amber pair to match its own accent. */
+  .fold-summary-bar{
     font-size:14px;font-weight:700;color:var(--navy);text-transform:none;
-    letter-spacing:normal;background:#EAF6EE;border-bottom:1px solid #CFE5D8;
+    letter-spacing:normal;background:var(--fold-tint-bg,#EAF6EE);
+    border-bottom:1px solid var(--fold-tint,#CFE5D8);
     border-radius:9px 9px 0 0;padding:12px 13px;margin:-12px -13px 10px;
   }
-  .pay-fold-summary::after{font-size:13px;}
+  .fold-summary-bar::after{font-size:13px;}
   .pay-table{width:100%;border-collapse:collapse;font-size:12px;}
   .pay-table td{padding:5px 4px;border-bottom:1px solid #E7EAF0;vertical-align:top;}
   .pay-table td.num{text-align:right;white-space:nowrap;font-weight:600;}
@@ -6147,7 +6160,7 @@ function buildHeadingExplainer(key){
 
   return `
     <details class="calc-card fold-card">
-      <summary class="calc-head">${h.label} — how this is calculated</summary>
+      <summary class="fold-summary-bar">📐 ${h.label} — how this is calculated</summary>
 
       <div class="calc-sec"><div class="calc-label">Formula Used</div>${formulaRows}</div>
 
@@ -12376,23 +12389,27 @@ function renderPayrollBreakdown(){
   // before overwriting it and carrying that forward keeps it open across
   // those redraws once HR has actually opened it, and closed the rest of
   // the time.
-  const wasOpen = (box.querySelector('details.pay-box') || {}).open;
-  box.innerHTML = `<details class="pay-box fold-card"${wasOpen ? ' open' : ''}>
-    <summary class="pay-fold-summary">💰 Salary breakdown — Basic, HRA, LTA, Gross and more</summary>
+  // Two independent toggles in this one box, so each needs its own id to
+  // read its own prior state back — a bare class selector would always
+  // find whichever of the two comes first in the markup.
+  const breakdownWasOpen = (document.getElementById('payBreakdownDetails') || {}).open;
+  const ctcWasOpen = (document.getElementById('payCtcDetails') || {}).open;
+  box.innerHTML = `<details class="pay-box fold-card" id="payBreakdownDetails"${breakdownWasOpen ? ' open' : ''}>
+    <summary class="fold-summary-bar">💰 Salary breakdown — Basic, HRA, LTA, Gross and more</summary>
     <table class="pay-table"><tbody>${rows}</tbody></table>
     ${na.length ? `<p class="calc-note">Not applicable to this heading: ${escapeHtml(na.join(', '))}.</p>` : ''}
     ${missing.length ? `<p class="pay-warn">No formula configured for: <strong>${escapeHtml(missing.join(', '))}</strong>. Fix the payroll master before saving.</p>` : ''}
     <p class="calc-note">🧮 means the figure is worked out for you and cannot be typed. ✏️ means there is no formula configured, so it is entered by hand. This shows a full month — leave days reduce each earning in proportion on the Salary Sheet.</p>
   </details>
-  <div class="pay-box fold-card" style="margin-top:10px;">
-    <div class="pay-head">Annual CTC — same figure as the Cost to Company Report</div>
+  <details class="pay-box fold-card" id="payCtcDetails" style="margin-top:10px;"${ctcWasOpen ? ' open' : ''}>
+    <summary class="fold-summary-bar">📅 Annual CTC — same figure as the Cost to Company Report</summary>
     <table class="pay-table"><tbody>
       <tr><td>Annual gross <span class="calc-note" style="display:inline;">(Rate of Pay + other allowances + dress + mobile + conveyance) × 12</span></td><td class="num">₹${fmtMoney(annualGross)}</td></tr>
       <tr><td>Diwali bonus</td><td class="num">₹${fmtMoney(bonus)}</td></tr>
       <tr class="pay-total"><td>Annual CTC</td><td class="num">₹${fmtMoney(annualCtc)}</td></tr>
     </tbody></table>
     <p class="calc-note">Matches the Cost to Company Report: the employer's own PF and ESI contributions are not included here either, since that report does not include them.</p>
-  </div>`;
+  </details>`;
 }
 
 // Fills the box with a month's pay. The old default, kept as one tap rather
