@@ -13451,6 +13451,27 @@ async function reconcileTrackingUsername(draft){
   if(!users.some(u => u.username === draft.trackingUsername)) draft.trackingUsername = '';
 }
 
+// iOS Safari can leave #employeeModalOverlay's own position:fixed box sized
+// to a stale, shorter height right after a native <input type=date> picker
+// opens and closes over it — fixed positioning tracks the LAYOUT viewport,
+// which never shrinks for the picker, while the ACTUAL visible screen
+// briefly does, and nothing forces the overlay to resettle once the
+// picker's own chrome goes away. The symptom: the sticky Cancel/Save bar
+// ends up floating a picker's-height short of the real bottom of the
+// screen, with whatever screen was open underneath the modal showing
+// through in the gap below it — first seen on the "Always mark Present
+// from" field, deep enough in a long form that reaching it and the sticky
+// footer are close together on screen. visualViewport's own resize event
+// fires exactly when this happens, which layout-viewport CSS (inset:0)
+// never sees on its own; used here to pin the overlay to the real visible
+// height explicitly, only while the modal is actually open.
+function resettleEmployeeModalHeight_(){
+  const overlay = document.getElementById('employeeModalOverlay');
+  if(!overlay || !window.visualViewport) return;
+  overlay.style.height = window.visualViewport.height + 'px';
+}
+if(window.visualViewport) window.visualViewport.addEventListener('resize', resettleEmployeeModalHeight_);
+
 async function openAddEmployeeModal(id){
   editingEmployeeId = id || null;
   if(id){
@@ -13473,6 +13494,7 @@ async function openAddEmployeeModal(id){
   renderAssetRows();
   initEmpStepper();
   updateEmpStepGroupSpans();
+  resettleEmployeeModalHeight_();
 
   // Offer the draft back only when it belongs to this form — a half-finished
   // new employee must never be poured into someone else's record.
