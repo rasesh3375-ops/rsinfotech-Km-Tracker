@@ -2757,6 +2757,34 @@ function todayStr(d){
   const dt = d || new Date();
   return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
 }
+// Every date shown to a person reads DD/MM/YYYY — the Indian numeral
+// convention — never the ISO storage order and never a bare
+// toLocaleDateString() guess at the browser's own locale. Storage stays
+// ISO everywhere it always was (financial-year math, sorting, attendance
+// keys, <input type="date"> values, which the HTML spec pins to ISO
+// regardless of display locale) — this only ever touches what a person
+// reads. The regex path handles the "YYYY-MM-DD" strings almost every
+// date in this app is actually stored as, without going through
+// `new Date()` at all — parsing a date-only string with the Date
+// constructor reads it as UTC midnight, which in a timezone behind UTC
+// lands the day before, exactly the bug financialYearLabel already has to
+// avoid. Anything not in that shape (a Date object, a timestamp) falls
+// back to reading local calendar fields off it instead. One legacy field
+// (policy-override log entries) already stored a bare, unpadded
+// toLocaleDateString('en-IN') result — day-first, same as everywhere else,
+// just missing the leading zero — so that shape is padded directly rather
+// than handed to `new Date()`, which would guess month-first for an
+// ambiguous "D/M/YYYY" string and silently transpose day and month.
+function fmtDateIN(v){
+  if(!v) return '';
+  const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m) return `${m[3]}/${m[2]}/${m[1]}`;
+  const dmy = String(v).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if(dmy) return dmy[1].padStart(2,'0') + '/' + dmy[2].padStart(2,'0') + '/' + dmy[3];
+  const d = v instanceof Date ? v : new Date(v);
+  if(isNaN(d)) return String(v);
+  return String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + d.getFullYear();
+}
 // The company's financial year runs 1 April – 31 March. This returns the
 // starting calendar year of the FY we're currently in (e.g. Feb 2027 is
 // still FY 2026-27, so this returns 2026).
@@ -4446,7 +4474,7 @@ async function renderEngLeavePreview(){
   if(r.code === 'LATE'){
     box.innerHTML = problems.length
       ? '<span class="pol-warn">' + problems.map(escapeHtml).join('<br>') + '</span>'
-      : 'Late arrival on <strong>' + escapeHtml(r.from) + '</strong> at ' + escapeHtml(r.lateTime) +
+      : 'Late arrival on <strong>' + fmtDateIN(r.from) + '</strong> at ' + escapeHtml(r.lateTime) +
         '. HR is told; your attendance stays as it is unless they mark otherwise.';
     if(btn) btn.disabled = problems.length > 0;
     return;
@@ -4564,7 +4592,7 @@ async function renderEngLeave(){
   listBox.innerHTML = mine.length
     ? '<div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:8px;">Your applications</div>' +
       mine.map(r => `<div class="legend-row"><span><strong>${escapeHtml(r.typeLabel || r.code)}</strong>
-          <span class="inc-sub">${escapeHtml(r.from)}${r.to && r.to !== r.from ? ' → ' + escapeHtml(r.to) : ''}${r.lateTime ? ' at ' + escapeHtml(r.lateTime) : ''}</span></span>
+          <span class="inc-sub">${fmtDateIN(r.from)}${r.to && r.to !== r.from ? ' → ' + fmtDateIN(r.to) : ''}${r.lateTime ? ' at ' + escapeHtml(r.lateTime) : ''}</span></span>
           ${tag(r.status)}</div>`).join('')
     : '<p style="font-size:12.5px;color:var(--muted);margin:0;">You have not applied for anything yet.</p>';
 }
@@ -5006,7 +5034,7 @@ async function renderEngHistory(){
     const timeCol = t.manual ? 'Added manually' : (new Date(t.startTime).toLocaleTimeString() + ' – ' + new Date(t.endTime).toLocaleTimeString());
     const inPhoto = t.checkinSelfie ? `<img src="${t.checkinSelfie}" class="selfie-thumb sm" title="Check-in" />` : '';
     const outPhoto = t.checkoutSelfie ? `<img src="${t.checkoutSelfie}" class="selfie-thumb sm" title="Check-out" />` : '';
-    return `<tr><td>${inPhoto}${outPhoto} ${t.date}</td><td>${t.company || '—'}</td><td>${timeCol}</td><td class="num">${fmtKm(t.km)} km</td></tr>`;
+    return `<tr><td>${inPhoto}${outPhoto} ${fmtDateIN(t.date)}</td><td>${t.company || '—'}</td><td>${timeCol}</td><td class="num">${fmtKm(t.km)} km</td></tr>`;
   }).join('');
   box.innerHTML = `<table><tr><th>Date</th><th>Company</th><th>Trip time</th><th class="num">Distance</th></tr>${rows}</table>`;
 }
@@ -5028,7 +5056,7 @@ async function renderDaily30(){
     box.innerHTML = '<div class="empty">No trips in the last 30 days.</div>';
     return;
   }
-  const rows = dates.map(d => `<tr><td>${d}${d === today ? ' (today)' : ''}</td><td class="num">${fmtKm(totals[d])} km</td></tr>`).join('');
+  const rows = dates.map(d => `<tr><td>${fmtDateIN(d)}${d === today ? ' (today)' : ''}</td><td class="num">${fmtKm(totals[d])} km</td></tr>`).join('');
   box.innerHTML = `<table><tr><th>Date</th><th class="num">Total distance</th></tr>${rows}</table>`;
 }
 
@@ -6111,7 +6139,7 @@ function computeEsi(gross, opts){
   return {
     covered:true, employee, employer, total: employee + employer, ceiling, period, lowWage,
     reason: mustContinue
-      ? 'Above the ceiling, but coverage continues to ' + period.endsOn.toLocaleDateString('en-IN') +
+      ? 'Above the ceiling, but coverage continues to ' + fmtDateIN(period.endsOn) +
         ' — contributions cannot stop mid-period.'
       : lowWage
         ? 'Daily wage of ₹' + fmtMoney(Math.round(dailyWage)) + ' is at or below ₹' +
@@ -7043,7 +7071,7 @@ async function logPolicyOverride(violations, reason){
   const now = new Date();
   const entry = {
     ts: now.toISOString(),
-    date: now.toLocaleDateString('en-IN'),
+    date: todayStr(now),
     time: now.toLocaleTimeString('en-IN'),
     account: 'HR administrator (shared login)',
     reason,
@@ -7071,7 +7099,7 @@ async function renderPolicyOverrideLog(){
     <div class="inc-scroll"><table class="inc-table">
       <thead><tr><th>When</th><th>Account</th><th>Employees</th><th>Reason</th></tr></thead>
       <tbody>${log.slice(0, 20).map(e => `
-        <tr><td>${escapeHtml(e.date)}<span class="inc-sub">${escapeHtml(e.time)}</span></td>
+        <tr><td>${fmtDateIN(e.date)}<span class="inc-sub">${escapeHtml(e.time)}</span></td>
           <td>${escapeHtml(e.account)}</td>
           <td>${escapeHtml((e.violations || []).map(v => v.employee).join(', '))}
             <span class="inc-sub">${escapeHtml((e.violations || []).flatMap(v => v.rules || []).join('; '))}</span></td>
@@ -8829,6 +8857,7 @@ async function renderBonusPaymentSheet(){
   const paidOnEl = document.getElementById('bonusPaidOn');
   if(paidOnEl && !paidOnEl.value) paidOnEl.value = todayStr();
   const paidOn = (paidOnEl && paidOnEl.value) || todayStr();
+  const paidOnDisp = fmtDateIN(paidOn);
 
   const onRoll = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
   const eligible = onRoll.filter(e => e.diwaliEligible === 'yes' && diwaliBonusFor(e) > 0);
@@ -8904,7 +8933,7 @@ async function renderBonusPaymentSheet(){
     const fileName = `Diwali Bonus Payment Sheet - ${paidOn}.csv`;
     const content = toCsv(cols, csvRows);
     queueFileToDrive(hrYearPath(paidOn, 'Dashboard', 'Diwali Bonus Payment Sheet'), fileName, content, 'text/csv');
-    stashReportShare('Diwali Bonus Payment Sheet — paid ' + paidOn, fileName, content, 'text/csv',
+    stashReportShare('Diwali Bonus Payment Sheet — paid ' + paidOnDisp, fileName, content, 'text/csv',
       'HR Management > ' + financialYearLabel(paidOn) + ' > Dashboard > Diwali Bonus Payment Sheet', 'bonusPaymentBox');
   }
 
@@ -8913,9 +8942,9 @@ async function renderBonusPaymentSheet(){
   const notEligible = onRoll.filter(e => e.diwaliEligible !== 'yes');
   const noAmount = onRoll.filter(e => diwaliBonusSource(e) === 'unset');
 
-  box.innerHTML = `${reportActionBar('Diwali Bonus Payment Sheet — paid ' + paidOn, 'bonusPaymentBox')}
+  box.innerHTML = `${reportActionBar('Diwali Bonus Payment Sheet — paid ' + paidOnDisp, 'bonusPaymentBox')}
     <div class="sal-sheet-wrap print-isolate" id="bonusPaymentPrintArea">
-    ${reportLogoHeader('Diwali Bonus Payment Sheet — paid ' + paidOn)}
+    ${reportLogoHeader('Diwali Bonus Payment Sheet — paid ' + paidOnDisp)}
     <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by salary heading, sorted by bank. Each figure is the Diwali bonus amount set on that employee's record — nothing is taken off it: no PF, no ESI, no Professional Tax, no loan instalment, no advance, no retention money, and no reduction for leave taken, however many days were lost that year.</p>
     ${noAmount.length ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${noAmount.length} eligible employee(s) are missing from this sheet because no bonus amount has been set for them: ${escapeHtml(noAmount.map(e => e.name || e.id).join(', '))}. Set an amount on each record, then generate the sheet again.</p>` : ''}
     ${noBank.length ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${noBank.length} employee(s) have no bank details on file and cannot be paid by transfer: ${escapeHtml(noBank.join(', '))}.</p>` : ''}
@@ -8925,7 +8954,7 @@ async function renderBonusPaymentSheet(){
     </div>
     ${notEligible.length ? `<p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">Not on this sheet: ${notEligible.length} marked not eligible.</p>` : ''}
     <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(paidOn))} &gt; Dashboard &gt; Diwali Bonus Payment Sheet.</p>`;
-  openFullscreenView('Diwali Bonus Payment Sheet — paid ' + paidOn, 'bonusPaymentBox');
+  openFullscreenView('Diwali Bonus Payment Sheet — paid ' + paidOnDisp, 'bonusPaymentBox');
 }
 
 async function renderConsultantReport(){
@@ -9130,9 +9159,9 @@ async function renderSalaryComparisonReport(){
   };
 
   group('New employees added', joined,
-    i => 'Joined ' + (i.emp.doj || '—') + ' — added to the total');
+    i => 'Joined ' + (fmtDateIN(i.emp.doj) || '—') + ' — added to the total');
   group('Employees who left', leavers,
-    i => 'Left ' + (i.emp.leftDate || '—') + ' — no longer in the total');
+    i => 'Left ' + (fmtDateIN(i.emp.leftDate) || '—') + ' — no longer in the total');
   group('Salary changed (same employees)', changed,
     i => `${fmtMoney(i.from)} → ${fmtMoney(i.to)} (increment, attendance or loan/advance)`);
 
@@ -10521,7 +10550,7 @@ async function buildHrDashboardHome(box){
   const bdayList = birthdays.length ? birthdays.slice(0, 5).map(b => `
     <div class="feed-row">
       <div class="ic">🎂</div>
-      <div class="body"><div class="t"><strong>${escapeHtml(b.who)}</strong></div><div class="when">${consultantDate(b.dob)}</div></div>
+      <div class="body"><div class="t"><strong>${escapeHtml(b.who)}</strong></div><div class="when">${fmtDateIN(b.dob)}</div></div>
       <span class="feed-tag" style="background:#EEF0FB;color:#3B4A7A;">${b.days === 0 ? 'today' : b.days + (b.days === 1 ? ' day' : ' days')}</span>
     </div>`).join('') : '<div class="empty">No birthdays in the next 30 days.</div>';
 
@@ -10680,7 +10709,7 @@ async function renderLeavePanel(){
   }catch(e){}
 
   box.innerHTML = `<div class="dash-card">
-    <div class="card-head"><h3>On leave today — ${escapeHtml(today)}</h3>
+    <div class="card-head"><h3>On leave today — ${fmtDateIN(today)}</h3>
       <button class="linkbtn" style="padding:0" onclick="hrNavigate('attendance')">Attendance sheet</button></div>
     ${dashLeaveList.length
       ? dashLeaveList.sort((a, b) => a.name.localeCompare(b.name)).map(a => `
@@ -10695,7 +10724,7 @@ async function renderLeavePanel(){
       ? upcoming.map(r => `
           <div class="legend-row"><span><strong>${escapeHtml(r.employeeName)}</strong>
             <span class="inc-sub">${escapeHtml(r.typeLabel)} · ${escapeHtml(String(r.days))} day(s)</span></span>
-            <span class="feed-tag">${escapeHtml(r.from)}${r.to && r.to !== r.from ? ' → ' + escapeHtml(r.to) : ''}</span></div>`).join('')
+            <span class="feed-tag">${fmtDateIN(r.from)}${r.to && r.to !== r.from ? ' → ' + fmtDateIN(r.to) : ''}</span></div>`).join('')
       : '<p class="dash-muted">No approved leave in the next 30 days.</p>'}
     ${pending ? `<p class="dash-muted" style="margin-top:10px;">${pending} application(s) still awaiting a decision — <button class="linkbtn" style="padding:0" onclick="jumpToGenerator('Leave Application Form')">open them</button>.</p>` : ''}
   </div>`;
@@ -10718,7 +10747,7 @@ function renderAbsentPanel(){
   const note = dashAbsentUnread
     ? `<p class="dash-muted" style="margin-top:8px;">${dashAbsentUnread} employee(s) couldn't be checked — attendance didn't load.</p>` : '';
   box.innerHTML = `<div class="dash-card">
-    <div class="card-head"><h3>Absent today — ${escapeHtml(todayStr())}</h3>
+    <div class="card-head"><h3>Absent today — ${fmtDateIN(todayStr())}</h3>
       <button class="linkbtn" style="padding:0" onclick="hrNavigate('attendance')">Attendance sheet</button></div>
     ${dashAbsentList.length
       ? dashAbsentList.sort((a, b) => a.name.localeCompare(b.name)).map(a => `
@@ -10885,7 +10914,7 @@ function renderIncrementWidget(){
         ${hrRow('Designation', escapeHtml(r.desig))}
         ${hrRow('Department', escapeHtml(r.dept))}
         ${hrRow('Salary', r.salary ? '₹' + fmtMoney(r.salary) : '—')}
-        ${hrRow('Due', escapeHtml(r.due) + ' · ' + label[r.band])}
+        ${hrRow('Due', fmtDateIN(r.due) + ' · ' + label[r.band])}
         ${hrRow('Days', r.days < 0 ? Math.abs(r.days) + ' late' : r.days)}
       </div>`).join('')}</div>`;
     return;
@@ -10898,7 +10927,7 @@ function renderIncrementWidget(){
         <td><strong>${escapeHtml(r.name)}</strong><span class="inc-sub">${escapeHtml(r.id)} · ${escapeHtml(r.desig)}</span></td>
         <td>${escapeHtml(r.dept)}</td>
         <td class="num">${r.salary ? '₹' + fmtMoney(r.salary) : '—'}</td>
-        <td>${escapeHtml(r.due)}<span class="inc-sub">${label[r.band]}</span></td>
+        <td>${fmtDateIN(r.due)}<span class="inc-sub">${label[r.band]}</span></td>
         <td class="num">${r.days < 0 ? Math.abs(r.days) + ' late' : r.days}</td>
       </tr>`).join('')}</tbody></table></div>`;
 }
@@ -11106,7 +11135,7 @@ async function renderIncrementReminders(){
   {
     const fileName = `Increment Reminders - ${todayStr()}.csv`;
     const content = toCsv(['Name','Designation','Increment due','Days away'],
-      upcoming.map(e => [e.name, e.designation||'', e.nextIncrement, Math.ceil((new Date(e.nextIncrement) - now) / 86400000)]));
+      upcoming.map(e => [e.name, e.designation||'', fmtDateIN(e.nextIncrement), Math.ceil((new Date(e.nextIncrement) - now) / 86400000)]));
     queueFileToDrive(hrYearPath(todayStr(), 'Dashboard', 'Increment Reminders'), fileName, content, 'text/csv');
     stashReportShare('Increment Reminders — ' + todayStr(), fileName, content, 'text/csv',
       'HR Management > ' + financialYearLabel(todayStr()) + ' > Dashboard > Increment Reminders', 'incrementReminderList');
@@ -11116,11 +11145,11 @@ async function renderIncrementReminders(){
     upcoming.map(e => {
       const days = Math.ceil((new Date(e.nextIncrement) - now) / 86400000);
       const subject = encodeURIComponent('Increment reminder: ' + e.name);
-      const body = encodeURIComponent('Reminder: ' + e.name + ' (' + (e.designation||'') + ') has an increment due on ' + e.nextIncrement + '.');
+      const body = encodeURIComponent('Reminder: ' + e.name + ' (' + (e.designation||'') + ') has an increment due on ' + fmtDateIN(e.nextIncrement) + '.');
       const mailLink = email ? `mailto:${email}?subject=${subject}&body=${body}` : `mailto:?subject=${subject}&body=${body}`;
       return `<div class="emp-row">
         <div class="head"><strong>${escapeHtml(e.name)}</strong><span class="id">in ${days} day${days===1?'':'s'}</span></div>
-        <div class="sub">${escapeHtml(e.designation || '')} · increment due ${e.nextIncrement}</div>
+        <div class="sub">${escapeHtml(e.designation || '')} · increment due ${fmtDateIN(e.nextIncrement)}</div>
         <div class="actions"><a class="btn ghost" href="${mailLink}">Send reminder email</a></div>
       </div>`;
     }).join('') + `</div>`;
@@ -11152,11 +11181,11 @@ async function renderDocExpiryList(){
   const email = await getReminderEmail();
   box.innerHTML = items.map(it => {
     const subject = encodeURIComponent(it.docLabel + ': ' + it.name);
-    const body = encodeURIComponent('Reminder: ' + it.name + '\'s ' + it.docLabel.toLowerCase() + ' is on ' + it.date + '.');
+    const body = encodeURIComponent('Reminder: ' + it.name + '\'s ' + it.docLabel.toLowerCase() + ' is on ' + fmtDateIN(it.date) + '.');
     const mailLink = email ? `mailto:${email}?subject=${subject}&body=${body}` : `mailto:?subject=${subject}&body=${body}`;
     return `<div class="emp-row">
       <div class="head"><strong>${escapeHtml(it.name)}</strong><span class="id">in ${it.days} day${it.days===1?'':'s'}</span></div>
-      <div class="sub">${escapeHtml(it.docLabel)} expires ${it.date}${it.designation ? (' · ' + it.designation) : ''}</div>
+      <div class="sub">${escapeHtml(it.docLabel)} expires ${fmtDateIN(it.date)}${it.designation ? (' · ' + it.designation) : ''}</div>
       <div class="actions"><a class="btn ghost" href="${mailLink}">Send reminder email</a></div>
     </div>`;
   }).join('');
@@ -11170,7 +11199,7 @@ async function renderActivityLogList(){
     box.innerHTML = '<div class="empty">No activity recorded yet.</div>';
     return;
   }
-  box.innerHTML = log.map(l => `<div class="emp-row"><div class="sub" style="margin-top:0;">${new Date(l.ts).toLocaleString()}</div><div style="font-size:13.5px;margin-top:2px;">${escapeHtml(l.text)}</div></div>`).join('');
+  box.innerHTML = log.map(l => `<div class="emp-row"><div class="sub" style="margin-top:0;">${fmtDateIN(new Date(l.ts))} ${new Date(l.ts).toLocaleTimeString('en-IN')}</div><div style="font-size:13.5px;margin-top:2px;">${escapeHtml(l.text)}</div></div>`).join('');
 }
 
 async function saveActivityLog(list){
@@ -11590,7 +11619,7 @@ function employeeModalHtml(emp){
         <label class="field">Rate of pay (monthly)</label>
         <input type="number" id="f_ratePay" placeholder="0" value="${curPay.ratePay||''}" oninput="renderPayrollBreakdown()" ${hasIncrementHistory ? 'readonly' : ''}>
         <div id="ratePayNote" style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;"></div>
-        ${hasIncrementHistory ? `<p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Current since ${salHist.slice().sort((a,b)=>(a.from||'').localeCompare(b.from||'')).slice(-1)[0].from || 'before increments were tracked'}. Rate of Pay and heading now change only through Record Increment further down, so a raise is never confused with an ordinary edit to the rest of this record.</p>` : ''}
+        ${hasIncrementHistory ? `<p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Current since ${fmtDateIN(salHist.slice().sort((a,b)=>(a.from||'').localeCompare(b.from||'')).slice(-1)[0].from) || 'before increments were tracked'}. Rate of Pay and heading now change only through Record Increment further down, so a raise is never confused with an ordinary edit to the rest of this record.</p>` : ''}
         <div id="directPayWrap" class="hidden">
           <div style="height:12px"></div>
           <label class="field">Paid directly to the employee's account?</label>
@@ -11727,7 +11756,7 @@ function employeeModalHtml(emp){
         <div style="height:10px"></div>
         <details><summary style="font-size:12.5px;color:var(--muted);cursor:pointer;">Salary history (${salHist.length})</summary>
           <div style="font-size:12.5px;color:var(--muted);margin-top:6px;">
-            ${salHist.slice().sort((a,b)=>(a.from||'').localeCompare(b.from||'')).map(h => `<div style="padding:4px 0;border-bottom:1px solid var(--border,#e5e5e5);">${h.from ? escapeHtml(h.from) : 'Before increments were tracked'} — ₹${fmtMoney(Number(h.ratePay)||0)}, ${escapeHtml((SALARY_HEADINGS[h.salaryHeading]||{}).label || h.salaryHeading || '')}</div>`).join('')}
+            ${salHist.slice().sort((a,b)=>(a.from||'').localeCompare(b.from||'')).map(h => `<div style="padding:4px 0;border-bottom:1px solid var(--border,#e5e5e5);">${h.from ? fmtDateIN(h.from) : 'Before increments were tracked'} — ₹${fmtMoney(Number(h.ratePay)||0)}, ${escapeHtml((SALARY_HEADINGS[h.salaryHeading]||{}).label || h.salaryHeading || '')}</div>`).join('')}
           </div>
         </details>` : ''}
       </div>
@@ -13433,8 +13462,8 @@ async function saveIncrement(id){
   const hist = salaryHistoryOf(emp);
   const latest = hist.slice().sort((a, b) => (a.from || '').localeCompare(b.from || '')).slice(-1)[0];
   if(latest && latest.from && from < latest.from){
-    if(!confirm('This effective date (' + from + ') is before the increment already on file that took effect ' +
-      latest.from + '.\n\nContinuing inserts it in between — correct only if this is a backdated correction. Continue?')) return;
+    if(!confirm('This effective date (' + fmtDateIN(from) + ') is before the increment already on file that took effect ' +
+      fmtDateIN(latest.from) + '.\n\nContinuing inserts it in between — correct only if this is a backdated correction. Continue?')) return;
   }
 
   recordIncrement(emp, { ratePay, salaryHeading, from });
@@ -13456,7 +13485,7 @@ async function saveIncrement(id){
   }
   invalidateSharedRead('employees');
   await addActivityLog('Recorded increment for ' + (emp.name || id) + ': ₹' + fmtMoney(before.ratePay) +
-    ' → ₹' + fmtMoney(ratePay) + ' effective ' + from +
+    ' → ₹' + fmtMoney(ratePay) + ' effective ' + fmtDateIN(from) +
     (salaryHeading !== before.salaryHeading ? ', heading changed to ' + ((SALARY_HEADINGS[salaryHeading]||{}).label || salaryHeading) : ''));
   closeIncrementModal();
   // Refresh the edit form behind it, if open, so the new figure shows at once.
@@ -13897,7 +13926,7 @@ async function markEmployeeLeft(id){
     emp.trackingUsername = '';
   }
   await saveEmployees(employees);
-  await addActivityLog(emp.name + ' marked as left (' + leftDate + ')' + (uname ? ' — km-tracking login @' + uname + ' deleted' : ''));
+  await addActivityLog(emp.name + ' marked as left (' + fmtDateIN(leftDate) + ')' + (uname ? ' — km-tracking login @' + uname + ' deleted' : ''));
   await renderEmployeeList();
   await refreshDashboard();
   await renderUserList();
@@ -13974,7 +14003,7 @@ function openLeftEmployeesModal(){
         <p class="hint">Their full record is kept on file — view details, reactivate if they rejoin, or delete permanently once there is no further reason to keep them on file. A complete backup is saved to Drive before a delete goes through.</p>
         ${left.map(e => `<div class="emp-row">
           <div class="head"><strong>${escapeHtml(e.name)}</strong><span class="id">${e.id}</span></div>
-          <div class="sub">${escapeHtml(e.designation || '—')} · left ${e.leftDate || 'date not recorded'}</div>
+          <div class="sub">${escapeHtml(e.designation || '—')} · left ${e.leftDate ? fmtDateIN(e.leftDate) : 'date not recorded'}</div>
           <div class="actions">
             <button class="btn ghost" onclick="closeLeftEmployeesModal();openAddEmployeeModal('${e.id}')">View details</button>
             <button class="btn ghost" onclick="reactivateEmployee('${e.id}')">Reactivate</button>
@@ -14337,7 +14366,7 @@ async function loadAttendanceCalendar(){
       status = 'Absent'; cls = 'warn'; absent++;
     }
     const dayName = new Date(year, month - 1, day).toLocaleDateString('en-IN', { weekday: 'short' });
-    rows.push(`<tr><td>${dateStr} (${dayName})</td><td><span class="pill ${cls}">${status}</span></td></tr>`);
+    rows.push(`<tr><td>${fmtDateIN(dateStr)} (${dayName})</td><td><span class="pill ${cls}">${status}</span></td></tr>`);
   }
   const label = document.getElementById('attendanceUserSelect').selectedOptions[0].textContent;
   const title = 'Attendance — ' + label + ' — ' + monthLabel(monthStr);
@@ -14364,7 +14393,7 @@ async function loadAttendanceCalendar(){
     else if(holidayMap[dateStr]) status = 'Holiday — ' + holidayMap[dateStr];
     else if(tripDates.has(dateStr) || checkinDates.has(dateStr)) status = 'Present';
     else status = 'Absent';
-    csvRows.push([dateStr, status]);
+    csvRows.push([fmtDateIN(dateStr), status]);
   }
   const fileName = `Attendance - ${label.replace(/[^\w .-]/g,'')} - ${monthStr}.csv`;
   const content = toCsv(['Date','Status'], csvRows);
@@ -14392,7 +14421,7 @@ async function addHoliday(){
   holidays.push({ date, name });
   holidays.sort((a,b) => a.date.localeCompare(b.date));
   await saveHolidays(holidays);
-  await addActivityLog('Added holiday "' + name + '" (' + date + ')');
+  await addActivityLog('Added holiday "' + name + '" (' + fmtDateIN(date) + ')');
   document.getElementById('holidayDateInput').value = '';
   document.getElementById('holidayNameInput').value = '';
   msg.textContent = 'Holiday added.';
@@ -14405,7 +14434,7 @@ async function deleteHoliday(date){
   const h = holidays.find(x => x.date === date);
   holidays = holidays.filter(x => x.date !== date);
   await saveHolidays(holidays);
-  if(h) await addActivityLog('Removed holiday "' + h.name + '" (' + date + ')');
+  if(h) await addActivityLog('Removed holiday "' + h.name + '" (' + fmtDateIN(date) + ')');
   await renderHolidayList();
 }
 
@@ -14419,7 +14448,7 @@ async function renderHolidayList(){
   }
   box.innerHTML = holidays.map(h => `
     <div class="emp-row">
-      <div class="head"><strong>${escapeHtml(h.name)}</strong><span class="id">${h.date}</span></div>
+      <div class="head"><strong>${escapeHtml(h.name)}</strong><span class="id">${fmtDateIN(h.date)}</span></div>
       <div class="actions"><button class="btn ghost" onclick="deleteHoliday('${h.date}')">Delete</button></div>
     </div>`).join('');
   const yearInput = document.getElementById('holidayListYear');
@@ -14453,7 +14482,7 @@ async function renderLeaveEncashmentReport(){
   const payable = rows.filter(r => r.pending > 0);
   if(!payable.length){
     box.innerHTML = `${reportLogoHeader('Leave Encashment — FY ' + fyLabel)}
-      <div class="empty">Nobody has unused privilege leave as at ${escapeHtml(asAt)}. Nothing to encash.</div>`;
+      <div class="empty">Nobody has unused privilege leave as at ${fmtDateIN(asAt)}. Nothing to encash.</div>`;
     return;
   }
 
@@ -14534,7 +14563,7 @@ async function renderLeaveEncashmentReport(){
   const nil = rows.length - payable.length;
   box.innerHTML = `${reportActionBar('Leave Encashment — FY ' + fyLabel, 'encashBox')}
     <div class="sal-sheet-wrap print-isolate" id="encashPrintArea">
-    ${reportLogoHeader('Leave Encashment — FY ' + fyLabel + ', as at ' + asAt)}
+    ${reportLogoHeader('Leave Encashment — FY ' + fyLabel + ', as at ' + fmtDateIN(asAt))}
     <p style="font-size:12px;color:var(--muted);margin:0 0 12px;line-height:1.6;">
       Pending days are what is left of privilege leave at 31 March — opening balance plus what was
       earned over the year, less what was taken. The policy is that it is encashed rather than
@@ -14659,7 +14688,7 @@ async function renderElCalculationSheet(){
     ${reportLogoHeader(elReportTitle)}
     ${elInner}
     </div>
-    <p style="font-size:11px;color:var(--muted);margin:10px 0;line-height:1.6;">FY ${startYear}-${String(startYear+1).slice(2)}: ${fyStart} to ${fyEnd}. EL earned = 1 day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} days present (present includes EL/SL days and half-day equivalents), floored — earned this year, usable from next year, so it is never part of what this year pays out. Unused Opening = this year's opening balance − EL used, floored at nil.
+    <p style="font-size:11px;color:var(--muted);margin:10px 0;line-height:1.6;">FY ${startYear}-${String(startYear+1).slice(2)}: ${fmtDateIN(fyStart)} to ${fmtDateIN(fyEnd)}. EL earned = 1 day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} days present (present includes EL/SL days and half-day equivalents), floored — earned this year, usable from next year, so it is never part of what this year pays out. Unused Opening = this year's opening balance − EL used, floored at nil.
       <br><strong style="color:var(--navy);">Encashment</strong> = Unused Opening × ${headingPct(B.grossPct)} of ${escapeHtml(B.label)} ÷ ${B.dayDivisor}, worked out from each employee's Rate of Pay and salary heading. The ${B.dayDivisor} is the same figure that earns the leave — one day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} days of attendance.</p>
     <div class="row-inline" style="margin-bottom:0;">
       <button class="btn" style="flex:1;" onclick='withBusy(this,"Working…",()=>encashAndResetEl(${JSON.stringify(rows.map(r=>({id:r.id,amount:r.amount,nextOpening:r.nextOpening})))}, ${JSON.stringify(nextFyStart)}))'>Encash unused &amp; open next year automatically</button>
@@ -14962,7 +14991,7 @@ async function addOvertimeEntry(){
   const log = await getOvertimeLog();
   log.push({ id: randomHex(6), employeeId: empId, name: emp ? emp.name : '', date, hours, note });
   await saveOvertimeLog(log);
-  await addActivityLog('Logged ' + hours + 'h overtime for ' + (emp ? emp.name : empId) + ' on ' + date);
+  await addActivityLog('Logged ' + hours + 'h overtime for ' + (emp ? emp.name : empId) + ' on ' + fmtDateIN(date));
   document.getElementById('otDateInput').value = '';
   document.getElementById('otHoursInput').value = '';
   document.getElementById('otNoteInput').value = '';
@@ -14978,7 +15007,7 @@ async function deleteOvertimeEntry(id){
   log = log.filter(o => o.id !== id);
   await saveOvertimeLog(log);
   await renderOvertimeReport();
-  if(entry) await addActivityLog('Deleted overtime entry for ' + entry.name + ' on ' + entry.date);
+  if(entry) await addActivityLog('Deleted overtime entry for ' + entry.name + ' on ' + fmtDateIN(entry.date));
 }
 
 async function renderOvertimeReport(){
@@ -14997,19 +15026,19 @@ async function renderOvertimeReport(){
   // Report showed nothing whenever there was anything to show.
   {
     const fileName = `Overtime Report - ${monthStr}.csv`;
-    const content = toCsv(['Name','Date','Hours','Note'], log.map(o => [o.name, o.date, o.hours, o.note||'']));
+    const content = toCsv(['Name','Date','Hours','Note'], log.map(o => [o.name, fmtDateIN(o.date), o.hours, o.note||'']));
     queueFileToDrive(hrYearPath(monthStr + '-01', 'Reports', 'Overtime Report'), fileName, content, 'text/csv');
     stashReportShare(reportTitle, fileName, content, 'text/csv',
       'HR Management > ' + financialYearLabel(monthStr + '-01') + ' > Reports > Overtime Report', 'overtimeReportBox');
   }
   const isCompact = isCompactSheetView();
   const overtimeInner = isCompact ? `<div class="hr-sheet-cards">${log.map(o => hrCard(
-      `<strong>${escapeHtml(o.name)}</strong><span class="id">${o.date}</span>`,
+      `<strong>${escapeHtml(o.name)}</strong><span class="id">${fmtDateIN(o.date)}</span>`,
       hrRow('Hours', o.hours) + hrRow('Note', escapeHtml(o.note || '—')) +
       `<div class="hr-sheet-row" style="border-bottom:none;"><span></span><span class="v"><button class="btn ghost" style="font-size:11.5px;padding:6px 10px;" onclick="deleteOvertimeEntry('${o.id}')">Delete</button></span></div>`
     )).join('')}</div>` : `<table class="sal-table">
       <tr><th>Name</th><th>Date</th><th class="num">Hours</th><th>Note</th><th></th></tr>
-      ${log.map(o => `<tr><td class="sal-name">${escapeHtml(o.name)}</td><td>${o.date}</td><td class="num">${o.hours}</td><td>${o.note||''}</td><td><button class="btn ghost" style="font-size:11.5px;padding:6px 10px;" onclick="deleteOvertimeEntry('${o.id}')">Delete</button></td></tr>`).join('')}
+      ${log.map(o => `<tr><td class="sal-name">${escapeHtml(o.name)}</td><td>${fmtDateIN(o.date)}</td><td class="num">${o.hours}</td><td>${o.note||''}</td><td><button class="btn ghost" style="font-size:11.5px;padding:6px 10px;" onclick="deleteOvertimeEntry('${o.id}')">Delete</button></td></tr>`).join('')}
     </table>`;
   box.innerHTML = `${reportActionBar(reportTitle, 'overtimeReportBox')}
     <div class="sal-sheet-wrap print-isolate" id="overtimeReportPrintArea">
@@ -15065,7 +15094,7 @@ async function generateHolidayListDoc(){
     </div>
     <h3>Holiday List — ${fyLabel}</h3>
     <table><tr><th>Date</th><th>Day</th><th>Festival / Occasion</th></tr>${rows}</table>
-    <div class="hl-footer">Issued by HR · R.S. Infotech · ${todayStr()}</div>`;
+    <div class="hl-footer">Issued by HR · R.S. Infotech · ${fmtDateIN(todayStr())}</div>`;
 
   document.getElementById('holidayListPaper').innerHTML = paperHtml;
   document.getElementById('holidayListOutput').classList.remove('hidden');
@@ -15141,17 +15170,17 @@ async function viewReport(key, label, monthFilter){
     }));
     rows2.sort((x, y) => (y.out - x.out) || (x.e.name || '').localeCompare(y.e.name || ''));
     csvHeader = ['Employee','Employee Code','Item','Qty','Issued On','Returned On','Status'];
-    csvRows = rows2.map(r => [r.e.name, r.e.id, r.a.item, r.a.qty || '', r.a.issuedOn || '',
-                              r.a.returnedOn || '', r.out ? 'Outstanding' : 'Returned']);
+    csvRows = rows2.map(r => [r.e.name, r.e.id, r.a.item, r.a.qty || '', fmtDateIN(r.a.issuedOn),
+                              fmtDateIN(r.a.returnedOn), r.out ? 'Outstanding' : 'Returned']);
     const outCount = rows2.filter(r => r.out).length;
     rows = rows2.map(r => `<tr class="${r.out ? 'inc-overdue' : ''}">
         <td class="sal-name">${escapeHtml(r.e.name)}<span class="inc-sub">${escapeHtml(r.e.id)}</span></td>
         <td>${escapeHtml(r.a.item)}</td><td class="num">${r.a.qty || '—'}</td>
-        <td>${escapeHtml(r.a.issuedOn || '—')}</td>
-        <td>${r.out ? '<span class="pol-warn">Not returned</span>' : escapeHtml(r.a.returnedOn)}</td></tr>`).join('');
+        <td>${fmtDateIN(r.a.issuedOn) || '—'}</td>
+        <td>${r.out ? '<span class="pol-warn">Not returned</span>' : fmtDateIN(r.a.returnedOn)}</td></tr>`).join('');
     const assetsCards = rows2.map(r => hrCard(`<strong>${escapeHtml(r.e.name)}</strong><span class="id">${escapeHtml(r.e.id)}</span>`,
-      hrRow('Item', escapeHtml(r.a.item)) + hrRow('Qty', r.a.qty || '—') + hrRow('Issued', escapeHtml(r.a.issuedOn || '—')) +
-      hrRow('Returned', r.out ? '<span class="pol-warn">Not returned</span>' : escapeHtml(r.a.returnedOn)),
+      hrRow('Item', escapeHtml(r.a.item)) + hrRow('Qty', r.a.qty || '—') + hrRow('Issued', fmtDateIN(r.a.issuedOn) || '—') +
+      hrRow('Returned', r.out ? '<span class="pol-warn">Not returned</span>' : fmtDateIN(r.a.returnedOn)),
       r.out ? 'is-new' : '')).join('');
     const assetsInner = isCompact ? `<div class="hr-sheet-cards">${assetsCards}</div>`
       : `<table class="sal-table"><thead><tr><th>Employee</th><th>Item</th><th class="num">Qty</th><th>Issued</th><th>Returned</th></tr></thead><tbody>${rows}</tbody></table>`;
@@ -15186,9 +15215,9 @@ async function viewReport(key, label, monthFilter){
     // a timezone behind UTC (see CLAUDE.md).
     const birthdayList = employees.filter(e => e.dob && (!monthFilter || e.dob.slice(5,7) === monthFilter));
     csvHeader = ['Name','Date of birth'];
-    csvRows = birthdayList.map(e => [e.name, e.dob]);
-    rows = birthdayList.map(e => `<tr><td class="sal-name">${escapeHtml(e.name)}</td><td>${e.dob}</td></tr>`).join('');
-    const birthdayCards = birthdayList.map(e => hrCard(`<strong>${escapeHtml(e.name)}</strong>`, hrRow('Date of birth', e.dob))).join('');
+    csvRows = birthdayList.map(e => [e.name, fmtDateIN(e.dob)]);
+    rows = birthdayList.map(e => `<tr><td class="sal-name">${escapeHtml(e.name)}</td><td>${fmtDateIN(e.dob)}</td></tr>`).join('');
+    const birthdayCards = birthdayList.map(e => hrCard(`<strong>${escapeHtml(e.name)}</strong>`, hrRow('Date of birth', fmtDateIN(e.dob)))).join('');
     const birthdayInner = isCompact ? (birthdayCards ? `<div class="hr-sheet-cards">${birthdayCards}</div>` : '<div class="empty">No data yet</div>')
       : `<table class="sal-table"><tr><th>Name</th><th>Date of birth</th></tr>${rows || '<tr><td colspan="2" class="empty">No data yet</td></tr>'}</table>`;
     box.innerHTML = `${fsBtn}<div class="sal-sheet-wrap print-isolate" id="reportPrintArea_birthday">${reportLogoHeader(label)}${birthdayInner}</div>`;
@@ -15212,16 +15241,16 @@ async function viewReport(key, label, monthFilter){
       // not from the original due date — an increment given late or early
       // still resets the clock from when it really happened.
       const nextDate = done ? nextAnniversaryOf(latest.from) : '';
-      csvRows.push([e.name, monthName, e.nextIncrement, Math.round(lastSalary), done ? 'Done' : 'Due', nextDate]);
+      csvRows.push([e.name, monthName, fmtDateIN(e.nextIncrement), Math.round(lastSalary), done ? 'Done' : 'Due', fmtDateIN(nextDate)]);
       if(isCompact){
         incrementCards += hrCard(`<strong>${escapeHtml(e.name)}</strong>`,
-          hrRow('Increment month', monthName) + hrRow('Increment date', e.nextIncrement) +
+          hrRow('Increment month', monthName) + hrRow('Increment date', fmtDateIN(e.nextIncrement)) +
           hrRow('Last salary (gross)', rupees(lastSalary)) +
           hrRow('Status', done ? '<span class="pol-ok">Done</span>' : '<span class="pol-warn">Due</span>') +
-          hrRow('Next increment date', nextDate || '—'), done ? '' : 'is-new');
+          hrRow('Next increment date', fmtDateIN(nextDate) || '—'), done ? '' : 'is-new');
       }
-      return `<tr${done ? '' : ' class="inc-overdue"'}><td class="sal-name">${escapeHtml(e.name)}</td><td>${monthName}</td><td>${e.nextIncrement}</td><td class="num">${rupees(lastSalary)}</td>` +
-        `<td>${done ? '<span class="pol-ok">Done</span>' : '<span class="pol-warn">Due</span>'}</td><td>${nextDate || '—'}</td></tr>`;
+      return `<tr${done ? '' : ' class="inc-overdue"'}><td class="sal-name">${escapeHtml(e.name)}</td><td>${monthName}</td><td>${fmtDateIN(e.nextIncrement)}</td><td class="num">${rupees(lastSalary)}</td>` +
+        `<td>${done ? '<span class="pol-ok">Done</span>' : '<span class="pol-warn">Due</span>'}</td><td>${fmtDateIN(nextDate) || '—'}</td></tr>`;
     }).join('');
     const incrementInner = isCompact ? (incrementCards ? `<div class="hr-sheet-cards">${incrementCards}</div>` : '<div class="empty">No data yet</div>')
       : `<table class="sal-table"><tr><th>Name</th><th>Increment month</th><th>Increment date</th><th class="num">Last salary (gross)</th><th>Status</th><th>Next increment date</th></tr>${rows || '<tr><td colspan="6" class="empty">No data yet</td></tr>'}</table>`;
@@ -15545,7 +15574,7 @@ async function populateGeneratorEmployees(){
   const prev = sel.value;
   sel.innerHTML = '<option value="">— Select employee —</option>' +
     list.map(e => `<option value="${e.id}">${escapeHtml(e.name)} (${e.id})${
-      e.employmentStatus === 'left' ? ' — left' + (e.leftDate ? ' ' + escapeHtml(e.leftDate) : '') : ''}</option>`).join('');
+      e.employmentStatus === 'left' ? ' — left' + (e.leftDate ? ' ' + fmtDateIN(e.leftDate) : '') : ''}</option>`).join('');
   if(prev && list.some(e => e.id === prev)) sel.value = prev;
   else if(prev) { sel.value = ''; clearGeneratorEmployeeFields(); }
 }
@@ -16067,7 +16096,7 @@ async function renderPendingLoanRequests(){
         <p style="font-size:12.5px;color:var(--muted);margin:6px 0 0;">
           ${r.months ? escapeHtml(String(r.months)) + ' month(s) at ₹' + fmtMoney(r.instalment) + ' a month' : 'No repayment period given'}
           ${r.reason ? ' · ' + escapeHtml(r.reason) : ''}
-          <br>Requested ${escapeHtml(String(r.requestedOn || '').slice(0, 10))}
+          <br>Requested ${fmtDateIN(String(r.requestedOn || '').slice(0, 10))}
         </p>
         <div class="row-inline" style="margin:10px 0 0;">
           <button class="btn" style="flex:1;" onclick="approveLoanRequest('${escapeHtml(r.id)}')">Approve</button>
@@ -16271,7 +16300,7 @@ async function renderLeaveRequestHint(){
   }
   const lines = [
     '<strong>' + escapeHtml(d.label) + ' — ' + d.days + ' day(s)</strong> on ' +
-      escapeHtml(d.dates.length > 1 ? d.dates[0] + ' to ' + d.dates[d.dates.length - 1] : d.dates[0]) + '.',
+      (d.dates.length > 1 ? fmtDateIN(d.dates[0]) + ' to ' + fmtDateIN(d.dates[d.dates.length - 1]) : fmtDateIN(d.dates[0])) + '.',
     'Balance ' + d.balance + ' → <strong>' + d.after + '</strong> after this.'
   ];
   if(d.after < 0) lines.push('<span class="pol-warn">More than the balance — the excess becomes leave without pay unless it is granted anyway.</span>');
@@ -16290,9 +16319,9 @@ async function renderPendingLeaveRequests(){
     pending.map(r => `<div class="emp-row">
         <div class="head"><strong>${escapeHtml(r.employeeName)}</strong><span class="id">${escapeHtml(String(r.days))} day(s)</span></div>
         <p style="font-size:12.5px;color:var(--muted);margin:6px 0 0;">
-          ${escapeHtml(r.typeLabel)} · ${escapeHtml(r.from)}${r.to && r.to !== r.from ? ' to ' + escapeHtml(r.to) : ''}${r.lateTime ? ' at ' + escapeHtml(r.lateTime) : ''}
+          ${escapeHtml(r.typeLabel)} · ${fmtDateIN(r.from)}${r.to && r.to !== r.from ? ' to ' + fmtDateIN(r.to) : ''}${r.lateTime ? ' at ' + escapeHtml(r.lateTime) : ''}
           ${r.reason ? ' · ' + escapeHtml(r.reason) : ''}
-          <br>Applied ${escapeHtml(String(r.requestedOn || '').slice(0, 10))}${r.source === 'employee' ? ' by the employee' : ''}
+          <br>Applied ${fmtDateIN(String(r.requestedOn || '').slice(0, 10))}${r.source === 'employee' ? ' by the employee' : ''}
           ${r.certificateUrl ? '<br><button type="button" style="background:none;border:none;padding:0;font:inherit;cursor:pointer;color:var(--amber-dark);font-weight:600;" onclick="viewEmployeeDocument(\'' + r.certificateUrl.replace(/'/g,"\\'") + '\',\'Medical certificate — ' + (r.employeeName || '').replace(/'/g,"\\'") + '\')">View medical certificate</button>' : ''}
         </p>
         <div class="row-inline" style="margin:10px 0 0;">
@@ -16316,7 +16345,7 @@ async function approveLeaveRequest(id){
   if(!emp){ alert('That employee is no longer on the roster, so this cannot be approved.'); return; }
 
   if(req.code === 'LATE'){
-    if(!confirm('Allow ' + emp.name + ' to come in late on ' + req.from +
+    if(!confirm('Allow ' + emp.name + ' to come in late on ' + fmtDateIN(req.from) +
         (req.lateTime ? ' at ' + req.lateTime : '') + '?\n\n' +
         'The day keeps whatever attendance it already has and is marked as a late arrival, ' +
         'which counts towards the late-coming rule.')) return;
@@ -16327,10 +16356,10 @@ async function approveLeaveRequest(id){
     await saveLeaveRequests(requests);
     invalidateSharedRead('attendance:' + emp.id);
     invalidateDashboardSnapshot();
-    addActivityLog('Allowed late arrival for ' + emp.name + ' on ' + req.from +
+    addActivityLog('Allowed late arrival for ' + emp.name + ' on ' + fmtDateIN(req.from) +
                    (req.lateTime ? ' at ' + req.lateTime : '')).catch(() => {});
     await renderPendingLeaveRequests();
-    alert('Recorded. ' + emp.name + "'s " + req.from + ' is flagged as a late arrival.');
+    alert('Recorded. ' + emp.name + "'s " + fmtDateIN(req.from) + ' is flagged as a late arrival.');
     return;
   }
 
@@ -16343,11 +16372,11 @@ async function approveLeaveRequest(id){
   d.policy.blockers.forEach(b => warn.push(b));
   const already = [];
   const att = await getAttendance(emp.id);
-  d.dates.forEach(iso => { if(att && att[iso] && att[iso].code) already.push(iso + ' (' + att[iso].code + ')'); });
+  d.dates.forEach(iso => { if(att && att[iso] && att[iso].code) already.push(fmtDateIN(iso) + ' (' + att[iso].code + ')'); });
   if(already.length) warn.push('Already marked: ' + already.join(', ') + ' — approving overwrites those.');
 
   if(!confirm('Approve ' + d.days + ' day(s) of ' + d.label + ' for ' + emp.name + '?\n\n' +
-      d.dates.join(', ') + '\n\n' + (warn.length ? warn.join('\n') + '\n\n' : '') +
+      d.dates.map(fmtDateIN).join(', ') + '\n\n' + (warn.length ? warn.join('\n') + '\n\n' : '') +
       'These dates go onto the attendance sheet now.')) return;
 
   for(const iso of d.dates){
@@ -16360,7 +16389,7 @@ async function approveLeaveRequest(id){
   invalidateSharedRead('attendance:' + emp.id);
   invalidateDashboardSnapshot();
   addActivityLog('Approved ' + d.days + ' day(s) ' + d.label + ' for ' + emp.name +
-                 ' (' + d.dates[0] + (d.dates.length > 1 ? ' to ' + d.dates[d.dates.length - 1] : '') + ')').catch(() => {});
+                 ' (' + fmtDateIN(d.dates[0]) + (d.dates.length > 1 ? ' to ' + fmtDateIN(d.dates[d.dates.length - 1]) : '') + ')').catch(() => {});
   await renderPendingLeaveRequests();
   alert('Approved. ' + emp.name + ' is marked on leave for ' + d.days + ' day(s), and the Salary Sheet will pay those days as leave.');
 }
@@ -16369,12 +16398,12 @@ async function declineLeaveRequest(id){
   const requests = await getLeaveRequests();
   const req = requests.find(r => r.id === id);
   if(!req || req.status !== 'pending') return;
-  if(!confirm('Decline ' + req.employeeName + "'s leave from " + req.from + '?\n\n' +
+  if(!confirm('Decline ' + req.employeeName + "'s leave from " + fmtDateIN(req.from) + '?\n\n' +
               'Nothing is marked on the attendance sheet and the request stays on record as declined.')) return;
   req.status = 'declined';
   req.decidedOn = new Date().toISOString();
   await saveLeaveRequests(requests);
-  addActivityLog('Declined leave request from ' + req.employeeName + ' (' + req.from + ')').catch(() => {});
+  addActivityLog('Declined leave request from ' + req.employeeName + ' (' + fmtDateIN(req.from) + ')').catch(() => {});
   await renderPendingLeaveRequests();
 }
 
@@ -16493,7 +16522,7 @@ function letterSignatureBlock(type, name, company, signatory){
 
 function letterTemplate(type, f){
   const company = f.company, name = f.name || '[Employee name]', designation = f.designation || '[Designation]',
-        department = f.department || '[Department]', doj = f.doj || '[Date of joining]', lwd = f.lwd || '[Last working date]',
+        department = f.department || '[Department]', doj = niceDate_(f.doj) || '[Date of joining]', lwd = niceDate_(f.lwd) || '[Last working date]',
         issueDate = f.issueDate;
   const inDept = department ? ' in the ' + department + ' department' : '';
   switch(type){
