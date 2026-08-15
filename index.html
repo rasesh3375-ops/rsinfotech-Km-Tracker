@@ -3519,12 +3519,39 @@ async function getAttendance(employeeId){
       const remoteVal = (v && v.value !== undefined && v.value !== null) ? v.value : null;
       try{ att = remoteVal ? JSON.parse(remoteVal) : {}; }catch(e){ att = {}; }
     }
+    att = await withAlwaysPresentFill_(employeeId, att);
     primeSharedRead(key, JSON.stringify(att));
     return att;
   })();
   inFlightReads.set(key, request);
   try{ return await request; }
   finally{ inFlightReads.delete(key); }
+}
+
+// A handful of employees (owners/family who don't punch in day to day) are
+// marked Present for every working day rather than tracked — emp.alwaysPresentFrom,
+// set on the Employee Master form. Computed fresh here from today's date and
+// the holiday list every time attendance is read, rather than ever being
+// written into the stored record, so it needs nothing re-run when a new
+// financial year's attendance key doesn't exist yet — it "just carries
+// forward" because there is nothing to carry, only a rule to re-apply. Stops
+// on its own once employmentStatus is 'left' (capped at leftDate). Never
+// overwrites a day already present in the real record, so HR can still mark
+// one specific day differently for these employees and it sticks. Every one
+// of getAttendance's callers — the Attendance Sheet, Salary Sheet, PF/ESI/PT
+// reports, leave and overtime reports — sees this the same way, since they
+// all read attendance through this one function.
+async function withAlwaysPresentFill_(employeeId, att){
+  const employees = await getEmployees();
+  const emp = employees.find(e => e.id === employeeId);
+  if(!emp || !emp.alwaysPresentFrom) return att;
+  const cutoff = (emp.employmentStatus === 'left' && emp.leftDate) ? emp.leftDate : todayStr();
+  const holidayMap = await getHolidayMap_local();
+  const filled = Object.assign({}, att);
+  leaveWorkingDays(emp.alwaysPresentFrom, cutoff, holidayMap).forEach(dateStr => {
+    if(!filled[dateStr]) filled[dateStr] = { code: 'P' };
+  });
+  return filled;
 }
 // Late coming is a flag on the day, not a code that replaces it. Somebody who
 // arrives late still worked, so overwriting their Present with anything else
@@ -11339,6 +11366,7 @@ function emptyEmployee(){
     trackingEnabled:'no', trackingUsername:'',
     employmentStatus:'active', leftDate:'',
     employeeType:'field', slOpening:0, elOpening:0,
+    alwaysPresentFrom:'',
     workLocation:'', shiftTime:'',
     salaryHeading:'managerial', ratePay:0, advanceTemp:0, advance:0,
     fatherName:'', motherName:'',
@@ -11543,6 +11571,10 @@ function employeeModalHtml(emp){
           <input type="text" id="f_shiftTime" placeholder="e.g. 08:00 to 17:00, or General shift" value="${escapeHtml(emp.shiftTime||'')}">
           <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Resident Engineers sit at the client's site on the client's hours, not the office 09:30–19:00 shift — so their location and timing are recorded here rather than assumed.</p>
         </div>
+        <div style="height:14px"></div>
+        <label class="field">Always mark Present from</label>
+        <input type="date" id="f_alwaysPresentFrom" value="${emp.alwaysPresentFrom||''}">
+        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Leave blank for normal day-by-day attendance. Set a date and every working day from then on — in the Attendance Sheet, the Salary Sheet, every report, every future financial year — computes as Present automatically. Nothing needs re-entering, ever; it stops on its own the day this employee is marked as left. Sundays and declared holidays are unaffected either way, and a specific day marked by hand still overrides it.</p>
       </div>
 
       <div class="field-group">
@@ -13731,6 +13763,7 @@ async function saveEmployeeForm(){
     employeeType: document.getElementById('f_employeeType').value,
     slOpening: Number(document.getElementById('f_slOpening').value)||0,
     elOpening: Number(document.getElementById('f_elOpening').value)||0,
+    alwaysPresentFrom: (document.getElementById('f_alwaysPresentFrom') || {}).value || '',
     workLocation: ((document.getElementById('f_workLocation') || {}).value || '').trim(),
     shiftTime: ((document.getElementById('f_shiftTime') || {}).value || '').trim(),
     fatherName: ((document.getElementById('f_fatherName') || {}).value || '').trim(),
