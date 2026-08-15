@@ -1687,6 +1687,10 @@
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Every employee's record shares that same one 49 KB cell — not only documents. If a save is refused with nothing left to move, this shows what is actually filling it.</p>
       <button class="btn ghost full" onclick="withBusy(this,'Working…',showEmployeeStorageBreakdown)">Show what's taking up space</button>
       <div id="empStorageBreakdownBox" style="margin-top:10px;overflow-x:auto;"></div>
+      <div style="height:14px"></div>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Fields added to Employee Master over time — Workman Compensation, insurance, checklists and the rest — are stored on every employee even when left blank for them, and that unused space adds up across everyone on file. This removes only genuinely empty fields (blank text, empty lists) from every record. Nothing in use on any employee is touched, and no document, salary, PF, ESI, PT or leave figure changes.</p>
+      <button class="btn ghost full" onclick="withBusy(this,'Working…',compactAllEmployeeRecords)">Remove unused empty fields from every employee</button>
+      <div id="empCompactBox" style="margin-top:10px;"></div>
     </section>
 
     <section class="block" id="secTeamOverview">
@@ -13708,12 +13712,17 @@ async function saveEmployeeForm(){
     // blocking this employee's entire record (name, salary, PF, bank
     // details, none of which are the problem) from saving at all.
     droppedDocs = dropOversizedInlineDocuments(draft, employees.filter(e => e.id !== draft.id));
-    if(isNew) employees.push(draft);
-    else employees[employees.findIndex(e => e.id === editingEmployeeId)] = draft;
+    // Only what's actually written is compacted — editingEmployeeDraft
+    // itself (the form's own live state, referenced by `draft`) is left
+    // exactly as it was, so nothing on screen changes; this only shrinks
+    // what leaves the browser.
+    const toStore = compactEmployeeRecord_(draft);
+    if(isNew) employees.push(toStore);
+    else employees[employees.findIndex(e => e.id === editingEmployeeId)] = toStore;
     // One record over the wire when the backend can merge it, the whole array
     // when it cannot. The merge path also removes the lost-update window: two
     // people editing different employees no longer overwrite each other.
-    const merged = await remoteSetItem('employees', draft, 'id');
+    const merged = await remoteSetItem('employees', toStore, 'id');
     if(!merged){
       try{
         await saveEmployees(employees);
@@ -14186,6 +14195,35 @@ async function populateRoleReportPickers(){
 
 const hasInlineOtherDoc_ = e => (e.otherDocs || []).some(d => d && d.dataUrl && !/^https?:/.test(d.dataUrl));
 
+// The storage breakdown tool below found that most of the shared cell was
+// going not to any field's own content but to JSON.stringify() writing out
+// every field's key name, quotes, colon and comma even when that field is
+// empty for that employee — 96 fields have accumulated on this record over
+// the app's life, most in use by only a handful of employees at a time,
+// and every one of them costs its own name's worth of space on every
+// employee whether or not it holds anything. Returns a shallow copy with
+// only the genuinely empty fields dropped, not the object it was given —
+// callers decide what to do with the result, same as
+// migrateInlineDocumentsInPlace_ beside it. Deliberately conservative
+// about what counts as "empty": only '', [] and {} — never 0, false or
+// null — since a currency or checkbox-style field storing a real 0/false
+// value is not the same thing as the field never having been set, and
+// every read of these fields elsewhere in the app already treats a
+// missing key exactly the same as '' (e.field || '') or an empty array
+// (e.field || []), so dropping only these three shapes cannot change what
+// anything downstream sees.
+function compactEmployeeRecord_(e){
+  const out = {};
+  Object.keys(e).forEach(k => {
+    const v = e[k];
+    const isEmpty = v === '' ||
+      (Array.isArray(v) && v.length === 0) ||
+      (v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0);
+    if(!isEmpty) out[k] = v;
+  });
+  return out;
+}
+
 // Every inline (non-Drive) document across the given employees, moved to
 // Drive in place — shared by the manual "Move stored documents to Drive"
 // button below and by saveEmployeeForm's own automatic rescue, so the two
@@ -14337,6 +14375,33 @@ async function showEmployeeStorageBreakdown(){
     ${fieldRows}
     <p style="font-weight:700;font-size:12.5px;margin:14px 0 6px;">Largest individual employee records</p>
     ${empRows}`;
+}
+
+// The breakdown above is what showed most of the shared cell was going to
+// field names and JSON punctuation, not content — fields added to the form
+// over the years that are blank on most employees but still cost their own
+// key's worth of space on every one of them. This runs compactEmployeeRecord_
+// (the same compaction saveEmployeeForm now applies to every future save)
+// once over every EXISTING record, so the space it frees is available
+// immediately rather than only as new saves happen to touch each employee.
+async function compactAllEmployeeRecords(){
+  const box = document.getElementById('empCompactBox');
+  const employees = await getEmployees();
+  const before = JSON.stringify(employees).length;
+  const compacted = employees.map(compactEmployeeRecord_);
+  const after = JSON.stringify(compacted).length;
+  const freed = before - after;
+  if(freed <= 0){
+    box.innerHTML = '<p class="dash-muted">✓ Nothing to remove — every field already in the record is in use somewhere.</p>';
+    return;
+  }
+  if(!confirm('This will remove empty, unused fields from all ' + employees.length + ' employee record(s), ' +
+    'freeing about ' + (freed/1024).toFixed(1) + ' KB. Nothing in use is touched — only fields already blank ' +
+    'for that employee. Continue?')) return;
+
+  await saveEmployees(compacted);
+  invalidateSharedRead('employees');
+  box.innerHTML = `<p class="dash-muted">Freed ${(freed/1024).toFixed(1)} KB. Employee list is now ${(after/1024).toFixed(1)} KB of the 49 KB the sheet can hold.</p>`;
 }
 
 // Opens a new leave year for Sick Leave only — SL is reset to the flat
