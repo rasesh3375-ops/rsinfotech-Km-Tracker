@@ -13249,8 +13249,7 @@ async function saveEmployeeForm(){
   }
   try{ clearEmployeeDraft(); }catch(e){}
   closeEmployeeModal(true);
-  showSavedToast((isNew ? 'Added ' : 'Updated ') + name + ' (' + id + ')' +
-                 (isNew ? ' — opening their appointment letter' : ''));
+  showSavedToast((isNew ? 'Added ' : 'Updated ') + name + ' (' + id + ')');
 
   // The log is a record, not something the user is waiting on.
   addActivityLog(isNew ? ('Added employee ' + name + ' (' + id + ')')
@@ -13260,8 +13259,11 @@ async function saveEmployeeForm(){
   invalidateDashboardSnapshot();
 
   try{
+    // Save used to jump straight to the Generator and open the new
+    // employee's Appointment Letter — HR asked for this to stop and land
+    // back on Employee Master instead, where the "+ Add employee" button
+    // that started this always lives.
     await renderEmployeeList();
-    if(isNew) await jumpToGeneratorForNewEmployee(id);
   }catch(e){
     // Redrawing a screen is not part of saving. Failing here must not look
     // like the record did not go in.
@@ -13291,16 +13293,6 @@ function showSavedToast(text){
     el.classList.remove('show');
     savedToastTimer = setTimeout(() => el.classList.add('hidden'), 400);
   }, 4000);
-}
-
-async function jumpToGeneratorForNewEmployee(employeeId){
-  switchHrSub('generator');
-  await renderGeneratorTab();
-  const idx = LETTER_TYPES.indexOf('Appointment Letter');
-  if(idx >= 0) selectLetterType(idx);
-  const sel = document.getElementById('genEmpSelect');
-  if(sel) sel.value = employeeId;
-  await autoFillGeneratorFromEmployee();
 }
 
 // Files the employee's document folder under Left Employees so the active
