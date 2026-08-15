@@ -809,13 +809,13 @@
   .calc-card{margin-top:12px;border:1px solid var(--line);border-left:3px solid var(--amber);
     border-radius:10px;background:#FAFBFD;padding:14px 15px;}
   .calc-head{font-size:13px;font-weight:700;color:var(--navy);margin-bottom:12px;}
-  /* This card's own .fold-summary-bar (see the shared rule above) — amber
-     to match .calc-card's own left-border accent, and its own negative
-     margin to bleed to this card's edges (14px/15px padding, not .pay-box's
-     12px/13px). Same amber tone the rest of the app already uses for
-     amber-toned cards (.kpi[data-tone="amber"]). */
+  /* This card's own .fold-summary-bar (see the shared rule above) — same
+     green as Salary breakdown and Annual CTC, not this card's own amber
+     left-border accent, so all three fold-card triggers read as one
+     consistent colour rather than each matching its own card. Only the
+     negative margin differs, to bleed to this card's own edges (14px/15px
+     padding, not .pay-box's 12px/13px). */
   .calc-card .fold-summary-bar{
-    --fold-tint-bg:#FDEFD8; --fold-tint:#F0DFC0;
     margin:-14px -15px 12px;
   }
   .calc-sec{margin-bottom:13px;}
