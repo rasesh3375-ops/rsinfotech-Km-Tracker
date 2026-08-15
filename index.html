@@ -580,6 +580,12 @@
   .inc-table tr.inc-this td.num:last-child{color:#B96E0A;font-weight:700;}
   .inc-table tr.inc-next td:first-child{box-shadow:inset 3px 0 0 #3B5BA9;}
   .inc-table tr.inc-next td.num:last-child{color:#3B5BA9;font-weight:700;}
+  /* Same band colour, carried the same way, on the mobile card each row
+     becomes below 760px — see renderIncrementWidget(). */
+  .hr-sheet-card.inc-overdue{cursor:pointer;box-shadow:inset 3px 0 0 var(--red);}
+  .hr-sheet-card.inc-this{cursor:pointer;box-shadow:inset 3px 0 0 #B96E0A;}
+  .hr-sheet-card.inc-next{cursor:pointer;box-shadow:inset 3px 0 0 #3B5BA9;}
+  .hr-sheet-card.inc-later{cursor:pointer;box-shadow:inset 3px 0 0 var(--line);}
 
   /* Placeholder / empty-state line inside a dashboard card. */
   .dash-muted{font-size:13px;color:var(--muted);margin:0;padding:6px 2px;}
@@ -6401,6 +6407,8 @@ window.addEventListener('resize', () => {
     if(attBox && attBox.innerHTML.trim()) renderAttendanceSheet();
     const salBox = document.getElementById('salarySheetBox');
     if(salBox && salBox.innerHTML.trim()) renderSalarySheet();
+    const incBox = document.getElementById('dashIncrementBox');
+    if(incBox && incBox.innerHTML.trim()) renderIncrementWidget();
   }, 300);
 });
 
@@ -10864,6 +10872,25 @@ function renderIncrementWidget(){
     return;
   }
   const label = { overdue:'Overdue', this:'This month', next:'Next month', later:'Upcoming' };
+
+  // Five columns fit a laptop's Increment Reminder card fine but not a phone
+  // screen — Employee's own two lines (name, ID · designation) already use
+  // most of it. Same fallback every other dashboard/report table already
+  // gets below 760px: one tap-card per employee instead of a table scrolling
+  // sideways inside its own box.
+  if(isCompactSheetView()){
+    box.innerHTML = `<div class="hr-sheet-cards">${rows.map(r => `
+      <div class="hr-sheet-card inc-${r.band}" onclick="openEmployeeFromDashboard('${escapeHtml(r.id)}')">
+        <div class="head"><strong>${escapeHtml(r.name)}</strong><span class="id">${escapeHtml(r.id)}</span></div>
+        ${hrRow('Designation', escapeHtml(r.desig))}
+        ${hrRow('Department', escapeHtml(r.dept))}
+        ${hrRow('Salary', r.salary ? '₹' + fmtMoney(r.salary) : '—')}
+        ${hrRow('Due', escapeHtml(r.due) + ' · ' + label[r.band])}
+        ${hrRow('Days', r.days < 0 ? Math.abs(r.days) + ' late' : r.days)}
+      </div>`).join('')}</div>`;
+    return;
+  }
+
   box.innerHTML = `<div class="inc-scroll"><table class="inc-table">
     <thead><tr><th>Employee</th><th>Department</th><th class="num">Salary</th><th>Due</th><th class="num">Days</th></tr></thead>
     <tbody>${rows.map(r => `
