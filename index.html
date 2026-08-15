@@ -6084,7 +6084,11 @@ function renderHeadingExplainer(){
 function computeAttendanceSummary(att, employee, dateList, holidayMap){
   let present=0, absent=0, elUsed=0, slUsed=0, lpDays=0, halfDays=0, shortCount=0, lateCount=0, holidays=0;
   dateList.forEach(dateStr => {
-    const dow = new Date(dateStr).getDay();
+    // 'T00:00:00' with no offset parses as local midnight, not UTC — bare
+    // new Date(dateStr) parses as UTC midnight (see CLAUDE.md), which shifts
+    // the apparent day of week in any timezone behind UTC and would mark the
+    // wrong day as Sunday here. Same fix already used in sandwichDaysFor.
+    const dow = new Date(dateStr + 'T00:00:00').getDay();
     const entry = att[dateStr];
     const code = entry ? entry.code : (holidayMap[dateStr] ? 'H' : (dow === 0 ? 'H' : null));
     if(entry && entry.lateFlag) lateCount++;
@@ -6326,7 +6330,8 @@ async function renderAttendanceSheet(){
   const today = todayStr();
   const dayMeta = dateList.map(dateStr => ({
     dateStr,
-    isSunday: new Date(dateStr).getDay() === 0,
+    // 'T00:00:00' — local midnight, not UTC (see computeAttendanceSummary).
+    isSunday: new Date(dateStr + 'T00:00:00').getDay() === 0,
     isHoliday: !!holidayMap[dateStr],
     isPast: dateStr <= today
   }));
@@ -8473,7 +8478,8 @@ function consultantDays(n){
 function consultantDayCounts(att, dateList, holidayMap){
   let present = 0, el = 0, sl = 0, absent = 0;
   dateList.forEach(dateStr => {
-    const dow = new Date(dateStr).getDay();
+    // 'T00:00:00' — local midnight, not UTC (see computeAttendanceSummary).
+    const dow = new Date(dateStr + 'T00:00:00').getDay();
     const entry = att[dateStr];
     const code = entry ? entry.code : (holidayMap[dateStr] ? 'H' : (dow === 0 ? 'H' : null));
     switch(code){
@@ -8738,7 +8744,8 @@ async function renderConsultantReport(){
   // fall on a Sunday (otherwise the same day would be counted twice).
   let weekOff = 0, publicHolidays = 0;
   dateList.forEach(dateStr => {
-    const isSunday = new Date(dateStr).getDay() === 0;
+    // 'T00:00:00' — local midnight, not UTC (see computeAttendanceSummary).
+    const isSunday = new Date(dateStr + 'T00:00:00').getDay() === 0;
     if(isSunday) weekOff++;
     else if(holidayMap[dateStr]) publicHolidays++;
   });
