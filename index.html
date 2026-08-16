@@ -13665,13 +13665,26 @@ function collectAdvanceTempSchedule(){
   const sched = editingEmployeeDraft.advanceTempSchedule;
   if(!sched) return null;
   const startMonth = (document.getElementById('advTemp_start') || {}).value || '';
+  // Once rate changes exist the field is read-only and shows the CURRENT
+  // rate, not the original one — read the original back from the draft
+  // instead of the DOM, or saving would overwrite it with today's rate.
+  // Same reasoning as collectLoanRows for the identical EMI-lock pattern —
+  // and the same field this function used to leave off the returned object
+  // entirely. renderAdvanceTempSchedule's "no changes yet" branch displays
+  // sched.instalment when the form is reopened; with nothing under that key
+  // ever saved, the Monthly rate field came back blank every time, looking
+  // like the figure had vanished. Worse than cosmetic: saving again from
+  // that blank field read rate as 0, and with hasRateChanges still false,
+  // wiped rateHistory down to [] — the rate that WAS entered, and every
+  // month's deduction with it, genuinely erased by the very next save.
   const rate = Number((document.getElementById('advTemp_rate') || {}).value) || 0;
   const hasRateChanges = Array.isArray(sched.rateHistory) && sched.rateHistory.length > 1;
-  if(!startMonth && !rate && !hasRateChanges) return null;
+  const instalment = hasRateChanges ? (Number(sched.instalment) || 0) : rate;
+  if(!startMonth && !instalment && !hasRateChanges) return null;
   const rateHistory = hasRateChanges
     ? sched.rateHistory
-    : (rate ? [{ from: startMonth || null, instalment: rate }] : []);
-  return { startMonth, rateHistory };
+    : (instalment ? [{ from: startMonth || null, instalment }] : []);
+  return { startMonth, instalment, rateHistory };
 }
 
 // Same shape as the Joining Kit's assets (item, qty, issuedOn, returnedOn), so
