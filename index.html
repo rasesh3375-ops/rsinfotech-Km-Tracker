@@ -15158,7 +15158,16 @@ async function applyAlwaysPresentBulk(){
     '?\n\nEvery working day from that date on computes as Present for them automatically, in every report and every ' +
     'future financial year, until changed here or on their own Employee Master record. Continue?')) return;
   const toSave = selected.map(e => Object.assign({}, e, { alwaysPresentFrom: date }));
-  await saveEmployees(toSave);
+  // saveEmployees throws on a real failure (over the per-record size limit, a
+  // network blip, the backend rejecting the write) — uncaught here, withBusy
+  // has no catch of its own, so the button just quietly went back to normal
+  // with nothing telling anyone the save never happened.
+  try{
+    await saveEmployees(toSave);
+  }catch(err){
+    box.innerHTML = '<p class="pol-warn">' + escapeHtml((err && err.message) || 'Could not save — the server did not respond.') + ' Nothing was changed — press Apply again.</p>';
+    return;
+  }
   box.innerHTML = '<p class="dash-muted">✓ Set for ' + selected.length + ' employee(s): ' + escapeHtml(names) + '.</p>';
   await renderAlwaysPresentBulkList();
 }
