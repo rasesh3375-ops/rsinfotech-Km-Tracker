@@ -8303,6 +8303,17 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   const monthYm = dateList[0].slice(0, 7);
   const advanceTemp = advanceTempForMonth(emp, monthYm);
   const advance = salaryAdvanceForMonth(emp, monthYm);
+  // Nothing recovered this month because no entry matches it is correct by
+  // design (see salaryAdvanceForMonth) — an April entry only ever affects
+  // April. On screen it is indistinguishable from "nobody ever entered
+  // anything for this employee" unless flagged, which is exactly what was
+  // reported as "advance not deducting" for an employee who in fact only
+  // had an entry for a different month. Only fires when this employee
+  // genuinely has Salary Advance Payment history recorded for SOME month —
+  // an employee with no history at all is correctly silent, nothing to warn
+  // about.
+  const advanceHist = emp.advanceHistory || [];
+  const advanceMissingThisMonth = !advance && advanceHist.length > 0 && !advanceHist.some(h => h.month === monthYm);
   const retention = computeRetentionForMonth(emp, dYear, dMonth);
   const loanEmi = computeLoanEmiForMonth(emp, dYear, dMonth);
   const loanBalance = loanBalanceAfterMonth(emp, dYear, dMonth);
@@ -8338,7 +8349,7 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   const ytd = leaveUsedThisFinancialYear(att, dateList[dateList.length - 1], emp.leaveOpeningFrom);
   const fullDayLeaveBal = Math.max(0, (Number(emp.elOpening) || 0) - ytd.el);
   const halfDayLeaveBal = Math.max(0, (Number(emp.slOpening) || 0) - ytd.sl);
-  return { rate, leaveDays, leaveAmount, basic, hra, lta, gross, pf, esi, pt, advanceTemp, advance,
+  return { rate, leaveDays, leaveAmount, basic, hra, lta, gross, pf, esi, pt, advanceTemp, advance, advanceMissingThisMonth,
            policyHalfDays: policyHalf.total, policyHalfReasons: policyHalf.reasons,
            sandwichDays: sandwichDates.length, sandwichDates,
            conveyance,
@@ -8382,7 +8393,7 @@ function salaryCardGroups(s){
         ${row('ESI', fmtMoney(s.esi))}
         ${row('PT', fmtMoney(s.pt))}
         ${row('Advance Temp', fmtMoney(s.advanceTemp))}
-        ${row('Advance', fmtMoney(s.advance))}
+        ${row('Advance', fmtMoney(s.advance) + (s.advanceMissingThisMonth ? ' <span class="pol-warn" title="This employee has a Salary Advance Payment entry for another month, but none for this one — each month needs its own entry, so nothing is recovered here unless one is added">(no entry this month)</span>' : ''))}
         ${row('Loan EMI', fmtMoney(s.loanEmi))}
         ${row('Retention', fmtMoney(s.retention))}
         ${row('Total Deduction', fmtMoney(s.totalDeduction))}
@@ -8513,7 +8524,7 @@ async function renderSalarySheet(){
       } else {
         bodyRows += `<tr${rowCls}><td class="sal-sr">${srNo++}</td><td class="sal-name">${escapeHtml(emp.name)}${isNewThisMonth ? ' <span class="pill new">new</span>' : ''}</td><td class="${rateCellCls}">${fmtMoney(s.rate)}</td><td>${s.leaveDays}${s.sandwichDays ? ' <span class="pol-warn" title="' + escapeHtml(s.sandwichDates.join(', ')) + ' — sandwiched between two unpaid-absence days">(incl. ' + s.sandwichDays + ' sandwich)</span>' : ''}</td><td class="sal-col-2nd">${s.policyHalfDays ? '<span class="pol-warn">' + s.policyHalfDays + '</span>' : '—'}</td><td class="sal-col-2nd">${fmtMoney(s.leaveAmount)}</td>` +
           `<td>${fmtMoney(s.basic)}</td><td>${fmtMoney(s.hra)}</td><td>${fmtMoney(s.lta)}</td><td>${fmtMoney(s.gross)}</td>` +
-          `<td class="sal-col-2nd">${fmtMoney(s.pf)}</td><td class="sal-col-2nd">${fmtMoney(s.esi)}</td><td class="sal-col-2nd">${fmtMoney(s.pt)}</td><td class="sal-col-2nd">${fmtMoney(s.advanceTemp)}</td><td class="sal-col-2nd">${fmtMoney(s.advance)}</td><td class="sal-col-2nd">${fmtMoney(s.loanEmi)}</td><td class="sal-col-2nd">${fmtMoney(s.retention)}</td>` +
+          `<td class="sal-col-2nd">${fmtMoney(s.pf)}</td><td class="sal-col-2nd">${fmtMoney(s.esi)}</td><td class="sal-col-2nd">${fmtMoney(s.pt)}</td><td class="sal-col-2nd">${fmtMoney(s.advanceTemp)}</td><td class="sal-col-2nd">${fmtMoney(s.advance)}${s.advanceMissingThisMonth ? ' <span class="pol-warn" title="This employee has a Salary Advance Payment entry for another month, but none for this one">(no entry this month)</span>' : ''}</td><td class="sal-col-2nd">${fmtMoney(s.loanEmi)}</td><td class="sal-col-2nd">${fmtMoney(s.retention)}</td>` +
           `<td class="sal-col-2nd">${fmtMoney(s.totalDeduction)}</td><td class="sal-col-2nd">${s.conveyance ? '+' + fmtMoney(s.conveyance) : '—'}</td><td class="sal-col-2nd">${fmtMoney(s.netBeforeDirect)}</td>` +
           `<td class="sal-col-2nd">${s.directPaid ? fmtMoney(s.directPaid) : '—'}</td><td><strong>${fmtMoney(s.netSalary)}</strong></td>` +
           `<td class="sal-col-2nd">${fmtMoney(s.pen)}</td><td class="sal-col-2nd">${fmtMoney(s.employerPf)}</td><td class="sal-col-2nd">${fmtMoney(s.pfAdmin)}</td>` +
@@ -8968,7 +8979,7 @@ async function renderApprenticeSalaryReport(){
   const apprenticeCardRows = s => hrRow('Rate of Pay', fmtMoney(s.rate)) + hrRow('Leave Days', s.leaveDays) +
     hrRow('Leave Amount', fmtMoney(s.leaveAmount)) + hrRow('Basic', fmtMoney(s.basic)) + hrRow('HRA', fmtMoney(s.hra)) +
     hrRow('LTA', fmtMoney(s.lta)) + hrRow('Gross', fmtMoney(s.gross)) +
-    hrRow('Advance Temp', fmtMoney(s.advanceTemp)) + hrRow('Advance', fmtMoney(s.advance)) + hrRow('Loan EMI', fmtMoney(s.loanEmi)) +
+    hrRow('Advance Temp', fmtMoney(s.advanceTemp)) + hrRow('Advance', fmtMoney(s.advance) + (s.advanceMissingThisMonth ? ' <span class="pol-warn" title="This employee has a Salary Advance Payment entry for another month, but none for this one">(no entry this month)</span>' : '')) + hrRow('Loan EMI', fmtMoney(s.loanEmi)) +
     hrRow('Retention', fmtMoney(s.retention)) + hrRow('Total Deduction', fmtMoney(s.totalDeduction)) +
     hrRow('Conveyance', s.conveyance ? '+' + fmtMoney(s.conveyance) : '—') + hrRow('Net Before Direct', fmtMoney(s.netBeforeDirect)) +
     hrRow('Paid Directly', s.directPaid ? fmtMoney(s.directPaid) : '—');
@@ -8982,7 +8993,7 @@ async function renderApprenticeSalaryReport(){
     } else {
       bodyRows += `<tr><td class="sal-name">${escapeHtml(emp.name)}</td><td class="num">${fmtMoney(s.rate)}</td><td class="num">${s.leaveDays}</td><td class="num">${fmtMoney(s.leaveAmount)}</td>` +
         `<td class="num">${fmtMoney(s.basic)}</td><td class="num">${fmtMoney(s.hra)}</td><td class="num">${fmtMoney(s.lta)}</td><td class="num">${fmtMoney(s.gross)}</td>` +
-        `<td class="num">${fmtMoney(s.advanceTemp)}</td><td class="num">${fmtMoney(s.advance)}</td><td class="num">${fmtMoney(s.loanEmi)}</td><td class="num">${fmtMoney(s.retention)}</td><td class="num">${fmtMoney(s.totalDeduction)}</td>` +
+        `<td class="num">${fmtMoney(s.advanceTemp)}</td><td class="num">${fmtMoney(s.advance)}${s.advanceMissingThisMonth ? ' <span class="pol-warn" title="This employee has a Salary Advance Payment entry for another month, but none for this one">(no entry this month)</span>' : ''}</td><td class="num">${fmtMoney(s.loanEmi)}</td><td class="num">${fmtMoney(s.retention)}</td><td class="num">${fmtMoney(s.totalDeduction)}</td>` +
         `<td class="num">${s.conveyance ? '+' + fmtMoney(s.conveyance) : '—'}</td><td class="num">${fmtMoney(s.netBeforeDirect)}</td><td class="num">${s.directPaid ? fmtMoney(s.directPaid) : '—'}</td>` +
         `<td class="num"><strong>${fmtMoney(s.netSalary)}</strong></td></tr>`;
     }
@@ -13672,7 +13683,19 @@ function renderAdvanceRows(){
     box.innerHTML = '<p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;">No advance recorded for any month yet.</p>';
     return;
   }
-  box.innerHTML = rows.map((r, i) => {
+  // Each entry only ever affects its own month's Salary Sheet — an April
+  // entry has no bearing on May, by design (see salaryAdvanceForMonth). That
+  // is easy to read as "it should keep applying" instead, and only shows up
+  // as a surprise later on the Salary Sheet itself. Flagged here too, at the
+  // point of entry, not just there — same "surface it where it happens"
+  // pattern as the loan/retention warnings above.
+  const thisMonthYm = todayStr().slice(0, 7);
+  const hasThisMonth = rows.some(r => r.month === thisMonthYm);
+  const currentMonthNote = !hasThisMonth
+    ? '<p style="font-size:11.5px;color:var(--amber-dark);margin:0 0 12px;">No entry yet for ' + escapeHtml(monthLabel(thisMonthYm)) +
+      ' — each month needs its own entry, so this employee’s Salary Sheet for this month will show ₹0 recovered until one is added below (even if an earlier month has a figure).</p>'
+    : '';
+  box.innerHTML = currentMonthNote + rows.map((r, i) => {
     // collectAdvanceRows drops any row with no month at save time — an
     // amount typed in with the month left blank used to look like a saved
     // entry right up until Save, then silently vanish with nothing telling
