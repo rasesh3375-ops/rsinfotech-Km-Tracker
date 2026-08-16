@@ -5918,6 +5918,7 @@ function buildPolicySummary(employees, attByEmp, dateList, precomputed, holidayM
       <td class="num">${r.sickUsed} / ${r.bal.sickTotal}</td>
       <td class="num">${r.plUsed} used · ${r.bal.plEarned} earned</td>
       <td class="num">${r.lwp || '—'}</td>
+      <td class="num">${r.sandwichDays || '—'}</td>
       <td class="num">${r.otMinutes ? Math.floor(r.otMinutes/60)+'h '+(r.otMinutes%60)+'m' : '—'}</td>
       <td>${r.warn.length
         ? r.warn.map(w => '<div class="pol-warn">⚠ ' + escapeHtml(w) + '</div>').join('')
@@ -5950,6 +5951,7 @@ function buildPolicySummary(employees, attByEmp, dateList, precomputed, holidayM
         <th class="num" title="Sick leave used against the yearly allowance">Sick<br><span class="th-sub">used / total</span></th>
         <th class="num" title="Privilege leave used and earned">PL<br><span class="th-sub">used / earned</span></th>
         <th class="num" title="Leave without pay — unpaid days">Unpaid<br><span class="th-sub">days</span></th>
+        <th class="num" title="Sunday/holiday charged because both bracketing days were unpaid absence">Sandwich<br><span class="th-sub">days</span></th>
         <th class="num" title="Overtime past the configured hour">Overtime<br><span class="th-sub">this month</span></th>
         <th>What the policy says</th></tr></thead>
       <tbody>${body}</tbody></table></div>
@@ -6636,7 +6638,7 @@ async function renderAttendanceSheet(){
   const csvHeader = ['S.No','Name', ...dateList.map(d => parseInt(d.slice(8),10)),
     'Present','Absent','EL','SL','LP','Half','Short','Late',
     'Employee Type','Late Count','Short Leaves','Half Days','Sick Used','Sick Balance',
-    'PL Earned','PL Used','PL Balance','LWP','Attendance Days','Overtime Minutes','Early Leaving Days',
+    'PL Earned','PL Used','PL Balance','LWP','Sandwich Days','Attendance Days','Overtime Minutes','Early Leaving Days',
     'Policy Rule Applied','Violation Reason'];
   const csvRows = [];
 
@@ -6728,7 +6730,7 @@ async function renderAttendanceSheet(){
       r.lateCount, r.shortLeaves, r.halfDays,
       r.sickUsed, r.bal.sickLeft,
       r.bal.plEarned, r.plUsed, r.bal.plLeft,
-      r.lwp, r.attendanceDays, r.otMinutes || 0, r.earlyDays || 0,
+      r.lwp, r.sandwichDays || 0, r.attendanceDays, r.otMinutes || 0, r.earlyDays || 0,
       LEAVE_POLICY.version,
       r.warn.length ? r.warn.join('; ') : 'Within policy'
     );
@@ -9295,7 +9297,14 @@ async function renderConsultantReport(){
     const att = await getAttendance(emp.id);
     const c = consultantDayCounts(att, dateList, holidayMap);
     const presentDays = c.present;
-    const absentDays = c.absent;
+    // A Sunday/holiday bracketed by two unpaid-absence days is charged as an
+    // extra unpaid day on the Salary Sheet (computeSalaryForEmployee) — this
+    // is the same figure, added the same way, so the payable-days count sent
+    // to the consultant cannot overstate what is actually paid. Resident
+    // Engineers sit outside the sandwich rule entirely, same exemption the
+    // Salary Sheet itself applies.
+    const sandwichDays = emp.employeeType === 'resident' ? 0 : sandwichDaysFor(att, dateList, holidayMap).length;
+    const absentDays = c.absent + sandwichDays;
     // Everything in the month is paid except unpaid absence (A and LP) — EL, SL,
     // week-offs and public holidays are all paid. Deriving it by subtraction keeps
     // this inside 0..monthDays even when someone checks in on a Sunday, which
@@ -16316,8 +16325,15 @@ async function renderEmployeeDetailReport(){
         }
       }
       const fySummary = computeAttendanceSummary(att, emp, fyDateList, holidayMap);
-      const fyPct = fyDateList.length ? Math.round((fySummary.paidDays / fyDateList.length) * 100) : 0;
-      observations.push('Attendance this FY (' + financialYearLabel(todayStr()) + ', to date): ' + fySummary.paidDays + ' of ' + fyDateList.length + ' days paid (' + fyPct + '%), ' + fySummary.absent + ' absent.');
+      // A Sunday/holiday bracketed by two unpaid-absence days is an extra
+      // unpaid day on the Salary Sheet (computeSalaryForEmployee) — folded in
+      // here too, so "days paid" cannot read higher than what payroll
+      // actually pays for the same period.
+      const fySandwichDays = sandwichDaysFor(att, fyDateList, holidayMap).length;
+      const fyPaidDays = Math.max(0, fySummary.paidDays - fySandwichDays);
+      const fyAbsentDays = fySummary.absent + fySandwichDays;
+      const fyPct = fyDateList.length ? Math.round((fyPaidDays / fyDateList.length) * 100) : 0;
+      observations.push('Attendance this FY (' + financialYearLabel(todayStr()) + ', to date): ' + fyPaidDays + ' of ' + fyDateList.length + ' days paid (' + fyPct + '%), ' + fyAbsentDays + ' absent.');
       observations.push('Leave this FY: ' + usedLeave.el + ' of ' + (Number(emp.elOpening) || 0) + ' Earned Leave used, ' + usedLeave.sl + ' of ' + (Number(emp.slOpening) || 0) + ' Sick Leave used.');
       if(lateCount || shortLeaves) flags.push('Late coming / short leave this FY: ' + lateCount + ' late arrival(s), ' + shortLeaves + ' short leave(s), amounting to ' + halfDayUnits + ' half-day deduction(s) in total.');
     }
