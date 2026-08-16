@@ -11910,6 +11910,7 @@ function employeeModalHtml(emp){
         <label class="field">Number of months to deduct over</label>
         <input type="number" id="f_retentionMonths" placeholder="e.g. 12" value="${emp.retentionMonths||''}" oninput="toggleBondFields()">
         <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Retention money is split evenly across these months from the bond start date and deducted on the Salary Sheet each month, as its own line.</p>
+        <p id="bondRetentionPreview" class="hidden" style="font-size:12.5px;font-weight:600;margin:6px 0 0;"></p>
         <p id="bondRetentionWarn" class="hidden" style="font-size:12px;color:var(--amber-dark);font-weight:600;margin:6px 0 0;"></p>
         </div>
       </div>
@@ -12390,6 +12391,22 @@ function toggleBondFields(){
     const missing = on && hasAmount && !bondStart;
     warnEl.classList.toggle('hidden', !missing);
     if(missing) warnEl.textContent = 'Bond start date is required for retention money to be deducted — without it, nothing comes off the Salary Sheet even with an amount entered here.';
+  }
+  // "Retention money (total)" is easy to read as a monthly figure instead
+  // of the whole bond amount it actually is — entering what was meant to be
+  // ₹1,500 a month as the total, with 11 months to split it across, quietly
+  // deducts ₹136 a month instead. Shown live so the actual per-month figure
+  // is obvious before saving, not discovered afterward on the Salary Sheet.
+  const previewEl = document.getElementById('bondRetentionPreview');
+  if(previewEl){
+    const money = Number((document.getElementById('f_retentionMoney') || {}).value) || 0;
+    const months = Number((document.getElementById('f_retentionMonths') || {}).value) || 0;
+    const showPreview = on && money > 0 && months > 0;
+    previewEl.classList.toggle('hidden', !showPreview);
+    if(showPreview){
+      const perMonth = Math.round((money / months) * 100) / 100;
+      previewEl.innerHTML = 'That deducts <strong>₹' + fmtMoney(perMonth) + ' a month</strong> for ' + months + ' month(s) — total ₹' + fmtMoney(money) + '. If you meant ₹' + fmtMoney(money) + ' a month instead, enter ₹' + fmtMoney(money * months) + ' as the total above.';
+    }
   }
 }
 
