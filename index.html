@@ -7958,7 +7958,11 @@ function computeRetentionForMonth(emp, year, month){
   const money = Number(emp.retentionMoney) || 0;
   const months = Number(emp.retentionMonths) || 0;
   if(!money || !months || !emp.bondStart) return 0;
-  const start = new Date(emp.bondStart);
+  // 'T00:00:00' — local midnight, not UTC (see CLAUDE.md/computeAttendanceSummary):
+  // a bare new Date(dateStr) parses a date-only string as UTC midnight, which
+  // can read back as the previous day — and so the previous month — in a
+  // timezone behind UTC.
+  const start = new Date(emp.bondStart + 'T00:00:00');
   const startIndex = start.getFullYear()*12 + start.getMonth();
   const thisIndex = year*12 + (month-1);
   const offset = thisIndex - startIndex;
@@ -11895,17 +11899,18 @@ function employeeModalHtml(emp){
         <div id="bondFields" class="hidden">
         <div style="height:12px"></div>
         <label class="field">Bond start date</label>
-        <input type="date" id="f_bondStart" value="${emp.bondStart||''}">
+        <input type="date" id="f_bondStart" value="${emp.bondStart||''}" onchange="toggleBondFields()">
         <div style="height:12px"></div>
         <label class="field">Bond end date</label>
         <input type="date" id="f_bondEnd" value="${emp.bondEnd||''}">
         <div style="height:12px"></div>
         <label class="field">Retention money (total)</label>
-        <input type="number" id="f_retentionMoney" placeholder="0" value="${emp.retentionMoney||''}">
+        <input type="number" id="f_retentionMoney" placeholder="0" value="${emp.retentionMoney||''}" oninput="toggleBondFields()">
         <div style="height:12px"></div>
         <label class="field">Number of months to deduct over</label>
-        <input type="number" id="f_retentionMonths" placeholder="e.g. 12" value="${emp.retentionMonths||''}">
+        <input type="number" id="f_retentionMonths" placeholder="e.g. 12" value="${emp.retentionMonths||''}" oninput="toggleBondFields()">
         <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Retention money is split evenly across these months from the bond start date and deducted on the Salary Sheet each month, as its own line.</p>
+        <p id="bondRetentionWarn" class="hidden" style="font-size:12px;color:var(--amber-dark);font-weight:600;margin:6px 0 0;"></p>
         </div>
       </div>
 
@@ -12372,6 +12377,19 @@ function toggleBondFields(){
       const el = document.getElementById(id);
       if(el) el.value = '';
     });
+  }
+  // computeRetentionForMonth refuses to deduct anything at all without a
+  // bond start date, even with money and months both filled in — silently,
+  // with nothing on this form saying so. Retention money entered with no
+  // start date used to look exactly like retention money entered correctly.
+  const warnEl = document.getElementById('bondRetentionWarn');
+  if(warnEl){
+    const bondStart = (document.getElementById('f_bondStart') || {}).value || '';
+    const hasAmount = (Number((document.getElementById('f_retentionMoney') || {}).value) || 0) > 0
+      || (Number((document.getElementById('f_retentionMonths') || {}).value) || 0) > 0;
+    const missing = on && hasAmount && !bondStart;
+    warnEl.classList.toggle('hidden', !missing);
+    if(missing) warnEl.textContent = 'Bond start date is required for retention money to be deducted — without it, nothing comes off the Salary Sheet even with an amount entered here.';
   }
 }
 
@@ -13338,7 +13356,12 @@ function renderLoanRows(){
     const amount = Number(l.amount) || 0;
     const bal = loanBalanceAfter(l, y, m);
     const recovered = Math.max(0, Math.round((amount - bal) * 100) / 100);
-    const warn = l.status === 'active' && !l.startMonth;
+    // loansOf() filters out any loan with no amount at all, everywhere the
+    // Salary Sheet and every report read loans from — an EMI entered with no
+    // amount used to look identical to a correctly-saved loan here, while
+    // silently deducting nothing anywhere else, with no warning explaining why.
+    const noAmount = l.status === 'active' && amount <= 0;
+    const warn = l.status === 'active' && (!l.startMonth || noAmount);
     // The top field only edits the ORIGINAL EMI. Once a change has actually
     // been recorded below, it goes read-only and shows the current rate —
     // same reasoning, and the same pattern, as Rate of Pay locking once an
@@ -13370,12 +13393,14 @@ function renderLoanRows(){
         <option value="closed" ${l.status === 'closed' ? 'selected' : ''}>Closed</option>
       </select>
       <p style="font-size:11.5px;margin:8px 0 0;${warn ? 'color:var(--amber-dark);font-weight:600;' : 'color:var(--muted);'}">
-        ${warn
-          ? 'No recovery month set, so nothing is being deducted for this one.'
-          : l.status === 'closed'
-            ? 'Closed — nothing is deducted.'
-            : 'Recovered so far ₹' + fmtMoney(recovered) + ' · balance ₹' + fmtMoney(bal) +
-              (skipMonths.length ? ' · ' + skipMonths.length + ' month(s) skipped, so payoff runs that much later' : '')}
+        ${noAmount
+          ? 'No loan amount entered, so nothing is being deducted for this one — not even the instalment above, however large.'
+          : warn
+            ? 'No recovery month set, so nothing is being deducted for this one.'
+            : l.status === 'closed'
+              ? 'Closed — nothing is deducted.'
+              : 'Recovered so far ₹' + fmtMoney(recovered) + ' · balance ₹' + fmtMoney(bal) +
+                (skipMonths.length ? ' · ' + skipMonths.length + ' month(s) skipped, so payoff runs that much later' : '')}
       </p>
 
       <div style="height:12px"></div>
@@ -13553,7 +13578,13 @@ function renderAdvanceRows(){
     box.innerHTML = '<p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;">No advance recorded for any month yet.</p>';
     return;
   }
-  box.innerHTML = rows.map((r, i) => `
+  box.innerHTML = rows.map((r, i) => {
+    // collectAdvanceRows drops any row with no month at save time — an
+    // amount typed in with the month left blank used to look like a saved
+    // entry right up until Save, then silently vanish with nothing telling
+    // HR why the Salary Sheet shows no advance for that employee.
+    const missingMonth = (Number(r.advance) || 0) > 0 && !r.month;
+    return `
     <div class="emp-row" style="margin-bottom:12px;">
       <div class="head">
         <strong>${r.month ? escapeHtml(monthLabel(r.month)) : 'New entry'}</strong>
@@ -13565,7 +13596,9 @@ function renderAdvanceRows(){
       <div style="height:10px"></div>
       <label class="field">Salary Advance Payment</label>
       <input type="number" id="adv_amount_${i}" placeholder="0" value="${r.advance || ''}" oninput="syncAdvanceRow(${i})">
-    </div>`).join('');
+      ${missingMonth ? '<p style="font-size:11.5px;color:var(--amber-dark);font-weight:600;margin:6px 0 0;">No month chosen — this amount will not be saved until one is set.</p>' : ''}
+    </div>`;
+  }).join('');
 }
 
 // Keeps the draft in step with what has been typed, same role as syncLoanRow.
