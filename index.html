@@ -3443,7 +3443,7 @@ async function getAttendanceRange(ids, from, to){
         { id, from, to, value: v, until: Date.now() + readTtlFor('attendance:' + id) });
       out[id] = v;
     });
-    return out;
+    return applyAlwaysPresentFillToMany_(out, ids, from, to);
   }
 
   // Backend without the range action: fetch whole records and cut them here.
@@ -3454,12 +3454,13 @@ async function getAttendanceRange(ids, from, to){
     Object.keys(all).forEach(d => { if(d >= from && d <= to) slice[d] = all[d]; });
     out[id] = slice;
   });
-  return out;
+  return applyAlwaysPresentFillToMany_(out, ids, from, to);
 }
 
 async function getAttendanceMany(ids){
   const out = {};
   if(!ids.length) return out;
+  const allIds = ids;
   // This filled the cache but never looked in it, so the dashboard downloaded
   // everybody's attendance to work out who is absent today and the Attendance
   // Sheet downloaded the identical thing again a second later. Whatever is
@@ -3473,27 +3474,34 @@ async function getAttendanceMany(ids){
       missing.push(id);
     }
   });
-  if(!missing.length) return out;
-  ids = missing;
-  // Whole history, merged on the backend across every financial year each
-  // employee has plus whatever is still in their legacy attendance:<id> key.
-  try{
-    const data = await backendAction({ action:'getAttendanceAll', ids });
-    if(data && data.values){
-      ids.forEach(id => {
-        const att = data.values[id] || {};
-        // Primed even when empty, so a new employee with nothing recorded yet
-        // is not asked for again on every screen.
-        primeSharedRead('attendance:' + id, JSON.stringify(att));
-        out[id] = att;
-      });
-      return out;
+  if(missing.length){
+    ids = missing;
+    let handledByBatch = false;
+    // Whole history, merged on the backend across every financial year each
+    // employee has plus whatever is still in their legacy attendance:<id> key.
+    try{
+      const data = await backendAction({ action:'getAttendanceAll', ids });
+      if(data && data.values){
+        ids.forEach(id => { out[id] = data.values[id] || {}; });
+        handledByBatch = true;
+      }
+    }catch(e){}
+    if(!handledByBatch){
+      // Older backend, or the call failed — one at a time, as before.
+      const each = await Promise.all(ids.map(id => getAttendance(id).catch(() => ({}))));
+      ids.forEach((id, i) => { out[id] = each[i] || {}; });
     }
-  }catch(e){}
-  // Older backend, or the call failed — one at a time, as before.
-  const each = await Promise.all(ids.map(id => getAttendance(id).catch(() => ({}))));
-  ids.forEach((id, i) => { out[id] = each[i] || {}; });
-  return out;
+  }
+  const filled = await applyAlwaysPresentFillToMany_(out, allIds, null, null);
+  // Primed with the FILLED value, not the raw one — getAttendance()'s own
+  // cache-hit fast path trusts whatever is here without re-applying the fill
+  // itself, so a stale unfilled entry here would make the Salary Sheet's read
+  // (which goes through that single-employee path) silently disagree with
+  // this one the moment this function had already run once this session.
+  missing.forEach(id => {
+    if(filled[id] !== undefined) primeSharedRead('attendance:' + id, JSON.stringify(filled[id]));
+  });
+  return filled;
 }
 
 // Attendance for a specific set of (employee, financial-year) buckets — the
@@ -3581,16 +3589,40 @@ async function getAttendance(employeeId){
 // reports, leave and overtime reports — sees this the same way, since they
 // all read attendance through this one function.
 async function withAlwaysPresentFill_(employeeId, att){
+  const filled = await applyAlwaysPresentFillToMany_({ [employeeId]: att }, [employeeId]);
+  return filled[employeeId];
+}
+
+// Batch counterpart of the fill above, for every reader that fetches several
+// employees' attendance at once — getAttendanceRange/getAttendanceMany, and
+// so the Attendance Sheet, Consultant Report, and every other bulk report.
+// Before this existed, only the single-employee getAttendance() path (and so
+// only the Salary Sheet, which calls it per employee) applied the "Always
+// mark Present" rule; an Always-Present employee correctly had nothing
+// deducted on the Salary Sheet but showed as entirely unmarked everywhere
+// else, which computeAttendanceSummary's own "unmarked past day defaults to
+// absent" rule then read as fully Absent on the Attendance Sheet itself —
+// the exact shape of "marked Present but the sheet shows all Absent".
+// `fromStr`/`toStr` bound the fill to a requested window (getAttendanceRange);
+// pass null/null for a whole-history read (getAttendanceMany). Always
+// returns fresh per-employee objects rather than mutating the ones passed in,
+// since those may be the same object a shared read cache is holding.
+async function applyAlwaysPresentFillToMany_(attByEmpId, ids, fromStr, toStr){
   const employees = await getEmployees();
-  const emp = employees.find(e => e.id === employeeId);
-  if(!emp || !emp.alwaysPresentFrom) return att;
-  const cutoff = (emp.employmentStatus === 'left' && emp.leftDate) ? emp.leftDate : todayStr();
+  const relevant = employees.filter(e => ids.indexOf(e.id) !== -1 && e.alwaysPresentFrom && attByEmpId[e.id]);
+  if(!relevant.length) return attByEmpId;
   const holidayMap = await getHolidayMap_local();
-  const filled = Object.assign({}, att);
-  leaveWorkingDays(emp.alwaysPresentFrom, cutoff, holidayMap).forEach(dateStr => {
-    if(!filled[dateStr]) filled[dateStr] = { code: 'P' };
+  relevant.forEach(emp => {
+    const cutoff = (emp.employmentStatus === 'left' && emp.leftDate) ? emp.leftDate : todayStr();
+    const from = (fromStr && fromStr > emp.alwaysPresentFrom) ? fromStr : emp.alwaysPresentFrom;
+    const to = (toStr && toStr < cutoff) ? toStr : cutoff;
+    const filled = Object.assign({}, attByEmpId[emp.id]);
+    leaveWorkingDays(from, to, holidayMap).forEach(dateStr => {
+      if(!filled[dateStr]) filled[dateStr] = { code: 'P' };
+    });
+    attByEmpId[emp.id] = filled;
   });
-  return filled;
+  return attByEmpId;
 }
 // Late coming is a flag on the day, not a code that replaces it. Somebody who
 // arrives late still worked, so overwriting their Present with anything else
