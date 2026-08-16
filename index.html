@@ -1154,6 +1154,12 @@
   @media print{
     /* Printing needs every row, not just what fits the on-screen box. */
     .sal-sheet-wrap{max-height:none;overflow:visible;}
+    /* Employee Wise Detail Report only — a rich multi-section single-employee
+       profile is far more likely to split a card across an A4 page boundary
+       than any of the other reports' flat per-employee-row tables, none of
+       which carry this. Scoped to .emp-detail-sec so it cannot affect
+       anything else printed via .print-isolate. */
+    .emp-detail-sec{break-inside:avoid;page-break-inside:avoid;}
   }
   /* Full screen already has its own scroll container (#fullscreenBody) and
      nothing else on the page competing for room, so the 70vh cap meant to
@@ -1950,6 +1956,12 @@
               <p>Log and review overtime hours for Field Engineers.</p>
               <span class="btn full">View</span>
             </button>
+            <button type="button" class="gen-card" onclick="openReportsCard('rptSecEmployeeDetail')">
+              <div class="gen-card-icon t4">🧾</div>
+              <h3>Employee Wise Detail Report</h3>
+              <p>One consolidated profile for a single employee — salary, PF/ESI/PT, loans, leave, bonus and documents.</p>
+              <span class="btn full">View</span>
+            </button>
             <div id="reportCardsLandingBox" style="display:contents"></div>
             <button type="button" class="gen-card" onclick="openReportsCard('rptSecLeaveRollover')">
               <div class="gen-card-icon t3">🔄</div>
@@ -2211,6 +2223,21 @@
           <button class="btn ghost full" onclick="withBusy(this,'Loading…',showOvertimeReport)">Show month</button>
           <div style="height:14px"></div>
           <div id="overtimeReportBox"></div>
+        </section>
+        </div>
+
+        <div id="rptSecEmployeeDetail" class="hidden">
+        <button type="button" class="gen-back-btn" onclick="showReportsLanding()">← Back to Reports</button>
+        <section class="block">
+          <h2 style="margin:0 0 4px;">Employee Wise Detail Report</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">One consolidated profile for a single employee — pick anyone, including those who have left.</p>
+          <label class="field">Employee</label>
+          <select class="field-input" id="empDetailSelect"></select>
+          <div style="height:14px"></div>
+          <button class="btn full" onclick="withBusy(this,'Building report…',showEmployeeDetailReport)">View report</button>
+          <div class="msg" id="empDetailMsg"></div>
+          <div style="height:14px"></div>
+          <div id="empDetailReportBox"></div>
         </section>
         </div>
 
@@ -7873,6 +7900,27 @@ function loanBalanceAfterMonth(emp, year, month){
   return Math.round(loansOf(emp).reduce((t, l) => t + loanBalanceAfter(l, year, month), 0) * 100) / 100;
 }
 
+// The month this loan's balance is projected to clear, walked forward with
+// loanScheduleThrough — the only function that already knows how to project
+// a balance, including EMI changes and skipped months — from the later of
+// "now" and the loan's own start month. Bounded at 240 months (20 years) so
+// a stalled or zero-EMI loan cannot hang the caller; such a loan reports as
+// unresolved (null) rather than looping forever.
+function loanPayoffMonth(loan, fromYear, fromMonth){
+  if(!loan || loan.status !== 'active') return null;
+  if(!(Number(loan.amount) || 0)) return null;
+  if(!loan.startMonth) return null;
+  const now = new Date();
+  let y = fromYear || now.getFullYear(), m = fromMonth || (now.getMonth() + 1);
+  const [sy, sm] = String(loan.startMonth).split('-').map(Number);
+  if(sy && sm && sy * 12 + (sm - 1) > y * 12 + (m - 1)){ y = sy; m = sm; }
+  for(let i = 0; i < 240; i++){
+    if(loanScheduleThrough(loan, y, m).balanceAfter <= 0) return y + '-' + String(m).padStart(2, '0');
+    m++; if(m > 12){ m = 1; y++; }
+  }
+  return null;
+}
+
 // Loans that are running but recovering nothing, because no month was set.
 function loansWithoutStart(emp){
   return loansOf(emp).filter(l => l.status === 'active' && !l.startMonth);
@@ -8096,6 +8144,27 @@ function financialYearRangeText(dateStr){
   const nice = iso => new Date(iso + 'T12:00:00').toLocaleDateString('en-IN',
     { day: 'numeric', month: 'long', year: 'numeric' });
   return nice(financialYearStart(dateStr)) + ' – ' + nice(financialYearEnd(dateStr));
+}
+
+// Length of service from date of joining — nothing else in this file reads
+// this. Returns null for "not recorded" (distinct from a real, if short,
+// tenure) and a distinct future-dated message (a mistyped doj should read as
+// wrong, not as "-2 years"); otherwise "X years, Y months" with the
+// zero-year/zero-month cases spelled out rather than shown as "0 months".
+function tenureText(doj){
+  if(!doj) return null;
+  const start = new Date(doj + 'T00:00:00');
+  const now = new Date();
+  if(start > now) return 'Joining date (' + fmtDateIN(doj) + ') is in the future';
+  let years = now.getFullYear() - start.getFullYear();
+  let months = now.getMonth() - start.getMonth();
+  if(now.getDate() < start.getDate()) months--;
+  if(months < 0){ years--; months += 12; }
+  if(years === 0 && months === 0) return 'Joined this month';
+  const parts = [];
+  if(years) parts.push(years + (years === 1 ? ' year' : ' years'));
+  if(months) parts.push(months + (months === 1 ? ' month' : ' months'));
+  return parts.join(', ');
 }
 
 // Leave used from 1 April up to and including the month being paid. Half days
@@ -14652,7 +14721,8 @@ async function renderReportsTab(){
     populateRoleReportPickers(),
     populateAttendanceUserSelect(),
     renderHolidayList(),
-    populateOvertimeEmployeeSelect()
+    populateOvertimeEmployeeSelect(),
+    populateEmpDetailSelect()
   ]);
   // Show the current month straight away rather than an empty dropdown —
   // these Month/Year <select>s were only ever populated inside their own
@@ -15830,6 +15900,347 @@ async function showOvertimeReport(){
   if(box.querySelector('.rpt-actions')){
     const monthStr = getMonthYearValue('otViewMonthSel', 'otViewYearSel');
     openFullscreenView('Overtime Report — ' + monthLabel(monthStr), 'overtimeReportBox');
+  }
+}
+
+// ---- employee wise detail report ----
+// Everyone, leavers included — unlike the Overtime picker this has no reason
+// to exclude anyone, since HR looking someone's record up is exactly the use
+// case for a leaver too.
+async function populateEmpDetailSelect(){
+  const sel = document.getElementById('empDetailSelect');
+  if(!sel) return;
+  const employees = (await getEmployees()).slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">— Select employee —</option>' +
+    employees.map(e => `<option value="${e.id}">${escapeHtml(e.name)} (${e.id})${
+      e.employmentStatus === 'left' ? ' — left' + (e.leftDate ? ' ' + fmtDateIN(e.leftDate) : '') : ''}</option>`).join('');
+  if(prev && employees.some(e => e.id === prev)) sel.value = prev;
+}
+
+// One consolidated profile for a single employee. Every figure here is read
+// through the same function every other report and the Salary Sheet already
+// use — nothing is worked out fresh for this screen — so it can never
+// disagree with them. monthlyPayFor(emp) is called once and reused across
+// the CTC, PF/ESI/PT and Observations sections rather than re-derived per
+// section, since it already calls calculatePfFor/computeEsi/monthlyPtFor
+// internally.
+async function renderEmployeeDetailReport(){
+  const box = document.getElementById('empDetailReportBox');
+  const msg = document.getElementById('empDetailMsg');
+  if(msg){ msg.textContent = ''; msg.classList.remove('error'); }
+  const id = document.getElementById('empDetailSelect').value;
+  if(!id){
+    box.innerHTML = '';
+    if(msg){ msg.textContent = 'Choose an employee first.'; msg.classList.add('error'); }
+    return;
+  }
+  const employees = await getEmployees();
+  const emp = employees.find(e => e.id === id);
+  if(!emp){ box.innerHTML = '<div class="empty">Employee not found.</div>'; return; }
+
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth() + 1;
+  const ym = y + '-' + String(m).padStart(2, '0');
+  const monthDays = new Date(y, m, 0).getDate();
+  const dateList = [];
+  for(let d = 1; d <= monthDays; d++) dateList.push(y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0'));
+
+  const att = await getAttendance(emp.id);
+  const holidayMap = await getHolidayMap_local();
+  const pay = monthlyPayFor(emp);
+  const cur = currentRatePay(emp);
+  const heading = SALARY_HEADINGS[cur.salaryHeading] || SALARY_HEADINGS.managerial;
+
+  const secs = [];
+  const csvRows = [];
+  const naSpan = '<span style="color:var(--muted);">Not applicable to this heading</span>';
+  const reasonLine = t => t ? '<div style="font-size:11px;color:var(--muted);margin-top:2px;">' + escapeHtml(t) + '</div>' : '';
+
+  // 1. Identity & tenure
+  {
+    const tenure = tenureText(emp.doj);
+    const left = emp.employmentStatus === 'left';
+    const body = hrRow('Employee ID', escapeHtml(emp.id)) +
+      hrRow('Designation', escapeHtml(emp.designation || '—')) +
+      hrRow('Department', escapeHtml(emp.department || '—')) +
+      hrRow('Employee type', escapeHtml(emp.employeeType || '—')) +
+      hrRow('Date of joining', emp.doj ? fmtDateIN(emp.doj) : 'Not recorded') +
+      hrRow('Tenure', tenure || 'Not recorded') +
+      hrRow('Status', left
+        ? '<span class="pol-warn">Left' + (emp.leftDate ? ' — ' + fmtDateIN(emp.leftDate) : '') + '</span>'
+        : '<span class="pol-ok">Active</span>');
+    secs.push(hrCard('<strong>Identity &amp; tenure</strong>', body, 'emp-detail-sec'));
+    csvRows.push(['Name', emp.name], ['Employee ID', emp.id], ['Designation', emp.designation || ''],
+      ['Department', emp.department || ''], ['Employee type', emp.employeeType || ''],
+      ['Date of joining', emp.doj ? fmtDateIN(emp.doj) : 'Not recorded'],
+      ['Tenure', tenure || 'Not recorded'],
+      ['Status', left ? ('Left' + (emp.leftDate ? ' ' + fmtDateIN(emp.leftDate) : '')) : 'Active']);
+  }
+
+  // 2. Salary — current rate, next increment DATE ONLY (no field anywhere
+  // holds a planned future amount), and full history.
+  {
+    const hist = salaryHistoryOf(emp).slice().sort((a, b) => (a.from || '').localeCompare(b.from || ''));
+    const latest = hist[hist.length - 1];
+    // Same Done/Due judgment as the Increment Report — read through the same
+    // salaryHistory every report reads through, not a separate flag.
+    const done = !!(emp.nextIncrement && latest && latest.from && latest.from >= emp.nextIncrement);
+    const histRows = hist.map(h => `<tr><td>${h.from ? fmtDateIN(h.from) : 'Before increments were tracked'}</td><td class="num">${rupees(Number(h.ratePay) || 0)}</td><td>${escapeHtml((SALARY_HEADINGS[h.salaryHeading] || {}).label || h.salaryHeading || '')}</td></tr>`).join('');
+    const body = hrRow('Current Rate of Pay', rupees(cur.ratePay)) +
+      hrRow('Current heading', escapeHtml(heading.label)) +
+      hrRow('Next increment due', emp.nextIncrement
+        ? fmtDateIN(emp.nextIncrement) + (done ? ' <span class="pol-ok">Done</span>' : ' <span class="pol-warn">Due</span>')
+        : 'Not set') +
+      `<table class="sal-table"><tr><th>Effective from</th><th class="num">Rate of Pay</th><th>Heading</th></tr>${histRows}</table>`;
+    secs.push(hrCard('<strong>Salary</strong>', body, 'emp-detail-sec'));
+    csvRows.push(['Current Rate of Pay', Math.round(cur.ratePay)], ['Current heading', heading.label],
+      ['Next increment date', emp.nextIncrement ? fmtDateIN(emp.nextIncrement) : 'Not set']);
+    hist.forEach((h, i) => csvRows.push(['Salary history ' + (i + 1),
+      (h.from ? fmtDateIN(h.from) : 'Before increments were tracked') + ' — ' + Math.round(Number(h.ratePay) || 0) + ', ' + ((SALARY_HEADINGS[h.salaryHeading] || {}).label || '')]));
+  }
+
+  // 3. CTC — same composition as the CTC Report (monthlyPayFor(e).ctcGross *
+  // 12, plus diwaliBonusFor(e)). The bonus LINE, unlike that sum, is shown
+  // through diwaliBonusSource's three states rather than the bare figure —
+  // an eligible-but-unset employee has bonus 0 for the arithmetic (correct:
+  // nothing has been decided, so nothing is added yet) but showing "₹0" on
+  // its own line reads as a decided nil bonus, not an undecided one. Section
+  // 9 below makes the same distinction for the same figure; showing it two
+  // different ways on one report would be its own inconsistency.
+  {
+    const annualGross = pay.ctcGross * 12;
+    const bonusSrc = diwaliBonusSource(emp);
+    const bonus = bonusSrc === 'entered' ? diwaliBonusFor(emp) : 0;
+    const annualCtc = annualGross + bonus;
+    const bonusDisplay = bonusSrc === 'entered' ? rupees(bonus)
+      : bonusSrc === 'unset' ? '<span class="pol-warn">Eligible — amount not yet set</span>'
+      : '<span style="color:var(--muted);">Not eligible</span>';
+    const body = hrRow('Monthly gross (CTC)', rupees(pay.ctcGross)) +
+      hrRow('Annual gross', rupees(annualGross)) +
+      hrRow('Diwali bonus', bonusDisplay) +
+      hrRow('Annual CTC', '<strong>' + rupees(annualCtc) + '</strong>');
+    secs.push(hrCard('<strong>Cost to Company</strong>', body, 'emp-detail-sec'));
+    csvRows.push(['Monthly gross (CTC)', Math.round(pay.ctcGross)], ['Annual gross', Math.round(annualGross)],
+      ['Diwali bonus (annual)', bonusSrc === 'entered' ? Math.round(bonus) : (bonusSrc === 'unset' ? 'Eligible — amount not yet set' : 'Not eligible')],
+      ['Annual CTC', Math.round(annualCtc)]);
+  }
+
+  // 4. PF / ESI / PT — three states per line: not applicable to this
+  // heading (never shown as ₹0), applicable but exempt, applicable and
+  // charged. ESI's own reason is not exposed by monthlyPayFor, so computeEsi
+  // is called a second time here with the exact same inputs it already used
+  // internally — reading its explanation, not re-deriving the figure.
+  {
+    const esiCalc = heading.esi ? computeEsi(pay.salaryGross, {
+      isDisabled: emp.esiDisabled === 'yes', coveredAtPeriodStart: emp.esiCoveredAtPeriodStart === 'yes'
+    }) : null;
+    const body = hrRow('PF', heading.pf ? (rupees(pay.pf) + reasonLine(pay.pfReason)) : naSpan) +
+      hrRow('ESI', heading.esi ? (rupees(pay.esi) + reasonLine(esiCalc && esiCalc.reason)) : naSpan) +
+      hrRow('PT', heading.pt ? (rupees(pay.pt) + reasonLine(pay.pt > 0 ? '' : ('Gross at or below ₹' + fmtMoney(PT_GROSS_THRESHOLD) + ' — no PT this month'))) : naSpan);
+    secs.push(hrCard('<strong>PF / ESI / PT</strong>', body, 'emp-detail-sec'));
+    csvRows.push(['PF applicable', heading.pf ? 'Yes' : 'No'], ['PF this month', heading.pf ? Math.round(pay.pf) : ''],
+      ['ESI applicable', heading.esi ? 'Yes' : 'No'], ['ESI this month', heading.esi ? Math.round(pay.esi) : ''],
+      ['PT applicable', heading.pt ? 'Yes' : 'No'], ['PT this month', heading.pt ? Math.round(pay.pt) : '']);
+  }
+
+  // 5. Loan & EMI — current position plus the expected payoff month, which
+  // no other report projects.
+  {
+    const loans = loansOf(emp);
+    let loanBody;
+    if(!loans.length){
+      loanBody = '<p class="hint">No loan / EMI on record for this employee.</p>';
+    } else {
+      const rowsHtml = loans.map((l, i) => {
+        const amount = Number(l.amount) || 0;
+        const currentEmi = loanEmiRateAsOf(l, ym);
+        const bal = loanBalanceAfter(l, y, m);
+        const payoffYm = (l.status === 'active' && l.startMonth) ? loanPayoffMonth(l, y, m) : null;
+        const payoffText = l.status !== 'active' ? 'Closed'
+          : !l.startMonth ? 'Not started'
+          : payoffYm ? fmtDateIN(payoffYm + '-01')
+          : 'Cannot be projected';
+        const payoffHtml = (l.status === 'active' && (!l.startMonth || !payoffYm)) ? '<span class="pol-warn">' + payoffText + '</span>' : payoffText;
+        csvRows.push(['Loan ' + (i + 1) + ' — amount', Math.round(amount)],
+          ['Loan ' + (i + 1) + ' — current EMI', Math.round(currentEmi)],
+          ['Loan ' + (i + 1) + ' — balance', Math.round(bal)],
+          ['Loan ' + (i + 1) + ' — expected payoff', payoffText]);
+        return `<tr><td class="sal-name">${escapeHtml(l.reason || 'Loan ' + (i + 1))}</td><td class="num">${rupees(amount)}</td><td class="num">${rupees(currentEmi)}</td><td class="num">${rupees(bal)}</td><td>${payoffHtml}</td></tr>`;
+      }).join('');
+      loanBody = `<table class="sal-table"><tr><th>Loan</th><th class="num">Amount</th><th class="num">Current EMI</th><th class="num">Balance</th><th>Expected payoff</th></tr>${rowsHtml}</table>`;
+    }
+    secs.push(hrCard('<strong>Loan &amp; EMI</strong>', loanBody, 'emp-detail-sec'));
+  }
+
+  // 6. Salary Advance Payment — the one-off, dated, balance-tracked advance.
+  {
+    const balance = advanceBalanceAfterMonth(emp, y, m);
+    const thisMonth = salaryAdvanceForMonth(emp, ym);
+    const hist = (emp.advanceHistory || []).slice().sort((a, b) => (a.month || '').localeCompare(b.month || ''));
+    const histTable = hist.length
+      ? `<table class="sal-table"><tr><th>Month</th><th class="num">Advance</th></tr>${hist.map(h => `<tr><td>${escapeHtml(h.month || '—')}</td><td class="num">${rupees(Number(h.advance) || 0)}</td></tr>`).join('')}</table>`
+      : '<p class="hint">No Salary Advance Payment entries on record.</p>';
+    const body = hrRow('Balance brought forward', rupees(Number(emp.advanceOpening) || 0)) +
+      hrRow("This month's recovery", rupees(thisMonth)) +
+      hrRow('Balance remaining', rupees(balance)) + histTable;
+    secs.push(hrCard('<strong>Salary Advance Payment</strong>', body, 'emp-detail-sec'));
+    csvRows.push(['Salary Advance Payment — balance', Math.round(balance)],
+      ['Salary Advance Payment — this month', Math.round(thisMonth)]);
+  }
+
+  // 7. Advance for Temporary — recurring, no balance by design (see
+  // advanceBalanceAfterMonth's own comment: open-ended, so it never
+  // "settles" while still recurring) — shown as a rate, not a total.
+  {
+    const sched = emp.advanceTempSchedule;
+    const rate = advanceTempForMonth(emp, ym);
+    const body = (sched && sched.startMonth)
+      ? hrRow('Monthly rate', rupees(rate)) + hrRow('Recurring from', escapeHtml(sched.startMonth)) +
+        '<p class="hint" style="margin:6px 0 0;">This is a recurring deduction, not a balance — it has no total to run down, so no "amount remaining" is shown here. It continues at this rate every month until HR changes or stops it.</p>'
+      : '<p class="hint">No recurring Advance for Temporary set up for this employee.</p>';
+    secs.push(hrCard('<strong>Advance for Temporary</strong>', body, 'emp-detail-sec'));
+    csvRows.push(['Advance for Temporary — monthly rate', Math.round(rate)]);
+  }
+
+  // 8. Leave — same block as the engineer's own leave-balance view, so this
+  // can never disagree with what the employee is shown.
+  let usedLeave = { el: 0, sl: 0 };
+  {
+    let leaveBody;
+    if(emp.employeeType === 'resident'){
+      leaveBody = '<p class="hint">Resident Engineers are outside the SL/EL leave scheme.</p>';
+      csvRows.push(['Leave', 'Resident Engineer — outside the SL/EL scheme']);
+    } else {
+      usedLeave = leaveUsedThisFinancialYear(att, financialYearEnd(todayStr()), emp.leaveOpeningFrom);
+      const el = Math.max(0, (Number(emp.elOpening) || 0) - usedLeave.el);
+      const sl = Math.max(0, (Number(emp.slOpening) || 0) - usedLeave.sl);
+      leaveBody = hrRow('Earned Leave — opening', Number(emp.elOpening) || 0) + hrRow('Earned Leave — used this FY', usedLeave.el) +
+        hrRow('Earned Leave — remaining', el) + hrRow('Sick Leave — opening', Number(emp.slOpening) || 0) +
+        hrRow('Sick Leave — used this FY', usedLeave.sl) + hrRow('Sick Leave — remaining', sl);
+      csvRows.push(['EL used this FY', usedLeave.el], ['EL remaining', el], ['SL used this FY', usedLeave.sl], ['SL remaining', sl]);
+    }
+    secs.push(hrCard('<strong>Leave (' + financialYearLabel(todayStr()) + ')</strong>', leaveBody, 'emp-detail-sec'));
+  }
+
+  // 9. Diwali bonus — three states, matching diwaliBonusSource exactly.
+  {
+    const src = diwaliBonusSource(emp);
+    const val = src === 'entered' ? rupees(diwaliBonusFor(emp))
+      : src === 'unset' ? '<span class="pol-warn">Eligible — amount not yet set</span>'
+      : '<span style="color:var(--muted);">Not eligible</span>';
+    secs.push(hrCard('<strong>Diwali Bonus</strong>', hrRow('Status', val), 'emp-detail-sec'));
+    csvRows.push(['Diwali bonus', src === 'entered' ? Math.round(diwaliBonusFor(emp)) : (src === 'unset' ? 'Eligible — amount not yet set' : 'Not eligible')]);
+  }
+
+  // 10. Documents — docCardHtml() returns '' for a falsy value, so the
+  // "Not uploaded" fallback belongs here, not inside docCardHtml itself.
+  {
+    const rowFor = (label, value) => hrRow(escapeHtml(label), docCardHtml(value, label) || '<span style="color:var(--muted);">Not uploaded</span>');
+    const docRows = EMPLOYEE_DOC_FIELDS.map(f => rowFor(DOC_FIELD_LABELS[f] || f, emp[f])).join('');
+    const otherDocs = (emp.otherDocs || []).filter(d => d && (d.name || d.dataUrl));
+    const otherRows = otherDocs.map(d => rowFor(d.name || 'Other document', d.dataUrl)).join('');
+    secs.push(hrCard('<strong>Documents</strong>', docRows + otherRows, 'emp-detail-sec'));
+    EMPLOYEE_DOC_FIELDS.forEach(f => csvRows.push([DOC_FIELD_LABELS[f] || f, emp[f] ? 'Uploaded' : 'Not uploaded']));
+    otherDocs.forEach(d => csvRows.push([d.name || 'Other document', d.dataUrl ? 'Uploaded' : 'Not uploaded']));
+  }
+
+  // 11. Salary heading / policy explainer — the same config-generated text
+  // used on the employee form, not hand-written prose. Its <details> is
+  // collapsed by default there (see CLAUDE.md's own note on this exact
+  // class of bug — present in textContent, invisible on screen), so it is
+  // forced open here.
+  {
+    const explainer = buildHeadingExplainer(cur.salaryHeading)
+      .replace('<details class="calc-card fold-card">', '<details class="calc-card fold-card" open>');
+    secs.push(`<div class="emp-detail-sec">${explainer}</div>`);
+    csvRows.push(['Salary heading', heading.label]);
+  }
+
+  // 12. Insurance — WC/GPA full detail when applicable; Mediclaim/Ayushman
+  // are plain yes/no flags, since neither carries policy sub-fields.
+  {
+    const tick = v => v === 'yes' ? '<span class="pol-ok">✓ Yes</span>' : '—';
+    let wcBody = hrRow('Applicable', tick(emp.wcApplicable));
+    if(emp.wcApplicable === 'yes'){
+      wcBody += hrRow('Policy number', escapeHtml(emp.wcPolicyNumber || '—')) +
+        hrRow('Provider', escapeHtml(emp.wcProvider || '—')) +
+        hrRow('Sum insured', escapeHtml(emp.wcSumInsured || '—')) +
+        hrRow('Expiry', emp.wcExpiryDate ? fmtDateIN(emp.wcExpiryDate) : '—');
+    }
+    let gpaBody = hrRow('Applicable', tick(emp.gpaApplicable));
+    if(emp.gpaApplicable === 'yes'){
+      gpaBody += hrRow('Policy number', escapeHtml(emp.gpaPolicyNumber || '—')) +
+        hrRow('Provider', escapeHtml(emp.gpaProvider || '—')) +
+        hrRow('Sum insured', escapeHtml(emp.gpaSumInsured || '—')) +
+        hrRow('Expiry', emp.gpaExpiryDate ? fmtDateIN(emp.gpaExpiryDate) : '—');
+    }
+    const body = '<div style="font-weight:600;font-size:12.5px;margin:4px 0;">Workmen Compensation (WC)</div>' + wcBody +
+      '<div style="font-weight:600;font-size:12.5px;margin:10px 0 4px;">Group Personal Accident (GPA)</div>' + gpaBody +
+      hrRow('Mediclaim', tick(emp.mediclaimApplicable)) + hrRow('Ayushman Card', tick(emp.ayushmanCardApplicable));
+    secs.push(hrCard('<strong>Insurance</strong>', body, 'emp-detail-sec'));
+    csvRows.push(['WC applicable', emp.wcApplicable === 'yes' ? 'Yes' : 'No'], ['GPA applicable', emp.gpaApplicable === 'yes' ? 'Yes' : 'No'],
+      ['Mediclaim', emp.mediclaimApplicable === 'yes' ? 'Yes' : 'No'], ['Ayushman Card', emp.ayushmanCardApplicable === 'yes' ? 'Yes' : 'No']);
+  }
+
+  // 13. HR Observations — plain, gated facts, no composite score (confirmed
+  // with HR). No threshold anywhere in LEAVE_POLICY/PAYROLL_MASTER defines
+  // "high" for any of these, so nothing here picks one — every line is a
+  // stated number, never a "flagged" one.
+  {
+    const observations = [];
+    const tenure = tenureText(emp.doj);
+    observations.push(tenure ? ('Tenure: ' + tenure + ' with R.S. Infotech.') : 'Date of joining is not recorded, so tenure cannot be stated.');
+
+    const flags = [];
+    if(emp.employeeType === 'resident'){
+      observations.push('Resident Engineer — outside the attendance, leave and late-coming policy entirely.');
+    } else {
+      const summary = computeAttendanceSummary(att, emp, dateList, holidayMap);
+      const pct = dateList.length ? Math.round((summary.paidDays / dateList.length) * 100) : 0;
+      observations.push('Attendance this month (' + monthLabel(ym) + '): ' + summary.paidDays + ' of ' + dateList.length + ' days paid (' + pct + '%), ' + summary.absent + ' absent.');
+      observations.push('Leave this FY: ' + usedLeave.el + ' of ' + (Number(emp.elOpening) || 0) + ' Earned Leave used, ' + usedLeave.sl + ' of ' + (Number(emp.slOpening) || 0) + ' Sick Leave used.');
+      const half = policyHalfDaysFor(emp, att, dateList);
+      half.reasons.forEach(r => flags.push('Late coming / short leave: ' + r + '.'));
+    }
+
+    const recoveries = computeLoanEmiForMonth(emp, y, m) + advanceTempForMonth(emp, ym) + salaryAdvanceForMonth(emp, ym);
+    if(recoveries > 0 && pay.gross > 0){
+      const recPct = Math.round((recoveries / pay.gross) * 100);
+      flags.push('Loan, advance and temporary-advance recoveries this month total ' + rupees(recoveries) + ', ' + recPct + '% of gross pay.');
+    }
+    if(!flags.length && emp.employeeType !== 'resident') flags.push('No late-coming, short-leave or recovery-load items to flag this month.');
+
+    const all = observations.concat(flags);
+    secs.push(hrCard('<strong>HR Observations</strong>', all.map(o => `<p style="font-size:12.5px;margin:4px 0;">${escapeHtml(o)}</p>`).join(''), 'emp-detail-sec'));
+    csvRows.push(['HR Observations', all.join(' | ')]);
+  }
+
+  const reportTitle = 'Employee Wise Detail Report — ' + emp.name;
+  box.innerHTML = `${reportActionBar(reportTitle, 'empDetailReportBox')}
+    <div class="sal-sheet-wrap print-isolate" id="empDetailPrintArea">
+    ${reportLogoHeader(reportTitle)}
+    ${secs.join('')}
+    </div>`;
+
+  const fileName = `Employee Detail - ${emp.name} - ${todayStr()}.csv`;
+  const content = toCsv(['Field', 'Value'], csvRows);
+  queueFileToDrive(hrYearPath('', 'Reports', 'Employee Detail'), fileName, content, 'text/csv');
+  stashReportShare(reportTitle, fileName, content, 'text/csv',
+    'HR Management > ' + financialYearLabel(todayStr()) + ' > Reports > Employee Detail', 'empDetailReportBox');
+}
+
+// Wraps renderEmployeeDetailReport() for the "View report" button, same
+// pattern as showOvertimeReport() — skips full screen if nothing rendered
+// (no employee chosen).
+async function showEmployeeDetailReport(){
+  await renderEmployeeDetailReport();
+  const box = document.getElementById('empDetailReportBox');
+  if(box.querySelector('.rpt-actions')){
+    const id = document.getElementById('empDetailSelect').value;
+    const employees = await getEmployees();
+    const emp = employees.find(e => e.id === id);
+    openFullscreenView('Employee Wise Detail Report — ' + (emp ? emp.name : ''), 'empDetailReportBox');
   }
 }
 
