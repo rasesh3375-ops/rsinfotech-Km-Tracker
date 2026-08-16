@@ -13523,23 +13523,30 @@ function removeLoanRow(i){
   renderLoanRows();
 }
 
-// Reads the rows back out of the form. Rows left at zero are dropped rather
-// than saved as empty loans.
+// Reads the rows back out of the form. Rows nobody has touched at all
+// (freshly added, still zero everywhere) are dropped rather than saved as
+// empty loans — but a row with EMI or a recovery month entered, even with
+// Amount left blank, is HR's intent to record something and is kept, not
+// discarded. This used to drop on Amount alone: an EMI entered with no
+// Amount vanished from the record entirely on save — not saved-but-broken,
+// gone — so renderLoanRows' own "No loan amount entered" warning below
+// never got the chance to reappear on the next reload and explain why
+// nothing was being deducted. It looked exactly like the loan had never
+// been added, when really it had been added and then silently erased.
 function collectLoanRows(){
   const out = [];
   const loans = editingEmployeeDraft.loans || [];
   loans.forEach((l, i) => {
     const amount = Number((document.getElementById('loan_amount_' + i) || {}).value) || 0;
-    if(!amount) return;
     const hasEmiChanges = Array.isArray(l.emiHistory) && l.emiHistory.length > 1;
+    const instalment = hasEmiChanges ? (Number(l.instalment) || 0) : (Number((document.getElementById('loan_emi_' + i) || {}).value) || 0);
+    const startMonth = (document.getElementById('loan_start_' + i) || {}).value || '';
+    if(!amount && !instalment && !startMonth) return;
     out.push({
       id: l.id || ('L-' + Date.now() + '-' + i),
       amount,
-      // Once EMI changes exist the field is read-only and shows the CURRENT
-      // rate, not the original one — read the original back from the draft
-      // instead of the DOM, or saving would overwrite it with today's rate.
-      instalment: hasEmiChanges ? (Number(l.instalment) || 0) : (Number((document.getElementById('loan_emi_' + i) || {}).value) || 0),
-      startMonth: (document.getElementById('loan_start_' + i) || {}).value || '',
+      instalment,
+      startMonth,
       status: (document.getElementById('loan_status_' + i) || {}).value || 'active',
       reason: l.reason || '',
       approvedOn: l.approvedOn || '',
@@ -13625,9 +13632,16 @@ function removeAdvanceRow(i){
   renderAdvanceRows();
 }
 
-// Reads the rows back out of the form. A row with no month, or with nothing
-// to recover (no legacy advanceTemp and no advance), is dropped rather than
-// saved as an empty entry. Two rows left pointing at the same month (typed
+// Reads the rows back out of the form. A row nobody has touched at all (no
+// month, no legacy advanceTemp, no advance) is dropped rather than saved as
+// an empty entry — but an amount entered with no month is kept, not
+// discarded: it used to be dropped on the missing month alone, so the
+// amount vanished from the record entirely on save, and renderAdvanceRows'
+// own "No month chosen" warning never got the chance to reappear on the
+// next reload and explain why. A month-less entry never matches any real
+// month salaryAdvanceForMonth looks up, so keeping it changes nothing about
+// what actually gets deducted — it just stays visible until fixed instead
+// of silently disappearing. Two rows left pointing at the same month (typed
 // by mistake, or a correction added alongside the original instead of
 // editing it) collapse to one — the later row in the list wins, since
 // salaryAdvanceForMonth's lookup can only ever answer with one figure for a
@@ -13640,7 +13654,7 @@ function collectAdvanceRows(){
     const advance = Number((document.getElementById('adv_amount_' + i) || {}).value) || 0;
     // Carried through unedited — see syncAdvanceRow's comment.
     const advanceTemp = Number(r.advanceTemp) || 0;
-    if(!month || (!advanceTemp && !advance)) return;
+    if(!month && !advanceTemp && !advance) return;
     const existingIdx = out.findIndex(o => o.month === month);
     if(existingIdx !== -1) out[existingIdx] = { month, advanceTemp, advance };
     else out.push({ month, advanceTemp, advance });
