@@ -7258,6 +7258,17 @@ function openFullscreenView(title, sourceId){
   fsBody.appendChild(el);
   document.getElementById('fullscreenSheetRoot').classList.remove('hidden');
   document.body.style.overflow = 'hidden';
+  // #fullscreenBody is one element reused for every report and letter — it
+  // never gets torn down between them, only its contents swapped out — so
+  // whatever scroll position was left over from the last report shown here
+  // (scrolled down a long table, or right to a later month) silently carried
+  // into the next one, opening it already cut off top-left: the logo header
+  // and Email/WhatsApp bar sliced away, exactly as if this report itself
+  // were broken. Set only now that #fullscreenSheetRoot is actually visible —
+  // scrollTop/scrollLeft are a no-op on an element still inside a
+  // display:none ancestor, so setting them any earlier silently did nothing.
+  fsBody.scrollTop = 0;
+  fsBody.scrollLeft = 0;
   updateSheetScrollNavVisibility();
   // Deliberately NOT calling the native Fullscreen API here (requestFullscreen()
   // used to be called on #fullscreenSheetRoot) — the CSS overlay already
