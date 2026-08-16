@@ -15955,9 +15955,6 @@ async function renderEmployeeDetailReport(){
   const now = new Date();
   const y = now.getFullYear(), m = now.getMonth() + 1;
   const ym = y + '-' + String(m).padStart(2, '0');
-  const monthDays = new Date(y, m, 0).getDate();
-  const dateList = [];
-  for(let d = 1; d <= monthDays; d++) dateList.push(y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0'));
 
   const att = await getAttendance(emp.id);
   const holidayMap = await getHolidayMap_local();
@@ -16197,32 +16194,73 @@ async function renderEmployeeDetailReport(){
   }
 
   // 13. HR Observations — plain, gated facts, no composite score (confirmed
-  // with HR). No threshold anywhere in LEAVE_POLICY/PAYROLL_MASTER defines
-  // "high" for any of these, so nothing here picks one — every line is a
-  // stated number, never a "flagged" one.
+  // with HR), scoped to the financial year to date rather than a single
+  // month — a single month says too little on its own, and one unusually
+  // good or bad month would otherwise skew the read. No threshold anywhere
+  // in LEAVE_POLICY/PAYROLL_MASTER defines "high" for any of these, so
+  // nothing here picks one — every line is a stated number, never a
+  // "flagged" one.
   {
     const observations = [];
     const tenure = tenureText(emp.doj);
     observations.push(tenure ? ('Tenure: ' + tenure + ' with R.S. Infotech.') : 'Date of joining is not recorded, so tenure cannot be stated.');
 
+    // Every month from the financial year's start through the current one,
+    // inclusive. Late coming and short leave reset every month
+    // (LEAVE_POLICY.lateComing/shortLeave), so a full year cannot be handed
+    // to policyHalfDaysFor in one go — it would apply the "3 free a month"
+    // escalation to the whole year as if it were a single month. Each
+    // calendar month is run through the same function payroll already uses
+    // for it, one at a time, and only the totals are summed here.
+    const fyStartYear = fyStartYearOf(todayStr());
+    const months = [];
+    { let my = fyStartYear, mm = FINANCIAL_YEAR.startMonth;
+      while(true){
+        const moYm = my + '-' + String(mm).padStart(2, '0');
+        months.push({ y: my, m: mm, ym: moYm });
+        if(moYm === ym) break;
+        mm++; if(mm > 12){ mm = 1; my++; }
+      }
+    }
+    let lateCount = 0, shortLeaves = 0, halfDayUnits = 0, recoveries = 0, grossTotal = 0;
+    months.forEach(mo => {
+      const days = new Date(mo.y, mo.m, 0).getDate();
+      const mDateList = [];
+      for(let d = 1; d <= days; d++) mDateList.push(mo.ym + '-' + String(d).padStart(2, '0'));
+      const half = policyHalfDaysFor(emp, att, mDateList);
+      lateCount += half.lateCount; shortLeaves += half.shortLeaves; halfDayUnits += half.total;
+      recoveries += computeLoanEmiForMonth(emp, mo.y, mo.m) + advanceTempForMonth(emp, mo.ym) + salaryAdvanceForMonth(emp, mo.ym);
+      grossTotal += monthlyPayFor(emp, mo.y, mo.m).gross;
+    });
+
     const flags = [];
     if(emp.employeeType === 'resident'){
       observations.push('Resident Engineer — outside the attendance, leave and late-coming policy entirely.');
     } else {
-      const summary = computeAttendanceSummary(att, emp, dateList, holidayMap);
-      const pct = dateList.length ? Math.round((summary.paidDays / dateList.length) * 100) : 0;
-      observations.push('Attendance this month (' + monthLabel(ym) + '): ' + summary.paidDays + ' of ' + dateList.length + ' days paid (' + pct + '%), ' + summary.absent + ' absent.');
+      // computeAttendanceSummary itself has no monthly reset logic (each day
+      // is tallied independently), so a single date list spanning the whole
+      // FY to date is fine here — unlike the late-coming loop above, there
+      // is no escalation table to misapply.
+      const fyStart = financialYearStart(todayStr());
+      const fyDateList = [];
+      { const d = new Date(fyStart + 'T00:00:00'), end = new Date(todayStr() + 'T00:00:00');
+        while(d <= end){
+          fyDateList.push(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'));
+          d.setDate(d.getDate() + 1);
+        }
+      }
+      const fySummary = computeAttendanceSummary(att, emp, fyDateList, holidayMap);
+      const fyPct = fyDateList.length ? Math.round((fySummary.paidDays / fyDateList.length) * 100) : 0;
+      observations.push('Attendance this FY (' + financialYearLabel(todayStr()) + ', to date): ' + fySummary.paidDays + ' of ' + fyDateList.length + ' days paid (' + fyPct + '%), ' + fySummary.absent + ' absent.');
       observations.push('Leave this FY: ' + usedLeave.el + ' of ' + (Number(emp.elOpening) || 0) + ' Earned Leave used, ' + usedLeave.sl + ' of ' + (Number(emp.slOpening) || 0) + ' Sick Leave used.');
-      const half = policyHalfDaysFor(emp, att, dateList);
-      half.reasons.forEach(r => flags.push('Late coming / short leave: ' + r + '.'));
+      if(lateCount || shortLeaves) flags.push('Late coming / short leave this FY: ' + lateCount + ' late arrival(s), ' + shortLeaves + ' short leave(s), amounting to ' + halfDayUnits + ' half-day deduction(s) in total.');
     }
 
-    const recoveries = computeLoanEmiForMonth(emp, y, m) + advanceTempForMonth(emp, ym) + salaryAdvanceForMonth(emp, ym);
-    if(recoveries > 0 && pay.gross > 0){
-      const recPct = Math.round((recoveries / pay.gross) * 100);
-      flags.push('Loan, advance and temporary-advance recoveries this month total ' + rupees(recoveries) + ', ' + recPct + '% of gross pay.');
+    if(recoveries > 0 && grossTotal > 0){
+      const recPct = Math.round((recoveries / grossTotal) * 100);
+      flags.push('Loan, advance and temporary-advance recoveries this FY total ' + rupees(recoveries) + ', ' + recPct + '% of gross pay for the same period.');
     }
-    if(!flags.length && emp.employeeType !== 'resident') flags.push('No late-coming, short-leave or recovery-load items to flag this month.');
+    if(!flags.length && emp.employeeType !== 'resident') flags.push('No late-coming, short-leave or recovery-load items to flag this FY.');
 
     const all = observations.concat(flags);
     secs.push(hrCard('<strong>HR Observations</strong>', all.map(o => `<p style="font-size:12.5px;margin:4px 0;">${escapeHtml(o)}</p>`).join(''), 'emp-detail-sec'));
