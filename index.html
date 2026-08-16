@@ -5833,13 +5833,19 @@ function policyHalfDaysFor(emp, att, dateList){
 // own to check against, so checking each day only against its immediate
 // neighbour would miss it. The bracketing working days — the one before the
 // block starts and the one after it ends — are what decide the whole block.
+// A plain "add N days to an ISO date string" helper — pulled out of
+// sandwichDaysFor so callers that need to widen an attendance fetch to
+// cover its before/after lookups (see the comment on getAttendanceRange
+// callers below) can compute the same padded dates without duplicating the
+// date arithmetic.
+function shiftDateStr(dateStr, delta){
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + delta);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
 function sandwichDaysFor(att, dateList, holidayMap){
   const codes = LEAVE_POLICY.leaveApplication.sandwichCodes;
-  const shiftDate = (dateStr, delta) => {
-    const d = new Date(dateStr + 'T00:00:00');
-    d.setDate(d.getDate() + delta);
-    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-  };
+  const shiftDate = shiftDateStr;
   const isNonWorking = dateStr => new Date(dateStr + 'T00:00:00').getDay() === 0 || !!(holidayMap && holidayMap[dateStr]);
   // An unmarked day is not "no opinion" — engineers who track attendance
   // from the mobile app are marked Present the moment they take a check-in
@@ -6677,9 +6683,20 @@ async function renderAttendanceSheet(){
   let bodyRows = '';
   // One request for everyone's attendance before the loop — this month only.
   // The whole record used to come back, every day anybody had ever worked, to
-  // draw thirty-one columns.
-  const attByEmp = await getAttendanceRange(employees.map(e => e.id),
-                                            dateList[0], dateList[dateList.length - 1]);
+  // draw thirty-one columns. Padded a day past each end of the month, not
+  // exactly the month: sandwichDaysFor (called below via policyRowsFor) has
+  // to look one day before/after a Sunday-or-holiday block to judge it, and
+  // when the 1st or last of the month IS that block, the bracketing day
+  // falls in the adjacent month — outside a fetch bounded to exactly this
+  // month. An out-of-range day then reads back as `undefined`, which
+  // sandwichDaysFor's own "unmarked past day defaults to absent" rule then
+  // wrongly treats as an unpaid absence, flagging a false-positive sandwich
+  // day the actual Salary Sheet (which reads whole-history attendance, not
+  // this month-bounded fetch) never charges. The one extra day either side
+  // costs nothing extra beyond the edges of what was already being fetched.
+  const attFetchFrom = shiftDateStr(dateList[0], -1);
+  const attFetchTo = shiftDateStr(dateList[dateList.length - 1], 1);
+  const attByEmp = await getAttendanceRange(employees.map(e => e.id), attFetchFrom, attFetchTo);
   // Everything about a day that does not depend on who is being drawn — the
   // weekday, whether it is a holiday, whether it has happened yet. Worked out
   // once instead of once per employee per day, which for a dozen staff was
@@ -11178,8 +11195,13 @@ async function loadDashboardAbsentToday(onRoll){
   const monthStart = today.slice(0, 8) + '01';
   const monthEnd = today.slice(0, 8) +
     String(new Date(Number(today.slice(0,4)), Number(today.slice(5,7)), 0).getDate()).padStart(2, '0');
+  // Padded a day past each end — renderPolicyAlerts below runs
+  // sandwichDaysFor over this same fetch, and it needs one real day either
+  // side of the month to judge a Sunday/holiday sitting right at the 1st or
+  // last of it. See the identical comment on the Attendance Sheet's own
+  // fetch, which had the same gap.
   const byId = await Promise.race([
-    getAttendanceRange(onRoll.map(e => e.id), monthStart, monthEnd),
+    getAttendanceRange(onRoll.map(e => e.id), shiftDateStr(monthStart, -1), shiftDateStr(monthEnd, 1)),
     new Promise(r => setTimeout(() => r({}), ms))
   ]);
   const atts = onRoll.map(e => byId[e.id] || null);
