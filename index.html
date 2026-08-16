@@ -11902,7 +11902,7 @@ function employeeModalHtml(emp){
         <input type="date" id="f_bondStart" value="${emp.bondStart||''}" onchange="toggleBondFields()">
         <div style="height:12px"></div>
         <label class="field">Bond end date</label>
-        <input type="date" id="f_bondEnd" value="${emp.bondEnd||''}">
+        <input type="date" id="f_bondEnd" value="${emp.bondEnd||''}" onchange="toggleBondFields()">
         <div style="height:12px"></div>
         <label class="field">Retention money (total)</label>
         <input type="number" id="f_retentionMoney" placeholder="0" value="${emp.retentionMoney||''}" oninput="toggleBondFields()">
@@ -12397,15 +12397,48 @@ function toggleBondFields(){
   // ₹1,500 a month as the total, with 11 months to split it across, quietly
   // deducts ₹136 a month instead. Shown live so the actual per-month figure
   // is obvious before saving, not discovered afterward on the Salary Sheet.
+  //
+  // The deduction window itself is Bond start date + Number of months —
+  // "Bond end date" is never read by computeRetentionForMonth at all, it is
+  // pure record-keeping. A bond start of 1 Jul 2025 with 9 months runs
+  // July 2025 through March 2026; an end date of 31 May 2026 entered
+  // alongside it (needing 11 months, not 9) looks like it should extend
+  // retention that far and quietly does not — the Salary Sheet just shows
+  // nothing from April on, with no error, because the two fields never
+  // actually have to agree. Spelling out the real window, and flagging it
+  // by name when it disagrees with Bond end date, is the only way to catch
+  // that before it shows up as "nothing deducted" months later.
   const previewEl = document.getElementById('bondRetentionPreview');
   if(previewEl){
     const money = Number((document.getElementById('f_retentionMoney') || {}).value) || 0;
     const months = Number((document.getElementById('f_retentionMonths') || {}).value) || 0;
+    const bondStartVal = (document.getElementById('f_bondStart') || {}).value || '';
+    const bondEndVal = (document.getElementById('f_bondEnd') || {}).value || '';
     const showPreview = on && money > 0 && months > 0;
     previewEl.classList.toggle('hidden', !showPreview);
     if(showPreview){
       const perMonth = Math.round((money / months) * 100) / 100;
-      previewEl.innerHTML = 'That deducts <strong>₹' + fmtMoney(perMonth) + ' a month</strong> for ' + months + ' month(s) — total ₹' + fmtMoney(money) + '. If you meant ₹' + fmtMoney(money) + ' a month instead, enter ₹' + fmtMoney(money * months) + ' as the total above.';
+      let windowText = '';
+      let mismatchText = '';
+      if(bondStartVal){
+        const [by, bm] = bondStartVal.split('-').map(Number);
+        if(by && bm){
+          const endIdx = by * 12 + (bm - 1) + (months - 1);
+          const endY = Math.floor(endIdx / 12), endM = (endIdx % 12) + 1;
+          const startLabel = MONTH_NAMES[bm - 1] + ' ' + by;
+          const endLabel = MONTH_NAMES[endM - 1] + ' ' + endY;
+          windowText = months === 1 ? (' Deducted in ' + startLabel + ' only.') : (' Runs ' + startLabel + ' through ' + endLabel + '.');
+          if(bondEndVal){
+            const [ey, em] = bondEndVal.split('-').map(Number);
+            if(ey && em && (ey !== endY || em !== endM)){
+              mismatchText = ' This does not match Bond end date (' + fmtDateIN(bondEndVal) + ') — check Number of months if retention should run that far.';
+            }
+          }
+        }
+      }
+      previewEl.innerHTML = 'That deducts <strong>₹' + fmtMoney(perMonth) + ' a month</strong> for ' + months + ' month(s) — total ₹' + fmtMoney(money) + '.' + windowText +
+        (mismatchText ? '<span style="color:var(--amber-dark);">' + mismatchText + '</span>' : '') +
+        ' If you meant ₹' + fmtMoney(money) + ' a month instead, enter ₹' + fmtMoney(money * months) + ' as the total above.';
     }
   }
 }
