@@ -12568,6 +12568,15 @@ function toggleStatutoryFieldsForHeading(){
   try{ toggleDirectPay(); }catch(e){}
   try{ toggleFamilyFields(); }catch(e){}
   try{ renderRatePayNote(); }catch(e){}
+  // Same gap as direct-pay/family above, just found later: bond/retention,
+  // WC and GPA are all "Yes" reveals a hidden section, wired only to the
+  // dropdown's own onchange — so an employee who already has one of these
+  // set to Yes opened with that whole section (retention amount included)
+  // hidden until someone happened to touch the dropdown. These three run
+  // here for the same reason the two above do.
+  try{ toggleBondFields(); }catch(e){}
+  try{ toggleWcFields(); }catch(e){}
+  try{ toggleGpaFields(); }catch(e){}
 }
 
 let editingEmployeeDraft = null;
