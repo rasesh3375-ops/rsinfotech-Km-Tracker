@@ -5797,9 +5797,23 @@ function sandwichDaysFor(att, dateList, holidayMap){
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   };
   const isNonWorking = dateStr => new Date(dateStr + 'T00:00:00').getDay() === 0 || !!(holidayMap && holidayMap[dateStr]);
+  // An unmarked day is not "no opinion" — engineers who track attendance
+  // from the mobile app are marked Present the moment they take a check-in
+  // selfie (see the Attendance tab's own description of that flow) and
+  // nothing at all is written for a day they never check in on, so a real
+  // absence there leaves no explicit code behind. computeAttendanceSummary
+  // already treats an unmarked day up to and including today as Absent for
+  // pay purposes; sandwich leave has to agree with that reading or the two
+  // disagree about the very day meant to trigger it, and the sandwich day
+  // silently stops being charged for anyone whose absences are mobile-
+  // tracked rather than typed into the Attendance Sheet by hand. A future
+  // date is never assumed absent. Always-Present employees never reach
+  // here with an unmarked day at all — withAlwaysPresentFill_ has already
+  // filled those in as Present before sandwichDaysFor ever sees them.
   const isUnpaidAbsence = dateStr => {
     const e = (att || {})[dateStr];
-    return !!e && codes.indexOf(e.code) !== -1;
+    if(e) return codes.indexOf(e.code) !== -1;
+    return dateStr <= todayStr();
   };
   if(!LEAVE_POLICY.leaveApplication.sandwichRule) return [];
   const list = dateList || [];
