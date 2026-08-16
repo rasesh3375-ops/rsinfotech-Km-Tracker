@@ -12009,13 +12009,7 @@ function employeeModalHtml(emp){
         <div style="height:10px"></div>
         <button type="button" class="btn ghost full" onclick="openIncrementModal('${emp.id}')">📈 Record Increment</button>
         <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Adds a new Rate of Pay effective from a chosen date — this is the only way Rate of Pay and salary heading change once the first increment has been recorded, so a raise is never confused with an ordinary edit to the rest of this record.</p>
-        ${salHist.length > 1 || hasIncrementHistory ? `
-        <div style="height:10px"></div>
-        <details><summary style="font-size:12.5px;color:var(--muted);cursor:pointer;">Salary history (${salHist.length})</summary>
-          <div style="font-size:12.5px;color:var(--muted);margin-top:6px;">
-            ${salHist.slice().sort((a,b)=>(a.from||'').localeCompare(b.from||'')).map(h => `<div style="padding:4px 0;border-bottom:1px solid var(--border,#e5e5e5);">${h.from ? fmtDateIN(h.from) : 'Before increments were tracked'} — ₹${fmtMoney(Number(h.ratePay)||0)}, ${escapeHtml((SALARY_HEADINGS[h.salaryHeading]||{}).label || h.salaryHeading || '')}</div>`).join('')}
-          </div>
-        </details>` : ''}
+        <div id="salaryHistoryBox"></div>
       </div>
 
       <div class="field-group">
@@ -13794,6 +13788,7 @@ function applyEmployeeDraft(fields){
     try{ syncAdvanceTempSchedule(); }catch(e){}
     try{ renderAdvanceTempSchedule(); }catch(e){}
   }
+  try{ renderSalaryHistoryBox(); }catch(e){}
   renderPayrollBreakdown();
   updateBonusPreview();
 }
@@ -13857,6 +13852,7 @@ async function openAddEmployeeModal(id){
   renderLoanRows();
   renderAdvanceRows();
   renderAdvanceTempSchedule();
+  renderSalaryHistoryBox();
   renderAssetRows();
   initEmpStepper();
   updateEmpStepGroupSpans();
@@ -13947,6 +13943,62 @@ function closeIncrementModal(){
   document.getElementById('incrementModalRoot').innerHTML = '';
 }
 
+// The record of every Rate of Pay change on file, with a Remove link on
+// every entry after the first — for undoing a Record Increment entered by
+// mistake (wrong amount, or the wrong effective date). The earliest entry
+// is not removable here: it is the rate this employee's record started
+// from, not a later change, so there is nothing before it to fall back to.
+function renderSalaryHistoryBox(){
+  const box = document.getElementById('salaryHistoryBox');
+  if(!box) return;
+  const hist = editingEmployeeDraft.salaryHistory;
+  if(!Array.isArray(hist) || !hist.length){
+    box.innerHTML = '';
+    return;
+  }
+  const sorted = hist.slice().sort((a, b) => (a.from || '').localeCompare(b.from || ''));
+  box.innerHTML = `
+    <div style="height:10px"></div>
+    <details open><summary style="font-size:12.5px;color:var(--muted);cursor:pointer;">Salary history (${sorted.length})</summary>
+      <div style="font-size:12.5px;color:var(--muted);margin-top:6px;">
+        ${sorted.map((h, hi) => `
+          <div class="row-inline" style="padding:4px 0;border-bottom:1px solid var(--border,#e5e5e5);align-items:center;">
+            <span style="flex:1;">${h.from ? fmtDateIN(h.from) : 'Before increments were tracked'} — ₹${fmtMoney(Number(h.ratePay)||0)}, ${escapeHtml((SALARY_HEADINGS[h.salaryHeading]||{}).label || h.salaryHeading || '')}</span>
+            ${hi > 0 ? `<a href="#" onclick="removeSalaryHistoryEntry(${hi});return false;" style="font-size:12px;color:var(--muted);">Remove</a>` : ''}
+          </div>`).join('')}
+      </div>
+    </details>`;
+}
+
+// Undoes a Record Increment entered by mistake. Every report for the months
+// it covered recomputes using whichever entry is in force once it is gone —
+// same as if the mistaken entry had never been added, and nothing about how
+// any other entry resolves changes.
+function removeSalaryHistoryEntry(hi){
+  const hist = editingEmployeeDraft.salaryHistory;
+  if(!Array.isArray(hist) || !(hi > 0)) return; // the earliest entry cannot be removed this way
+  const sorted = hist.slice().sort((a, b) => (a.from || '').localeCompare(b.from || ''));
+  const target = sorted[hi];
+  if(!target) return;
+  if(!confirm('Remove this increment — ₹' + fmtMoney(Number(target.ratePay) || 0) +
+    (target.from ? ' effective ' + fmtDateIN(target.from) : '') +
+    '?\n\nEvery report for the months it covered will recompute using whichever entry is in force once it is gone. Use this only to correct an increment entered by mistake.')) return;
+  editingEmployeeDraft.salaryHistory = hist.filter(h => h !== target);
+  // A full re-render, not just this box: Rate of Pay, heading and the
+  // "Current since" hint above are all read out of currentRatePay() at
+  // render time, and removing an entry can change what that now resolves
+  // to (see saveIncrement's own refresh, which does the same).
+  document.getElementById('employeeModalRoot').innerHTML = employeeModalHtml(editingEmployeeDraft);
+  toggleStatutoryFieldsForHeading();
+  renderLoanRows();
+  renderAdvanceRows();
+  renderAdvanceTempSchedule();
+  renderSalaryHistoryBox();
+  initEmpStepper();
+  updateEmpStepGroupSpans();
+  renderPayrollBreakdown();
+}
+
 async function saveIncrement(id){
   const msg = document.getElementById('incMsg');
   const setErr = t => { msg.textContent = t; msg.classList.add('error'); };
@@ -13993,6 +14045,10 @@ async function saveIncrement(id){
     await reconcileTrackingUsername(editingEmployeeDraft);
     document.getElementById('employeeModalRoot').innerHTML = employeeModalHtml(editingEmployeeDraft);
     toggleStatutoryFieldsForHeading();
+    renderLoanRows();
+    renderAdvanceRows();
+    renderAdvanceTempSchedule();
+    renderSalaryHistoryBox();
     initEmpStepper();
     updateEmpStepGroupSpans();
   }
