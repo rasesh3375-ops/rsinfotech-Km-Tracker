@@ -7879,49 +7879,103 @@ function computeRetentionForMonth(emp, year, month){
   return Math.round((money / months) * 100) / 100;
 }
 
-// Advance and Advance for Temporary, unlike a loan, carry no recurring
-// rate — HR types a fresh figure for whichever month it actually applies
-// to (emp.advanceHistory: [{month:'YYYY-MM', advanceTemp, advance}, ...]),
-// so there is no schedule to walk and nothing can overshoot. A month with
-// no entry is genuinely nil, not "not yet decided" — same treatment loan
-// months get when no instalment was recorded for them.
+// Salary Advance Payment carries no recurring rate — HR types a fresh
+// figure for whichever month it actually applies to
+// (emp.advanceHistory: [{month:'YYYY-MM', advanceTemp, advance}, ...] —
+// advanceTemp is a leftover key from before Advance for Temporary became
+// recurring below; still read here as a one-off legacy fallback, never
+// written by anything current), so there is no schedule to walk and
+// nothing can overshoot. A month with no entry is genuinely nil, not "not
+// yet decided" — same treatment loan months get when no instalment was
+// recorded for them.
 //
 // A record that has never been touched since this replaced the old flat
-// advanceTemp/advance fields has no history at all — those flat fields
-// used to apply identically to every month a sheet was generated for,
-// which is exactly the bug this exists to fix (today's figure silently
-// showing up on a regenerated April sheet). The fallback below only ever
-// answers for the CURRENT month on such a record, so nothing already
-// relying on today's flat figure breaks, while every other month reads a
-// clean zero — the safer wrong answer for payroll (under-deducts, fixable
-// by adding a dated entry) rather than the old behaviour's over-deduction
-// risk.
-function advanceRecoveryForMonth(emp, ym){
+// advance field has no history at all — that flat field used to apply
+// identically to every month a sheet was generated for, which is exactly
+// the bug this exists to fix (today's figure silently showing up on a
+// regenerated April sheet). The fallback below only ever answers for the
+// CURRENT month on such a record, so nothing already relying on today's
+// flat figure breaks, while every other month reads a clean zero — the
+// safer wrong answer for payroll (under-deducts, fixable by adding a
+// dated entry) rather than the old behaviour's over-deduction risk.
+function salaryAdvanceForMonth(emp, ym){
   const hist = emp.advanceHistory || [];
   if(hist.length){
     const entry = hist.find(h => h.month === ym);
-    return entry
-      ? { advanceTemp: Number(entry.advanceTemp) || 0, advance: Number(entry.advance) || 0 }
-      : { advanceTemp: 0, advance: 0 };
+    return entry ? (Number(entry.advance) || 0) : 0;
   }
-  if(ym !== todayStr().slice(0, 7)) return { advanceTemp: 0, advance: 0 };
-  return { advanceTemp: Number(emp.advanceTemp) || 0, advance: Number(emp.advance) || 0 };
+  if(ym !== todayStr().slice(0, 7)) return 0;
+  return Number(emp.advance) || 0;
 }
 
-// What is still owed once the given month's recovery is taken — a
-// cumulative sum of every advanceHistory entry up to and including that
-// month, not a month-by-month walk like a loan's balance: there is no rate
-// to resolve per month and no schedule that could overshoot, so summing
-// what has actually been recorded is enough. advanceOpening is the figure
-// as HR last entered it "as it stands today" — no separate "as of" date is
-// needed, since an employee with no advanceHistory yet correctly shows
-// that same opening figure for every month, which is the honest answer
-// when nothing has been recorded against it.
+// Advance for Temporary, unlike Salary Advance Payment, recurs — set a
+// rate once with a start month and it keeps applying every month after
+// that until HR records a change, exactly like a Loan EMI
+// (loanEmiRateAsOf/loanScheduleThrough above). Unlike a loan there is no
+// principal being paid off, so there is no schedule to walk and nothing
+// that could overshoot — "stopping" it is simply a new rateHistory entry
+// of ₹0 dated from the stop month, the same mechanism a genuine rate
+// change already uses.
 //
-// Falls back to the flat advanceTemp/advance fields for the CURRENT month
-// only, on a record with no advanceHistory yet — same rule
-// advanceRecoveryForMonth uses, so this balance does not look stale next
-// to a real deduction happening in the very same row.
+// The two guards below matter precisely because this ISN'T only ever
+// called the way loanEmiRateAsOf is — that function is only ever reached
+// from inside loanScheduleThrough's own loop, which never asks about a
+// month before the loan's startMonth to begin with. Nothing here plays
+// that gatekeeping role, so an un-started schedule (blank startMonth) or a
+// month before the schedule actually began would otherwise fall through
+// to "no entry matches, so use the earliest one anyway" and return a rate
+// that hasn't started yet.
+function advanceTempForMonth(emp, ym){
+  const sched = emp.advanceTempSchedule;
+  if(!sched || !sched.startMonth) return legacyAdvanceTempForMonth_(emp, ym);
+  if(ym < sched.startMonth) return 0;
+  const hist = (Array.isArray(sched.rateHistory) && sched.rateHistory.length)
+    ? sched.rateHistory
+    : [{ from: sched.startMonth, instalment: Number(sched.instalment) || 0 }];
+  let chosen = null;
+  hist.forEach(h => {
+    if(h.from && h.from > ym) return;
+    if(!chosen || (h.from || '') > (chosen.from || '')) chosen = h;
+  });
+  return chosen ? (Number(chosen.instalment) || 0) : 0;
+}
+
+// No recurring schedule set up yet — the same three-tier fallback
+// salaryAdvanceForMonth uses, so whatever was entered under the one-off
+// design this replaces (an April figure, say) keeps answering for exactly
+// that month, without silently starting to recur, until HR actually sets
+// up the schedule above.
+function legacyAdvanceTempForMonth_(emp, ym){
+  const hist = emp.advanceHistory || [];
+  const entry = hist.find(h => h.month === ym);
+  if(entry) return Number(entry.advanceTemp) || 0;
+  if(ym === todayStr().slice(0, 7)) return Number(emp.advanceTemp) || 0;
+  return 0;
+}
+
+// What is still owed on Salary Advance Payment once the given month's
+// recovery is taken — a cumulative sum of every advanceHistory entry up to
+// and including that month, not a month-by-month walk like a loan's
+// balance: there is no rate to resolve per month and no schedule that
+// could overshoot, so summing what has actually been recorded is enough.
+// advanceOpening is the figure as HR last entered it "as it stands
+// today" — no separate "as of" date is needed, since an employee with no
+// advanceHistory yet correctly shows that same opening figure for every
+// month, which is the honest answer when nothing has been recorded
+// against it.
+//
+// Advance for Temporary is deliberately NOT part of this balance — once it
+// became a recurring, open-ended deduction (advanceTempForMonth above)
+// rather than a fixed amount being paid down, subtracting it here forever
+// would eventually run the balance to ₹0 and leave it looking "settled"
+// while the recurring deduction kept happening every month for an
+// unrelated reason. This balance is Salary Advance Payment's alone, the
+// same way PT or a Loan's own balance never mix with each other either.
+//
+// Falls back to the flat advance field for the CURRENT month only, on a
+// record with no advanceHistory yet — same rule salaryAdvanceForMonth
+// uses, so this balance does not look stale next to a real deduction
+// happening in the very same row.
 function advanceBalanceAfterMonth(emp, year, month){
   const opening = Number(emp.advanceOpening) || 0;
   const ym = year + '-' + String(month).padStart(2, '0');
@@ -7930,11 +7984,9 @@ function advanceBalanceAfterMonth(emp, year, month){
   if(hist.length){
     recoveredSoFar = hist
       .filter(h => h.month && h.month <= ym)
-      .reduce((t, h) => t + (Number(h.advanceTemp) || 0) + (Number(h.advance) || 0), 0);
+      .reduce((t, h) => t + (Number(h.advance) || 0), 0);
   } else {
-    recoveredSoFar = ym === todayStr().slice(0, 7)
-      ? (Number(emp.advanceTemp) || 0) + (Number(emp.advance) || 0)
-      : 0;
+    recoveredSoFar = ym === todayStr().slice(0, 7) ? (Number(emp.advance) || 0) : 0;
   }
   return Math.max(0, Math.round((opening - recoveredSoFar) * 100) / 100);
 }
@@ -8103,9 +8155,9 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   const esi = esiCalc.employee;
   const pt = heading.pt ? monthlyPtFor(gross, emp.ptPaidThisYear) : 0;
   const [dYear, dMonth] = dateList[0].split('-').map(Number);
-  const advanceRecovery = advanceRecoveryForMonth(emp, dateList[0].slice(0, 7));
-  const advanceTemp = advanceRecovery.advanceTemp;
-  const advance = advanceRecovery.advance;
+  const monthYm = dateList[0].slice(0, 7);
+  const advanceTemp = advanceTempForMonth(emp, monthYm);
+  const advance = salaryAdvanceForMonth(emp, monthYm);
   const retention = computeRetentionForMonth(emp, dYear, dMonth);
   const loanEmi = computeLoanEmiForMonth(emp, dYear, dMonth);
   const loanBalance = loanBalanceAfterMonth(emp, dYear, dMonth);
@@ -9145,8 +9197,8 @@ async function renderConsultantReport(){
     const payableDays = Math.max(0, monthDays - absentDays);
 
     const loanEmi = computeLoanEmiForMonth(emp, year, month);
-    const advRec = advanceRecoveryForMonth(emp, year + '-' + String(month).padStart(2, '0'));
-    const advance = advRec.advanceTemp + advRec.advance;
+    const consultantYm = year + '-' + String(month).padStart(2, '0');
+    const advance = advanceTempForMonth(emp, consultantYm) + salaryAdvanceForMonth(emp, consultantYm);
     const deduction = loanEmi + advance;
     let loanLabel = '';
     if(loanEmi && advance) loanLabel = 'Loan / Advance';
@@ -11446,7 +11498,7 @@ function emptyEmployee(){
     pan:'', aadhaar:'', uan:'', esiNumber:'', bankName:'', ifsc:'', accountNumber:'',
     phone:'', email:'', address:'',
     basic:0, hra:0, otherAllowances:0, dressAllowance:0, mobileExpense:0, conveyance:0, pf:0, esiDeduction:0, pt:0,
-    loans:[], advanceHistory:[],
+    loans:[], advanceHistory:[], advanceTempSchedule:null,
     diwaliEligible:'yes', diwaliBonusAmount:0,
     emergencyName:'', emergencyNumber:'',
     bloodGroup:'', insuranceDetails:'',
@@ -11813,9 +11865,9 @@ function employeeModalHtml(emp){
         <div style="height:12px"></div>
         <label class="field">Advance balance brought forward</label>
         <input type="number" id="f_advanceOpening" placeholder="0" value="${emp.advanceOpening??''}">
-        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Enter the outstanding advance as it stands today, once. The Salary Sheet then carries it forward each month, less what is recorded below, so it does not need entering again.</p>
+        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Enter the outstanding Salary Advance Payment as it stands today, once. The Salary Sheet then carries it forward each month, less what is recorded below under Salary Advance Payment, so it does not need entering again. Advance for Temporary, further down, is a separate recurring deduction with no balance of its own.</p>
         <div style="height:14px"></div>
-        <div class="sec-title" style="font-size:12.5px;">Advance for Temporary &amp; Salary Advance Payment</div>
+        <div class="sec-title" style="font-size:12.5px;">Salary Advance Payment</div>
         <p style="font-size:12px;color:var(--muted);margin:0 0 12px;line-height:1.55;">
           Add one entry per month — each month's Salary Sheet only ever recovers what is
           entered here for that month, so April's figure and August's stay independent of
@@ -11825,6 +11877,18 @@ function employeeModalHtml(emp){
         </p>
         <div id="advanceRowsBox"></div>
         <a href="#" onclick="addAdvanceRow();return false;" style="font-size:13px;color:var(--amber-dark);font-weight:600;">+ Add advance entry</a>
+      </div>
+
+      <div class="field-group field-group-wide">
+        <div class="sec-title">Advance for Temporary</div>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;line-height:1.55;">
+          Set a monthly rate and a start month once — unlike Salary Advance Payment above, it
+          then keeps recovering that same amount every month on its own, exactly like a Loan EMI,
+          with nothing to re-enter. Change the rate from a later month if it changes, or set a new
+          rate of ₹0 from whichever month it should stop — there is no balance to run down, so
+          stopping it is just as much a rate change as any other.
+        </p>
+        <div id="advanceTempScheduleBox"></div>
       </div>
 
       <div class="field-group field-group-wide">
@@ -12421,10 +12485,9 @@ function payrollExclusionInputs(){
 function payrollRecoveryFrom(src, ym){
   const target = ym || todayStr().slice(0, 7);
   const [y, m] = target.split('-').map(Number);
-  const advRec = advanceRecoveryForMonth(src, target);
   return {
-    advanceTemp: advRec.advanceTemp,
-    advance: advRec.advance,
+    advanceTemp: advanceTempForMonth(src, target),
+    advance: salaryAdvanceForMonth(src, target),
     loanEmi: computeLoanEmiForMonth(src, y, m),
     retention: computeRetentionForMonth(src, y, m)
   };
@@ -12444,6 +12507,7 @@ function payrollFormContext(){
     // screen.
     recovery: payrollRecoveryFrom({
       advanceHistory: (typeof editingEmployeeDraft === 'object' && editingEmployeeDraft && editingEmployeeDraft.advanceHistory) || [],
+      advanceTempSchedule: (typeof editingEmployeeDraft === 'object' && editingEmployeeDraft && editingEmployeeDraft.advanceTempSchedule) || null,
       loans: (typeof editingEmployeeDraft === 'object' && editingEmployeeDraft && editingEmployeeDraft.loans) || [],
       retentionMoney: (document.getElementById('f_retentionMoney') || {}).value,
       retentionMonths: (document.getElementById('f_retentionMonths') || {}).value,
@@ -13341,7 +13405,7 @@ function collectLoanRows(){
   return out;
 }
 
-// ---- advance ledger, employee form ----
+// ---- Salary Advance Payment ledger, employee form ----
 // Rows are rebuilt from the draft, same reasoning as renderLoanRows — removing
 // the middle entry of three cannot leave the remaining two bound to stale
 // indexes. Two differences from loan rows: sorted by month, since (unlike
@@ -13379,26 +13443,26 @@ function renderAdvanceRows(){
       <label class="field">Month</label>
       <input type="month" class="field-input" id="adv_month_${i}" value="${escapeHtml(r.month || '')}" onchange="syncAdvanceRow(${i});renderAdvanceRows();">
       <div style="height:10px"></div>
-      <label class="field">Advance for Temporary</label>
-      <input type="number" id="adv_temp_${i}" placeholder="0" value="${r.advanceTemp || ''}" oninput="syncAdvanceRow(${i})">
-      <div style="height:10px"></div>
       <label class="field">Salary Advance Payment</label>
       <input type="number" id="adv_amount_${i}" placeholder="0" value="${r.advance || ''}" oninput="syncAdvanceRow(${i})">
     </div>`).join('');
 }
 
 // Keeps the draft in step with what has been typed, same role as syncLoanRow.
+// advanceTemp is deliberately left untouched here — Advance for Temporary
+// moved to its own recurring schedule (see advanceTempScheduleBox below) and
+// this form no longer edits it — a row that still carries an old value
+// (entered before that move) keeps it exactly as it was.
 function syncAdvanceRow(i){
   const r = (editingEmployeeDraft.advanceHistory || [])[i];
   if(!r) return;
   r.month = (document.getElementById('adv_month_' + i) || {}).value || '';
-  r.advanceTemp = Number((document.getElementById('adv_temp_' + i) || {}).value) || 0;
   r.advance = Number((document.getElementById('adv_amount_' + i) || {}).value) || 0;
 }
 
 function addAdvanceRow(){
   if(!Array.isArray(editingEmployeeDraft.advanceHistory)) editingEmployeeDraft.advanceHistory = [];
-  editingEmployeeDraft.advanceHistory.push({ month:'', advanceTemp:0, advance:0 });
+  editingEmployeeDraft.advanceHistory.push({ month:'', advance:0 });
   renderAdvanceRows();
 }
 
@@ -13408,25 +13472,132 @@ function removeAdvanceRow(i){
   renderAdvanceRows();
 }
 
-// Reads the rows back out of the form. A row with no month, or with both
-// amounts at zero, is dropped rather than saved as an empty entry. Two rows
-// left pointing at the same month (typed by mistake, or a correction added
-// alongside the original instead of editing it) collapse to one — the later
-// row in the list wins, since advanceRecoveryForMonth's lookup can only ever
-// answer with one figure for a given month.
+// Reads the rows back out of the form. A row with no month, or with nothing
+// to recover (no legacy advanceTemp and no advance), is dropped rather than
+// saved as an empty entry. Two rows left pointing at the same month (typed
+// by mistake, or a correction added alongside the original instead of
+// editing it) collapse to one — the later row in the list wins, since
+// salaryAdvanceForMonth's lookup can only ever answer with one figure for a
+// given month.
 function collectAdvanceRows(){
   const out = [];
   const rows = editingEmployeeDraft.advanceHistory || [];
   rows.forEach((r, i) => {
     const month = (document.getElementById('adv_month_' + i) || {}).value || '';
-    const advanceTemp = Number((document.getElementById('adv_temp_' + i) || {}).value) || 0;
     const advance = Number((document.getElementById('adv_amount_' + i) || {}).value) || 0;
+    // Carried through unedited — see syncAdvanceRow's comment.
+    const advanceTemp = Number(r.advanceTemp) || 0;
     if(!month || (!advanceTemp && !advance)) return;
     const existingIdx = out.findIndex(o => o.month === month);
     if(existingIdx !== -1) out[existingIdx] = { month, advanceTemp, advance };
     else out.push({ month, advanceTemp, advance });
   });
   return out;
+}
+
+// ---- Advance for Temporary recurring schedule, employee form ----
+// A single schedule, not an array — one employee has at most one Advance
+// for Temporary rate running at a time, unlike loans which can overlap.
+// Mirrors renderLoanRows' "Change EMI from a month" block, minus everything
+// that only makes sense for a principal being paid off (amount, status,
+// skip-months): there is nothing to skip, nothing that can overshoot, and
+// "stopped" is simply a rate of ₹0 from whichever month it should stop —
+// see advanceTempForMonth.
+function renderAdvanceTempSchedule(){
+  const box = document.getElementById('advanceTempScheduleBox');
+  if(!box) return;
+  const sched = editingEmployeeDraft.advanceTempSchedule || (editingEmployeeDraft.advanceTempSchedule = { startMonth:'', rateHistory:[] });
+  const hist = Array.isArray(sched.rateHistory) ? sched.rateHistory : [];
+  const hasRateChanges = hist.length > 1;
+  const thisYm = todayStr().slice(0, 7);
+  const currentRate = sched.startMonth ? advanceTempForMonth(editingEmployeeDraft, thisYm >= sched.startMonth ? thisYm : sched.startMonth) : 0;
+  const noStart = !sched.startMonth;
+  box.innerHTML = `
+    <label class="field">Monthly rate${hasRateChanges ? ' (original)' : ''}</label>
+    <input type="number" id="advTemp_rate" placeholder="0" value="${hasRateChanges ? (Number(hist[0].instalment) || '') : (Number(sched.instalment) || '')}" oninput="syncAdvanceTempSchedule()" ${hasRateChanges ? 'readonly' : ''}>
+    ${hasRateChanges ? `<p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Current rate is ₹${fmtMoney(currentRate)}. It now changes only through "Change rate from a month" below, so a rate change is never confused with correcting the original figure.</p>` : ''}
+    <div style="height:10px"></div>
+    <label class="field">Starts from (month)</label>
+    <input type="month" class="field-input" id="advTemp_start" value="${escapeHtml(sched.startMonth || '')}" onchange="syncAdvanceTempSchedule()">
+    <p style="font-size:11.5px;margin:8px 0 0;${noStart ? 'color:var(--amber-dark);font-weight:600;' : 'color:var(--muted);'}">
+      ${noStart
+        ? 'No start month set, so nothing is being deducted yet.'
+        : 'Currently ₹' + fmtMoney(currentRate) + ' a month, recovered automatically every month from ' + escapeHtml(monthLabel(sched.startMonth)) + ' onward until changed.'}
+    </p>
+
+    <div style="height:12px"></div>
+    <div style="border-top:1px solid var(--line);padding-top:10px;">
+      <label class="field">Change rate from a month — a raise, cut, or ₹0 to stop it from then on</label>
+      ${hasRateChanges ? hist.slice().sort((a,b)=>(a.from||'').localeCompare(b.from||'')).map((h, hi) => `
+        <div class="row-inline" style="margin:0 0 6px;align-items:center;">
+          <span style="font-size:12.5px;flex:1;">${escapeHtml(h.from || '—')}: ₹${fmtMoney(Number(h.instalment) || 0)}${hi === 0 ? ' (original)' : ''}</span>
+          ${hi > 0 ? `<a href="#" onclick="removeAdvanceTempRateChange(${hi});return false;" style="font-size:12px;color:var(--muted);">Remove</a>` : ''}
+        </div>`).join('') : ''}
+      <div class="row-inline" style="align-items:flex-end;">
+        <div><label class="field">From month</label><input type="month" class="field-input" id="advTemp_change_month"></div>
+        <div><label class="field">New rate</label><input type="number" class="field-input" id="advTemp_change_amount" placeholder="0"></div>
+      </div>
+      <a href="#" onclick="addAdvanceTempRateChange();return false;" style="font-size:13px;color:var(--amber-dark);font-weight:600;">+ Add rate change</a>
+    </div>`;
+}
+
+// Keeps the draft in step with what has been typed, same role as syncLoanRow.
+function syncAdvanceTempSchedule(){
+  const sched = editingEmployeeDraft.advanceTempSchedule || (editingEmployeeDraft.advanceTempSchedule = { startMonth:'', rateHistory:[] });
+  // Once rate changes exist the field is read-only (see renderAdvanceTempSchedule),
+  // so this only ever writes the original rate back.
+  if(!(Array.isArray(sched.rateHistory) && sched.rateHistory.length > 1)){
+    sched.instalment = Number((document.getElementById('advTemp_rate') || {}).value) || 0;
+  }
+  sched.startMonth = (document.getElementById('advTemp_start') || {}).value || '';
+}
+
+// The first rate change seeds the schedule's history from the flat rate —
+// same lazy-migration idea as addLoanEmiChange, so a schedule nobody has
+// ever changed the rate on still reads exactly as it always has.
+function addAdvanceTempRateChange(){
+  const sched = editingEmployeeDraft.advanceTempSchedule || (editingEmployeeDraft.advanceTempSchedule = { startMonth:'', rateHistory:[] });
+  const monthEl = document.getElementById('advTemp_change_month');
+  const amountEl = document.getElementById('advTemp_change_amount');
+  const from = (monthEl || {}).value || '';
+  const instalment = Number((amountEl || {}).value) || 0;
+  if(!from){ alert('Enter the month this rate change starts from.'); return; }
+  if(!amountEl || amountEl.value === ''){ alert('Enter the new rate — 0 to stop it from this month on.'); return; }
+  if(!Array.isArray(sched.rateHistory) || !sched.rateHistory.length){
+    sched.rateHistory = [{ from: sched.startMonth || null, instalment: Number(sched.instalment) || 0 }];
+  }
+  sched.rateHistory = sched.rateHistory.filter(h => h.from !== from);
+  sched.rateHistory.push({ from, instalment });
+  renderAdvanceTempSchedule();
+}
+
+function removeAdvanceTempRateChange(hi){
+  const sched = editingEmployeeDraft.advanceTempSchedule;
+  if(!sched || !Array.isArray(sched.rateHistory)) return;
+  if(hi <= 0) return; // the earliest-dated entry is the original rate and cannot be removed this way
+  const sorted = sched.rateHistory.slice().sort((a, b) => (a.from || '').localeCompare(b.from || ''));
+  const target = sorted[hi];
+  if(!target) return;
+  sched.rateHistory = sched.rateHistory.filter(h => h !== target);
+  renderAdvanceTempSchedule();
+}
+
+// Reads the schedule back out of the form. No start month and no rate at
+// all means nothing has been configured — saved as null rather than an
+// empty object, so a fresh employee (or one nobody has touched this for)
+// reads as "no schedule" through the same legacy fallback every other
+// unmigrated record already uses.
+function collectAdvanceTempSchedule(){
+  const sched = editingEmployeeDraft.advanceTempSchedule;
+  if(!sched) return null;
+  const startMonth = (document.getElementById('advTemp_start') || {}).value || '';
+  const rate = Number((document.getElementById('advTemp_rate') || {}).value) || 0;
+  const hasRateChanges = Array.isArray(sched.rateHistory) && sched.rateHistory.length > 1;
+  if(!startMonth && !rate && !hasRateChanges) return null;
+  const rateHistory = hasRateChanges
+    ? sched.rateHistory
+    : (rate ? [{ from: startMonth || null, instalment: rate }] : []);
+  return { startMonth, rateHistory };
 }
 
 // Same shape as the Joining Kit's assets (item, qty, issuedOn, returnedOn), so
@@ -13619,6 +13790,10 @@ function applyEmployeeDraft(fields){
   try{ renderLoanRows(); }catch(e){}
   (editingEmployeeDraft.advanceHistory || []).forEach((_, i) => { try{ syncAdvanceRow(i); }catch(e){} });
   try{ renderAdvanceRows(); }catch(e){}
+  if(editingEmployeeDraft.advanceTempSchedule){
+    try{ syncAdvanceTempSchedule(); }catch(e){}
+    try{ renderAdvanceTempSchedule(); }catch(e){}
+  }
   renderPayrollBreakdown();
   updateBonusPreview();
 }
@@ -13681,6 +13856,7 @@ async function openAddEmployeeModal(id){
   toggleStatutoryFieldsForHeading();
   renderLoanRows();
   renderAdvanceRows();
+  renderAdvanceTempSchedule();
   renderAssetRows();
   initEmpStepper();
   updateEmpStepGroupSpans();
@@ -13983,6 +14159,7 @@ async function saveEmployeeForm(){
     salaryHeading: document.getElementById('f_salaryHeading').value,
     ratePay: Number(document.getElementById('f_ratePay').value)||0,
     advanceHistory: collectAdvanceRows(),
+    advanceTempSchedule: collectAdvanceTempSchedule(),
     assets: collectAssetRows(),
     wcApplicable: (document.getElementById('f_wcApplicable') || {}).value || 'no',
     wcPolicyNumber: ((document.getElementById('f_wcPolicyNumber') || {}).value || '').trim(),
