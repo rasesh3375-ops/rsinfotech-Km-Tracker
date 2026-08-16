@@ -5908,17 +5908,23 @@ function buildPolicySummary(employees, attByEmp, dateList, precomputed, holidayM
 // ---- identity & bank validation ----
 // Fields that must not be shared between two people. A repeated Aadhaar, PAN,
 // UAN, ESI or bank account is almost always a typo or a record being cloned,
-// and it reaches payroll and statutory filings if nobody catches it. A shared
-// phone or email is common enough in a family to be worth flagging rather than
-// refusing, so every case here warns and lets the user decide.
+// and it reaches payroll and statutory filings if nobody catches it — checked
+// against every record on file, left or not, since none of these can ever
+// legitimately belong to two different people. A shared phone or email is
+// common enough in a family to be worth flagging rather than refusing, so
+// those two warn and let the user decide — but only against someone still on
+// roll: a company phone or SIM handed to whoever replaces someone who has
+// left is routine, not a likely typo, and warning about it on every single
+// new joiner in that situation is noise HR would otherwise have to click
+// through each time.
 const UNIQUE_EMPLOYEE_FIELDS = [
   { id:'f_aadhaar',       key:'aadhaar',       label:'Aadhaar number' },
   { id:'f_pan',           key:'pan',           label:'PAN' },
   { id:'f_uan',           key:'uan',           label:'UAN' },
   { id:'f_esiNumber',     key:'esiNumber',     label:'ESI number' },
   { id:'f_accountNumber', key:'accountNumber', label:'Bank account number' },
-  { id:'f_phone',         key:'phone',         label:'Mobile number' },
-  { id:'f_email',         key:'email',         label:'Email address' }
+  { id:'f_phone',         key:'phone',         label:'Mobile number',   skipLeft:true },
+  { id:'f_email',         key:'email',         label:'Email address',   skipLeft:true }
 ];
 
 const normId = v => String(v || '').replace(/[\s-]/g, '').toLowerCase();
@@ -5931,6 +5937,7 @@ function findEmployeeDuplicates(employees, draftValues, editingId){
     if(!v) return;
     employees.forEach(e => {
       if(editingId && e.id === editingId) return;
+      if(f.skipLeft && e.employmentStatus === 'left') return;
       if(normId(e[f.key]) === v){
         out.push({ field:f.label, value:draftValues[f.key], employee:e.name || e.id, employeeId:e.id });
       }
@@ -6551,7 +6558,7 @@ async function renderAttendanceSheet(){
   const dateList = [];
   for(let d=1; d<=daysInMonth; d++) dateList.push(year + '-' + String(month).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
 
-  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
+  const employees = (await getEmployees()).filter(e => employedDuringPeriod_(e, dateList[0], dateList[dateList.length-1]));
   if(!employees.length){
     box.innerHTML = '<div class="empty">Add employees in Employee Master first.</div>';
     collapseSheetTopControls('attTopControls');
@@ -8170,7 +8177,7 @@ async function renderSalarySheet(){
   const dateList = [];
   for(let d=1; d<=monthDays; d++) dateList.push(year + '-' + String(month).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
 
-  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
+  const employees = (await getEmployees()).filter(e => employedDuringPeriod_(e, dateList[0], dateList[dateList.length-1]));
   if(!employees.length){
     box.innerHTML = '<div class="empty">Add employees in Employee Master first.</div>';
     collapseSheetTopControls('salTopControls');
@@ -8372,7 +8379,7 @@ async function renderStatutoryReport(key, label){
   const dateList = [];
   for(let d=1; d<=monthDays; d++) dateList.push(year + '-' + String(month).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
 
-  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
+  const employees = (await getEmployees()).filter(e => employedDuringPeriod_(e, dateList[0], dateList[dateList.length-1]));
   if(!employees.length){
     box.innerHTML = '<div class="empty">Add employees in Employee Master first.</div>';
     return;
@@ -8683,7 +8690,7 @@ async function renderApprenticeSalaryReport(){
   // Whoever was under the Apprentices heading THIS month, not whoever is
   // today — a since-recorded promotion off apprentice must not pull them out
   // of a month they were still on it for.
-  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left' && ratePayAsOf(e, dateList[0]).salaryHeading === 'apprentice');
+  const employees = (await getEmployees()).filter(e => employedDuringPeriod_(e, dateList[0], dateList[dateList.length-1]) && ratePayAsOf(e, dateList[0]).salaryHeading === 'apprentice');
   if(!employees.length){
     box.innerHTML = `${reportLogoHeader('Apprentice Salary Report — ' + monthLabel(monthVal))}<div class="empty">No employees under the Apprentices heading yet.</div>`;
     return;
@@ -8818,7 +8825,7 @@ async function renderFinalSalarySheet(){
   const dateList = [];
   for(let d = 1; d <= monthDays; d++) dateList.push(monthVal + '-' + String(d).padStart(2,'0'));
 
-  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
+  const employees = (await getEmployees()).filter(e => employedDuringPeriod_(e, dateList[0], dateList[dateList.length-1]));
   if(!employees.length){ box.innerHTML = '<div class="empty">No employees on roll.</div>'; return; }
   box.innerHTML = '<p class="dash-muted">Building…</p>';
   const holidayMap = await getHolidayMap_local();
@@ -9040,7 +9047,7 @@ async function renderConsultantReport(){
   // Judged by the heading each employee was under THIS month, same as the
   // Salary Sheet.
   const employees = (await getEmployees()).filter(e =>
-    e.employmentStatus !== 'left' &&
+    employedDuringPeriod_(e, dateList[0], dateList[dateList.length-1]) &&
     CONSULTANT_REPORT_HEADINGS.indexOf(ratePayAsOf(e, dateList[0]).salaryHeading) !== -1);
   if(!employees.length){
     box.innerHTML = '<div class="empty">Nobody is on the R.S. Infotech payroll headings (' +
@@ -9153,13 +9160,32 @@ function monthContext_(year, month){
   };
 }
 
+// Whether an employee counts as on roll for a given past period — true if
+// their tenure overlaps it at all: joined on or before the period ends, and
+// either never left or left on or after the period starts. A plain "not
+// left" filter — which most reports used before this existed — makes a
+// leaver vanish from every report for the months they actually worked,
+// which is backwards for anything about a specific past month or year: HR
+// entering July's data in August for someone who left in July needs them to
+// still show up on July's Salary Sheet, PF/ESI return, Attendance Sheet and
+// every other period report, right up to the month they actually left.
+// Reports about the CURRENT roster (dashboards, the Employee Master list,
+// admin tools that act going forward) are correctly left on the plain
+// "not left" filter — this is only for a report generated for one specific
+// past period.
+function employedDuringPeriod_(emp, startStr, endStr){
+  if(emp.doj && endStr && emp.doj > endStr) return false;
+  if(emp.employmentStatus === 'left' && emp.leftDate && startStr && emp.leftDate < startStr) return false;
+  return true;
+}
+
 // The Salary Sheet simply drops anyone marked left, which would make a leaver
 // vanish from both months and hide the very change this report exists to show.
-// Membership is decided per month from the joining and leaving dates instead.
+// Membership is decided per month from the joining and leaving dates instead —
+// now the general case above, kept under its original name since Month-wise
+// Salary Comparison already calls it with a monthContext_ object.
 function employedInMonth_(emp, ctx){
-  if(emp.doj && emp.doj > ctx.end) return false;
-  if(emp.employmentStatus === 'left' && emp.leftDate && emp.leftDate < ctx.start) return false;
-  return true;
+  return employedDuringPeriod_(emp, ctx.start, ctx.end);
 }
 
 function fmtSigned_(n){
