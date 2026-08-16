@@ -6286,7 +6286,7 @@ function buildHeadingExplainer(key){
 
   const comps = headingComponents(h);
   const stat = headingStatutory(h);
-  const ded = stat.map(s => s.name).concat(['Advance (temporary)', 'Advance', 'Retention']);
+  const ded = stat.map(s => s.name).concat(['Advance (temporary)', 'Salary Advance Payment', 'Retention']);
 
   const formulaRows = comps.map(c =>
     `<div class="calc-line"><code>${escapeHtml(c.name)}</code> = ${headingComponentFormula(c)}</div>`).join('') +
@@ -6306,7 +6306,7 @@ function buildHeadingExplainer(key){
 
   const fields = ['Rate of pay (monthly)', 'Attendance — Absent and LP days for the month']
     .concat(h.pf ? ['PF'] : []).concat(h.esi ? ['ESI deduction'] : [])
-    .concat(['Advance for temporary', 'Advance', 'Retention (if a bond is configured)']);
+    .concat(['Advance for temporary', 'Salary Advance Payment', 'Retention (if a bond is configured)']);
 
   const tags = ['Auto Calculated'].concat(h.flat ? ['Full Rate — no split'] : ['Percentage Based'])
     .concat(['Attendance Based'])
@@ -9647,7 +9647,7 @@ const PAYROLL_MASTER = [
   // them out is what had this breakdown showing a net ₹7,500 above the Salary
   // Sheet for anybody repaying anything.
   { key:'advanceTemp', label:'Advance for temporary', group:'deduction', source:'recovery' },
-  { key:'advance',     label:'Advance',               group:'deduction', source:'recovery' },
+  { key:'advance',     label:'Salary Advance Payment', group:'deduction', source:'recovery' },
   { key:'loanEmi',     label:'Loan instalment',       group:'deduction', source:'recovery' },
   { key:'retention',   label:'Retention money',       group:'deduction', source:'recovery' },
   { key:'totalDeduction', label:'Total Deductions', group:'total', source:'sum',
@@ -11766,9 +11766,11 @@ function employeeModalHtml(emp){
         <div style="height:12px"></div>
         <label class="field">Advance for temporary</label>
         <input type="number" id="f_advanceTemp" placeholder="0" value="${emp.advanceTemp||''}">
+        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Adjusted against salary — recovered from this employee's pay for salary adjustment purposes.</p>
         <div style="height:12px"></div>
-        <label class="field">Advance</label>
+        <label class="field">Salary Advance Payment</label>
         <input type="number" id="f_advance" placeholder="0" value="${emp.advance||''}">
+        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">An advance paid to the employee, deducted from their upcoming month's salary.</p>
         <div style="height:12px"></div>
         <label class="field">Advance balance brought forward</label>
         <input type="number" id="f_advanceOpening" placeholder="0" value="${emp.advanceOpening??''}">
