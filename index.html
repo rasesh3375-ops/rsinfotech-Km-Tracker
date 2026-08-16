@@ -14052,22 +14052,6 @@ async function saveEmployeeForm(){
 
   // Past this line the record is on the server. Nothing below can un-save it,
   // so nothing below is allowed to hold the form open or say the save failed.
-  // It used to be able to: the localStorage mirror sat inside the same try, and
-  // a full store — which iOS Safari reaches at about 5 MB, and private browsing
-  // reaches immediately — threw after the record had been written. The employee
-  // was saved, the form stayed open, and the message told the user nothing had
-  // been saved and to press Save again, which the duplicate-ID check then
-  // refused.
-  try{
-    // The saved array IS the current state, so prime the cache with it rather
-    // than dropping it — otherwise the very next screen re-reads from the
-    // backend to learn what we just sent.
-    const savedJson = JSON.stringify(employees);
-    localStorage.setItem('kmt_shared_employees', savedJson);
-    primeSharedRead('employees', savedJson);
-  }catch(e){
-    // A full or unavailable local store costs one re-read, not a save.
-  }
   try{ clearEmployeeDraft(); }catch(e){}
   closeEmployeeModal(true);
   showSavedToast((isNew ? 'Added ' : 'Updated ') + name + ' (' + id + ')');
@@ -16705,11 +16689,7 @@ async function approveLoanRequest(id){
   req.startMonth = start.trim();
 
   await saveOneEmployee_(emp);
-  const savedJson = JSON.stringify(employees);
-  localStorage.setItem('kmt_shared_employees', savedJson);
-  primeSharedRead('employees', savedJson);
   await saveLoanRequests(requests);
-  invalidateSharedRead('employees');
   invalidateDashboardSnapshot();
   addActivityLog('Approved ₹' + fmtMoney(req.amount) + ' loan/advance for ' + emp.name +
                  ', recovering ₹' + fmtMoney(instalment) + ' a month from ' + start.trim()).catch(() => {});
