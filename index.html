@@ -1703,6 +1703,18 @@
       <div id="empUndefinedCleanupBox" style="margin-top:10px;"></div>
     </section>
 
+    <section class="block" id="secAlwaysPresentBulk">
+      <h2 style="margin:0 0 4px;">Always mark Present — bulk apply</h2>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">For owners, family or anyone else who doesn't punch in day to day — this is the same "Always mark Present from" field as on each employee's own Employee Master record, just set on several at once instead of opening each one's Edit form individually. Tick everyone this should apply to, pick the date it starts from, and Apply.</p>
+      <div id="alwaysPresentBulkList" style="max-height:320px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:4px 12px;"></div>
+      <div style="height:12px"></div>
+      <label class="field">Starts from</label>
+      <input type="date" class="field-input" id="alwaysPresentBulkDate">
+      <div style="height:12px"></div>
+      <button class="btn full" onclick="withBusy(this,'Applying…',applyAlwaysPresentBulk)">Apply to selected employees</button>
+      <div id="alwaysPresentBulkBox" style="margin-top:10px;"></div>
+    </section>
+
     <section class="block" id="secTeamOverview">
       <h2>Team overview</h2>
       <div id="hrSummaryGrid"></div>
@@ -10501,7 +10513,8 @@ async function getReminderEmail(){
 // nothing downstream had to change.
 const HR_PANELS = ['hrPageDashboard','hrTabTracking','hrTabMgmt','hrSubDash','hrSubMaster','hrSubReports',
   'hrSubGenerator','dashSubAttendance','dashSubSalary','dashSubReminders','dashSubExpiry',
-  'dashSubActivity','secManageTeam','secExpenseRate','secLiveTracking','secGeofence','secDocStorage','secTeamOverview',
+  'dashSubActivity','secManageTeam','secExpenseRate','secLiveTracking','secGeofence','secDocStorage',
+  'secAlwaysPresentBulk','secTeamOverview',
   'secDailySummary','secByCompany','secBackendConn'];
 
 // Grouped rather than listed in the order each route was added: Dashboard on
@@ -10535,11 +10548,12 @@ const HR_ROUTES = {
   activity:   { label:'Activity Log',        icon:'🕘', show:['hrTabMgmt','hrSubDash','dashSubActivity'], run:() => renderActivityLogList() },
   reports:    { label:'Reports',             icon:'📊', show:['hrTabMgmt','hrSubReports'], run:() => renderReportsTab() },
   generator:  { label:'Generator',           icon:'✉️', show:['hrTabMgmt','hrSubGenerator'], run:() => renderGeneratorTab() },
-  settings:   { label:'Settings',            icon:'⚙️', show:['hrTabTracking','secExpenseRate','secGeofence','secDocStorage','secBackendConn'],
+  settings:   { label:'Settings',            icon:'⚙️', show:['hrTabTracking','secExpenseRate','secGeofence','secDocStorage','secAlwaysPresentBulk','secBackendConn'],
                 run: async () => {
                   const el = document.getElementById('rateInput');
                   if(el) el.value = (await getRate()) || '';
                   renderGeofenceZones();
+                  renderAlwaysPresentBulkList();
                 } }
 };
 let hrRoute = 'dashboard';
@@ -15058,6 +15072,44 @@ async function cleanupCorruptedEmployeeFields(){
   await saveEmployees(toSave);
   invalidateSharedRead('employees');
   box.innerHTML = '<p class="dash-muted">✓ Cleared placeholder text from ' + affected.length + ' employee record(s): ' + escapeHtml(names) + '.</p>';
+}
+
+// One checkbox per active employee, so "Always mark Present from" can be set
+// on several at once instead of opening each one's Edit form individually —
+// the actual field (emp.alwaysPresentFrom) and what it does are unchanged;
+// this is only a faster way to write the same value onto more than one
+// record. Left employees are left out — their attendance is already capped
+// at leftDate regardless, so there is nothing here for one to apply to.
+async function renderAlwaysPresentBulkList(){
+  const box = document.getElementById('alwaysPresentBulkList');
+  if(!box) return;
+  const employees = (await getEmployees())
+    .filter(e => e.employmentStatus !== 'left')
+    .slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  box.innerHTML = employees.length ? employees.map(e => `
+    <label class="row-inline" style="align-items:center;padding:6px 0;border-bottom:1px dashed var(--line);cursor:pointer;margin:0;">
+      <input type="checkbox" class="alwaysPresentBulkCheck" value="${e.id}" style="margin-right:8px;">
+      <span style="flex:1;">${escapeHtml(e.name)}</span>
+      <span style="font-size:11.5px;color:var(--muted);">${e.alwaysPresentFrom ? 'Currently from ' + fmtDateIN(e.alwaysPresentFrom) : 'Not set'}</span>
+    </label>`).join('') : '<p class="dash-muted">No active employees on file.</p>';
+}
+
+async function applyAlwaysPresentBulk(){
+  const box = document.getElementById('alwaysPresentBulkBox');
+  const date = (document.getElementById('alwaysPresentBulkDate') || {}).value || '';
+  const checked = Array.from(document.querySelectorAll('.alwaysPresentBulkCheck:checked')).map(c => c.value);
+  if(!checked.length){ box.innerHTML = '<p class="pol-warn">Tick at least one employee first.</p>'; return; }
+  if(!date){ box.innerHTML = '<p class="pol-warn">Pick the date it should start from.</p>'; return; }
+  const employees = await getEmployees();
+  const selected = employees.filter(e => checked.includes(e.id));
+  const names = selected.map(e => e.name || e.id).join(', ');
+  if(!confirm('Set "Always mark Present from ' + fmtDateIN(date) + '" on ' + selected.length + ' employee(s): ' + names +
+    '?\n\nEvery working day from that date on computes as Present for them automatically, in every report and every ' +
+    'future financial year, until changed here or on their own Employee Master record. Continue?')) return;
+  const toSave = selected.map(e => Object.assign({}, e, { alwaysPresentFrom: date }));
+  await saveEmployees(toSave);
+  box.innerHTML = '<p class="dash-muted">✓ Set for ' + selected.length + ' employee(s): ' + escapeHtml(names) + '.</p>';
+  await renderAlwaysPresentBulkList();
 }
 
 // Opens a new leave year for Sick Leave only — SL is reset to the flat
