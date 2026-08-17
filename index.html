@@ -2035,10 +2035,10 @@
         <button type="button" class="gen-back-btn" onclick="showReportsLanding()">← Back to Reports</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Attendance</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Marked Present as soon as the engineer takes a check-in selfie that day — whether or not they end up recording a trip. Sundays are excluded automatically; add festivals or declared holidays below so they don't count as absent either.</p>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The same attendance the Attendance Sheet records for this employee — Present, Absent, EL/SL/LP and half-days — one employee's calendar at a time. Sundays and declared holidays are excluded from the Absent count automatically.</p>
           <div class="row-inline">
             <div>
-              <label class="field">Engineer (tracking login)</label>
+              <label class="field">Employee</label>
               <select class="field-input" id="attendanceUserSelect"></select>
             </div>
           </div>
@@ -15626,32 +15626,53 @@ function reportHasData(key, e){
 }
 
 // ---- attendance & holidays ----
+// Every employee, not just the ones with a km-tracking login — this used to
+// list only getUsers() (tracking accounts), so a company of thirty people
+// with two mobile logins showed a dropdown of two. Attendance is recorded
+// for everyone through the Attendance Sheet whether or not they ever check
+// in from a phone, and this report exists to show that same record back,
+// one person at a time.
 async function populateAttendanceUserSelect(){
   const sel = document.getElementById('attendanceUserSelect');
   if(!sel) return;
-  const users = await getUsers();
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
   const prev = sel.value;
-  // Unconditional, and ahead of the "no engineers yet" early return below —
-  // the empty-users case used to skip this entirely, so on a fresh install,
-  // or the day the last engineer login was removed, the Month/Year pickers
-  // here went right back to empty until some other tab happened to fill
-  // them in first.
+  // Unconditional, and ahead of the "no employees yet" early return below —
+  // the empty-list case used to skip this entirely, so on a fresh install
+  // the Month/Year pickers here went right back to empty until some other
+  // tab happened to fill them in first.
   populateMonthYearSelects('attendanceMonthSel', 'attendanceYearSel');
-  if(!users.length){
-    sel.innerHTML = '<option value="">No engineer logins yet</option>';
+  if(!employees.length){
+    sel.innerHTML = '<option value="">No employees yet</option>';
     return;
   }
-  sel.innerHTML = users.map(u => `<option value="${escapeHtml(u.username)}">${u.displayName || u.username}</option>`).join('');
-  if(prev && users.some(u => u.username === prev)) sel.value = prev;
+  sel.innerHTML = employees.map(e => `<option value="${escapeHtml(e.id)}">${escapeHtml(e.name || e.id)}</option>`).join('');
+  if(prev && employees.some(e => e.id === prev)) sel.value = prev;
+}
+
+// What one day reads as for one employee — an explicit code if one was
+// recorded, else a declared holiday or Sunday, else Absent for a day up to
+// and including today, else unknown (a future date, no opinion yet).
+// Mirrors computeAttendanceSummary's own resolution exactly, so a day shown
+// here can never disagree with what that function counts it as for payroll
+// and every other report — kept as its own small function rather than
+// folded into that one, since computeAttendanceSummary only ever needed the
+// running totals, not the individual day.
+function resolvedAttendanceCode_(att, dateStr, holidayMap){
+  const entry = (att || {})[dateStr];
+  if(entry) return entry.code;
+  if(holidayMap && holidayMap[dateStr]) return 'H';
+  if(new Date(dateStr + 'T00:00:00').getDay() === 0) return 'H';
+  return dateStr <= todayStr() ? 'A' : null;
 }
 
 async function loadAttendanceCalendar(){
   const box = document.getElementById('attendanceCalendarBox');
-  const username = document.getElementById('attendanceUserSelect').value;
+  const empId = document.getElementById('attendanceUserSelect').value;
   populateMonthYearSelects('attendanceMonthSel', 'attendanceYearSel');
   const monthStr = getMonthYearValue('attendanceMonthSel', 'attendanceYearSel');
-  if(!username){
-    box.innerHTML = '<div class="empty">Add an engineer login first.</div>';
+  if(!empId){
+    box.innerHTML = '<div class="empty">Add an employee first.</div>';
     return;
   }
   if(!monthStr){
@@ -15660,30 +15681,40 @@ async function loadAttendanceCalendar(){
   }
   const [year, month] = monthStr.split('-').map(Number);
   const daysInMonth = new Date(year, month, 0).getDate();
-  const trips = await getTrips(username);
-  const tripDates = new Set(trips.map(t => t.date));
-  const checkinDates = new Set(await getCheckins(username));
+  // The same store, and the same fill rule (Always-Present, unmarked-past-
+  // day-defaults-to-absent), the Attendance Sheet and Salary Sheet already
+  // read through — not a second, independently-derived picture of the
+  // month.
+  const att = await getAttendance(empId);
   const holidays = await getHolidays();
   const holidayMap = {};
   holidays.forEach(h => { holidayMap[h.date] = h.name; });
-  const todayD = todayStr();
 
-  let present = 0, absent = 0, offDays = 0;
+  const CODE_CLASS = { P:'live', EL:'live', SL:'live', HEL:'live', HSL:'live', SHORT:'live',
+                        A:'warn', LP:'warn', HLP:'warn' };
+  // Present/Absent/LP kept as three separate tiles, not Absent-and-LP
+  // combined into one "unpaid" figure — computeAttendanceSummary (the
+  // Attendance Sheet's own count) keeps them apart too, and a combined
+  // number here would not match either of that function's own fields,
+  // reading as a fresh disagreement instead of the same numbers restated.
+  let present = 0, absent = 0, lpDays = 0, offDays = 0;
   const rows = [];
   for(let day = 1; day <= daysInMonth; day++){
     const dateStr = year + '-' + String(month).padStart(2,'0') + '-' + String(day).padStart(2,'0');
-    const dow = new Date(year, month - 1, day).getDay();
+    const code = resolvedAttendanceCode_(att, dateStr, holidayMap);
     let status, cls;
-    if(dateStr > todayD){
+    if(code === null){
       status = '—'; cls = '';
-    } else if(dow === 0){
-      status = 'Weekly off (Sunday)'; cls = ''; offDays++;
-    } else if(holidayMap[dateStr]){
-      status = 'Holiday — ' + holidayMap[dateStr]; cls = ''; offDays++;
-    } else if(tripDates.has(dateStr) || checkinDates.has(dateStr)){
-      status = 'Present'; cls = 'live'; present++;
+    } else if(code === 'H'){
+      status = holidayMap[dateStr] ? 'Holiday — ' + holidayMap[dateStr] : 'Weekly off (Sunday)';
+      cls = ''; offDays++;
     } else {
-      status = 'Absent'; cls = 'warn'; absent++;
+      status = ATT_CODE_LABELS[code] || code;
+      cls = CODE_CLASS[code] || 'warn';
+      if(code === 'A') absent += 1;
+      else if(code === 'LP') lpDays += 1;
+      else if(code === 'HLP') lpDays += 0.5;
+      else present += (code === 'HEL' || code === 'HSL' ? 0.5 : 1);
     }
     const dayName = new Date(year, month - 1, day).toLocaleDateString('en-IN', { weekday: 'short' });
     rows.push(`<tr><td>${fmtDateIN(dateStr)} (${dayName})</td><td><span class="pill ${cls}">${status}</span></td></tr>`);
@@ -15693,9 +15724,10 @@ async function loadAttendanceCalendar(){
   box.innerHTML = `${reportActionBar(title, 'attendanceCalendarBox')}
     <div class="print-isolate" id="attendanceCalendarPrintArea">
       ${reportLogoHeader(title)}
-      <div class="summary-grid" style="grid-template-columns:repeat(3,1fr);">
+      <div class="summary-grid" style="grid-template-columns:repeat(4,1fr);">
         <div class="stat"><div class="n">${present}</div><div class="l">Present</div></div>
         <div class="stat"><div class="n">${absent}</div><div class="l">Absent</div></div>
+        <div class="stat"><div class="n">${lpDays}</div><div class="l">LP (unpaid)</div></div>
         <div class="stat"><div class="n">${offDays}</div><div class="l">Off / holiday</div></div>
       </div>
       <table class="sal-table"><tr><th>Date</th><th>Status</th></tr>${rows.join('')}</table>
@@ -15706,13 +15738,10 @@ async function loadAttendanceCalendar(){
     const dateStr = year + '-' + String(month).padStart(2,'0') + '-' + String(day).padStart(2,'0');
     // Re-derive the same status shown above, rather than parsing it back out
     // of the rendered row HTML.
-    const dow = new Date(year, month - 1, day).getDay();
-    let status;
-    if(dateStr > todayD) status = '—';
-    else if(dow === 0) status = 'Weekly off (Sunday)';
-    else if(holidayMap[dateStr]) status = 'Holiday — ' + holidayMap[dateStr];
-    else if(tripDates.has(dateStr) || checkinDates.has(dateStr)) status = 'Present';
-    else status = 'Absent';
+    const code = resolvedAttendanceCode_(att, dateStr, holidayMap);
+    const status = code === null ? '—'
+      : code === 'H' ? (holidayMap[dateStr] ? 'Holiday — ' + holidayMap[dateStr] : 'Weekly off (Sunday)')
+      : (ATT_CODE_LABELS[code] || code);
     csvRows.push([fmtDateIN(dateStr), status]);
   }
   const fileName = `Attendance - ${label.replace(/[^\w .-]/g,'')} - ${monthStr}.csv`;
