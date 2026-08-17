@@ -6228,8 +6228,17 @@ function calculatePfFor(emp, wage){
   const ex = pfExclusionStatus(emp, w);
   if(ex.excluded) return { ...PF_ZERO, wage:w, reason:'Excluded employee — no prior UAN, Form 11 submitted, wage above ₹' + fmtMoney(PF_RULES.exclusion.wageAbove) };
 
-  // Step 4 — the configured contribution type.
-  if(cfg.type === 'fixed'){
+  // Step 4 — the configured contribution type. Fixed ₹1,800 is only ever
+  // shorthand for "12% of the ₹15,000 ceiling" — the two are the same
+  // figure — so it only holds while the wage this month is genuinely above
+  // that ceiling. Unpaid leave can take a month's payable Basic down to or
+  // below ₹15,000; charging the flat ₹1,800 against a wage that has
+  // actually dropped would take more than 12% of what the employee was
+  // really paid that month, so this falls through to the same percentage
+  // formula 'percent' always uses once the wage is at or under the
+  // ceiling — there is no discontinuity at the boundary, since 12% of
+  // exactly ₹15,000 is ₹1,800 either way.
+  if(cfg.type === 'fixed' && w > PF_RULES.epsWageCeiling){
     const f = PF_RULES.fixedAmount;
     // A flat amount on both sides. Deliberately not 12% of anything, and the
     // EPS split does not apply — the figure is the agreed contribution.
@@ -6248,9 +6257,12 @@ function calculatePfFor(emp, wage){
     employeeTotal:c.employee,
     employerTotal:c.employerEpf + c.employerEps + edli + admin,
     grandTotal:c.employee + c.employerEpf + c.employerEps + edli + admin,
-    reason:c.capApplied
-      ? 'Percentage — EPS capped at ₹' + fmtMoney(PF_RULES.epsMonthlyCap) + ' on a wage of ₹' + fmtMoney(w)
-      : 'Percentage on a wage of ₹' + fmtMoney(w)
+    reason: cfg.type === 'fixed'
+      ? 'Percentage — Basic of ₹' + fmtMoney(w) + ' this month is at or below the ₹' + fmtMoney(PF_RULES.epsWageCeiling) +
+        ' ceiling, so the usual Fixed ₹' + fmtMoney(PF_RULES.fixedAmount) + ' does not apply'
+      : c.capApplied
+        ? 'Percentage — EPS capped at ₹' + fmtMoney(PF_RULES.epsMonthlyCap) + ' on a wage of ₹' + fmtMoney(w)
+        : 'Percentage on a wage of ₹' + fmtMoney(w)
   };
 }
 
@@ -6322,9 +6334,25 @@ function esiContributionPeriod(d){
 // gross is the ESI wage: Basic, DA/HRA, overtime and regular monthly
 // allowances. Annual bonus, gratuity and the employer's PF share are excluded,
 // so this is deliberately NOT the CTC figure.
+//
+// o.eligible defaults to true — every existing employee, whose record
+// predates this field, keeps computing exactly as before. Set to false
+// (emp.esiEligible === 'no' on the record) only when HR has explicitly
+// marked someone exempt regardless of what their gross would otherwise
+// require — coverage they already hold under a different employer as their
+// primary one is the usual real case, not a way to routinely skip the
+// statutory deduction. Checked before the wage-ceiling rule, since an
+// explicit exemption overrides gross-based coverage entirely, including the
+// "once covered, always covered" continuation below — nothing about that
+// rule makes sense for someone HR has said is not covered by this employer
+// in the first place.
 function computeEsi(gross, opts){
   const o = opts || {};
   const g = Number(gross) || 0;
+  if(o.eligible === false){
+    return { covered:false, employee:0, employer:0, total:0, ceiling:null, period:null,
+             reason:'Marked not eligible for ESI on the employee record — no ESI deducted regardless of gross.' };
+  }
   const ceiling = o.isDisabled ? ESI_RULES.disabledCeiling : ESI_RULES.wageCeiling;
   const aboveCeiling = g > ceiling;
 
@@ -8359,6 +8387,7 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   const esiCalc = heading.esi ? computeEsi(gross, {
         isDisabled: emp.esiDisabled === 'yes',
         coveredAtPeriodStart: emp.esiCoveredAtPeriodStart === 'yes',
+        eligible: emp.esiEligible !== 'no',
         asOf: dateList[0]
       }) : { employee:0, employer:0 };
   const esi = esiCalc.employee;
@@ -8770,6 +8799,7 @@ async function renderStatutoryReport(key, label){
       const r = computeEsi(s.gross, {
         isDisabled: emp.esiDisabled === 'yes',
         coveredAtPeriodStart: emp.esiCoveredAtPeriodStart === 'yes',
+        eligible: emp.esiEligible !== 'no',
         asOf: dateList[0]
       });
       esiRows.push({ emp, headingKey, s, r });
@@ -10109,7 +10139,8 @@ function computePayrollComponents(rate, headingKey, manual, ctx){
       const gr = out.find(x => x.key === 'gross');
       const r = computeEsi(gr ? gr.value : 0, {
         isDisabled: c.isDisabled,
-        coveredAtPeriodStart: c.coveredAtPeriodStart
+        coveredAtPeriodStart: c.coveredAtPeriodStart,
+        eligible: c.esiEligible !== 'no'
       });
       value = def.source === 'esiEmployee' ? r.employee : r.employer;
       formula = r.reason;
@@ -12237,6 +12268,13 @@ function employeeModalHtml(emp){
         <div style="height:12px"></div>
         </div>
         <div id="esiQuestionsWrap">
+        <label class="field">ESI applicable for this employee?</label>
+        <select class="field-input" id="f_esiEligible" onchange="toggleStatutoryFieldsForHeading()">
+          <option value="yes" ${emp.esiEligible!=='no'?'selected':''}>Yes — follow the usual gross-based rule</option>
+          <option value="no" ${emp.esiEligible==='no'?'selected':''}>No — exempt regardless of gross</option>
+        </select>
+        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Leave this on Yes for almost everyone — ESI eligibility is normally decided by gross alone, not by choice. Only select No for someone genuinely exempt for a reason outside that rule (already covered under a different employer as their primary employment is the usual case), since selecting it stops ESI being deducted even for a gross that would otherwise require it.</p>
+        <div style="height:10px"></div>
         <label class="field">Person with disability? (raises the ESI ceiling)</label>
         <select class="field-input" id="f_esiDisabled" onchange="toggleStatutoryFieldsForHeading()">
           <option value="no" ${emp.esiDisabled!=='yes'?'selected':''}>No</option>
@@ -12734,7 +12772,8 @@ function toggleStatutoryFieldsForHeading(){
     } else {
       const r = computeEsi(payrollValue('gross'), {
         isDisabled: (document.getElementById('f_esiDisabled') || {}).value === 'yes',
-        coveredAtPeriodStart: (document.getElementById('f_esiCovered') || {}).value === 'yes'
+        coveredAtPeriodStart: (document.getElementById('f_esiCovered') || {}).value === 'yes',
+        eligible: (document.getElementById('f_esiEligible') || {}).value !== 'no'
       });
       esiEl.value = Math.round(r.employee);
       if(esiNote) esiNote.textContent = r.reason +
@@ -12828,6 +12867,7 @@ function payrollFormContext(){
     pfContributionType: (document.getElementById('f_pfContributionType') || {}).value || '',
     isDisabled: (document.getElementById('f_esiDisabled') || {}).value === 'yes',
     coveredAtPeriodStart: (document.getElementById('f_esiCovered') || {}).value === 'yes',
+    esiEligible: (document.getElementById('f_esiEligible') || {}).value || '',
     // Built from the form as it stands, including any loan/advance rows
     // typed but not yet saved, so the breakdown answers for what is on
     // screen.
@@ -12853,6 +12893,7 @@ function payrollRecordContext(emp, ym){
     pfContributionType: e.pfContributionType || '',
     isDisabled: e.esiDisabled === 'yes',
     coveredAtPeriodStart: e.esiCoveredAtPeriodStart === 'yes',
+    esiEligible: e.esiEligible || '',
     recovery: payrollRecoveryFrom(e, ym)
   };
 }
@@ -12894,7 +12935,8 @@ function monthlyPayFor(emp, asOfYear, asOfMonth){
   const pfCalc = calculatePfFor(asOfEmp, pfWage);
   const esiCalc = heading.esi ? computeEsi(salaryGross, {
         isDisabled: emp.esiDisabled === 'yes',
-        coveredAtPeriodStart: emp.esiCoveredAtPeriodStart === 'yes'
+        coveredAtPeriodStart: emp.esiCoveredAtPeriodStart === 'yes',
+        eligible: emp.esiEligible !== 'no'
       }) : { employee:0, employer:0 };
   const pt = heading.pt ? monthlyPtFor(salaryGross, emp.ptPaidThisYear) : 0;
 
@@ -14614,6 +14656,7 @@ async function saveEmployeeForm(){
     pfContributionType: document.getElementById('f_pfContributionType').value,
     esiDisabled: document.getElementById('f_esiDisabled').value,
     esiCoveredAtPeriodStart: document.getElementById('f_esiCovered').value,
+    esiEligible: document.getElementById('f_esiEligible').value,
     esiEmployer: payrollValue('esiEmployer'),
     hasPriorUan: document.getElementById('f_hasPriorUan').value,
     form11Submitted: document.getElementById('f_form11').value,
@@ -16515,7 +16558,8 @@ async function renderEmployeeDetailReport(){
   // internally — reading its explanation, not re-deriving the figure.
   {
     const esiCalc = heading.esi ? computeEsi(pay.salaryGross, {
-      isDisabled: emp.esiDisabled === 'yes', coveredAtPeriodStart: emp.esiCoveredAtPeriodStart === 'yes'
+      isDisabled: emp.esiDisabled === 'yes', coveredAtPeriodStart: emp.esiCoveredAtPeriodStart === 'yes',
+      eligible: emp.esiEligible !== 'no'
     }) : null;
     const body = hrRow('PF', heading.pf ? (rupees(pay.pf) + reasonLine(pay.pfReason)) : naSpan) +
       hrRow('ESI', heading.esi ? (rupees(pay.esi) + reasonLine(esiCalc && esiCalc.reason)) : naSpan) +
