@@ -447,7 +447,27 @@
     /* Touch targets: 44px is the smallest comfortable tap area. */
     #hrContent .btn,#hrContent .linkbtn,#hrContent select,#hrContent input,
     #hrContent .qa,#hrContent .icon-btn{min-height:44px;}
-    #hrContent select,#hrContent input,#hrContent textarea{font-size:16px;}
+    /* font-size:16px stops iOS Safari auto-zooming the whole page the
+       instant a smaller field is focused — this rule only ever covered
+       #hrContent, but the Employee modal, Increment modal, checklist
+       modals, the fullscreen sheet viewer and Global Search all render into
+       their own root divs OUTSIDE #hrContent (employeeModalRoot sits as a
+       sibling of #hrContent, not a descendant of it — see where each is
+       declared), so none of them were ever covered by this rule despite
+       being reached from the exact same mobile HR screens. .field-input is
+       14.5px normally; the auto-zoom it triggered on a phone was the actual
+       cause of the Employee modal's own background-bleed-through report,
+       worse than the keyboard-only case already fixed elsewhere — a
+       pinch-zoomed page shifts and scrolls in ways position:fixed;100dvh
+       and visualViewport-driven resettling were never built to track, so
+       the real fix is not letting the zoom happen in the first place. */
+    #hrContent select,#hrContent input,#hrContent textarea,
+    #employeeModalRoot select,#employeeModalRoot input,#employeeModalRoot textarea,
+    #incrementModalRoot select,#incrementModalRoot input,#incrementModalRoot textarea,
+    #checklistModalRoot select,#checklistModalRoot input,#checklistModalRoot textarea,
+    #closeSheetModalRoot select,#closeSheetModalRoot input,#closeSheetModalRoot textarea,
+    #fullscreenSheetRoot select,#fullscreenSheetRoot input,#fullscreenSheetRoot textarea,
+    #gsOverlay select,#gsOverlay input,#gsOverlay textarea{font-size:16px;}
     /* The report close button stays visually small everywhere else, but
        widens on a touch screen so it's not a sub-44px target. */
     #hrContent .rpt-close-btn{width:40px;height:40px;}
