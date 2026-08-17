@@ -14176,6 +14176,34 @@ if(window.visualViewport){
   window.visualViewport.addEventListener('resize', resettleFixedOverlays_);
   window.visualViewport.addEventListener('scroll', resettleFixedOverlays_);
 }
+// height:100dvh (the CSS rule on .modal-overlay/#fullscreenSheetRoot) only
+// ever fixed the OTHER cause of this gap — Safari's own toolbar collapsing
+// on plain scroll, with no keyboard involved — because iOS Safari has a
+// long-standing, still-current bug where 100dvh on a position:fixed element
+// does not shrink for the keyboard at all, only for its own chrome; dvh
+// keeps tracking the full screen straight through a field's keyboard
+// opening, so the visualViewport listeners above remain the only thing that
+// actually catches THAT case, and evidently do not fire reliably for every
+// field — reported again with a keyboard genuinely open. Focus itself is
+// unconditional: every keyboard-opening interaction starts by focusing an
+// input, so resettling from that event does not depend on iOS choosing to
+// fire visualViewport's resize or scroll at all. The keyboard's own slide
+// animation takes roughly a quarter second, and visualViewport.height has
+// not settled to its final value the instant focus fires, so this checks
+// again shortly after rather than trusting one immediate read.
+document.addEventListener('focusin', e => {
+  if(!e.target || !e.target.closest) return;
+  if(!e.target.closest('#employeeModalOverlay, #fullscreenSheetRoot')) return;
+  resettleFixedOverlays_();
+  setTimeout(resettleFixedOverlays_, 120);
+  setTimeout(resettleFixedOverlays_, 350);
+});
+document.addEventListener('focusout', e => {
+  if(!e.target || !e.target.closest) return;
+  if(!e.target.closest('#employeeModalOverlay, #fullscreenSheetRoot')) return;
+  setTimeout(resettleFixedOverlays_, 120);
+  setTimeout(resettleFixedOverlays_, 350);
+});
 
 async function openAddEmployeeModal(id){
   editingEmployeeId = id || null;
