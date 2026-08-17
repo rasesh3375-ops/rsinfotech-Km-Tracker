@@ -695,6 +695,18 @@
   .emp-row .actions button{font-size:12px;padding:7px 10px;}
 
   .modal-overlay{position:fixed;inset:0;background:rgba(22,33,62,0.55);display:flex;align-items:flex-start;justify-content:center;padding:20px 12px;overflow-y:auto;z-index:var(--z-modal);}
+  /* checklistModalRoot and incrementModalRoot hold "edit/add" modals (the
+     attendance day-time editor, Record Increment, Left Employees, the
+     Joining/Exit checklist) that all get opened from a report already
+     showing in #fullscreenSheetRoot (z-index var(--z-fullscreen), 200) — a
+     Salary/Attendance Sheet tapped into full screen on a phone, most often.
+     Left at the plain .modal-overlay z-index (var(--z-modal), 50) they
+     rendered BEHIND that full-screen report instead of over it: on screen
+     this looked like the report and the (invisible, unclickable) modal
+     overlapping. closeSheetModalRoot already got this fix; these two did
+     not. One rule here fixes every modal either root ever opens, present or
+     future, instead of repeating the z-index on each call site. */
+  #checklistModalRoot .modal-overlay, #incrementModalRoot .modal-overlay{z-index:var(--z-modal-top);}
   .modal-box{background:var(--paper);border-radius:14px;max-width:520px;width:100%;padding:22px;margin:20px 0 40px;}
   .modal-box h2{margin:0 0 6px;font-size:19px;}
   /* Title bar that stays put. The overlay is the scrolling element, so sticky
@@ -2720,9 +2732,12 @@
   <!-- Uses --z-modal-top (300), above #fullscreenSheetRoot's --z-fullscreen
        (200), since this can be opened from the Salary Sheet's Close button
        while it is showing in full screen — plain --z-modal (50) would render
-       behind it and be invisible, same bug as incrementModalRoot below. The
-       three-step scale is defined once on :root; a modal that needs to sit
-       above another open one should use the next step up rather than another
+       behind it and be invisible, the same bug checklistModalRoot and
+       incrementModalRoot had (see the #checklistModalRoot .modal-overlay,
+       #incrementModalRoot .modal-overlay rule near .modal-overlay's own
+       definition). The three-step scale is defined once on :root; a modal
+       that needs to sit above another open one should use the next step up
+       rather than another
        one-off number. -->
   <div id="closeSheetModalRoot"></div>
 
@@ -7030,7 +7045,25 @@ function renderDayTimeVerdict(){
   box.innerHTML = lines.join('<br>');
 }
 
-function applyDayTimes(){
+// Re-rendering the sheet after a small per-day edit rebuilds the whole box,
+// including its own scrolling wrap, so whatever spot the list was scrolled
+// to is lost. On a phone, with the employee list several screens of cards
+// tall, Apply/Clear on the day-time editor always kicked the sheet straight
+// back to the top afterward — every late-time entry meant scrolling back
+// down to find the employee again. fsBody (full screen) is never destroyed
+// by the re-render, only its contents, so its own scrollTop survives across
+// the await; the inline .att-sheet-wrap IS destroyed and rebuilt by the
+// innerHTML swap, so that one has to be re-queried afterward rather than
+// reused — same target resolution scrollSheetView() already uses.
+async function reRenderAttendanceSheetKeepingScroll_(){
+  const fsBody = fullscreenActiveId ? document.getElementById('fullscreenBody') : null;
+  const preTop = fsBody ? fsBody.scrollTop : ((inlineSheetWrap() || {}).scrollTop || 0);
+  await renderAttendanceSheet();
+  const target = fsBody || inlineSheetWrap();
+  if(target) target.scrollTop = preTop;
+}
+
+async function applyDayTimes(){
   if(!dayTimeEditorFor) return;
   const { employeeId, dateStr, currentCode } = dayTimeEditorFor;
   const j = judgeDayTimes();
@@ -7053,10 +7086,10 @@ function applyDayTimes(){
   persistPendingAttendance();
   updateAttendanceSaveBar();
   closeDayTimeEditor();
-  renderAttendanceSheet();
+  await reRenderAttendanceSheetKeepingScroll_();
 }
 
-function clearDayTimes(){
+async function clearDayTimes(){
   if(!dayTimeEditorFor) return;
   const { employeeId, dateStr, currentCode } = dayTimeEditorFor;
   pendingAttendance[employeeId + '|' + dateStr] = {
@@ -7066,7 +7099,7 @@ function clearDayTimes(){
   persistPendingAttendance();
   updateAttendanceSaveBar();
   closeDayTimeEditor();
-  renderAttendanceSheet();
+  await reRenderAttendanceSheetKeepingScroll_();
 }
 
 function handleAttendanceCellChange(employeeId, dateStr, selectEl){
