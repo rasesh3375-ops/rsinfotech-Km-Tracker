@@ -475,7 +475,12 @@
   .crumb-here{color:var(--navy);}
 
   /* ---- global search ---- */
-  .gs-overlay{position:fixed;inset:0;z-index:90;background:rgba(22,33,62,.34);
+  /* height:100dvh — same fixed-overlay-behind-a-keyboard exposure as
+     .modal-overlay/#fullscreenSheetRoot (see the comment there): #gsInput
+     below is a real text input, so this dims short of the real screen the
+     instant its keyboard opens on a browser dvh alone doesn't cover, unless
+     paired with the same focusin/focusout resettle those two use. */
+  .gs-overlay{position:fixed;inset:0;height:100vh;height:100dvh;z-index:90;background:rgba(22,33,62,.34);
     display:flex;align-items:flex-start;justify-content:center;padding:12vh 16px 16px;}
   .gs-panel{width:100%;max-width:560px;background:var(--paper);border:1px solid var(--line);
     border-radius:14px;box-shadow:0 18px 50px rgba(22,33,62,.3);overflow:hidden;}
@@ -641,10 +646,15 @@
   @media (max-width: 900px){
     /* Off-canvas by left offset rather than transform: same effect, but it can't
        be defeated by a stacking or containing-block quirk on the flex parent. */
-    #hrSidebar{position:fixed;left:-262px;top:0;bottom:0;z-index:60;
+    /* height:100dvh on both — no input lives in this drawer, so there is no
+       keyboard case to worry about, but Safari's own toolbar collapsing on
+       scroll (the OTHER cause found on .modal-overlay) applies here too:
+       without it, a short scrim/drawer leaves a sliver of the real page
+       showing, undimmed, below the menu. */
+    #hrSidebar{position:fixed;left:-262px;top:0;height:100vh;height:100dvh;z-index:60;
       transition:left .22s ease;box-shadow:0 0 30px rgba(22,33,62,.18);}
     body.hr-nav-open #hrSidebar, #hrSidebar.open{left:0;}
-    #hrNavScrim{position:fixed;inset:0;background:rgba(22,33,62,.42);z-index:50;}
+    #hrNavScrim{position:fixed;inset:0;height:100vh;height:100dvh;background:rgba(22,33,62,.42);z-index:50;}
     body.hr-nav-open #hrNavScrim{display:block;}
     /* The drawer sliding over the page was never enough on its own — the
        page underneath still scrolled with it, which on a touch screen meant
@@ -14171,6 +14181,10 @@ function resettleFixedOverlays_(){
   if(empOverlay) empOverlay.style.height = h;
   const sheetRoot = document.getElementById('fullscreenSheetRoot');
   if(sheetRoot && !sheetRoot.classList.contains('hidden')) sheetRoot.style.height = h;
+  // Global Search has the same real text input (#gsInput) as any Employee
+  // Master field — same keyboard, same exposure.
+  const gsOverlay = document.getElementById('gsOverlay');
+  if(gsOverlay && !gsOverlay.classList.contains('hidden')) gsOverlay.style.height = h;
 }
 if(window.visualViewport){
   window.visualViewport.addEventListener('resize', resettleFixedOverlays_);
@@ -14191,16 +14205,17 @@ if(window.visualViewport){
 // animation takes roughly a quarter second, and visualViewport.height has
 // not settled to its final value the instant focus fires, so this checks
 // again shortly after rather than trusting one immediate read.
+const FIXED_OVERLAY_SELECTOR = '#employeeModalOverlay, #fullscreenSheetRoot, #gsOverlay';
 document.addEventListener('focusin', e => {
   if(!e.target || !e.target.closest) return;
-  if(!e.target.closest('#employeeModalOverlay, #fullscreenSheetRoot')) return;
+  if(!e.target.closest(FIXED_OVERLAY_SELECTOR)) return;
   resettleFixedOverlays_();
   setTimeout(resettleFixedOverlays_, 120);
   setTimeout(resettleFixedOverlays_, 350);
 });
 document.addEventListener('focusout', e => {
   if(!e.target || !e.target.closest) return;
-  if(!e.target.closest('#employeeModalOverlay, #fullscreenSheetRoot')) return;
+  if(!e.target.closest(FIXED_OVERLAY_SELECTOR)) return;
   setTimeout(resettleFixedOverlays_, 120);
   setTimeout(resettleFixedOverlays_, 350);
 });
