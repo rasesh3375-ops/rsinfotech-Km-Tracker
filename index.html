@@ -694,7 +694,18 @@
   .emp-row .actions{margin-top:10px;display:flex;gap:8px;}
   .emp-row .actions button{font-size:12px;padding:7px 10px;}
 
-  .modal-overlay{position:fixed;inset:0;background:rgba(22,33,62,0.55);display:flex;align-items:flex-start;justify-content:center;padding:20px 12px;overflow-y:auto;z-index:var(--z-modal);}
+  /* height:100dvh (after the plain vh fallback, so it only overrides in
+     browsers that understand it) ties this directly to the browser's own
+     dynamic viewport — the one that already tracks the keyboard AND the
+     address-bar/toolbar collapsing on scroll — instead of the layout
+     viewport inset:0 alone resolves against, which never shrinks for
+     either. This is what resettleFixedOverlays_ (further down, in the JS)
+     was trying to patch up after the fact with visualViewport resize/scroll
+     listeners; it stayed in as a fallback for a browser without dvh
+     support, but dvh is the one that actually stays correct through every
+     case, including ones no listener ever caught — plain scrolling that
+     collapses Safari's own toolbar without any keyboard involved at all. */
+  .modal-overlay{position:fixed;inset:0;height:100vh;height:100dvh;background:rgba(22,33,62,0.55);display:flex;align-items:flex-start;justify-content:center;padding:20px 12px;overflow-y:auto;z-index:var(--z-modal);}
   .modal-box{background:var(--paper);border-radius:14px;max-width:520px;width:100%;padding:22px;margin:20px 0 40px;}
   .modal-box h2{margin:0 0 6px;font-size:19px;}
   /* Title bar that stays put. The overlay is the scrolling element, so sticky
@@ -885,7 +896,9 @@
   input:disabled{background:#EDEDE7;color:var(--muted);cursor:not-allowed;}
 
   /* ===== Full-screen sheet viewer ===== */
-  #fullscreenSheetRoot{position:fixed;inset:0;background:var(--paper);z-index:var(--z-fullscreen);display:flex;flex-direction:column;}
+  /* height:100dvh — see the .modal-overlay comment above; same reasoning,
+     same fix, this is the other fixed full-viewport overlay in the app. */
+  #fullscreenSheetRoot{position:fixed;inset:0;height:100vh;height:100dvh;background:var(--paper);z-index:var(--z-fullscreen);display:flex;flex-direction:column;}
   .fullscreen-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line);background:var(--navy);color:#fff;flex-shrink:0;}
   .fullscreen-header strong{font-size:15px;}
   /* Icon-only, not "✕ Close" — a report already carries its own close button
