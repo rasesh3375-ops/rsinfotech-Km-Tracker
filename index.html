@@ -9443,12 +9443,33 @@ async function renderConsultantReport(){
     `<td${i === 9 || i === 19 ? ' class="num"' : i === 2 ? ' class="sal-name"' : ''}>${cell === '' ? '' : cell}</td>`
   ).join('') + '</tr>').join('');
 
+  // The desktop table mirrors the consultant's own filing sheet column for
+  // column (min-width:1500px, 21 columns) — exactly the shape that renders
+  // fine wide but, without a compact alternative, only ever showed the first
+  // few columns on a phone with nothing to tell HR the rest were still there
+  // off-screen. One card per employee instead, same field order as the
+  // table, following the same isCompact pattern already used everywhere
+  // else in this file (Salary Sheet, PF/ESI/PT, Bonus Payment Sheet, ...).
+  const isCompact = isCompactSheetView();
+  const cardsHtml = rows.map(r => hrCard(
+    `<strong>${escapeHtml(String(r[2]))}</strong><span class="id">${escapeHtml(String(r[1]))}</span>`,
+    hrRow('Designation', escapeHtml(String(r[3])) || '—') +
+    hrRow('Birth date', r[4] || '—') + hrRow('Joining date', r[5] || '—') +
+    hrRow('PF No.', escapeHtml(String(r[6])) || '—') + hrRow('UAN No.', escapeHtml(String(r[7])) || '—') + hrRow('ESI No.', escapeHtml(String(r[8])) || '—') +
+    hrRow('Gross salary (incl. PT)', fmtMoney(r[9])) +
+    hrRow('Working days', r[10]) + hrRow('Week off', r[11]) + hrRow('Present days', r[12]) + hrRow('Public holidays', r[13]) +
+    hrRow('EL', r[14]) + hrRow('SL', r[15]) + hrRow('Absent days', r[16]) + hrRow('Payable days', r[17]) +
+    hrRow('Other allowance', r[18] === 'NA' ? '—' : rupees(Number(r[18].toString().replace(/,/g, '')) || 0)) +
+    hrRow('Loan / Advance', r[19] === '' ? '—' : rupees(Number(r[19]) || 0) + (r[20] ? ' (' + escapeHtml(String(r[20])) + ')' : ''))
+  )).join('');
+  const tableInner = isCompact
+    ? `<div class="hr-sheet-cards">${cardsHtml}</div>`
+    : `<table class="sal-table" style="min-width:1500px;font-size:11.5px;"><tr>${head}</tr>${body}</table>`;
+
   box.innerHTML = `${reportActionBar('Consultant Report — ' + monthLabel(monthVal), 'consultantReportBox')}
     <div class="sal-sheet-wrap print-isolate" id="consultantReportPrintArea">
       ${reportLogoHeader('Consultant Report — ' + monthLabel(monthVal))}
-      <table class="sal-table" style="min-width:1500px;font-size:11.5px;">
-        <tr>${head}</tr>${body}
-      </table>
+      ${tableInner}
       <p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">${rows.length} employees · ${monthDays} days · ${workingDays} working, ${weekOff} week-off, ${publicHolidays} public holiday${publicHolidays === 1 ? '' : 's'}.</p>
     </div>`;
 
@@ -16024,11 +16045,26 @@ async function renderMonthlyLeaveReport(){
   const header = ['Name'].concat(FY_MONTH_LABELS).concat(['Total']);
   const tableRows = rows.map(r => `<tr><td class="sal-name">${escapeHtml(r.name)}</td>${r.monthTotals.map(v => `<td class="num">${v || ''}</td>`).join('')}<td class="num"><strong>${r.yearTotal}</strong></td></tr>`).join('');
 
+  // 14 columns (Name + all 12 FY months + Total) is the whole point of this
+  // report on a wide screen, but on a phone it just ran off the right edge
+  // with nothing to show the rest of the year was even there. One card per
+  // employee instead, same isCompact pattern used everywhere else in this
+  // file — every month still listed, just stacked instead of side by side.
+  const isCompact = isCompactSheetView();
+  const cardsHtml = rows.map(r => hrCard(
+    `<strong>${escapeHtml(r.name)}</strong>`,
+    FY_MONTH_LABELS.map((label, i) => hrRow(label, r.monthTotals[i] || '—')).join('') +
+    hrRow('Total this FY', '<strong>' + r.yearTotal + '</strong>')
+  )).join('');
+  const tableInner = isCompact
+    ? `<div class="hr-sheet-cards">${cardsHtml}</div>`
+    : `<table class="sal-table"><tr>${header.map(h=>`<th>${h}</th>`).join('')}</tr>${tableRows}</table>`;
+
   const reportTitle = 'Monthly Leave Report — FY ' + startYear + '-' + String(startYear+1).slice(2);
   box.innerHTML = `${reportActionBar(reportTitle, 'monthlyLeaveReportBox')}
     <div class="sal-sheet-wrap print-isolate" id="leaveReportPrintArea">
       ${reportLogoHeader(reportTitle)}
-      <table class="sal-table"><tr>${header.map(h=>`<th>${h}</th>`).join('')}</tr>${tableRows}</table>
+      ${tableInner}
     </div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0;">Each number is EL + SL + LP days that month (half-day codes count as 0.5). Absent and Short Leave are not counted here — see the Attendance Sheet for the complete picture.</p>`;
 
@@ -16069,6 +16105,15 @@ function leaveDetailCell(value, columnMax, bold){
   const style = isMax ? 'color:var(--red);font-weight:700;' : (bold ? 'font-weight:700;' : '');
   return `<td class="num"${style ? ` style="${style}"` : ''}>${v || ''}</td>`;
 }
+// Same red/bold "highest in this column" flag as leaveDetailCell, for the
+// compact card — the card's whole reason to exist is not losing that flag
+// just because the number moved from a table cell to a card row.
+function leaveDetailRowHtml(label, value, columnMax){
+  const v = value || 0;
+  const isMax = columnMax > 0 && v === columnMax;
+  const style = isMax ? 'color:var(--red);font-weight:700;' : '';
+  return hrRow(label, style ? `<span style="${style}">${v}</span>` : (v || '—'));
+}
 
 async function renderMonthlyLeaveDetailReport(){
   const box = document.getElementById('monthlyLeaveDetailReportBox');
@@ -16101,12 +16146,21 @@ async function renderMonthlyLeaveDetailReport(){
   const tableRows = rows.map(r => `<tr><td class="sal-name">${escapeHtml(r.name)}</td>${
     LEAVE_DETAIL_METRICS.map(m => leaveDetailCell(r[m.key], maxes[m.key], false)).join('')}</tr>`).join('');
 
+  const isCompact = isCompactSheetView();
+  const cardsHtml = rows.map(r => hrCard(
+    `<strong>${escapeHtml(r.name)}</strong>`,
+    LEAVE_DETAIL_METRICS.map(m => leaveDetailRowHtml(m.label, r[m.key], maxes[m.key])).join('')
+  )).join('');
+  const tableInner = isCompact
+    ? `<div class="hr-sheet-cards">${cardsHtml}</div>`
+    : `<table class="sal-table"><tr>${header.map(h=>`<th>${h}</th>`).join('')}</tr>${tableRows}</table>`;
+
   const monthLabel = MONTH_NAMES[month-1] + ' ' + year;
   const reportTitle = 'Monthly Leave Detail Report — ' + monthLabel;
   box.innerHTML = `${reportActionBar(reportTitle, 'monthlyLeaveDetailReportBox')}
     <div class="sal-sheet-wrap print-isolate" id="leaveDetailPrintArea">
       ${reportLogoHeader(reportTitle)}
-      <table class="sal-table"><tr>${header.map(h=>`<th>${h}</th>`).join('')}</tr>${tableRows}</table>
+      ${tableInner}
     </div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0;">EL/PL and SL include half-day instances at 0.5; Half Day is the count of half-day instances of any kind. A number shown in red is the highest in that column this month.</p>`;
 
@@ -16155,6 +16209,15 @@ async function renderYearlyLeaveDetailReport(){
     perEmp.push({ name: emp.name, months });
   }
 
+  // Five 14-column tables (one per metric, Name + all 12 FY months + Total)
+  // stacked one after another — the widest report in the app on a wide
+  // screen, and on a phone the worst offender for exactly the problem every
+  // other report in this file already got fixed for: nothing past the first
+  // couple of months ever showed, with no hint the rest of the year was
+  // still there off-screen. Same isCompact card treatment as the Monthly
+  // Leave Report just above, done once per metric section instead of once
+  // for the whole report, since each metric is its own table here.
+  const isCompact = isCompactSheetView();
   const csvBlocks = [];
   const tablesHtml = LEAVE_DETAIL_METRICS.map(metric => {
     const rows = perEmp.map(e => {
@@ -16171,8 +16234,16 @@ async function renderYearlyLeaveDetailReport(){
 
     csvBlocks.push(metric.label + '\n' + toCsv(header, rows.map(r => [r.name, ...r.monthVals, r.total])));
 
-    return `<h3 style="margin:20px 0 6px;font-size:14px;">${escapeHtml(metric.label)}</h3>
-      <table class="sal-table"><tr>${header.map(h=>`<th>${h}</th>`).join('')}</tr>${tableRows}</table>`;
+    const cardsHtml = rows.map(r => hrCard(
+      `<strong>${escapeHtml(r.name)}</strong>`,
+      FY_MONTH_LABELS.map((label, i) => leaveDetailRowHtml(label, r.monthVals[i], colMaxes[i])).join('') +
+      leaveDetailRowHtml('Total this FY', r.total, totalMax)
+    )).join('');
+    const metricInner = isCompact
+      ? `<div class="hr-sheet-cards">${cardsHtml}</div>`
+      : `<table class="sal-table"><tr>${header.map(h=>`<th>${h}</th>`).join('')}</tr>${tableRows}</table>`;
+
+    return `<h3 style="margin:20px 0 6px;font-size:14px;">${escapeHtml(metric.label)}</h3>${metricInner}`;
   }).join('');
 
   const reportTitle = 'Yearly Leave Detail Report — FY ' + startYear + '-' + String(startYear+1).slice(2);
