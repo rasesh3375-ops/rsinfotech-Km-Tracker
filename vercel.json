@@ -6,5 +6,19 @@
     { "source": "/hr/", "destination": "/index.html" },
     { "source": "/hr/manifest.json", "destination": "/manifest-hr.json" },
     { "source": "/hr/icons/apple-touch-icon.png", "destination": "/icons/apple-touch-icon-hr.png" }
+  ],
+  "headers": [
+    {
+      "source": "/",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
+    },
+    {
+      "source": "/index.html",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
+    },
+    {
+      "source": "/hr/",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
+    }
   ]
 }
