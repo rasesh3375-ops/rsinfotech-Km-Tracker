@@ -5980,7 +5980,13 @@ function policyRowsFor(employees, attByEmp, dateList, holidayMap){
       warn.push('More than ' + P.privilegeLeave.maxPerMonth + ' PL this month — excess deducted from salary');
     if(!bal.plUsable && bal.plEarned > 0) warn.push('PL earned this year is usable from the next financial year');
     if(earlyDays) warn.push(earlyDays + ' day(s) left before shift end (' + minToHHMM(P.shift.endMin) + ')');
-    const sandwichDates = emp.employeeType === 'resident' ? [] : sandwichDaysFor(att, dateList, holidayMap || {});
+    // Sandwich leave applies to Resident Engineers too — confirmed as a
+    // deliberate policy decision, unlike the EL/SL/short-leave/late-coming
+    // rules just above, which stay exempt for them exactly as before. A
+    // Resident's day is still marked A/LP/P through the same Attendance
+    // Sheet everyone else uses, so there is nothing special about how their
+    // sandwich days are found — only whether the exemption applied at all.
+    const sandwichDates = sandwichDaysFor(att, dateList, holidayMap || {});
     if(sandwichDates.length) warn.push(sandwichDates.length + ' sandwich day(s) (' + sandwichDates.join(', ') +
       ') — Sunday/holiday between two unpaid-absence days, deducted from this month’s salary');
     return { emp, lateCount, shortLeaves, sickUsed, plUsed, lwp, halfDays, attendanceDays,
@@ -8356,8 +8362,12 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   const policyHalf = policyHalfDaysFor(emp, att, dateList);
   // A Sunday or holiday sandwiched between two unpaid-absence days, charged
   // as an extra unpaid day of its own — see sandwichDaysFor. Resident
-  // Engineers sit outside every leave rule, sandwich included.
-  const sandwichDates = (emp || {}).employeeType === 'resident' ? [] : sandwichDaysFor(att, dateList, holidayMap);
+  // Engineers are exempt from the EL/SL/short-leave/late-coming rules, but
+  // NOT from this one — a deliberate policy decision, since a Resident's
+  // day is still marked A/LP/P through the same Attendance Sheet as
+  // everyone else, so the same Sunday-or-holiday-bracketed-by-two-unpaid-
+  // days reasoning applies to them the same way.
+  const sandwichDates = sandwichDaysFor(att, dateList, holidayMap);
   const leaveDays = summary.absent + summary.lpDays + policyHalf.total * 0.5 + sandwichDates.length;
   // Rate of Pay and heading as they stood on THIS month, not whatever they are
   // today — an increment recorded since must not move a month that has
@@ -9443,9 +9453,10 @@ async function renderConsultantReport(){
     // extra unpaid day on the Salary Sheet (computeSalaryForEmployee) — this
     // is the same figure, added the same way, so the payable-days count sent
     // to the consultant cannot overstate what is actually paid. Resident
-    // Engineers sit outside the sandwich rule entirely, same exemption the
-    // Salary Sheet itself applies.
-    const sandwichDays = emp.employeeType === 'resident' ? 0 : sandwichDaysFor(att, dateList, holidayMap).length;
+    // Engineers ARE subject to sandwich leave (unlike EL/SL/short-leave/
+    // late-coming, which they stay exempt from) — same policy the Salary
+    // Sheet itself now applies.
+    const sandwichDays = sandwichDaysFor(att, dateList, holidayMap).length;
     const absentDays = c.absent + sandwichDays;
     // Everything in the month is paid except unpaid absence (A and LP) — EL, SL,
     // week-offs and public holidays are all paid. Deriving it by subtraction keeps
@@ -16780,7 +16791,21 @@ async function renderEmployeeDetailReport(){
 
     const flags = [];
     if(emp.employeeType === 'resident'){
-      observations.push('Resident Engineer — outside the attendance, leave and late-coming policy entirely.');
+      observations.push('Resident Engineer — outside the attendance, leave and late-coming policy, except sandwich leave, which applies the same way it does for everyone else.');
+      // Not folded into the exempt narrative above — a Resident's sandwich
+      // days ARE deducted on their Salary Sheet (see computeSalaryForEmployee),
+      // so this report has to say so too, or it would read as though nothing
+      // about their pay this FY was ever reduced.
+      const fyStart0 = financialYearStart(todayStr());
+      const fyDateList0 = [];
+      { const d = new Date(fyStart0 + 'T00:00:00'), end = new Date(todayStr() + 'T00:00:00');
+        while(d <= end){
+          fyDateList0.push(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'));
+          d.setDate(d.getDate() + 1);
+        }
+      }
+      const fySandwichDays0 = sandwichDaysFor(att, fyDateList0, holidayMap).length;
+      if(fySandwichDays0) observations.push('Sandwich leave this FY: ' + fySandwichDays0 + ' day(s) deducted.');
     } else {
       // computeAttendanceSummary itself has no monthly reset logic (each day
       // is tallied independently), so a single date list spanning the whole
