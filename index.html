@@ -6218,6 +6218,18 @@ PF_RULES.edliPct  = 0.005;
 
 PF_RULES.fixedAmount = 1800;      // the flat option, both sides
 
+// HR-confirmed exception, standing policy: Jalpa Rasesh Doshi (id 31) and
+// Narendrabhai Doshi (id 30). When Actual Percentage is selected for them,
+// Employee PF stays uncapped at 12% of their actual wage — no ₹1,800
+// ceiling, unlike every other employee on Actual Percentage below — and
+// every report shows their Employer PF as one combined figure rather than
+// split into Employer PF/EPF and Pension/EPS columns. Nothing else about
+// them changes: same wage, same exclusions, ordinary Fixed-₹1,800 behaviour
+// if that option is ever picked for them instead. By employee id, not name
+// — a name match is one typo away from silently missing the right person or
+// catching the wrong one in a payroll figure.
+PF_RULES.uncappedPercentIds = ['30', '31'];
+
 PF_RULES.exclusion = {
   wageAbove: 15000,
   conditions: ['No prior UAN or EPF account', 'Basic strictly above ₹15,000', 'Form 11 declaration submitted']
@@ -6243,7 +6255,7 @@ function pfConfigStatus(emp){
 }
 
 const PF_ZERO = { applicable:false, employee:0, employerEpf:0, employerEps:0, edli:0, admin:0,
-                  employeeTotal:0, employerTotal:0, grandTotal:0, wage:0, type:'' };
+                  employeeTotal:0, employerTotal:0, grandTotal:0, wage:0, type:'', employerPfMerged:false };
 
 function calculatePfFor(emp, wage){
   const w = Math.max(0, Number(wage) || 0);
@@ -6274,28 +6286,54 @@ function calculatePfFor(emp, wage){
   if(cfg.type === 'fixed' && w > PF_RULES.epsWageCeiling){
     const f = PF_RULES.fixedAmount;
     // A flat amount on both sides. Deliberately not 12% of anything, and the
-    // EPS split does not apply — the figure is the agreed contribution.
+    // EPS split does not apply — the figure is the agreed contribution. This
+    // is already a single un-split employer figure by construction, so the
+    // two-employee "combined Employer PF" exception below has nothing to do
+    // here even if it were one of them.
     return { applicable:true, type:'fixed', wage:w,
              employee:f, employerEpf:f, employerEps:0, edli:0, admin:0,
              employeeTotal:f, employerTotal:f, grandTotal:f * 2,
+             employerPfMerged:false,
              reason:'Fixed ₹' + fmtMoney(f) + ' each side' };
   }
 
   const c = computePf(w);
   const edli  = w * PF_RULES.edliPct;
   const admin = w * PF_RULES.adminPct;
+  const isUncapped = PF_RULES.uncappedPercentIds.indexOf(String((emp || {}).id)) !== -1;
+  // Everyone except the two HR-confirmed exceptions is stopped here — Fixed
+  // ₹1,800 and Actual Percentage converge on the same ceiling, just reached
+  // two different ways: Fixed is the flat figure directly, Percentage is
+  // 12% of the actual wage stopped at the same figure. Below the ceiling
+  // neither ever needed capping, since 12% of a wage under ₹15,000 is
+  // already under ₹1,800 on its own — this only bites employees whose
+  // actual percentage would otherwise have run past it.
+  const employeeCharged = isUncapped ? c.employee : Math.min(c.employee, PF_RULES.fixedAmount);
+  // The two exceptions' Employer PF is reported as one combined figure
+  // rather than split into EPF and Pension/EPS — an HR-confirmed reporting
+  // decision for these two specifically. The combined total
+  // (employerEpf + employerEps) is exactly what employerTotal already was
+  // either way; only which field carries it, and therefore which report
+  // column it lands in, changes.
+  const employerEpf = isUncapped ? (c.employerEpf + c.employerEps) : c.employerEpf;
+  const employerEps = isUncapped ? 0 : c.employerEps;
   return {
     applicable:true, type:'percent', wage:w,
-    employee:c.employee, employerEpf:c.employerEpf, employerEps:c.employerEps, edli, admin,
-    employeeTotal:c.employee,
-    employerTotal:c.employerEpf + c.employerEps + edli + admin,
-    grandTotal:c.employee + c.employerEpf + c.employerEps + edli + admin,
-    reason: cfg.type === 'fixed'
-      ? 'Percentage — Basic of ₹' + fmtMoney(w) + ' this month is at or below the ₹' + fmtMoney(PF_RULES.epsWageCeiling) +
-        ' ceiling, so the usual Fixed ₹' + fmtMoney(PF_RULES.fixedAmount) + ' does not apply'
-      : c.capApplied
-        ? 'Percentage — EPS capped at ₹' + fmtMoney(PF_RULES.epsMonthlyCap) + ' on a wage of ₹' + fmtMoney(w)
-        : 'Percentage on a wage of ₹' + fmtMoney(w)
+    employee:employeeCharged, employerEpf, employerEps, edli, admin,
+    employeeTotal:employeeCharged,
+    employerTotal:employerEpf + employerEps + edli + admin,
+    grandTotal:employeeCharged + employerEpf + employerEps + edli + admin,
+    employerPfMerged:isUncapped,
+    reason: isUncapped
+      ? 'Percentage on a wage of ₹' + fmtMoney(w) + ' — Employee PF uncapped by standing HR agreement for this employee; Employer PF shown as one combined figure, not split into EPF and Pension/EPS'
+      : cfg.type === 'fixed'
+        ? 'Percentage — Basic of ₹' + fmtMoney(w) + ' this month is at or below the ₹' + fmtMoney(PF_RULES.epsWageCeiling) +
+          ' ceiling, so the usual Fixed ₹' + fmtMoney(PF_RULES.fixedAmount) + ' does not apply'
+        : employeeCharged < c.employee
+          ? 'Percentage — Employee PF capped at ₹' + fmtMoney(PF_RULES.fixedAmount) + ' on a wage of ₹' + fmtMoney(w)
+          : c.capApplied
+            ? 'Percentage — EPS capped at ₹' + fmtMoney(PF_RULES.epsMonthlyCap) + ' on a wage of ₹' + fmtMoney(w)
+            : 'Percentage on a wage of ₹' + fmtMoney(w)
   };
 }
 
@@ -8489,7 +8527,13 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
            pfWage, pfType: pfCalc.type, pfApplicable: pfCalc.applicable, pfReason: pfCalc.reason,
            directPaid, netBeforeDirect,
            pfEmployeeTotal: pfCalc.employeeTotal, pfEmployerTotal: pfCalc.employerTotal,
-           pfGrandTotal: pfCalc.grandTotal };
+           pfGrandTotal: pfCalc.grandTotal,
+           // pen/employerPf above already carry the merge (employerPf holds
+           // the combined figure, pen is 0) for the two HR-confirmed
+           // exceptions — this flag is only so a report can label that
+           // column "Employer PF (combined)" instead of implying a real
+           // zero Pension/EPS contribution.
+           employerPfMerged: pfCalc.employerPfMerged };
 }
 
 // The grouped section markup shared by an employee row, a heading's
@@ -12782,6 +12826,14 @@ function toggleStatutoryFieldsForHeading(){
         if(elig !== 'yes') typeEl.value = '';
       }
       const probe = Object.assign({}, payrollExclusionInputs(), {
+        // id matters here, not just as a label — calculatePfFor uses it to
+        // recognise the two employees whose Employee PF stays uncapped by
+        // standing HR agreement. Without it this preview would show a
+        // capped ₹1,800 for them while the Salary Sheet (which calls
+        // calculatePfFor with their real record) correctly shows their
+        // actual uncapped figure — exactly the "form disagrees with the
+        // Salary Sheet" class of bug this app has been burned by before.
+        id: editingEmployeeId || (document.getElementById('f_id') || {}).value || '',
         salaryHeading: (document.getElementById('f_salaryHeading') || {}).value,
         pfEligible: elig,
         pfContributionType: typeEl ? typeEl.value : ''
