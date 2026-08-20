@@ -17616,23 +17616,47 @@ async function viewReport(key, label, monthFilter){
     // other. They are always the same figure, and showing only the bonus left
     // no way to see that from the report — which is how a rate that happens to
     // end in 200 came to look like Professional Tax had been added to it.
-    csvHeader = ['Name','Eligible','Rate of Pay','Bonus','Status'];
+    csvHeader = ['Name','Eligible','Rate of Pay','Bonus','Status','Next Eligible Date'];
     const SRC = { entered:'Amount set', unset:'AMOUNT NOT SET', ineligible:'Not eligible' };
+    // diwaliEligible is a manual Yes/No HR sets per employee — there is no
+    // date logic behind it anywhere else in the app. Per HR, the waiting
+    // period is one year of service from Date of Joining, so this is shown
+    // only for someone currently marked not eligible, computed off doj
+    // (nextAnniversaryOf, the same string-based DOJ+1-year helper used
+    // elsewhere — never new Date(dateStr), which can shift a day across a
+    // UTC-midnight boundary). If that anniversary has already passed, the
+    // date is flagged for review rather than silently shown in the past,
+    // since setting Eligible to Yes is still a manual step this does not do
+    // on its own.
+    const nextEligibleFor = (e) => {
+      if(e.diwaliEligible === 'yes') return null;
+      if(!e.doj) return { text: 'Date of joining not recorded', overdue: false };
+      const anniv = nextAnniversaryOf(e.doj);
+      return anniv <= todayStr()
+        ? { text: 'Completed 1 year on ' + fmtDateIN(anniv) + ' — review eligibility', overdue: true }
+        : { text: fmtDateIN(anniv), overdue: false };
+    };
     csvRows = employees.map(e => [e.name, e.diwaliEligible==='yes'?'Yes':'No',
                                   currentRatePay(e).ratePay,
                                   diwaliBonusSource(e) === 'entered' ? diwaliBonusFor(e) : '',
-                                  SRC[diwaliBonusSource(e)]]);
+                                  SRC[diwaliBonusSource(e)],
+                                  (nextEligibleFor(e) || {}).text || '']);
     let diwaliCards = '';
     rows = employees.map(e => {
       const rate = currentRatePay(e).ratePay;
       const src = diwaliBonusSource(e);
+      const nextEligible = nextEligibleFor(e);
+      const nextEligibleHtml = nextEligible
+        ? (nextEligible.overdue ? '<span class="pol-warn">' + escapeHtml(nextEligible.text) + '</span>' : escapeHtml(nextEligible.text))
+        : '—';
       if(isCompact){
         diwaliCards += hrCard(`<strong>${escapeHtml(e.name)}</strong>`,
           hrRow('Eligible', e.diwaliEligible==='yes'?'Yes':'No') + hrRow('Rate of Pay', rupees(rate)) +
           hrRow('Bonus', src === 'entered' ? rupees(diwaliBonusFor(e)) : '—') +
           hrRow('Status', src === 'entered' ? '<span class="pol-ok">Amount set</span>'
               : src === 'unset' ? '<span class="pol-warn">No amount set</span>'
-              : '<span style="color:var(--muted);">Not eligible</span>'),
+              : '<span style="color:var(--muted);">Not eligible</span>') +
+          (nextEligible ? hrRow('Next eligible', nextEligibleHtml) : ''),
           src === 'unset' ? 'is-new' : '');
       }
       return `<tr${src === 'unset' ? ' class="inc-overdue"' : ''}>
@@ -17641,12 +17665,13 @@ async function viewReport(key, label, monthFilter){
         <td class="num">${src === 'entered' ? rupees(diwaliBonusFor(e)) : '—'}</td>
         <td>${src === 'entered' ? '<span class="pol-ok">Amount set</span>'
             : src === 'unset' ? '<span class="pol-warn">No amount set</span>'
-            : '<span style="color:var(--muted);">Not eligible</span>'}</td></tr>`;
+            : '<span style="color:var(--muted);">Not eligible</span>'}</td>
+        <td>${nextEligibleHtml}</td></tr>`;
     }).join('');
     const unsetCount = employees.filter(e => diwaliBonusSource(e) === 'unset').length;
     const diwaliInner = isCompact ? (diwaliCards ? `<div class="hr-sheet-cards">${diwaliCards}</div>` : '<div class="empty">No data yet</div>')
-      : `<div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th>Eligible</th><th class="num">Rate of Pay</th><th class="num">Bonus</th><th>Status</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table></div>`;
-    box.innerHTML = `${fsBtn}<div class="print-isolate" id="reportPrintArea_diwali" style="margin-top:12px;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">The bonus is the amount entered against each employee — nothing is worked out from the Rate of Pay, which is shown only for comparison. Nothing is deducted from a bonus and nothing is added to one: no PF, ESI or Professional Tax, no advance, loan or retention, and no reduction for leave taken during the year.</p>
+      : `<div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th>Eligible</th><th class="num">Rate of Pay</th><th class="num">Bonus</th><th>Status</th><th>Next Eligible Date</th></tr>${rows || '<tr><td colspan="6" class="empty">No data yet</td></tr>'}</table></div>`;
+    box.innerHTML = `${fsBtn}<div class="print-isolate" id="reportPrintArea_diwali" style="margin-top:12px;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">The bonus is the amount entered against each employee — nothing is worked out from the Rate of Pay, which is shown only for comparison. Nothing is deducted from a bonus and nothing is added to one: no PF, ESI or Professional Tax, no advance, loan or retention, and no reduction for leave taken during the year. Next Eligible Date is one year of service from Date of Joining, shown only for anyone not currently marked eligible.</p>
       ${unsetCount ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${unsetCount} eligible employee(s) have no bonus amount set, so nothing will be paid to them. Open each record and fill in Diwali bonus amount — the form suggests one month's pay if that is what you want.</p>` : ''}${diwaliInner}</div>`;
   } else if(key === 'salary'){
     // Deductions used to be one lump figure — right, but unreadable next to
