@@ -9784,6 +9784,7 @@ async function renderSalaryComparisonReport(){
   const prevAgg = mkAgg(), currAgg = mkAgg();
   let newEmpPrevCount=0, newEmpPrevAmt=0, newEmpCurrCount=0, newEmpCurrAmt=0;
   let leftPrevCount=0, leftPrevAmt=0, leftCurrCount=0, leftCurrAmt=0;
+  const newEmpPrevNames=[], newEmpCurrNames=[], leftPrevNames=[], leftCurrNames=[];
 
   let prevTotal = 0, currTotal = 0;
   const joined = [], leavers = [], changed = [];
@@ -9825,10 +9826,10 @@ async function renderSalaryComparisonReport(){
     // falling inside that specific month, not by prev-vs-curr roster
     // membership — the latter would also catch someone reactivated after
     // being marked left, which is not a new joiner.
-    if(emp.doj && emp.doj >= prev.start && emp.doj <= prev.end){ newEmpPrevCount++; if(sPrev) newEmpPrevAmt += sPrev.gross; }
-    if(emp.doj && emp.doj >= curr.start && emp.doj <= curr.end){ newEmpCurrCount++; if(sCurr) newEmpCurrAmt += sCurr.gross; }
-    if(emp.employmentStatus === 'left' && emp.leftDate && emp.leftDate >= prev.start && emp.leftDate <= prev.end){ leftPrevCount++; if(sPrev) leftPrevAmt += sPrev.gross; }
-    if(emp.employmentStatus === 'left' && emp.leftDate && emp.leftDate >= curr.start && emp.leftDate <= curr.end){ leftCurrCount++; if(sCurr) leftCurrAmt += sCurr.gross; }
+    if(emp.doj && emp.doj >= prev.start && emp.doj <= prev.end){ newEmpPrevCount++; newEmpPrevNames.push(emp.name); if(sPrev) newEmpPrevAmt += sPrev.gross; }
+    if(emp.doj && emp.doj >= curr.start && emp.doj <= curr.end){ newEmpCurrCount++; newEmpCurrNames.push(emp.name); if(sCurr) newEmpCurrAmt += sCurr.gross; }
+    if(emp.employmentStatus === 'left' && emp.leftDate && emp.leftDate >= prev.start && emp.leftDate <= prev.end){ leftPrevCount++; leftPrevNames.push(emp.name); if(sPrev) leftPrevAmt += sPrev.gross; }
+    if(emp.employmentStatus === 'left' && emp.leftDate && emp.leftDate >= curr.start && emp.leftDate <= curr.end){ leftCurrCount++; leftCurrNames.push(emp.name); if(sCurr) leftCurrAmt += sCurr.gross; }
 
     // Increments, isolated from leave: rate = gross + leaveAmount for every
     // heading (the Basic/HRA/LTA percentages always sum to 100%, so "gross
@@ -9899,10 +9900,23 @@ async function renderSalaryComparisonReport(){
       : `<tr><td class="sal-name">${label}</td><td class="num">${prevVal}</td><td class="num">${currVal}</td></tr>`;
   };
   const money = v => '₹' + fmtMoney(v);
+  // New Employees / Employees Left name who, not just how many — a bare
+  // count was the one thing HR asked to add back on top of the category
+  // matrix. Shown as a smaller, muted line under the count so it reads as
+  // detail rather than competing with the figure itself.
+  const namesLine = names => names.length ? `<br><span style="font-weight:400;font-size:11px;color:var(--muted);">${names.map(escapeHtml).join(', ')}</span>` : '';
   const catRowsHtml = [
     catRow('Gross Salary (all on-roll employees)', money(prevAgg.gross), money(currAgg.gross), Math.round(prevAgg.gross), Math.round(currAgg.gross)),
-    catRow('New Employees', newEmpPrevCount + ' · ' + money(newEmpPrevAmt), newEmpCurrCount + ' · ' + money(newEmpCurrAmt), newEmpPrevCount + ' (' + Math.round(newEmpPrevAmt) + ')', newEmpCurrCount + ' (' + Math.round(newEmpCurrAmt) + ')'),
-    catRow('Employees Left', leftPrevCount + ' · ' + money(leftPrevAmt), leftCurrCount + ' · ' + money(leftCurrAmt), leftPrevCount + ' (' + Math.round(leftPrevAmt) + ')', leftCurrCount + ' (' + Math.round(leftCurrAmt) + ')'),
+    catRow('New Employees',
+      newEmpPrevCount + ' · ' + money(newEmpPrevAmt) + namesLine(newEmpPrevNames),
+      newEmpCurrCount + ' · ' + money(newEmpCurrAmt) + namesLine(newEmpCurrNames),
+      newEmpPrevCount + ' (' + Math.round(newEmpPrevAmt) + ') ' + newEmpPrevNames.join('; '),
+      newEmpCurrCount + ' (' + Math.round(newEmpCurrAmt) + ') ' + newEmpCurrNames.join('; ')),
+    catRow('Employees Left',
+      leftPrevCount + ' · ' + money(leftPrevAmt) + namesLine(leftPrevNames),
+      leftCurrCount + ' · ' + money(leftCurrAmt) + namesLine(leftCurrNames),
+      leftPrevCount + ' (' + Math.round(leftPrevAmt) + ') ' + leftPrevNames.join('; '),
+      leftCurrCount + ' (' + Math.round(leftCurrAmt) + ') ' + leftCurrNames.join('; ')),
     catRow('Leave Days (all employees)', prevAgg.leaveDaysCount + ' days · ' + money(prevAgg.leaveAmount), currAgg.leaveDaysCount + ' days · ' + money(currAgg.leaveAmount), prevAgg.leaveDaysCount + ' (' + Math.round(prevAgg.leaveAmount) + ')', currAgg.leaveDaysCount + ' (' + Math.round(currAgg.leaveAmount) + ')'),
     catRow('Increments — Rate of Pay, continuing staff (leave excluded)', money(prevAgg.continuingRate), money(currAgg.continuingRate), Math.round(prevAgg.continuingRate), Math.round(currAgg.continuingRate)),
     catRow('PF (Employee + Employer)', money(prevAgg.pf), money(currAgg.pf), Math.round(prevAgg.pf), Math.round(currAgg.pf)),
