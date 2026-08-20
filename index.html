@@ -2053,7 +2053,7 @@
         </div>
 
         <div id="rptSecAttendance" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showReportsLanding()">← Back to Reports</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Attendance</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The same attendance the Attendance Sheet records for this employee — Present, Absent, EL/SL/LP and half-days — one employee's calendar at a time. Sundays and declared holidays are excluded from the Absent count automatically.</p>
@@ -2073,14 +2073,14 @@
               <select class="field-input" id="attendanceYearSel"></select>
             </div>
           </div>
-          <button class="btn full" onclick="withBusy(this,'Loading…',loadAttendanceCalendar)">Load attendance</button>
+          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Loading…',loadAttendanceCalendar)">Load attendance</button>
           <div style="height:14px"></div>
           <div id="attendanceCalendarBox"></div>
         </section>
         </div>
 
         <div id="rptSecHolidays" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showReportsLanding()">← Back to Reports</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Holidays</h2>
           <div class="row-inline">
@@ -2101,21 +2101,21 @@
         </div>
 
         <div id="rptSecMonthlyLeave" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showReportsLanding()">← Back to Reports</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Monthly Leave Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Every employee's leave days (EL + SL + LP, half-days counted as 0.5) broken down month by month across the financial year — April through March — so you can see each person's full-year leave pattern at a glance.</p>
           <label class="field">Financial year starting April of</label>
           <input type="number" id="leaveReportStartYear" placeholder="e.g. 2026 for FY 2026-27" />
           <div style="height:14px"></div>
-          <button class="btn full" onclick="withBusy(this,'Building report…',renderMonthlyLeaveReport)">Generate monthly leave report</button>
+          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building report…',renderMonthlyLeaveReport)">Generate monthly leave report</button>
           <div style="height:14px"></div>
           <div id="monthlyLeaveReportBox"></div>
         </section>
         </div>
 
         <div id="rptSecMonthlyLeaveDetail" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showReportsLanding()">← Back to Reports</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Monthly Leave Detail Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Every employee's late coming, EL/PL, SL, half days and short leaves for one month, side by side. Whoever has the highest count in a column is shown in red, so it's easy to see at a glance who to have a word with.</p>
@@ -2123,28 +2123,28 @@
             <div><label class="field">Month</label><select class="field-input" id="leaveDetailMonthSel"></select></div>
             <div><label class="field">Year</label><select class="field-input" id="leaveDetailYearSel"></select></div>
           </div>
-          <button class="btn full" onclick="withBusy(this,'Building report…',renderMonthlyLeaveDetailReport)">Generate monthly leave detail report</button>
+          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building report…',renderMonthlyLeaveDetailReport)">Generate monthly leave detail report</button>
           <div style="height:14px"></div>
           <div id="monthlyLeaveDetailReportBox"></div>
         </section>
         </div>
 
         <div id="rptSecYearlyLeaveDetail" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showReportsLanding()">← Back to Reports</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Yearly Leave Detail Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The same breakdown — late coming, EL/PL, SL, half days, short leaves — one table per category, month by month across the financial year with a Total column. The highest count in each column is shown in red.</p>
           <label class="field">Financial year starting April of</label>
           <input type="number" id="leaveDetailYearlyStartYear" placeholder="e.g. 2026 for FY 2026-27" />
           <div style="height:14px"></div>
-          <button class="btn full" onclick="withBusy(this,'Building report…',renderYearlyLeaveDetailReport)">Generate yearly leave detail report</button>
+          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building report…',renderYearlyLeaveDetailReport)">Generate yearly leave detail report</button>
           <div style="height:14px"></div>
           <div id="yearlyLeaveDetailReportBox"></div>
         </section>
         </div>
 
         <div id="rptSecPF" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showReportsLanding()">← Back to Reports</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">PF Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">PF deducted per employee for the month, pulled from the Salary Sheet. Apprentices, R.S.IT Solution and Contractors don't have PF, so they're excluded here.</p>
@@ -2152,14 +2152,14 @@
             <div><label class="field">Month</label><select class="field-input" id="pfReportMonthSel"></select></div>
             <div><label class="field">Year</label><select class="field-input" id="pfReportYearSel"></select></div>
           </div>
-          <button class="btn full" onclick="withBusy(this,'Building report…',()=>renderStatutoryReport('pf','PF Report'))">Generate PF report</button>
+          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building report…',()=>renderStatutoryReport('pf','PF Report'))">Generate PF report</button>
           <div style="height:14px"></div>
           <div id="pfReportBox"></div>
         </section>
         </div>
 
         <div id="rptSecESI" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showReportsLanding()">← Back to Reports</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">ESI Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">ESI deducted per employee for the month, pulled from the Salary Sheet. Apprentices, R.S.IT Solution and Contractors don't have ESI, so they're excluded here.</p>
@@ -2167,14 +2167,14 @@
             <div><label class="field">Month</label><select class="field-input" id="esiReportMonthSel"></select></div>
             <div><label class="field">Year</label><select class="field-input" id="esiReportYearSel"></select></div>
           </div>
-          <button class="btn full" onclick="withBusy(this,'Building report…',()=>renderStatutoryReport('esi','ESI Report'))">Generate ESI report</button>
+          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building report…',()=>renderStatutoryReport('esi','ESI Report'))">Generate ESI report</button>
           <div style="height:14px"></div>
           <div id="esiReportBox"></div>
         </section>
         </div>
 
         <div id="rptSecPT" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showReportsLanding()">← Back to Reports</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">PT Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Professional Tax deducted per employee for the month, pulled from the Salary Sheet. Apprentices and Contractors don't have PT — Managerial, Seniors, Junior Engineers, and R.S.IT Solution do, when Gross exceeds ₹12,000.</p>
@@ -2182,14 +2182,14 @@
             <div><label class="field">Month</label><select class="field-input" id="ptReportMonthSel"></select></div>
             <div><label class="field">Year</label><select class="field-input" id="ptReportYearSel"></select></div>
           </div>
-          <button class="btn full" onclick="withBusy(this,'Building report…',()=>renderStatutoryReport('pt','PT Report'))">Generate PT report</button>
+          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building report…',()=>renderStatutoryReport('pt','PT Report'))">Generate PT report</button>
           <div style="height:14px"></div>
           <div id="ptReportBox"></div>
         </section>
         </div>
 
         <div id="rptSecApprenticeSalary" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showReportsLanding()">← Back to Reports</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Apprentice Salary Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Full salary breakdown for employees under the Apprentices heading only, for the month you pick — pulled from the Salary Sheet.</p>
@@ -2197,14 +2197,14 @@
             <div><label class="field">Month</label><select class="field-input" id="apprenticeReportMonthSel"></select></div>
             <div><label class="field">Year</label><select class="field-input" id="apprenticeReportYearSel"></select></div>
           </div>
-          <button class="btn full" onclick="withBusy(this,'Building report…',renderApprenticeSalaryReport)">Generate apprentice salary report</button>
+          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building report…',renderApprenticeSalaryReport)">Generate apprentice salary report</button>
           <div style="height:14px"></div>
           <div id="apprenticeReportBox"></div>
         </section>
         </div>
 
         <div id="rptSecFinalSalary" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showReportsLanding()">← Back to Reports</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Final Salary Sheet for Accountant</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The payment list: every employee grouped by salary heading, sorted by bank within each heading, with account number and the final amount payable after all deductions. Built for handing to the bank — one block per heading, subtotalled, with a grand total at the end.</p>
@@ -2212,28 +2212,28 @@
             <div><label class="field">Month</label><select class="field-input" id="finalSalMonthSel"></select></div>
             <div><label class="field">Year</label><select class="field-input" id="finalSalYearSel"></select></div>
           </div>
-          <button class="btn full" onclick="withBusy(this,'Building sheet…',renderFinalSalarySheet)">Generate final salary sheet</button>
+          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building sheet…',renderFinalSalarySheet)">Generate final salary sheet</button>
           <div style="height:14px"></div>
           <div id="finalSalaryBox"></div>
         </section>
         </div>
 
         <div id="rptSecDiwaliBonus" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showReportsLanding()">← Back to Reports</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Diwali Bonus Payment Sheet</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The payment list for the bonus, in the same shape as the Final Salary Sheet — grouped by salary heading, sorted by bank, with account number and the amount payable. An employee appears once they are marked eligible <em>and</em> have a Diwali bonus amount set on their record; anyone eligible without one is named above the table rather than left off quietly. No PF, ESI, Professional Tax, advance, loan or retention is deducted, and leave taken during the year does not reduce it.</p>
           <label class="field">Paid on</label>
           <input type="date" class="field-input" id="bonusPaidOn" />
           <div style="height:12px"></div>
-          <button class="btn full" onclick="withBusy(this,'Building sheet…',renderBonusPaymentSheet)">Generate bonus payment sheet</button>
+          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building sheet…',renderBonusPaymentSheet)">Generate bonus payment sheet</button>
           <div style="height:14px"></div>
           <div id="bonusPaymentBox"></div>
         </section>
         </div>
 
         <div id="rptSecConsultant" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showReportsLanding()">← Back to Reports</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Consultant Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The monthly attendance sheet in the exact column format the consultant asks for — one row per employee, built automatically from Employee Master and the month's attendance. Pick any month; export the CSV and send it on.</p>
@@ -2241,14 +2241,14 @@
             <div><label class="field">Month</label><select class="field-input" id="consultantReportMonthSel"></select></div>
             <div><label class="field">Year</label><select class="field-input" id="consultantReportYearSel"></select></div>
           </div>
-          <button class="btn full" onclick="withBusy(this,'Building report…',renderConsultantReport)">Generate consultant report</button>
+          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building report…',renderConsultantReport)">Generate consultant report</button>
           <div style="height:14px"></div>
           <div id="consultantReportBox"></div>
         </section>
         </div>
 
         <div id="rptSecSalaryCompare" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showReportsLanding()">← Back to Reports</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Month-wise Salary Comparison</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Last month's total salary against the month you pick, and exactly what explains the gap — each new joiner that added to it, each leaver that took away from it, and anyone whose own salary moved. The reasons add up to the difference.</p>
@@ -2256,14 +2256,14 @@
             <div><label class="field">Month</label><select class="field-input" id="salCompareMonthSel"></select></div>
             <div><label class="field">Year</label><select class="field-input" id="salCompareYearSel"></select></div>
           </div>
-          <button class="btn full" onclick="withBusy(this,'Building comparison…',renderSalaryComparisonReport)">Generate salary comparison</button>
+          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building comparison…',renderSalaryComparisonReport)">Generate salary comparison</button>
           <div style="height:14px"></div>
           <div id="salCompareBox"></div>
         </section>
         </div>
 
         <div id="rptSecOvertime" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showReportsLanding()">← Back to Reports</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Overtime Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Applies to Field Engineers per the overtime policy. Log hours HR has been informed of (by the following day, per policy) — this is manual since overtime is reported over WhatsApp, not through this app.</p>
@@ -2300,21 +2300,21 @@
               <select class="field-input" id="otViewYearSel"></select>
             </div>
           </div>
-          <button class="btn ghost full" onclick="withBusy(this,'Loading…',showOvertimeReport)">Show month</button>
+          <button class="btn ghost full" data-kmt-generate onclick="withBusy(this,'Loading…',showOvertimeReport)">Show month</button>
           <div style="height:14px"></div>
           <div id="overtimeReportBox"></div>
         </section>
         </div>
 
         <div id="rptSecEmployeeDetail" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showReportsLanding()">← Back to Reports</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Employee Wise Detail Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">One consolidated profile for a single employee — pick anyone, including those who have left.</p>
           <label class="field">Employee</label>
           <select class="field-input" id="empDetailSelect"></select>
           <div style="height:14px"></div>
-          <button class="btn full" onclick="withBusy(this,'Building report…',showEmployeeDetailReport)">View report</button>
+          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building report…',showEmployeeDetailReport)">View report</button>
           <div class="msg" id="empDetailMsg"></div>
           <div style="height:14px"></div>
           <div id="empDetailReportBox"></div>
@@ -2324,7 +2324,7 @@
         <div id="reportCardsBox"></div>
 
         <div id="rptSecLeaveRollover" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showReportsLanding()">← Back to Reports</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Sick Leave Balance Generator for New Year</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Sets each employee's opening SL to the yearly allowance for their employee type. Resident Engineers and Work From Home staff are skipped, their policies being different, as are non-R.S. Infotech headings. Run once, in April. <strong>EL is not touched here</strong> — open it for the new year from the EL Calculation Sheet's "Encash and start next year at nil" or "Carry forward instead", so EL is only ever set from one place.</p>
@@ -2395,7 +2395,7 @@
         </div>
 
         <div id="genSecRoleReports" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showGeneratorLanding()">← Back to Generator</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Generator</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Employee Role Reports</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A branded A4 report built from one employee's job profile, responsibilities, designation and department — the measures, risks and recommendations change with the role. Fill in Job profile and Key responsibilities in Employee Master first; without them the report falls back to designation and department and says so.</p>
@@ -2411,7 +2411,7 @@
         </div>
 
         <div id="genSecLetterhead" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showGeneratorLanding()">← Back to Generator</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Generator</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Company letterhead</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Printed in the header and footer of every generated report. Anything left blank is left off the report rather than filled with a placeholder.</p>
@@ -2437,14 +2437,14 @@
         </div>
 
         <div id="genSecHolidayList" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showGeneratorLanding()">← Back to Generator</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Generator</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Holiday List (to share with engineers)</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A printable holiday list with the company logo, for a chosen financial year (April–March) — built from the Holidays list above.</p>
           <label class="field">Financial year starting April of</label>
           <input type="number" id="holidayListYear" placeholder="e.g. 2026 for FY 2026-27" />
           <div style="height:14px"></div>
-          <button class="btn full" onclick="withBusy(this,'Building document…',generateHolidayListDoc)">Generate holiday list</button>
+          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building document…',generateHolidayListDoc)">Generate holiday list</button>
           <div id="holidayListOutput" class="hidden" style="margin-top:16px;">
             <div id="holidayListActionBar"></div>
             <div class="holiday-list-paper" id="holidayListPaper"></div>
@@ -2453,35 +2453,35 @@
         </div>
 
         <div id="genSecLeaveEncashment" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showGeneratorLanding()">← Back to Generator</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Generator</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Leave Encashment Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">What is owed for unused privilege leave at the year end, as at 31 March. Grouped by salary heading and sorted by bank with account numbers, so it can be paid the same way as the salary and the bonus. Resident Engineers are outside the EL scheme and do not appear.</p>
           <label class="field">Financial year starting April of</label>
           <input type="number" id="encashStartYear" placeholder="e.g. 2026 for FY 2026-27" />
           <div style="height:14px"></div>
-          <button class="btn full" onclick="withBusy(this,'Building report…',renderLeaveEncashmentReport)">Generate leave encashment report</button>
+          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building report…',renderLeaveEncashmentReport)">Generate leave encashment report</button>
           <div style="height:14px"></div>
           <div id="encashBox"></div>
         </section>
         </div>
 
         <div id="genSecElCalc" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showGeneratorLanding()">← Back to Generator</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Generator</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">EL Calculation Sheet</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Earned Leave = 1 day per 25 days present, per the leave policy. Resident Engineers are excluded. This computes each employee's EL for the financial year you pick from the Attendance Sheet, and can carry the closing balance forward as next year's opening balance automatically.</p>
           <label class="field">Financial year starting April of</label>
           <input type="number" id="elCalcStartYear" placeholder="e.g. 2026 for FY 2026-27" />
           <div style="height:14px"></div>
-          <button class="btn full" onclick="withBusy(this,'Building sheet…',renderElCalculationSheet)">Generate EL calculation sheet</button>
+          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building sheet…',renderElCalculationSheet)">Generate EL calculation sheet</button>
           <div style="height:14px"></div>
           <div id="elCalcBox"></div>
         </section>
         </div>
 
         <div id="genSecChecklists" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showGeneratorLanding()">← Back to Generator</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Generator</button>
         <section class="block">
           <h2 style="margin:0 0 4px;">Checklists</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Joining checklist, items issued at joining, and the exit checklist — same lists that were under "Choose a letter" before, kept together here since they're not letters.</p>
@@ -2491,7 +2491,7 @@
         </div>
 
         <div id="genSecLetters" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showGeneratorLanding()">← Back to Generator</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Generator</button>
         <section class="block">
           <div class="field-group">
             <div class="sec-title">Choose a letter</div>
@@ -2609,7 +2609,7 @@
         </div>
         </div>
         <div id="genSecOfficeDocuments" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="showGeneratorLanding()">← Back to Generator</button>
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Generator</button>
 
         <section class="block">
           <h2 style="margin:0 0 4px;">1. Payroll Documents (monthly)</h2>
@@ -4537,8 +4537,12 @@ async function enterHrMain(){
   if(rollEl && !rollEl.value) rollEl.value = nextFinancialYearStart();
   renderHrSideNav();
   restoreHrSidebar();
-  hrNavigate('dashboard');
+  // Arm the exit guard BEFORE the first real navigation, not after — its
+  // placeholder entry needs to sit beneath the Dashboard's own history
+  // entry, not interleaved on top of it, or the very first Back press would
+  // pop the wrong one.
   armExitGuard();
+  hrNavigate('dashboard');
 
   // Warm-up, each guarded on its own: a flaky backend may degrade a panel but
   // must never take the whole app down with it.
@@ -7491,6 +7495,12 @@ let fullscreenOriginalNextSibling = null;
 function openFullscreenView(title, sourceId){
   const el = document.getElementById(sourceId);
   if(!el) return;
+  // Only a genuine new level of "back" — regenerating the same report into
+  // the box it's already showing full screen (a month changed, Generate
+  // pressed again without leaving full screen first) must not push a second
+  // history entry on top of the one already there for this exact view.
+  const kmtIsNewFullscreen = fullscreenActiveId !== sourceId;
+  if(kmtIsNewFullscreen) kmtCaptureDeparture();
   // stashReportShare() now takes sourceId itself, at every call site — this
   // used to be the ONLY place it got set (every report/letter calls
   // stashReportShare() immediately before this, so whichever box was just
@@ -7542,6 +7552,7 @@ function openFullscreenView(title, sourceId){
   fsBody.scrollTop = 0;
   fsBody.scrollLeft = 0;
   updateSheetScrollNavVisibility();
+  if(kmtIsNewFullscreen) kmtCommitArrival();
   // Deliberately NOT calling the native Fullscreen API here (requestFullscreen()
   // used to be called on #fullscreenSheetRoot) — the CSS overlay already
   // covers the whole viewport on its own (position:fixed;inset:0), so it was
@@ -7653,7 +7664,13 @@ function closeFullscreenHeaderButton(){
     const ownClose = box && box.querySelector('.rpt-close-btn:not([data-no-fs-delegate])');
     if(ownClose){ ownClose.click(); return; }
   }
-  closeFullscreenView();
+  // No owned close button to delegate to (the Salary Sheet's own dedicated
+  // close still routes through its separate PDF-prompt flow above, unaffected
+  // by this) — kmtBack() lands on exactly the same "not full screen, same
+  // tab" entry closeFullscreenView() used to reach directly, just by way of
+  // history instead of skipping it, so a later real Back press still unwinds
+  // correctly rather than landing one level short.
+  kmtBack();
 }
 
 // ---- close the Salary Sheet, asking whether to save a PDF first ----
@@ -7691,10 +7708,11 @@ function closeSalarySheetAction(save){
   // always left the Salary Sheet tab entirely there. Only on laptop/desktop
   // does it now stay on the tab and bring back the month/year picker
   // instead, since that is what collapseSheetTopControls hid the moment the
-  // sheet rendered there — leaving via hrNavigate would have landed on an
-  // unrelated Dashboard with nothing to undo the collapse.
+  // sheet rendered there. kmtBack() returns to wherever the Salary Sheet was
+  // actually opened FROM, not a hardcoded Dashboard — the same fix as every
+  // other report's Close button below.
   else if(isSheetDeclutterView()) cancelSalarySheetView();
-  else hrNavigate('dashboard');
+  else kmtBack();
 }
 function cancelSalarySheetView(){
   const box = document.getElementById('salarySheetBox');
@@ -7767,11 +7785,16 @@ function closeReportView(sourceId){
 // Leaves full screen AND clears the box in one call — pressing Close from
 // full screen used to only exit full screen, leaving the report sitting
 // inline, unchanged, so a second Close press was needed to actually get rid
-// of it. One press now does both.
+// of it. One press now does both. It used to stop there, leaving the same
+// (now empty) report card open — neither the report nor the landing grid,
+// a position that isn't really anywhere at all. kmtBack() now finishes the
+// job: the box is cleared first so nothing stale flashes on screen for a
+// moment, then Back genuinely goes back a level.
 function clearReportBox(boxId){
   if(fullscreenActiveId === boxId) closeFullscreenView();
   const box = document.getElementById(boxId);
   if(box) box.innerHTML = '';
+  kmtBack();
 }
 // html2canvas + jsPDF, fetched only the first time a PDF is actually needed
 // rather than on every page load. Same CDN-script approach already used for
@@ -10849,6 +10872,160 @@ const HR_ROUTES = {
 };
 let hrRoute = 'dashboard';
 
+// ===== Back navigation: a real history stack instead of a single "exit
+// guard" placeholder =====
+//
+// Every hrNavigate/openReportsCard/openGeneratorCard/openFullscreenView call
+// is bracketed with kmtCaptureDeparture()/kmtCommitArrival() below, so the
+// browser's own history.state becomes a real stack of "what was on screen"
+// snapshots — no parallel array to keep in sync with it. Back (hardware,
+// browser, or one of the app's own "← Back" buttons, all routed through
+// kmtBack()) replays the popped snapshot through kmtRestoreView(), which
+// reopens the same route, the same report card, the same fullscreen state,
+// reapplies every filter/search value by id, re-runs the report's own
+// generate button if it had actually been generated (never resurrects old
+// HTML — a stale report is exactly the class of bug this app has been
+// burned by before), and restores scroll position last.
+//
+// kmtRestoring/kmtPendingCardRestore exist purely to stop a restore from
+// fighting itself: a restore must not push a NEW history entry on top of
+// the one it is replaying, and renderReportsTab()/renderGeneratorTab()'s own
+// "always reset to the landing grid" first line must not undo the very card
+// this restore is about to reopen.
+let kmtRestoring = false;
+let kmtPendingCardRestore = null;
+const kmtCardGenerated = new Set();
+document.addEventListener('click', e => {
+  const btn = e.target.closest && e.target.closest('[data-kmt-generate]');
+  if(!btn) return;
+  const card = btn.closest('[id^="rptSec"], [id^="genSec"]');
+  if(card) kmtCardGenerated.add(card.id);
+}, true);
+
+// Whichever rptSec*/genSec* card is currently visible, or null if we're
+// sitting on the landing grid (or a route that has no card concept at all).
+function kmtActiveCard(){
+  if(hrRoute === 'reports'){
+    const el = document.querySelector('#hrSubReports [id^="rptSec"]:not(.hidden)');
+    return el ? el.id : null;
+  }
+  if(hrRoute === 'generator'){
+    for(const id of GENERATOR_SECTIONS){
+      const el = document.getElementById(id);
+      if(el && !el.classList.contains('hidden')) return id;
+    }
+  }
+  return null;
+}
+
+// A snapshot of exactly what's on screen right now — the route, the open
+// card if any, whether fullscreen is active and for which box, scroll
+// position, and a generic id→value map of every select/input/textarea
+// inside the active card (or the whole route panel, if no card is open).
+// Generic on purpose: this covers every current and future report's
+// filters without a hand-maintained field list, the same reasoning
+// staticReportCardStats() already uses for the Reports landing counts.
+function kmtSnapshotView(){
+  const card = kmtActiveCard();
+  const scopeEl = card ? document.getElementById(card) : document.getElementById('hrContent');
+  const fields = {};
+  if(scopeEl){
+    scopeEl.querySelectorAll('select[id], input[id], textarea[id]').forEach(el => { fields[el.id] = el.value; });
+  }
+  let cardTitle = null;
+  if(card){
+    const h = document.querySelector('#' + card + ' h2, #' + card + ' h3');
+    if(h) cardTitle = h.textContent.trim();
+  }
+  const fsBody = document.getElementById('fullscreenBody');
+  return {
+    kmtView: true,
+    route: hrRoute,
+    card: card,
+    cardTitle: cardTitle,
+    fullscreen: fullscreenActiveId || null,
+    scrollY: window.scrollY,
+    fsScrollTop: (fullscreenActiveId && fsBody) ? fsBody.scrollTop : 0,
+    fields: fields,
+    generated: card ? kmtCardGenerated.has(card) : false
+  };
+}
+
+// Snapshots the view being LEFT and writes it back onto the history entry
+// already sitting there for it (replaceState, not push — that entry exists
+// already, this just brings it up to date before we navigate away from it).
+// Only touches an entry this mechanism actually owns — never the exit-guard
+// placeholder, and never fires mid-restore, where history.state is already
+// the destination we're replaying, not something to overwrite.
+function kmtCaptureDeparture(){
+  if(kmtRestoring) return;
+  if(history.state && history.state.kmtView) history.replaceState(kmtSnapshotView(), '');
+}
+// Pushes a fresh snapshot of the view just ARRIVED at. No-ops mid-restore
+// for the same reason as above — a restore is replaying an existing entry,
+// not creating a new one.
+function kmtCommitArrival(){
+  if(kmtRestoring) return;
+  history.pushState(kmtSnapshotView(), '');
+}
+
+// The shared "go back one view" used by every in-app Back control (not just
+// the hardware/browser button) — this is what makes it work on an iOS
+// home-screen install, where there is no OS back gesture at all
+// (manifest.json/manifest-hr.json both declare "standalone"): the app's own
+// buttons are the only Back that exists there, and now they drive the exact
+// same restore path a hardware Back would on Android/desktop.
+function kmtBack(){
+  if(history.state && history.state.kmtView) history.back();
+  else showReportsLanding();
+}
+
+// Replays a popped snapshot: reopens the route (awaiting its loader, since
+// a specific card can't be reopened until the tab has finished rebuilding
+// itself), reopens the card and fullscreen state, reapplies every captured
+// field value, re-generates the report fresh if it had been generated
+// before, then restores scroll — in that order, since scroll only means
+// anything once the content it's scrolling to is actually back on screen.
+async function kmtRestoreView(descriptor){
+  if(!descriptor || !descriptor.kmtView) return;
+  kmtRestoring = true;
+  kmtPendingCardRestore = descriptor.card ? descriptor : null;
+  try{
+    await hrNavigate(descriptor.route, { restoring:true });
+    await new Promise(r => setTimeout(r, 60));
+    if(descriptor.card){
+      if(descriptor.route === 'reports') openReportsCard(descriptor.card);
+      else if(descriptor.route === 'generator') openGeneratorCard(descriptor.card);
+    }
+    Object.keys(descriptor.fields || {}).forEach(id => {
+      const el = document.getElementById(id);
+      if(el) el.value = descriptor.fields[id];
+    });
+    if(descriptor.generated && descriptor.card){
+      const btn = document.querySelector('#' + descriptor.card + ' [data-kmt-generate]');
+      if(btn) btn.click();
+      // Every report auto-opens full screen the moment it's generated — that
+      // click just did exactly that, regardless of whether THIS descriptor
+      // actually wants full screen. Reconciling below (after giving the
+      // click's own async work time to finish) is simpler and more robust
+      // than trying to suppress that behaviour from here.
+      await new Promise(r => setTimeout(r, 80));
+    }
+    if(!descriptor.fullscreen && fullscreenActiveId) closeFullscreenView();
+    window.scrollTo(0, descriptor.scrollY || 0);
+    if(descriptor.fullscreen && document.getElementById(descriptor.fullscreen)){
+      if(fullscreenActiveId !== descriptor.fullscreen) openFullscreenView(descriptor.cardTitle || '', descriptor.fullscreen);
+      setTimeout(() => {
+        const fsBody = document.getElementById('fullscreenBody');
+        if(fsBody) fsBody.scrollTop = descriptor.fsScrollTop || 0;
+      }, 60);
+    }
+  } finally {
+    kmtRestoring = false;
+    kmtPendingCardRestore = null;
+  }
+}
+
 function renderHrSideNav(){
   const nav = document.getElementById('hrSideNav');
   if(!nav) return;
@@ -10889,7 +11066,8 @@ function toggleHrNav(force){
   if(sb) sb.classList.toggle('open', open);
 }
 
-function hrNavigate(route){
+async function hrNavigate(route, opts){
+  opts = opts || {};
   const cfg = HR_ROUTES[route];
   if(!cfg) return;
   if(typeof attendanceDirtyCount === 'function' && attendanceDirtyCount() && route !== 'attendance'){
@@ -10897,6 +11075,11 @@ function hrNavigate(route){
     pendingAttendance = {};
     updateAttendanceSaveBar();
   }
+  // Snapshot whatever's on screen right now, before any of it changes, so
+  // Back can return to it exactly as it was left — filters, scroll and all.
+  // No-ops mid-restore (kmtRestoring), and no-ops if there's nothing of ours
+  // to update yet (the exit-guard placeholder, or a fresh page load).
+  kmtCaptureDeparture();
   // Navigating away must never leave a full-screen report stuck on top of
   // the screen it's navigating to — a stale overlay showing the report you
   // just left behind, on a tab that no longer has anything to do with it.
@@ -10931,18 +11114,32 @@ function hrNavigate(route){
   noteRecentRoute(route);
   renderHrSideNav();
   toggleHrNav(false);
-  const content = document.getElementById('hrContent');
-  if(content) content.scrollTop = 0;
-  window.scrollTo(0, 0);
-  // Navigation has already happened by this point. The loader is fired without
-  // awaiting and with its own catch, so a backend failure degrades one panel
-  // rather than aborting the switch and stranding the user on another page.
-  if(cfg.run){
-    try{
-      const p = cfg.run();
-      if(p && typeof p.catch === 'function') p.catch(e => console.warn('Panel failed to load', route, e));
-    }catch(e){ console.warn('Panel failed to load', route, e); }
+  // A restore puts the scroll position back itself, later, once the exact
+  // spot it's scrolling to actually exists on screen again — resetting it
+  // here first would just be thrown away a moment later.
+  if(!opts.restoring){
+    const content = document.getElementById('hrContent');
+    if(content) content.scrollTop = 0;
+    window.scrollTo(0, 0);
   }
+  // Navigation has already happened by this point. The loader is normally
+  // fired without awaiting, with its own catch, so a backend failure degrades
+  // one panel rather than aborting the switch and stranding the user on
+  // another page. A restore is the one exception — it awaits the loader
+  // (still under its own catch), because it cannot reopen a specific report
+  // card or reapply its filters until the tab has actually finished
+  // rebuilding itself.
+  if(cfg.run){
+    if(opts.restoring){
+      try{ await cfg.run(); }catch(e){ console.warn('Panel failed to load', route, e); }
+    } else {
+      try{
+        const p = cfg.run();
+        if(p && typeof p.catch === 'function') p.catch(e => console.warn('Panel failed to load', route, e));
+      }catch(e){ console.warn('Panel failed to load', route, e); }
+    }
+  }
+  kmtCommitArrival();
 }
 
 // Kept so existing callers elsewhere keep working — they now just pick a route.
@@ -15192,7 +15389,11 @@ const REPORT_CARD_META = {
   insurance: { icon:'🛡️', tone:'t1' }
 };
 async function renderReportsTab(){
-  showReportsLanding();
+  // Runs on every visit to the Reports tab, including a Back-navigation
+  // restore that's about to reopen a specific card itself right after this —
+  // skip the reset in exactly that one case, or the restore would win the
+  // race only to have this immediately undo it.
+  if(!(kmtPendingCardRestore && kmtPendingCardRestore.route === 'reports')) showReportsLanding();
   const employees = await getEmployees();
   const reports = [
     {key:'contact', label:'Employee Contact Report'},
@@ -15232,12 +15433,12 @@ async function renderReportsTab(){
         ${MONTH_NAMES.map((m, i) => `<option value="${String(i+1).padStart(2,'0')}">${m}</option>`).join('')}
       </select>` : '';
     return `<div id="rptSecReport_${r.key}" class="hidden">
-    <button type="button" class="gen-back-btn" onclick="showReportsLanding()">← Back to Reports</button>
+    <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
     <section class="block">
       <h2 style="margin:0 0 4px;">${r.label}</h2>
       <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">${withDataCounts[r.key]} employees with data</p>
       ${monthPicker}
-      <button class="btn full" onclick="withBusy(this,'Loading…',()=>viewReport('${r.key}','${r.label}',(document.getElementById('reportMonthSel_${r.key}')||{}).value||''))">View report</button>
+      <button class="btn full" data-kmt-generate onclick="withBusy(this,'Loading…',()=>viewReport('${r.key}','${r.label}',(document.getElementById('reportMonthSel_${r.key}')||{}).value||''))">View report</button>
       <div id="reportBox_${r.key}"></div>
     </section>
     </div>`;
@@ -17590,8 +17791,10 @@ function showGeneratorLanding(){
   GENERATOR_SECTIONS.forEach(id => document.getElementById(id).classList.add('hidden'));
 }
 function openGeneratorCard(sectionId){
+  kmtCaptureDeparture();
   document.getElementById('genLanding').classList.add('hidden');
   GENERATOR_SECTIONS.forEach(id => document.getElementById(id).classList.toggle('hidden', id !== sectionId));
+  kmtCommitArrival();
 }
 
 // Same "click a card, see one thing at a time" shape as the Generator tab
@@ -17605,8 +17808,10 @@ function showReportsLanding(){
   document.querySelectorAll('#hrSubReports [id^="rptSec"]').forEach(el => el.classList.add('hidden'));
 }
 function openReportsCard(sectionId){
+  kmtCaptureDeparture();
   document.getElementById('reportsLanding').classList.add('hidden');
   document.querySelectorAll('#hrSubReports [id^="rptSec"]').forEach(el => el.classList.toggle('hidden', el.id !== sectionId));
+  kmtCommitArrival();
 }
 
 function jumpToGenerator(letterLabel){
@@ -17620,8 +17825,11 @@ async function renderGeneratorTab(){
   // from elsewhere in the app — reset to the landing grid first; a caller
   // that wants a specific card open (jumpToGenerator, openJoiningKit) calls
   // openGeneratorCard() itself right after, synchronously, before the
-  // getEmployees() below resolves.
-  showGeneratorLanding();
+  // getEmployees() below resolves. A Back-navigation restore is the other
+  // caller that wants a specific card reopened instead of the landing grid —
+  // skip the reset for exactly that case, the same way renderReportsTab()
+  // does for its own cards.
+  if(!(kmtPendingCardRestore && kmtPendingCardRestore.route === 'generator')) showGeneratorLanding();
 
   const employees = await getEmployees();
   const joiningDone = employees.filter(e => Object.values(e.checklists?.joining||{}).filter(Boolean).length === CHECKLIST_ITEMS.joining.length).length;
@@ -18829,11 +19037,14 @@ function isSignedIn(){
   return false;
 }
 
-// Back button. There is no in-app history to go back through — the sidebar
-// swaps panels without touching the URL — so the first back press leaves the
-// site entirely. A spare history entry is parked on top while signed in: back
-// consumes that instead, which gives us a chance to ask. Cancelling parks a
-// fresh entry so the guard survives any number of presses.
+// Back button. A spare history entry is parked on top while signed in: back
+// consumes that instead of leaving the site outright, which gives us a
+// chance to ask. Cancelling parks a fresh entry so the guard survives any
+// number of presses. On the HR side, every real navigation now also pushes
+// its own entry (see kmtCaptureDeparture/kmtCommitArrival, near hrRoute) —
+// this exit guard sits at the very bottom of that stack, underneath all of
+// them, so it's only ever reached once Back has already walked all the way
+// back through everywhere the user actually was.
 let exitConfirmed = false;
 
 function armExitGuard(){
@@ -18841,16 +19052,18 @@ function armExitGuard(){
   history.pushState({ kmtExitGuard: true }, '');
 }
 
-window.addEventListener('popstate', () => {
+window.addEventListener('popstate', (e) => {
   if(exitConfirmed || !isSignedIn()) return;   // let the navigation happen
-  // Back means "up a level" first. Anywhere other than the Dashboard it goes
-  // there, which is what people actually want from a screen like the
-  // Attendance Sheet; only from the Dashboard itself does it mean leaving.
-  if(currentRole === 'hr' && typeof hrRoute !== 'undefined' && hrRoute && hrRoute !== 'dashboard'){
-    history.pushState({ kmtExitGuard: true }, '');
-    hrNavigate('dashboard');
+  // A real view snapshot (route, report card, fullscreen state, filters,
+  // scroll) — replay it exactly, rather than the old fixed "just go to the
+  // Dashboard" fallback.
+  const state = e.state;
+  if(state && state.kmtView){
+    kmtRestoreView(state);
     return;
   }
+  // Genuinely at the bottom of the stack now (the exit-guard placeholder, or
+  // nothing) — unchanged from before.
   const leave = confirm('Are you sure you want to exit?\n\nYou will be signed out, and anything you have typed on this screen but not saved will be lost.');
   if(leave){
     exitConfirmed = true;
