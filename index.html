@@ -17649,28 +17649,66 @@ async function viewReport(key, label, monthFilter){
     box.innerHTML = `${fsBtn}<div class="print-isolate" id="reportPrintArea_diwali" style="margin-top:12px;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">The bonus is the amount entered against each employee — nothing is worked out from the Rate of Pay, which is shown only for comparison. Nothing is deducted from a bonus and nothing is added to one: no PF, ESI or Professional Tax, no advance, loan or retention, and no reduction for leave taken during the year.</p>
       ${unsetCount ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${unsetCount} eligible employee(s) have no bonus amount set, so nothing will be paid to them. Open each record and fill in Diwali bonus amount — the form suggests one month's pay if that is what you want.</p>` : ''}${diwaliInner}</div>`;
   } else if(key === 'salary'){
-    // Conveyance gets its own column. Without it the row did not add up —
-    // gross 30,000 less deductions 200 showing a net of 32,800 — and a row that
-    // does not add up is read as a mistake even when the net is right.
-    csvHeader = ['Name','Gross','Conveyance','Deductions','Net'];
+    // Deductions used to be one lump figure — right, but unreadable next to
+    // the Salary Sheet, which already shows PF/ESI/PT/Advance/Loan/Retention
+    // as their own columns. Bifurcated the same way here, still off
+    // monthlyPayFor's own return object — nothing here is worked out again,
+    // only shown in more detail — plus Loan/Advance Balance (the "opening"
+    // figure still owed) and a company-wide Grand Total row, neither of
+    // which this report had before.
+    const now = new Date();
+    const gy = now.getFullYear(), gm = now.getMonth() + 1;
+    csvHeader = ['Name','Gross','PF','ESI','PT','Advance Temp','Advance','Loan EMI','Retention','Total Deduction','Conveyance','Net','Loan Balance','Advance Balance'];
     let salaryCards = '';
+    const grand = { gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, emi:0, retention:0, deductions:0, conv:0, net:0, loanBal:0, advBal:0 };
     rows = employees.map(e => {
       const p = monthlyPayFor(e);
       const gross = p.gross, deductions = p.deductions, net = p.net, conv = p.conveyance;
-      csvRows.push([e.name, Math.round(gross), Math.round(conv), Math.round(deductions), Math.round(net)]);
+      const loanBal = loanBalanceAfterMonth(e, gy, gm);
+      const advBal = advanceBalanceAfterMonth(e, gy, gm);
+      csvRows.push([e.name, Math.round(gross), Math.round(p.pf), Math.round(p.esi), Math.round(p.pt),
+        Math.round(p.advanceTemp), Math.round(p.advance), Math.round(p.emi), Math.round(p.retention),
+        Math.round(deductions), Math.round(conv), Math.round(net), Math.round(loanBal), Math.round(advBal)]);
+      grand.gross += gross; grand.pf += p.pf; grand.esi += p.esi; grand.pt += p.pt;
+      grand.advanceTemp += p.advanceTemp; grand.advance += p.advance; grand.emi += p.emi; grand.retention += p.retention;
+      grand.deductions += deductions; grand.conv += conv; grand.net += net; grand.loanBal += loanBal; grand.advBal += advBal;
       if(isCompact){
         salaryCards += hrCard(`<strong>${escapeHtml(e.name)}</strong>`,
-          hrRow('Gross', rupees(gross)) + hrRow('Conveyance', conv ? '+' + rupees(conv) : '—') +
-          hrRow('Deductions', '−' + rupees(deductions)) +
+          hrRow('Gross', rupees(gross)) +
+          hrRow('PF', p.pf ? '−' + rupees(p.pf) : '—') + hrRow('ESI', p.esi ? '−' + rupees(p.esi) : '—') + hrRow('PT', p.pt ? '−' + rupees(p.pt) : '—') +
+          hrRow('Advance Temp', p.advanceTemp ? '−' + rupees(p.advanceTemp) : '—') + hrRow('Advance', p.advance ? '−' + rupees(p.advance) : '—') +
+          hrRow('Loan EMI', p.emi ? '−' + rupees(p.emi) : '—') + hrRow('Retention', p.retention ? '−' + rupees(p.retention) : '—') +
+          hrRow('Total Deduction', '−' + rupees(deductions)) +
+          hrRow('Conveyance', conv ? '+' + rupees(conv) : '—') +
+          hrRow('Loan Balance', rupees(loanBal)) + hrRow('Advance Balance', rupees(advBal)) +
           `<div class="hr-sheet-net"><span>Net</span><span>${rupees(net)}</span></div>`);
       }
       return `<tr><td class="sal-name">${escapeHtml(e.name)}</td><td class="num">${rupees(gross)}</td>` +
-        `<td class="num">${conv ? '+' + rupees(conv) : '—'}</td>` +
-        `<td class="num">−${rupees(deductions)}</td><td class="num"><strong>${rupees(net)}</strong></td></tr>`;
+        `<td class="num">${p.pf ? '−' + rupees(p.pf) : '—'}</td><td class="num">${p.esi ? '−' + rupees(p.esi) : '—'}</td><td class="num">${p.pt ? '−' + rupees(p.pt) : '—'}</td>` +
+        `<td class="num">${p.advanceTemp ? '−' + rupees(p.advanceTemp) : '—'}</td><td class="num">${p.advance ? '−' + rupees(p.advance) : '—'}</td>` +
+        `<td class="num">${p.emi ? '−' + rupees(p.emi) : '—'}</td><td class="num">${p.retention ? '−' + rupees(p.retention) : '—'}</td>` +
+        `<td class="num">−${rupees(deductions)}</td><td class="num">${conv ? '+' + rupees(conv) : '—'}</td>` +
+        `<td class="num"><strong>${rupees(net)}</strong></td>` +
+        `<td class="num">${rupees(loanBal)}</td><td class="num">${rupees(advBal)}</td></tr>`;
     }).join('');
-    const salaryInner = isCompact ? (salaryCards ? `<div class="hr-sheet-cards">${salaryCards}</div>` : '<div class="empty">No data yet</div>')
-      : `<div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th class="num">Gross</th><th class="num">Conveyance</th><th class="num">Deductions</th><th class="num">Net</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table></div>`;
-    box.innerHTML = `${fsBtn}<div class="print-isolate" id="reportPrintArea_salary" style="margin-top:12px;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">Net = Gross + Conveyance − Deductions. Conveyance is paid on top of the salary, so it is added rather than taken off; deductions cover PF, ESI, PT and anything being recovered — advance, loan instalment and retention.</p>${salaryInner}</div>`;
+    csvRows.push(['Grand Total', Math.round(grand.gross), Math.round(grand.pf), Math.round(grand.esi), Math.round(grand.pt),
+      Math.round(grand.advanceTemp), Math.round(grand.advance), Math.round(grand.emi), Math.round(grand.retention),
+      Math.round(grand.deductions), Math.round(grand.conv), Math.round(grand.net), Math.round(grand.loanBal), Math.round(grand.advBal)]);
+    const grandRow = employees.length ? (isCompact
+      ? hrCard(null, hrRow('Grand Total — Net Salary', rupees(grand.net)), 'sal-grand-card')
+      : `<tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total</strong></td><td class="num"><strong>${rupees(grand.gross)}</strong></td>` +
+        `<td class="num"><strong>${rupees(grand.pf)}</strong></td><td class="num"><strong>${rupees(grand.esi)}</strong></td><td class="num"><strong>${rupees(grand.pt)}</strong></td>` +
+        `<td class="num"><strong>${rupees(grand.advanceTemp)}</strong></td><td class="num"><strong>${rupees(grand.advance)}</strong></td>` +
+        `<td class="num"><strong>${rupees(grand.emi)}</strong></td><td class="num"><strong>${rupees(grand.retention)}</strong></td>` +
+        `<td class="num"><strong>${rupees(grand.deductions)}</strong></td><td class="num"><strong>${rupees(grand.conv)}</strong></td>` +
+        `<td class="num"><strong>${rupees(grand.net)}</strong></td>` +
+        `<td class="num"><strong>${rupees(grand.loanBal)}</strong></td><td class="num"><strong>${rupees(grand.advBal)}</strong></td></tr>`) : '';
+    const salaryInner = isCompact ? (salaryCards ? `<div class="hr-sheet-cards">${salaryCards}${grandRow}</div>` : '<div class="empty">No data yet</div>')
+      : `<div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th class="num">Gross</th><th class="num">PF</th><th class="num">ESI</th><th class="num">PT</th>` +
+        `<th class="num">Advance Temp</th><th class="num">Advance</th><th class="num">Loan EMI</th><th class="num">Retention</th>` +
+        `<th class="num">Total Deduction</th><th class="num">Conveyance</th><th class="num">Net</th><th class="num">Loan Balance</th><th class="num">Advance Balance</th></tr>` +
+        `${rows || '<tr><td colspan="14" class="empty">No data yet</td></tr>'}${grandRow}</table></div>`;
+    box.innerHTML = `${fsBtn}<div class="print-isolate" id="reportPrintArea_salary" style="margin-top:12px;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">Net = Gross + Conveyance − Deductions. Conveyance is paid on top of the salary, so it is added rather than taken off; deductions cover PF, ESI, PT and anything being recovered — advance, loan instalment and retention. Loan Balance and Advance Balance are what is still outstanding as of today.</p>${salaryInner}</div>`;
   } else if(key === 'ctc'){
     csvHeader = ['Name','Monthly gross','Annual gross','Diwali bonus','Annual CTC'];
     let ctcCards = '';
