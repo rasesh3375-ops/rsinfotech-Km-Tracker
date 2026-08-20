@@ -7871,15 +7871,92 @@ async function reportToPdfBlob(sourceId){
     // letter does), so the PDF matches "Print / Save PDF" — action buttons
     // and Close/Full screen controls left out, same as printing does.
     const target = el.querySelector('.print-isolate') || el.querySelector('.rpt-wrap') || el;
-    const canvas = await window.html2canvas(target, {
-      scale: 2, useCORS: true, backgroundColor: '#ffffff',
-      windowWidth: target.scrollWidth, width: target.scrollWidth
-    });
     const { jsPDF } = window.jspdf;
-    const landscape = canvas.width > canvas.height;
+    const landscape = target.scrollWidth > target.scrollHeight;
     const pdf = new jsPDF({ orientation: landscape ? 'landscape' : 'portrait', unit: 'pt', format: 'a4' });
     const pageW = pdf.internal.pageSize.getWidth();
     const pageH = pdf.internal.pageSize.getHeight();
+    const scale = 2;
+    const targetWidth = target.scrollWidth;
+    const tooTallForAPage = h => (h * pageW / targetWidth) > pageH;
+
+    // A tall report/letter used to be rasterised whole into one image and
+    // sliced every "one page's worth of pixels" — the block below, kept as
+    // the fallback. That slice boundary has no idea where a line of text
+    // actually sits, so on anything longer than one page it can and does
+    // land mid-sentence — reported on the Experience Letter, where a page
+    // break fell in the middle of "During her tenure, she carried out the
+    // duties and responsibilities…". Two things stood in the way of simply
+    // capturing each top-level child on its own instead, on that letter
+    // specifically: its real content sits one level down (.rpt-wrap wraps a
+    // single .rpt-page), and the letter body itself is ONE
+    // white-space:pre-wrap block holding every paragraph — the piece that
+    // actually overflowed. Both are worked around on an off-screen clone
+    // (nothing here ever touches what is actually on screen): a wrapper
+    // with exactly one non-leaf child is unwrapped until there is a real
+    // list of siblings, and any of those siblings that is a tall, childless
+    // block of text is split on its own blank-line paragraph breaks into
+    // one small div per paragraph, replacing it in place among the
+    // letterhead/signature/footer it sat beside. Capturing each of those
+    // siblings on its own and only starting a new PDF page when the next
+    // one would not fit means a break can only ever fall BETWEEN two of
+    // them, never through the middle of one — the worst case is some blank
+    // space at the foot of a page, which reads as normal rather than as
+    // broken. Anything that still isn't a safe list of same-level,
+    // reasonably-sized pieces after this — a big table, for instance, with
+    // no per-child unit safe to break on here — falls through to the old
+    // whole-image behaviour unchanged.
+    const clone = target.cloneNode(true);
+    clone.style.position = 'fixed'; clone.style.left = '-99999px'; clone.style.top = '0';
+    clone.style.width = targetWidth + 'px';
+    document.body.appendChild(clone);
+    let container = clone;
+    while(container.children.length === 1 && container.children[0].children.length){
+      container = container.children[0];
+    }
+    Array.from(container.children).forEach(child => {
+      if(child.children.length === 0 && tooTallForAPage(child.offsetHeight) && /\n\s*\n/.test(child.textContent || '')){
+        const style = window.getComputedStyle(child);
+        const frag = document.createDocumentFragment();
+        child.textContent.split(/\n\s*\n/).forEach(para => {
+          const d = document.createElement('div');
+          d.style.whiteSpace = 'pre-wrap';
+          d.style.font = style.font;
+          d.style.lineHeight = style.lineHeight;
+          d.style.color = style.color;
+          d.style.marginBottom = style.lineHeight;
+          d.textContent = para;
+          frag.appendChild(d);
+        });
+        child.replaceWith(frag);
+      }
+    });
+    const chunks = Array.from(container.children).filter(c => c.offsetHeight > 4);
+    if(chunks.length > 1 && !chunks.some(c => tooTallForAPage(c.offsetHeight))){
+      let y = 0, startedPage = false;
+      for(const chunk of chunks){
+        const canvas = await window.html2canvas(chunk, {
+          scale, useCORS: true, backgroundColor: '#ffffff', windowWidth: targetWidth
+        });
+        const imgW = pageW;
+        const imgH = canvas.height * (imgW / canvas.width);
+        if(startedPage && y + imgH > pageH){
+          pdf.addPage();
+          y = 0;
+        }
+        pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, y, imgW, imgH);
+        y += imgH;
+        startedPage = true;
+      }
+      clone.remove();
+      return pdf.output('blob');
+    }
+    clone.remove();
+
+    const canvas = await window.html2canvas(target, {
+      scale, useCORS: true, backgroundColor: '#ffffff',
+      windowWidth: targetWidth, width: targetWidth
+    });
     const imgW = pageW;
     const imgH = canvas.height * (imgW / canvas.width);
     const imgData = canvas.toDataURL('image/png');
