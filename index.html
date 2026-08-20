@@ -14611,26 +14611,31 @@ async function reconcileTrackingUsername(draft){
 // underneath the overlay showing through in the gap below it. First seen on
 // the Employee modal's "Always mark Present from" date field (picker
 // closing), then again just typing into an ordinary Salary Advance Payment
-// number field (plain keyboard opening, no picker involved) — so this is
-// not specific to pickers, and not specific to the employee modal: every
-// full-viewport fixed overlay in the app has the same exposure.
-// visualViewport's own resize/scroll events fire when this happens, which
-// layout-viewport CSS (inset:0) never sees on its own; used here to pin
-// each open overlay to the real visible height explicitly. Both events are
-// listened for because iOS does not consistently fire 'resize' alone for
-// every kind of keyboard — a plain text/number keypad has been seen firing
-// only 'scroll'.
+// number field (plain keyboard opening, no picker involved), then again on
+// plain Employee ID/Full name fields with the fix below already in place —
+// so this is not specific to pickers, not specific to any one field, and
+// not specific to the employee modal: every full-viewport fixed overlay in
+// the app has the same exposure. querySelectorAll('.modal-overlay') picks up
+// whichever modal is actually open (Employee, Increment, Checklist, Left
+// Employees, Day Time editor all share the class) without hand-listing each
+// one's id — a modal added later gets this for free.
+// Both top and height are pinned to visualViewport's own numbers, not just
+// height: inset:0 always assumes top is 0, but iOS can pan the visual
+// viewport (offsetTop > 0) to bring a lower field above the keyboard, and a
+// fixed element that only corrects its height would then sit short of
+// where the visible area actually starts.
 function resettleFixedOverlays_(){
   if(!window.visualViewport) return;
-  const h = window.visualViewport.height + 'px';
-  const empOverlay = document.getElementById('employeeModalOverlay');
-  if(empOverlay) empOverlay.style.height = h;
+  const vv = window.visualViewport;
+  const h = vv.height + 'px';
+  const t = vv.offsetTop + 'px';
+  document.querySelectorAll('.modal-overlay').forEach(el => { el.style.height = h; el.style.top = t; });
   const sheetRoot = document.getElementById('fullscreenSheetRoot');
-  if(sheetRoot && !sheetRoot.classList.contains('hidden')) sheetRoot.style.height = h;
+  if(sheetRoot && !sheetRoot.classList.contains('hidden')){ sheetRoot.style.height = h; sheetRoot.style.top = t; }
   // Global Search has the same real text input (#gsInput) as any Employee
   // Master field — same keyboard, same exposure.
   const gsOverlay = document.getElementById('gsOverlay');
-  if(gsOverlay && !gsOverlay.classList.contains('hidden')) gsOverlay.style.height = h;
+  if(gsOverlay && !gsOverlay.classList.contains('hidden')){ gsOverlay.style.height = h; gsOverlay.style.top = t; }
 }
 if(window.visualViewport){
   window.visualViewport.addEventListener('resize', resettleFixedOverlays_);
@@ -14644,26 +14649,38 @@ if(window.visualViewport){
 // keeps tracking the full screen straight through a field's keyboard
 // opening, so the visualViewport listeners above remain the only thing that
 // actually catches THAT case, and evidently do not fire reliably for every
-// field — reported again with a keyboard genuinely open. Focus itself is
-// unconditional: every keyboard-opening interaction starts by focusing an
-// input, so resettling from that event does not depend on iOS choosing to
-// fire visualViewport's resize or scroll at all. The keyboard's own slide
-// animation takes roughly a quarter second, and visualViewport.height has
-// not settled to its final value the instant focus fires, so this checks
-// again shortly after rather than trusting one immediate read.
-const FIXED_OVERLAY_SELECTOR = '#employeeModalOverlay, #fullscreenSheetRoot, #gsOverlay';
+// field — reported again with a keyboard genuinely open, on the Employee
+// modal's very first two fields, with a fixed round of resettles (0/120/
+// 350ms) already in place. That means the keyboard — plus, on a name field,
+// the QuickType suggestion bar loading in a moment after — can still settle
+// later than 350ms on a real device; guessing a longer fixed delay just
+// moves the same race further out. Runs every animation frame instead, for
+// a full second after focus/blur, so it keeps catching visualViewport's
+// true number for as long as the keyboard could plausibly still be
+// animating, rather than betting on any single delay being long enough.
+const FIXED_OVERLAY_SELECTOR = '.modal-overlay, #fullscreenSheetRoot, #gsOverlay';
+let kmtResettleRafId = null;
+function kmtResettleUntil_(deadline){
+  resettleFixedOverlays_();
+  if(window.performance.now() < deadline){
+    kmtResettleRafId = window.requestAnimationFrame(() => kmtResettleUntil_(deadline));
+  } else {
+    kmtResettleRafId = null;
+  }
+}
+function kmtStartResettleLoop_(){
+  if(kmtResettleRafId) window.cancelAnimationFrame(kmtResettleRafId);
+  kmtResettleUntil_(window.performance.now() + 1000);
+}
 document.addEventListener('focusin', e => {
   if(!e.target || !e.target.closest) return;
   if(!e.target.closest(FIXED_OVERLAY_SELECTOR)) return;
-  resettleFixedOverlays_();
-  setTimeout(resettleFixedOverlays_, 120);
-  setTimeout(resettleFixedOverlays_, 350);
+  kmtStartResettleLoop_();
 });
 document.addEventListener('focusout', e => {
   if(!e.target || !e.target.closest) return;
   if(!e.target.closest(FIXED_OVERLAY_SELECTOR)) return;
-  setTimeout(resettleFixedOverlays_, 120);
-  setTimeout(resettleFixedOverlays_, 350);
+  kmtStartResettleLoop_();
 });
 
 async function openAddEmployeeModal(id){
