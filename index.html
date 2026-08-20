@@ -17557,13 +17557,26 @@ async function viewReport(key, label, monthFilter){
     return;
   }
   if(key === 'contact'){
-    csvHeader = ['Name','Designation','Phone','Email'];
-    csvRows = employees.map(e => [e.name, e.designation||'', e.phone||'', e.email||'']);
-    rows = employees.map(e => `<tr><td class="sal-name">${escapeHtml(e.name)}</td><td>${escapeHtml(e.designation||'')}</td><td>${escapeHtml(e.phone||'')}</td><td>${escapeHtml(e.email||'')}</td></tr>`).join('');
+    // Everything a HR office would actually reach for in an emergency, not
+    // just a phone directory — emergency contact, blood group and insurance
+    // sit right on the Employee Master record already (Emergency & Medical
+    // section), so this only reads them, never re-enters them.
+    csvHeader = ['Name','Designation','Mobile','Email','Address','Emergency Contact Name','Emergency Contact Number','Blood Group','Insurance'];
+    csvRows = employees.map(e => [e.name, e.designation||'', e.phone||'', e.email||'', e.address||'',
+      e.emergencyName||'', e.emergencyNumber||'', e.bloodGroup||'', e.insuranceDetails||'']);
+    rows = employees.map(e => `<tr><td class="sal-name">${escapeHtml(e.name)}</td><td>${escapeHtml(e.designation||'')}</td>` +
+      `<td>${escapeHtml(e.phone||'')}</td><td>${escapeHtml(e.email||'')}</td><td>${escapeHtml(e.address||'')}</td>` +
+      `<td>${escapeHtml(e.emergencyName||'')}</td><td>${escapeHtml(e.emergencyNumber||'')}</td>` +
+      `<td>${escapeHtml(e.bloodGroup||'')}</td><td>${escapeHtml(e.insuranceDetails||'')}</td></tr>`).join('');
     const contactCards = employees.map(e => hrCard(`<strong>${escapeHtml(e.name)}</strong>`,
-      hrRow('Designation', escapeHtml(e.designation||'—')) + hrRow('Phone', escapeHtml(e.phone||'—')) + hrRow('Email', escapeHtml(e.email||'—')))).join('');
+      hrRow('Designation', escapeHtml(e.designation||'—')) + hrRow('Mobile', escapeHtml(e.phone||'—')) + hrRow('Email', escapeHtml(e.email||'—')) +
+      hrRow('Address', escapeHtml(e.address||'—')) +
+      hrRow('Emergency Contact Name', escapeHtml(e.emergencyName||'—')) + hrRow('Emergency Contact Number', escapeHtml(e.emergencyNumber||'—')) +
+      hrRow('Blood Group', escapeHtml(e.bloodGroup||'—')) + hrRow('Insurance', escapeHtml(e.insuranceDetails||'—')))).join('');
     const contactInner = isCompact ? (contactCards ? `<div class="hr-sheet-cards">${contactCards}</div>` : '<div class="empty">No data yet</div>')
-      : `<table class="sal-table"><tr><th>Name</th><th>Designation</th><th>Phone</th><th>Email</th></tr>${rows || '<tr><td colspan="4" class="empty">No data yet</td></tr>'}</table>`;
+      : `<table class="sal-table"><tr><th>Name</th><th>Designation</th><th>Mobile</th><th>Email</th><th>Address</th>` +
+        `<th>Emergency Contact Name</th><th>Emergency Contact Number</th><th>Blood Group</th><th>Insurance</th></tr>` +
+        `${rows || '<tr><td colspan="9" class="empty">No data yet</td></tr>'}</table>`;
     box.innerHTML = `${fsBtn}<div class="sal-sheet-wrap print-isolate" id="reportPrintArea_contact">${reportLogoHeader(label)}${contactInner}</div>`;
   } else if(key === 'birthday'){
     // dob is a plain "YYYY-MM-DD" date-input value — the month is read by
