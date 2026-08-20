@@ -9773,19 +9773,72 @@ async function renderSalaryComparisonReport(){
   }
   const holidayMap = await getHolidayMap_local();
 
+  // Category-wise bifurcation: every payroll component gets its own
+  // company-wide total for Last Month and Current Month, side by side, so
+  // HR can see exactly which piece moved instead of only the one net
+  // figure at the bottom. Everything here reads off computeSalaryForEmployee's
+  // own return object — the one central per-employee calculation every other
+  // report already uses — never re-derives PF/ESI/PT/loan figures by hand.
+  const mkAgg = () => ({ gross:0, pf:0, esi:0, pt:0, loanEmi:0, advance:0, advanceTemp:0,
+    retention:0, leaveDaysCount:0, leaveAmount:0, continuingRate:0 });
+  const prevAgg = mkAgg(), currAgg = mkAgg();
+  let newEmpPrevCount=0, newEmpPrevAmt=0, newEmpCurrCount=0, newEmpCurrAmt=0;
+  let leftPrevCount=0, leftPrevAmt=0, leftCurrCount=0, leftCurrAmt=0;
+
   let prevTotal = 0, currTotal = 0;
   const joined = [], leavers = [], changed = [];
   for(const emp of employees){
     const inPrev = employedInMonth_(emp, prev);
     const inCurr = employedInMonth_(emp, curr);
     if(!inPrev && !inCurr) continue;
-    const p = inPrev ? (await computeSalaryForEmployee(emp, prev.dateList, prev.monthDays, holidayMap)).netSalary : 0;
-    const c = inCurr ? (await computeSalaryForEmployee(emp, curr.dateList, curr.monthDays, holidayMap)).netSalary : 0;
+    const sPrev = inPrev ? await computeSalaryForEmployee(emp, prev.dateList, prev.monthDays, holidayMap) : null;
+    const sCurr = inCurr ? await computeSalaryForEmployee(emp, curr.dateList, curr.monthDays, holidayMap) : null;
+    const p = sPrev ? sPrev.netSalary : 0;
+    const c = sCurr ? sCurr.netSalary : 0;
     prevTotal += p;
     currTotal += c;
     if(!inPrev && inCurr) joined.push({ emp, amount: c });
     else if(inPrev && !inCurr) leavers.push({ emp, amount: -p });
     else if(Math.round((c - p) * 100) !== 0) changed.push({ emp, amount: c - p, from: p, to: c });
+
+    const addToAgg = (agg, s) => {
+      agg.gross += s.gross;
+      // PF and ESI are shown as employee + employer combined — pfGrandTotal
+      // already is that (see calculatePfFor); ESI has no single combined
+      // field returned, so the two sides are added here instead of inside
+      // computeSalaryForEmployee, which must keep them separate for every
+      // other report that shows them on their own line.
+      agg.pf += s.pfGrandTotal;
+      agg.esi += s.esi + s.esiEmployer;
+      agg.pt += s.pt;
+      agg.loanEmi += s.loanEmi;
+      agg.advance += s.advance;
+      agg.advanceTemp += s.advanceTemp;
+      agg.retention += s.retention;
+      agg.leaveDaysCount += s.leaveDays;
+      agg.leaveAmount += s.leaveAmount;
+    };
+    if(sPrev) addToAgg(prevAgg, sPrev);
+    if(sCurr) addToAgg(currAgg, sCurr);
+
+    // New Employees / Employees Left: judged by doj/leftDate actually
+    // falling inside that specific month, not by prev-vs-curr roster
+    // membership — the latter would also catch someone reactivated after
+    // being marked left, which is not a new joiner.
+    if(emp.doj && emp.doj >= prev.start && emp.doj <= prev.end){ newEmpPrevCount++; if(sPrev) newEmpPrevAmt += sPrev.gross; }
+    if(emp.doj && emp.doj >= curr.start && emp.doj <= curr.end){ newEmpCurrCount++; if(sCurr) newEmpCurrAmt += sCurr.gross; }
+    if(emp.employmentStatus === 'left' && emp.leftDate && emp.leftDate >= prev.start && emp.leftDate <= prev.end){ leftPrevCount++; if(sPrev) leftPrevAmt += sPrev.gross; }
+    if(emp.employmentStatus === 'left' && emp.leftDate && emp.leftDate >= curr.start && emp.leftDate <= curr.end){ leftCurrCount++; if(sCurr) leftCurrAmt += sCurr.gross; }
+
+    // Increments, isolated from leave: rate = gross + leaveAmount for every
+    // heading (the Basic/HRA/LTA percentages always sum to 100%, so "gross
+    // before that month's leave deduction" is exactly the contracted Rate
+    // of Pay). Summed only for employees on roll BOTH months, so a plain
+    // joiner/leaver never shows up here as a false "increment".
+    if(sPrev && sCurr){
+      prevAgg.continuingRate += sPrev.rate;
+      currAgg.continuingRate += sCurr.rate;
+    }
   }
   const difference = currTotal - prevTotal;
   const isCompact = isCompactSheetView();
@@ -9833,14 +9886,43 @@ async function renderSalaryComparisonReport(){
   // visible rather than silent.
   const reconciled = Math.round((joined.concat(leavers, changed).reduce((t, i) => t + i.amount, 0) - difference) * 100) === 0;
 
+  // One row per category, Last Month beside Current Month — the layout asked
+  // for: every payroll component bifurcated the same way "Total Salary"
+  // already was, ending in the same Grand Total (Net Salary Payable) and
+  // Difference this report has always closed on. csvCatRows mirrors it in
+  // the same order for the CSV export below.
+  const csvCatRows = [];
+  const catRow = (label, prevVal, currVal, prevCsv, currCsv) => {
+    csvCatRows.push([label, prevCsv, currCsv]);
+    return isCompact
+      ? hrCard(null, hrRow(label, '') + hrRow(prev.label, prevVal) + hrRow(curr.label, currVal))
+      : `<tr><td class="sal-name">${label}</td><td class="num">${prevVal}</td><td class="num">${currVal}</td></tr>`;
+  };
+  const money = v => '₹' + fmtMoney(v);
+  const catRowsHtml = [
+    catRow('Gross Salary (all on-roll employees)', money(prevAgg.gross), money(currAgg.gross), Math.round(prevAgg.gross), Math.round(currAgg.gross)),
+    catRow('New Employees', newEmpPrevCount + ' · ' + money(newEmpPrevAmt), newEmpCurrCount + ' · ' + money(newEmpCurrAmt), newEmpPrevCount + ' (' + Math.round(newEmpPrevAmt) + ')', newEmpCurrCount + ' (' + Math.round(newEmpCurrAmt) + ')'),
+    catRow('Employees Left', leftPrevCount + ' · ' + money(leftPrevAmt), leftCurrCount + ' · ' + money(leftCurrAmt), leftPrevCount + ' (' + Math.round(leftPrevAmt) + ')', leftCurrCount + ' (' + Math.round(leftCurrAmt) + ')'),
+    catRow('Leave Days (all employees)', prevAgg.leaveDaysCount + ' days · ' + money(prevAgg.leaveAmount), currAgg.leaveDaysCount + ' days · ' + money(currAgg.leaveAmount), prevAgg.leaveDaysCount + ' (' + Math.round(prevAgg.leaveAmount) + ')', currAgg.leaveDaysCount + ' (' + Math.round(currAgg.leaveAmount) + ')'),
+    catRow('Increments — Rate of Pay, continuing staff (leave excluded)', money(prevAgg.continuingRate), money(currAgg.continuingRate), Math.round(prevAgg.continuingRate), Math.round(currAgg.continuingRate)),
+    catRow('PF (Employee + Employer)', money(prevAgg.pf), money(currAgg.pf), Math.round(prevAgg.pf), Math.round(currAgg.pf)),
+    catRow('ESI (Employee + Employer)', money(prevAgg.esi), money(currAgg.esi), Math.round(prevAgg.esi), Math.round(currAgg.esi)),
+    catRow('PT', money(prevAgg.pt), money(currAgg.pt), Math.round(prevAgg.pt), Math.round(currAgg.pt)),
+    catRow('Loan EMI', money(prevAgg.loanEmi), money(currAgg.loanEmi), Math.round(prevAgg.loanEmi), Math.round(currAgg.loanEmi)),
+    catRow('Advance', money(prevAgg.advance), money(currAgg.advance), Math.round(prevAgg.advance), Math.round(currAgg.advance)),
+    catRow('Advance Temp', money(prevAgg.advanceTemp), money(currAgg.advanceTemp), Math.round(prevAgg.advanceTemp), Math.round(currAgg.advanceTemp)),
+    catRow('Retention', money(prevAgg.retention), money(currAgg.retention), Math.round(prevAgg.retention), Math.round(currAgg.retention))
+  ].join('');
+
   const summaryInner = isCompact ? `<div class="hr-sheet-cards">
-      ${hrCard(null, hrRow(prev.label + ' (last month)', '₹' + fmtMoney(prevTotal)) + hrRow(curr.label + ' (this month)', '₹' + fmtMoney(currTotal)))}
+      ${catRowsHtml}
+      ${hrCard(null, hrRow('Grand Total — Net Salary Payable', '') + hrRow(prev.label, '₹' + fmtMoney(prevTotal)) + hrRow(curr.label, '₹' + fmtMoney(currTotal)), 'sal-grand-card')}
       ${hrCard(null, hrRow('Difference', fmtSigned_(difference)), 'sal-grand-card')}
     </div>` : `<table class="sal-table">
-        <tr><th>Month</th><th class="num">Total Salary</th></tr>
-        <tr><td class="sal-name">${prev.label} (last month)</td><td class="num">₹${fmtMoney(prevTotal)}</td></tr>
-        <tr><td class="sal-name">${curr.label} (this month)</td><td class="num">₹${fmtMoney(currTotal)}</td></tr>
-        <tr class="sal-grandtotal"><td class="sal-name"><strong>Difference</strong></td><td class="num"><strong>${fmtSigned_(difference)}</strong></td></tr>
+        <tr><th>Category</th><th class="num">${prev.label}<br><span style="font-weight:400;">(last month)</span></th><th class="num">${curr.label}<br><span style="font-weight:400;">(this month)</span></th></tr>
+        ${catRowsHtml}
+        <tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total — Net Salary Payable</strong></td><td class="num"><strong>₹${fmtMoney(prevTotal)}</strong></td><td class="num"><strong>₹${fmtMoney(currTotal)}</strong></td></tr>
+        <tr class="sal-grandtotal"><td class="sal-name"><strong>Difference</strong></td><td class="num" colspan="2"><strong>${fmtSigned_(difference)}</strong></td></tr>
       </table>`;
   const reasonsInner = isCompact ? (nothingChanged
       ? `<div class="empty">Nothing changed between ${prev.label} and ${curr.label}.</div>`
@@ -9854,6 +9936,7 @@ async function renderSalaryComparisonReport(){
   box.innerHTML = `${reportActionBar('Month-wise Salary Comparison — ' + curr.label, 'salCompareBox')}
     <div class="print-isolate" id="salComparePrintArea">
       ${reportLogoHeader('Month-wise Salary Comparison — ' + curr.label)}
+      <h2 style="font-size:15px;margin:0 0 8px;">Category Breakdown — ${prev.label} vs ${curr.label}</h2>
       ${summaryInner}
       <h2 style="font-size:15px;margin:18px 0 8px;">Why the salary differs</h2>
       ${reasonsInner}
@@ -9863,13 +9946,13 @@ async function renderSalaryComparisonReport(){
       </p>
     </div>`;
 
-  const csvHead = ['Employee', 'Reason', 'Effect on total'];
-  const csvAll = [
-    [prev.label + ' (last month) total', '', Math.round(prevTotal)],
-    [curr.label + ' (this month) total', '', Math.round(currTotal)],
+  const csvHead = ['Category', prev.label, curr.label];
+  const csvAll = [['Category Breakdown', '', '']].concat(csvCatRows, [
+    ['Grand Total — Net Salary Payable', Math.round(prevTotal), Math.round(currTotal)],
     ['Difference', '', Math.round(difference)],
-    ['', '', '']
-  ].concat(csvRows, [['Grand Total', '', Math.round(difference)]]);
+    ['', '', ''],
+    ['Why the salary differs', '', '']
+  ]).concat(csvRows, [['Grand Total', '', Math.round(difference)]]);
   {
     const fileName = `Month-wise Salary Comparison - ${monthVal}.csv`;
     const content = toCsv(csvHead, csvAll);
