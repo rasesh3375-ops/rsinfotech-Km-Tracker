@@ -2119,8 +2119,8 @@
             <div id="reportCardsLandingBox" style="display:contents"></div>
             <button type="button" class="gen-card" onclick="openReportsCard('rptSecLeaveRollover')">
               <div class="gen-card-icon t3">🔄</div>
-              <h3>Leave Balance Generator for New Year</h3>
-              <p>Sets each employee's opening EL and SL for a new leave year. Run once, in April.</p>
+              <h3>Leave Balance Next Year Report</h3>
+              <p>EL calculation and SL rollover together — one table, one place to open each employee's leave balances for the new year.</p>
               <span class="btn full">View</span>
             </button>
           </div>
@@ -2400,13 +2400,14 @@
         <div id="rptSecLeaveRollover" class="hidden">
         <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
         <section class="block">
-          <h2 style="margin:0 0 4px;">Sick Leave Balance Generator for New Year</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Sets each employee's opening SL to the yearly allowance for their employee type. Resident Engineers and Work From Home staff are skipped, their policies being different, as are non-R.S. Infotech headings. Run once, in April. <strong>EL is not touched here</strong> — open it for the new year from the EL Calculation Sheet's "Encash and start next year at nil" or "Carry forward instead", so EL is only ever set from one place.</p>
-          <label class="field">Year starts</label>
-          <input class="field-input" type="date" id="rolloverFy">
-          <div style="height:12px"></div>
-          <button class="btn full" onclick="withBusy(this,'Working…',rollOverLeaveYear)">Open leave year</button>
-          <div id="rolloverBox" style="margin-top:10px;"></div>
+          <h2 style="margin:0 0 4px;">Leave Balance Next Year Report</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">SL and EL together, for the financial year you pick — SL resets to the yearly allowance for each employee's type; EL is earned at 1 day per 25 days present (from the Attendance Sheet), unchanged from how the EL Calculation Sheet always worked. Resident Engineers are excluded from both; Work From Home and non-R.S. Infotech headings are excluded from SL only, shown as "—" in the SL columns. Run once, in April.</p>
+          <label class="field">Financial year starting April of</label>
+          <input class="field-input" type="number" id="leaveBalanceStartYear" placeholder="e.g. 2026 for FY 2026-27">
+          <div style="height:14px"></div>
+          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building report…',renderLeaveBalanceNextYearReport)">Generate leave balance report</button>
+          <div style="height:14px"></div>
+          <div id="leaveBalanceNextYearBox"></div>
         </section>
         </div>
       </div>
@@ -2439,12 +2440,6 @@
               <div class="gen-card-icon t4">📅</div>
               <h3>Holiday List</h3>
               <p>A printable holiday list for engineers, by financial year.</p>
-              <span class="btn full">Generate</span>
-            </button>
-            <button type="button" class="gen-card" onclick="openGeneratorCard('genSecElCalc')">
-              <div class="gen-card-icon t1">🧮</div>
-              <h3>EL Calculation Sheet</h3>
-              <p>Earned leave for the financial year, from the Attendance Sheet.</p>
               <span class="btn full">Generate</span>
             </button>
             <button type="button" class="gen-card" onclick="openGeneratorCard('genSecLeaveEncashment')">
@@ -2537,20 +2532,6 @@
           <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building report…',renderLeaveEncashmentReport)">Generate leave encashment report</button>
           <div style="height:14px"></div>
           <div id="encashBox"></div>
-        </section>
-        </div>
-
-        <div id="genSecElCalc" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Generator</button>
-        <section class="block">
-          <h2 style="margin:0 0 4px;">EL Calculation Sheet</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Earned Leave = 1 day per 25 days present, per the leave policy. Resident Engineers are excluded. This computes each employee's EL for the financial year you pick from the Attendance Sheet, and can carry the closing balance forward as next year's opening balance automatically.</p>
-          <label class="field">Financial year starting April of</label>
-          <input type="number" id="elCalcStartYear" placeholder="e.g. 2026 for FY 2026-27" />
-          <div style="height:14px"></div>
-          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building sheet…',renderElCalculationSheet)">Generate EL calculation sheet</button>
-          <div style="height:14px"></div>
-          <div id="elCalcBox"></div>
         </section>
         </div>
 
@@ -4671,9 +4652,6 @@ async function enterHrMain(){
     dateEl.title = 'Financial year ' + financialYearLabel() + ': ' + financialYearRangeText() +
       '. Rolls over automatically on 1 April.';
   }
-  // Defaults to the next 1 April rather than a date fixed in the page.
-  const rollEl = document.getElementById('rolloverFy');
-  if(rollEl && !rollEl.value) rollEl.value = nextFinancialYearStart();
   renderHrSideNav();
   restoreHrSidebar();
   // Arm the exit guard BEFORE the first real navigation, not after — its
@@ -5947,8 +5925,8 @@ function leaveBalances(emp, used, P){
 // Pay like everything else — never from a stored figure, so an employee whose
 // pay changed is encashed at what they are on now.
 //
-// One function, so the EL Calculation Sheet and anything else that ever needs
-// the figure cannot disagree about it.
+// One function, so the Leave Balance Next Year Report and anything else that
+// ever needs the figure cannot disagree about it.
 function plEncashmentRate(emp, P){
   P = P || LEAVE_POLICY;
   const B = P.privilegeLeave.salaryBasis;
@@ -13118,7 +13096,7 @@ function employeeModalHtml(emp){
           <label class="field">These balances are as at (month)</label>
           <input type="month" class="field-input" id="f_leaveOpeningFrom" value="${emp.leaveOpeningFrom || ''}">
           <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Leave taken from this month onward is deducted from the balances above. Leave it blank and the financial year start is used.</p>
-          <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Enter manually for this year only. From next year onward, the EL Calculation Sheet report carries the closing balance forward automatically.</p>
+          <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Enter manually for this year only. From next year onward, the Leave Balance Next Year Report carries the closing balance forward automatically.</p>
         </div>
         <p class="${emp.employeeType==='resident'?'':'hidden'}" id="residentLeaveNote" style="font-size:12px;color:var(--muted);margin:0;">Resident Engineers are outside the SL/EL leave scheme, so there is no opening balance to enter.</p>
       </div>
@@ -16387,54 +16365,9 @@ async function applyAlwaysPresentBulk(){
   await renderAlwaysPresentBulkList();
 }
 
-// Opens a new leave year for Sick Leave only — SL is reset to the flat
-// yearly allowance for the employee type, since the policy gives no
-// mechanism to encash or carry it. EL used to be set here too (one day per
-// 25 attendance days), but the EL Calculation Sheet's own "Encash and start
-// next year at nil" / "Carry forward instead" already work out and set the
-// new EL opening balance from that same attendance record — running both
-// meant EL could be paid out in cash by one and then handed straight back as
-// fresh usable leave by the other, for the same year's attendance. EL is
-// now only ever written from the EL Calculation Sheet, so there is one place
-// it can be set, not two that can disagree.
-async function rollOverLeaveYear(){
-  const box = document.getElementById('rolloverBox');
-  const fyStart = (document.getElementById('rolloverFy') || {}).value || nextFinancialYearStart();
-  const label = financialYearLabel(fyStart);
-
-  const employees = await getEmployees();
-  // Resident Engineers and Work From Home run on different policies, so they
-  // are left alone rather than given a balance the policy does not grant them.
-  const eligible = employees.filter(e =>
-    e.employmentStatus !== 'left' &&
-    CONSULTANT_REPORT_HEADINGS.indexOf(e.salaryHeading || 'managerial') !== -1 &&
-    e.employeeType !== 'resident' && e.employeeType !== 'wfh');
-  const skipped = employees.filter(e => e.employmentStatus !== 'left' && eligible.indexOf(e) === -1);
-
-  if(!eligible.length){ box.innerHTML = '<p class="dash-muted">No eligible employees.</p>'; return; }
-
-  const P = LEAVE_POLICY;
-  const rows = eligible.map(e => {
-    const sl = P.sickLeave.perYear[e.employeeType === 'part' ? 'part' : 'full'];
-    return { e, sl };
-  });
-
-  const summary = rows.map(r => '• ' + (r.e.name || r.e.id) + ': ' + r.sl + ' SL').join('\n');
-  if(!confirm('Open leave year ' + label + ' for ' + rows.length + ' employee(s)?\n\n' + summary +
-    '\n\nThis replaces their opening SL. EL is not touched — open it separately from the EL Calculation ' +
-    'Sheet. ' + skipped.length +
-    ' employee(s) are skipped — Resident Engineers, Work From Home and non-R.S. Infotech headings.')) return;
-
-  // leaveOpeningFrom marks the month both opening balances are current as of,
-  // so it still moves forward here even though this only sets SL — it is the
-  // baseline leaveUsedThisFinancialYear reads for EL usage too.
-  rows.forEach(r => { r.e.slOpening = r.sl; r.e.leaveOpeningFrom = fyStart.slice(0, 7); });
-  await saveEmployees(employees);
-  invalidateSharedRead('employees');
-  box.innerHTML = '<p class="dash-muted">✓ Leave year ' + escapeHtml(label) + ' opened for ' + rows.length +
-    ' employee(s). ' + skipped.length + ' skipped (Resident, Work From Home, other headings). ' +
-    'Reports from April onward file to Drive under HR Management &gt; ' + escapeHtml(label) + '.</p>';
-}
+// SL and EL rollover used to be two entirely separate functions/reports —
+// see openLeaveYearSl and encashAndResetEl/applyElClosingAsNextOpening
+// below, called from the merged renderLeaveBalanceNextYearReport.
 
 // Opens the Company Letterhead card with its fields — including the HR
 // Signatory dropdown — showing what is actually saved, not blank. The
@@ -16853,14 +16786,14 @@ async function renderLeaveEncashmentReport(){
       <tbody>${bodyRows}</tbody></table>`}
     </div>
     ${nil ? `<p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">${nil} employee(s) have no leave left to encash and are not listed.</p>` : ''}
-    <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(asAt))} &gt; Reports &gt; Leave Encashment. Use <em>Encash and start next year at nil</em> on the EL Calculation Sheet once these have been paid.</p>`;
+    <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(asAt))} &gt; Reports &gt; Leave Encashment. Use <em>Encash unused EL &amp; open next year automatically</em> on the Leave Balance Next Year Report once these have been paid.</p>`;
   openFullscreenView('Leave Encashment — FY ' + fyLabel, 'encashBox');
 }
 
 // Privilege leave earned, used and left for one financial year, with what the
-// remainder is worth. Shared by the EL Calculation Sheet and the Leave
-// Encashment Report — two reports that disagreed about how many days somebody
-// had pending would be worse than having only one of them.
+// remainder is worth. Shared by the Leave Balance Next Year Report and the
+// Leave Encashment Report — two reports that disagreed about how many days
+// somebody had pending would be worse than having only one of them.
 async function elFyRows(employees, startYear){
   const fyStart = fyOfStartYear(startYear).from;
   const fyEnd = fyOfStartYear(startYear).to;
@@ -16906,66 +16839,127 @@ async function elFyRows(employees, startYear){
   return rows;
 }
 
-async function renderElCalculationSheet(){
-  const box = document.getElementById('elCalcBox');
-  const yearInput = document.getElementById('elCalcStartYear');
+// SL and EL together, one table — these used to be two separate reports
+// (EL Calculation Sheet in Generator, a Sick Leave-only rollover in
+// Reports) that both existed only to open next year's leave balances; HR
+// ran both every April for the same purpose, so they are now one. Every
+// formula is byte-for-byte what it always was: elFyRows below is the exact
+// function the old EL Calculation Sheet called, and the SL figure is the
+// exact lookup rollOverLeaveYear used to use. Only the two employee lists
+// are shown together instead of on separate screens.
+async function renderLeaveBalanceNextYearReport(){
+  const box = document.getElementById('leaveBalanceNextYearBox');
+  const yearInput = document.getElementById('leaveBalanceStartYear');
   if(!yearInput.value) yearInput.value = getCurrentFYStartYear();
   const startYear = parseInt(yearInput.value, 10);
   const fyStart = fyOfStartYear(startYear).from;
   const fyEnd = fyOfStartYear(startYear).to;
 
+  // Resident Engineers are excluded from both SL and EL. Work From Home and
+  // non-R.S. Infotech headings are excluded from SL only (a different
+  // policy) — shown as "—" in the SL columns below rather than dropped from
+  // the report entirely, since they may still have an EL figure to show.
   const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left' && e.employeeType !== 'resident');
   if(!employees.length){
     box.innerHTML = '<div class="empty">No non-resident employees on file yet.</div>';
     return;
   }
 
-  const rows = await elFyRows(employees, startYear);
+  const P = LEAVE_POLICY;
+  const slEligible = e => CONSULTANT_REPORT_HEADINGS.indexOf(e.salaryHeading || 'managerial') !== -1 && e.employeeType !== 'wfh';
+  const elRows = await elFyRows(employees, startYear);
+  const rows = elRows.map(r => {
+    const eligible = slEligible(r.emp);
+    return Object.assign({}, r, {
+      slEligible: eligible,
+      slCurrent: Number(r.emp.slOpening) || 0,
+      slNext: eligible ? P.sickLeave.perYear[r.emp.employeeType === 'part' ? 'part' : 'full'] : null
+    });
+  });
   const totalEncash = Math.round(rows.reduce((t, r) => t + r.amount, 0) * 100) / 100;
   const B = LEAVE_POLICY.privilegeLeave.salaryBasis;
-  // The FY this sheet is closing opens the NEXT one — earned this year,
-  // usable from next year — so the automatic button needs to know which
+  // The FY this report is closing opens the NEXT one — earned this year,
+  // usable from next year — so the automatic buttons need to know which
   // month that new year's leaveOpeningFrom baseline should start from.
   const nextFyStart = fyOfStartYear(startYear + 1).from.slice(0, 7);
 
-  const elReportTitle = 'EL Calculation Sheet — FY ' + startYear + '-' + String(startYear+1).slice(2);
+  const reportTitle = 'Leave Balance Next Year Report — FY ' + startYear + '-' + String(startYear+1).slice(2);
   {
-    const fileName = `EL Calculation Sheet - FY ${startYear}-${String(startYear+1).slice(2)}.csv`;
-    const content = toCsv(['Name','Opening EL','Present days (FY)','EL earned (→ next year)','EL used','Unused Opening (to encash)','Encashment per day','Encashment payable'],
-      rows.map(r => [r.name, r.opening, r.presentDays, r.earned, r.elUsed, r.unusedOpening, r.perDay, r.amount])
-        .concat([['GRAND TOTAL','','','','','','', totalEncash]]));
-    queueFileToDrive(hrYearPath(fyEnd, 'Reports', 'EL Calculation Sheet'), fileName, content, 'text/csv');
-    stashReportShare(elReportTitle, fileName, content, 'text/csv',
-      'HR Management > ' + financialYearLabel(fyEnd) + ' > Reports > EL Calculation Sheet', 'elCalcBox');
+    const fileName = `Leave Balance Next Year Report - FY ${startYear}-${String(startYear+1).slice(2)}.csv`;
+    const content = toCsv(
+      ['Name','SL Current Opening','SL New Opening (Next Year)','EL Opening','EL Present days (FY)','EL Earned (→ next year)','EL Used','EL Unused Opening (to encash)','EL Per day','EL Encashment'],
+      rows.map(r => [r.name, r.slEligible ? r.slCurrent : '—', r.slEligible ? r.slNext : '—',
+        r.opening, r.presentDays, r.earned, r.elUsed, r.unusedOpening, r.perDay, r.amount])
+        .concat([['GRAND TOTAL','','','','','','','','', totalEncash]]));
+    queueFileToDrive(hrYearPath(fyEnd, 'Reports', 'Leave Balance Next Year Report'), fileName, content, 'text/csv');
+    stashReportShare(reportTitle, fileName, content, 'text/csv',
+      'HR Management > ' + financialYearLabel(fyEnd) + ' > Reports > Leave Balance Next Year Report', 'leaveBalanceNextYearBox');
   }
 
   const isCompact = isCompactSheetView();
-  const elInner = isCompact ? `<div class="hr-sheet-cards">
+  const inner = isCompact ? `<div class="hr-sheet-cards">
       ${rows.map(r => hrCard(`<strong>${escapeHtml(r.name)}</strong>`,
-        hrRow('Opening EL', r.opening) + hrRow('Present days (FY)', r.presentDays) + hrRow('EL earned (→ next year)', r.earned) +
-        hrRow('EL used', r.elUsed) + hrRow('Unused Opening (to encash)', r.unusedOpening) + hrRow('Per day', '₹' + fmtMoney(r.perDay)) +
-        `<div class="hr-sheet-net"><span>Encashment</span><span>₹${fmtMoney(r.amount)}</span></div>`)).join('')}
-      ${hrCard('<strong>Grand Total</strong>', hrRow('Encashment', '₹' + fmtMoney(totalEncash)), 'sal-grand-card')}
+        hrRow('SL Current Opening', r.slEligible ? r.slCurrent : '—') + hrRow('SL New Opening (Next Year)', r.slEligible ? r.slNext : '—') +
+        hrRow('EL Opening', r.opening) + hrRow('EL Present days (FY)', r.presentDays) + hrRow('EL Earned (→ next year)', r.earned) +
+        hrRow('EL Used', r.elUsed) + hrRow('EL Unused Opening (to encash)', r.unusedOpening) + hrRow('EL Per day', '₹' + fmtMoney(r.perDay)) +
+        `<div class="hr-sheet-net"><span>EL Encashment</span><span>₹${fmtMoney(r.amount)}</span></div>`)).join('')}
+      ${hrCard('<strong>Grand Total</strong>', hrRow('EL Encashment', '₹' + fmtMoney(totalEncash)), 'sal-grand-card')}
     </div>` : `<table class="sal-table">
-      <tr><th>Name</th><th class="num">Opening EL</th><th class="num">Present days (FY)</th><th class="num">EL earned<br><span class="th-sub">→ next year</span></th><th class="num">EL used</th><th class="num">Unused Opening<br><span class="th-sub">to encash</span></th><th class="num">Per day</th><th class="num">Encashment</th></tr>
-      ${rows.map(r => `<tr><td class="sal-name">${escapeHtml(r.name)}</td><td class="num">${r.opening}</td><td class="num">${r.presentDays}</td><td class="num">${r.earned}</td><td class="num">${r.elUsed}</td><td class="num">${r.unusedOpening}</td><td class="num">₹${fmtMoney(r.perDay)}</td><td class="num"><strong>₹${fmtMoney(r.amount)}</strong></td></tr>`).join('')}
-      <tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total</strong></td><td colspan="6"></td><td class="num"><strong>₹${fmtMoney(totalEncash)}</strong></td></tr>
+      <tr><th>Name</th><th class="num">SL Current<br><span class="th-sub">opening</span></th><th class="num">SL New<br><span class="th-sub">next year</span></th>
+      <th class="num">EL Opening</th><th class="num">EL Present days<br><span class="th-sub">FY</span></th><th class="num">EL Earned<br><span class="th-sub">→ next year</span></th>
+      <th class="num">EL Used</th><th class="num">EL Unused Opening<br><span class="th-sub">to encash</span></th><th class="num">EL Per day</th><th class="num">EL Encashment</th></tr>
+      ${rows.map(r => `<tr><td class="sal-name">${escapeHtml(r.name)}</td>
+        <td class="num">${r.slEligible ? r.slCurrent : '—'}</td><td class="num">${r.slEligible ? r.slNext : '—'}</td>
+        <td class="num">${r.opening}</td><td class="num">${r.presentDays}</td><td class="num">${r.earned}</td><td class="num">${r.elUsed}</td>
+        <td class="num">${r.unusedOpening}</td><td class="num">₹${fmtMoney(r.perDay)}</td><td class="num"><strong>₹${fmtMoney(r.amount)}</strong></td></tr>`).join('')}
+      <tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total</strong></td><td colspan="8"></td><td class="num"><strong>₹${fmtMoney(totalEncash)}</strong></td></tr>
     </table>`;
   box.innerHTML = `
-    ${reportActionBar(elReportTitle, 'elCalcBox')}
-    <div class="sal-sheet-wrap print-isolate" id="elCalcPrintArea">
-    ${reportLogoHeader(elReportTitle)}
-    ${elInner}
+    ${reportActionBar(reportTitle, 'leaveBalanceNextYearBox')}
+    <div class="sal-sheet-wrap print-isolate" id="leaveBalanceNextYearPrintArea">
+    ${reportLogoHeader(reportTitle)}
+    ${inner}
     </div>
-    <p style="font-size:11px;color:var(--muted);margin:10px 0;line-height:1.6;">FY ${startYear}-${String(startYear+1).slice(2)}: ${fmtDateIN(fyStart)} to ${fmtDateIN(fyEnd)}. EL earned = 1 day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} days present (present includes EL/SL days and half-day equivalents), floored — earned this year, usable from next year, so it is never part of what this year pays out. Unused Opening = this year's opening balance − EL used, floored at nil.
-      <br><strong style="color:var(--navy);">Encashment</strong> = Unused Opening × ${headingPct(B.grossPct)} of ${escapeHtml(B.label)} ÷ ${B.dayDivisor}, worked out from each employee's Rate of Pay and salary heading. The ${B.dayDivisor} is the same figure that earns the leave — one day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} days of attendance.</p>
+    <p style="font-size:11px;color:var(--muted);margin:10px 0;line-height:1.6;">FY ${startYear}-${String(startYear+1).slice(2)}: ${fmtDateIN(fyStart)} to ${fmtDateIN(fyEnd)}.
+      <br><strong style="color:var(--navy);">SL</strong> resets to the yearly allowance for the employee's type (${P.sickLeave.perYear.full} normally, ${P.sickLeave.perYear.part} for part-time) — shown as "—" for Work From Home and non-R.S. Infotech headings, left untouched, their policy being different.
+      <br><strong style="color:var(--navy);">EL Earned</strong> = 1 day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} days present (present includes EL/SL days and half-day equivalents), floored — earned this year, usable from next year, so it is never part of what this year pays out. Unused Opening = this year's opening balance − EL used, floored at nil.
+      <br><strong style="color:var(--navy);">EL Encashment</strong> = Unused Opening × ${headingPct(B.grossPct)} of ${escapeHtml(B.label)} ÷ ${B.dayDivisor}, worked out from each employee's Rate of Pay and salary heading. The ${B.dayDivisor} is the same figure that earns the leave — one day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} days of attendance.</p>
+    <div class="row-inline" style="margin-bottom:8px;">
+      <button class="btn full" onclick='withBusy(this,"Working…",()=>openLeaveYearSl(${JSON.stringify(rows.filter(r=>r.slEligible).map(r=>({id:r.id,sl:r.slNext})))}, ${JSON.stringify(fyStart)}))'>Open leave year (SL)</button>
+    </div>
     <div class="row-inline" style="margin-bottom:0;">
-      <button class="btn" style="flex:1;" onclick='withBusy(this,"Working…",()=>encashAndResetEl(${JSON.stringify(rows.map(r=>({id:r.id,amount:r.amount,nextOpening:r.nextOpening})))}, ${JSON.stringify(nextFyStart)}))'>Encash unused &amp; open next year automatically</button>
-      <button class="btn ghost" style="flex:1;" onclick='withBusy(this,"Working…",()=>applyElClosingAsNextOpening(${JSON.stringify(rows.map(r=>({id:r.id,closing:r.closing})))}))'>Carry whole balance forward (no cash)</button>
+      <button class="btn" style="flex:1;" onclick='withBusy(this,"Working…",()=>encashAndResetEl(${JSON.stringify(rows.map(r=>({id:r.id,amount:r.amount,nextOpening:r.nextOpening})))}, ${JSON.stringify(nextFyStart)}))'>Encash unused EL &amp; open next year automatically</button>
+      <button class="btn ghost" style="flex:1;" onclick='withBusy(this,"Working…",()=>applyElClosingAsNextOpening(${JSON.stringify(rows.map(r=>({id:r.id,closing:r.closing})))}))'>Carry whole EL balance forward (no cash)</button>
     </div>
-    <p style="font-size:11px;color:var(--muted);margin:8px 0 0;">The first button pays cash for Unused Opening only, then automatically sets next year's EL opening balance to what was earned this year (EL earned column) — the one-year lag the policy describes, applied without a second manual step. Carrying the whole balance forward is kept for years already run that way; the written policy is to encash.</p>
+    <p style="font-size:11px;color:var(--muted);margin:8px 0 0;">SL is a flat reset with no encashment option, per policy. For EL, the first button pays cash for Unused Opening only, then automatically sets next year's EL opening balance to what was earned this year (EL Earned column) — the one-year lag the policy describes, applied without a second manual step. Carrying the whole EL balance forward is kept for years already run that way; the written policy is to encash.</p>
   `;
-  openFullscreenView(elReportTitle, 'elCalcBox');
+  openFullscreenView(reportTitle, 'leaveBalanceNextYearBox');
+}
+
+// The SL half of the merged report above — a flat reset to each employee's
+// yearly allowance, with no encashment mechanism (policy gives none for
+// SL, unlike EL's two buttons below). Takes the SL-eligible rows already
+// computed by renderLeaveBalanceNextYearReport rather than recomputing
+// them, so the figures acted on are exactly the ones just shown on screen.
+async function openLeaveYearSl(list, fyStart){
+  const label = financialYearLabel(fyStart);
+  if(!list.length){ alert('No SL-eligible employees in this report.'); return; }
+  const employees = await getEmployees();
+  const summary = list.map(c => {
+    const emp = employees.find(e => e.id === c.id);
+    return '• ' + ((emp && emp.name) || c.id) + ': ' + c.sl + ' SL';
+  }).join('\n');
+  if(!confirm('Open leave year ' + label + ' (SL) for ' + list.length + ' employee(s)?\n\n' + summary +
+    '\n\nThis replaces their opening SL. EL is unaffected — use the EL buttons below for that.')) return;
+  list.forEach(c => {
+    const emp = employees.find(e => e.id === c.id);
+    if(emp){ emp.slOpening = c.sl; emp.leaveOpeningFrom = fyStart.slice(0, 7); }
+  });
+  await saveEmployees(employees);
+  invalidateSharedRead('employees');
+  await addActivityLog('Opened SL for leave year ' + label + ', ' + list.length + ' employee(s)');
+  showSavedToast('SL opened for ' + list.length + ' employee(s) — ' + label);
+  await renderLeaveBalanceNextYearReport();
 }
 
 // Pays cash for whatever was left unused from what was already usable this
@@ -16994,7 +16988,7 @@ async function encashAndResetEl(list, nextFyStartMonth){
                        ' total, and opened next year\'s EL balance from what was earned this year');
   invalidateSharedRead('employees');
   showSavedToast('Encashed ₹' + fmtMoney(total) + ' — next year\'s EL balance opened automatically');
-  await renderElCalculationSheet();
+  await renderLeaveBalanceNextYearReport();
 }
 
 async function applyElClosingAsNextOpening(closingList){
@@ -18396,7 +18390,7 @@ function clearGeneratorEmployeeFields(){
 // toggles which of these wrapper divs is visible — no new report, letter or
 // calculation, only how you get to the ones that already existed.
 const GENERATOR_SECTIONS = ['genSecRoleReports','genSecLetterhead','genSecHolidayList',
-  'genSecLeaveEncashment','genSecElCalc','genSecChecklists','genSecLetters','genSecOfficeDocuments'];
+  'genSecLeaveEncashment','genSecChecklists','genSecLetters','genSecOfficeDocuments'];
 function showGeneratorLanding(){
   document.getElementById('genLanding').classList.remove('hidden');
   GENERATOR_SECTIONS.forEach(id => document.getElementById(id).classList.add('hidden'));
