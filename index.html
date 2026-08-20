@@ -1112,6 +1112,26 @@
   .letter-choice .num{font-size:11px;color:var(--muted);font-weight:700;}
   .letter-choice.active{border-left-color:var(--amber-dark);background:var(--cream);font-weight:700;}
 
+  /* ===== "Choose a Letter" step-card layout (Generator > Letters) =====
+     Same tokens as the rest of the app (navy/amber/cream/paper/line) — no
+     new colors introduced, only a new arrangement of the existing ones. */
+  .gen-step-card{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:14px;}
+  .gen-step-head{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+  .gen-step-num{width:26px;height:26px;border-radius:50%;background:var(--navy);color:#fff;flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12.5px;}
+  .gen-step-title{font-size:15px;font-weight:700;color:var(--navy);}
+  .gen-step-icon{margin-left:auto;color:var(--muted);font-size:16px;}
+  .gen-step-hint{font-size:11.5px;color:var(--muted);margin:8px 0 0;}
+  .gen-select-wrap{position:relative;}
+  .gen-select-wrap .gen-select-ic{position:absolute;left:13px;top:50%;transform:translateY(-50%);
+    font-size:15px;pointer-events:none;}
+  .gen-select-wrap select{padding-left:38px;}
+  /* The same numbered .letter-choice rows used everywhere else, just flowed
+     two to a row here — nothing about the row style itself changes. */
+  .gen-quick-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .gen-quick-grid .letter-choice{margin-bottom:0;}
+  @media (max-width:360px){ .gen-quick-grid{grid-template-columns:1fr;} }
+
   /* ===== Generator landing: a card grid picking which existing form to open ===== */
   .gen-landing h1{font-size:20px;margin:0 0 4px;color:var(--navy);}
   .gen-landing>p{font-size:13px;color:var(--muted);margin:0;}
@@ -2547,10 +2567,42 @@
         <div id="genSecLetters" class="hidden">
         <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Generator</button>
         <section class="block">
-          <div class="field-group">
-            <div class="sec-title">Choose a letter</div>
-            <div id="letterChoiceList"></div>
+          <h2 style="margin:0 0 4px;">Generate Letter</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 16px;">Choose a letter, select employee and generate your document.</p>
+
+          <div class="gen-step-card">
+            <div class="gen-step-head">
+              <span class="gen-step-num">1</span>
+              <span class="gen-step-title">Choose a Letter</span>
+              <span class="gen-step-icon">📄</span>
+            </div>
+            <div class="gen-select-wrap">
+              <span class="gen-select-ic">📄</span>
+              <select class="field-input" id="genLetterTypeSelect" onchange="selectLetterType(Number(this.value))"></select>
+            </div>
+            <p class="gen-step-hint">Select the type of letter you want to generate.</p>
           </div>
+
+          <div class="gen-step-card" id="genEmpSelectWrap">
+            <div class="gen-step-head">
+              <span class="gen-step-num">2</span>
+              <span class="gen-step-title">Select Employee</span>
+              <span class="gen-step-icon">👤</span>
+            </div>
+            <div class="gen-select-wrap">
+              <span class="gen-select-ic">👤</span>
+              <select class="field-input" id="genEmpSelect" onchange="autoFillGeneratorFromEmployee()">
+                <option value="">— Select employee —</option>
+              </select>
+            </div>
+            <p class="gen-step-hint">Choose the employee for this letter.</p>
+          </div>
+
+          <div class="gen-step-card">
+            <div class="gen-step-head">
+              <span class="gen-step-title">Document Details</span>
+              <span class="gen-step-icon">📝</span>
+            </div>
           <label class="field">Company name</label>
           <input type="text" id="genCompanyName" value="R.S.Infotech" />
           <div style="height:12px"></div>
@@ -2564,14 +2616,6 @@
             <div style="height:12px"></div>
             <label class="field">Reply / acceptance by</label>
             <input type="date" id="genOfferReplyBy" />
-            <div style="height:14px"></div>
-          </div>
-          <div id="genEmpSelectWrap">
-            <label class="field">Employee</label>
-            <select class="field-input" id="genEmpSelect" onchange="autoFillGeneratorFromEmployee()">
-              <option value="">— Select employee —</option>
-            </select>
-            <p style="font-size:11.5px;color:var(--muted);margin:8px 0 0;">Designation, department and date of joining below are pulled from Employee Master automatically — edit them here only if this document needs something different.</p>
             <div style="height:14px"></div>
           </div>
           <div id="genLeaveFieldsWrap" class="hidden">
@@ -2652,9 +2696,31 @@
           </div>
           <label class="field">Date of issue</label>
           <input type="date" id="genIssueDate" />
-          <div style="height:16px"></div>
-          <button class="btn full" onclick="withBusy(this,'Generating letter…',generateLetter)">Generate letter</button>
-          <div class="msg" id="genMsg"></div>
+          </div>
+
+          <div class="gen-step-card">
+            <div class="gen-step-head">
+              <span class="gen-step-num">3</span>
+              <span class="gen-step-title">Generate</span>
+              <span class="gen-step-icon">➤</span>
+            </div>
+            <button class="btn full" onclick="withBusy(this,'Generating letter…',generateLetter)">📄 Generate Letter</button>
+            <p class="gen-step-hint">Click to generate the letter for the selected employee.</p>
+            <div class="msg" id="genMsg"></div>
+          </div>
+
+          <div class="gen-step-card">
+            <div class="gen-step-head">
+              <span class="gen-step-icon" style="margin-left:0;">📄</span>
+              <span class="gen-step-title">Quick Letter List</span>
+            </div>
+            <div id="letterChoiceList" class="gen-quick-grid"></div>
+          </div>
+
+          <div class="bonus-callout" style="display:flex;gap:10px;align-items:flex-start;">
+            <span>ℹ️</span>
+            <span>Designation, department and date of joining are pulled from Employee Master automatically — edit them here only if this document needs something different.</span>
+          </div>
         </section>
 
         <div id="letterOutput">
@@ -18366,6 +18432,14 @@ async function renderGeneratorTab(){
       <span class="num">${String(i+1).padStart(2,'0')}</span> ${t}
     </div>`).join('');
   document.getElementById('letterChoiceList').innerHTML = letterItems;
+  // The "Choose a Letter" dropdown (Step 1) — same LETTER_TYPES, same
+  // selectLetterType() on change, so picking a type either way stays in
+  // sync with the quick-list grid below it.
+  const letterTypeSel = document.getElementById('genLetterTypeSelect');
+  if(letterTypeSel){
+    letterTypeSel.innerHTML = LETTER_TYPES.map((t,i) => `<option value="${i}">${t}</option>`).join('');
+    letterTypeSel.value = String(selectedLetterIdx);
+  }
 
   document.getElementById('checklistPickerList').innerHTML = `
     <div class="letter-choice" onclick="openChecklistPicker('joining')">
@@ -18758,6 +18832,10 @@ async function selectLetterType(idx){
   // items above, and a global query here would toggle "active" on those by
   // the same numeric index instead.
   document.querySelectorAll('#letterChoiceList .letter-choice').forEach((el,i) => el.classList.toggle('active', i===idx));
+  // Keeps the Step 1 dropdown in step whichever way the type was actually
+  // changed — the dropdown itself, or a tap on the quick-list grid below it.
+  const letterTypeSel = document.getElementById('genLetterTypeSelect');
+  if(letterTypeSel) letterTypeSel.value = String(idx);
   await toggleGeneratorFieldsForType();
   // Switching letter type for an employee already picked — Experience to
   // Relieving, say — should show the new letter immediately rather than
