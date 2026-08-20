@@ -6310,16 +6310,26 @@ function calculatePfFor(emp, wage){
   // exactly ₹15,000 is ₹1,800 either way.
   if(cfg.type === 'fixed' && w > PF_RULES.epsWageCeiling){
     const f = PF_RULES.fixedAmount;
-    // A flat amount on both sides. Deliberately not 12% of anything, and the
-    // EPS split does not apply — the figure is the agreed contribution. This
-    // is already a single un-split employer figure by construction, so the
-    // two-employee "combined Employer PF" exception below has nothing to do
-    // here even if it were one of them.
+    // Employee side stays the flat, agreed ₹1,800 — unchanged. Employer side
+    // used to be a second flat ₹1,800 with no breakdown at all; it now uses
+    // the exact same formula the Actual Percentage branch below already
+    // uses (computePf on the real wage, plus EDLI and Admin), bifurcated
+    // into the same four columns — Employer EPF, Pension/EPS, EDLI, Admin
+    // Charges — every other report already shows for Employer PF. This is
+    // already a single un-split figure on the EMPLOYEE side by construction,
+    // so the two-employee "combined Employer PF" exception below has
+    // nothing to do here even if it were one of them.
+    const cFixed = computePf(w);
+    const edliFixed  = w * PF_RULES.edliPct;
+    const adminFixed = w * PF_RULES.adminPct;
     return { applicable:true, type:'fixed', wage:w,
-             employee:f, employerEpf:f, employerEps:0, edli:0, admin:0,
-             employeeTotal:f, employerTotal:f, grandTotal:f * 2,
+             employee:f, employerEpf:cFixed.employerEpf, employerEps:cFixed.employerEps,
+             edli:edliFixed, admin:adminFixed,
+             employeeTotal:f,
+             employerTotal:cFixed.employerEpf + cFixed.employerEps + edliFixed + adminFixed,
+             grandTotal:f + cFixed.employerEpf + cFixed.employerEps + edliFixed + adminFixed,
              employerPfMerged:false,
-             reason:'Fixed ₹' + fmtMoney(f) + ' each side' };
+             reason:'Fixed ₹' + fmtMoney(f) + ' (employee) — employer side is Employer EPF + Pension/EPS + EDLI + Admin Charges on a wage of ₹' + fmtMoney(w) };
   }
 
   const c = computePf(w);
