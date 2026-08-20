@@ -15909,6 +15909,12 @@ async function renderReportsTab(){
   // which year it falls in, so the filter here is month-only — no year — and
   // "All months" (the default) keeps today's full-list behaviour.
   const MONTH_FILTER_REPORTS = { birthday:1, increment:1 };
+  // Salary Report is a snapshot of "right now" by default (monthlyPayFor's
+  // own fallback) — this lets HR pull it for a specific month/year instead,
+  // same Month+Year pair every other month-scoped report already uses, with
+  // ids ending in MonthSel/YearSel so autoDefaultMonthYearSelects_ (wired
+  // into openReportsCard) defaults them to the current month for free.
+  const MONTH_YEAR_REPORTS = { salary:1 };
   // Each of these gets its own landing card (in the shared grid, matching
   // every other report) plus its own hidden detail section — same two-piece
   // shape as the static reports below, just built from data instead of
@@ -15940,13 +15946,21 @@ async function renderReportsTab(){
         <option value="">All months</option>
         ${MONTH_NAMES.map((m, i) => `<option value="${String(i+1).padStart(2,'0')}">${m}</option>`).join('')}
       </select>` : '';
+    const capKey = r.key.charAt(0).toUpperCase() + r.key.slice(1);
+    const monthYearPicker = MONTH_YEAR_REPORTS[r.key] ? `<div class="row-inline" style="margin-bottom:10px;">
+        <div><label class="field">Month</label><select class="field-input" id="report${capKey}MonthSel"></select></div>
+        <div><label class="field">Year</label><select class="field-input" id="report${capKey}YearSel"></select></div>
+      </div>` : '';
+    const generateOnclick = MONTH_YEAR_REPORTS[r.key]
+      ? `withBusy(this,'Loading…',()=>viewReport('${r.key}','${r.label}',getMonthYearValue('report${capKey}MonthSel','report${capKey}YearSel')))`
+      : `withBusy(this,'Loading…',()=>viewReport('${r.key}','${r.label}',(document.getElementById('reportMonthSel_${r.key}')||{}).value||''))`;
     return `<div id="rptSecReport_${r.key}" class="hidden">
     <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
     <section class="block">
       <h2 style="margin:0 0 4px;">${r.label}</h2>
       <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">${cardSubtitle(r)}</p>
-      ${monthPicker}
-      <button class="btn full" data-kmt-generate onclick="withBusy(this,'Loading…',()=>viewReport('${r.key}','${r.label}',(document.getElementById('reportMonthSel_${r.key}')||{}).value||''))">View report</button>
+      ${monthPicker}${monthYearPicker}
+      <button class="btn full" data-kmt-generate onclick="${generateOnclick}">View report</button>
       <div id="reportBox_${r.key}"></div>
     </section>
     </div>`;
@@ -17860,7 +17874,11 @@ async function viewReport(key, label, monthFilter){
   // Birthday and Increment carry an optional month-only filter (see
   // renderReportsTab) — folded into the title everywhere the report's name
   // appears, so a shared/printed copy says which month it is, not just "Due".
-  label = monthFilter ? label + ' — ' + MONTH_NAMES[Number(monthFilter) - 1] : label;
+  // Salary Report instead carries a full "YYYY-MM" (see MONTH_YEAR_REPORTS),
+  // so it gets the month label built the same way every other month-scoped
+  // report already does.
+  label = key === 'salary' ? (monthFilter ? label + ' — ' + monthLabel(monthFilter) : label)
+        : monthFilter ? label + ' — ' + MONTH_NAMES[Number(monthFilter) - 1] : label;
   // Lives inside a card on the Reports tab, not its own nav tab, so Close
   // clears the card rather than navigating away from the whole tab.
   const fsBtn = reportActionBar(label, 'reportBox_' + key, `clearReportBox('reportBox_${key}')`);
@@ -18044,13 +18062,16 @@ async function viewReport(key, label, monthFilter){
     // only shown in more detail — plus Loan/Advance Balance (the "opening"
     // figure still owed) and a company-wide Grand Total row, neither of
     // which this report had before.
-    const now = new Date();
-    const gy = now.getFullYear(), gm = now.getMonth() + 1;
+    // monthFilter here is a full "YYYY-MM" (see MONTH_YEAR_REPORTS) — falls
+    // back to the current month if it somehow arrives empty, matching
+    // monthlyPayFor's own default so nothing changes for a caller that never
+    // passes one.
+    const [gy, gm] = (monthFilter && /^\d{4}-\d{2}$/.test(monthFilter) ? monthFilter : todayStr().slice(0, 7)).split('-').map(Number);
     csvHeader = ['Name','Gross','PF','ESI','PT','Advance Temp','Advance','Loan EMI','Retention','Total Deduction','Conveyance','Net','Loan Balance','Advance Balance'];
     let salaryCards = '';
     const grand = { gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, emi:0, retention:0, deductions:0, conv:0, net:0, loanBal:0, advBal:0 };
     rows = employees.map(e => {
-      const p = monthlyPayFor(e);
+      const p = monthlyPayFor(e, gy, gm);
       const gross = p.gross, deductions = p.deductions, net = p.net, conv = p.conveyance;
       const loanBal = loanBalanceAfterMonth(e, gy, gm);
       const advBal = advanceBalanceAfterMonth(e, gy, gm);
@@ -18096,7 +18117,7 @@ async function viewReport(key, label, monthFilter){
         `<th class="num">Advance Temp</th><th class="num">Advance</th><th class="num">Loan EMI</th><th class="num">Retention</th>` +
         `<th class="num">Total Deduction</th><th class="num">Conveyance</th><th class="num">Net</th><th class="num">Loan Balance</th><th class="num">Advance Balance</th></tr>` +
         `${rows || '<tr><td colspan="14" class="empty">No data yet</td></tr>'}${grandRow}</table></div>`;
-    box.innerHTML = `${fsBtn}<div class="print-isolate" id="reportPrintArea_salary" style="margin-top:12px;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">Net = Gross + Conveyance − Deductions. Conveyance is paid on top of the salary, so it is added rather than taken off; deductions cover PF, ESI, PT and anything being recovered — advance, loan instalment and retention. Loan Balance and Advance Balance are what is still outstanding as of today.</p>${salaryInner}</div>`;
+    box.innerHTML = `${fsBtn}<div class="print-isolate" id="reportPrintArea_salary" style="margin-top:12px;">${reportLogoHeader(label)}<p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">Net = Gross + Conveyance − Deductions. Conveyance is paid on top of the salary, so it is added rather than taken off; deductions cover PF, ESI, PT and anything being recovered — advance, loan instalment and retention. Loan Balance and Advance Balance are what is still outstanding as of the end of ${monthLabel(gy + '-' + String(gm).padStart(2, '0'))}.</p>${salaryInner}</div>`;
   } else if(key === 'ctc'){
     csvHeader = ['Name','Monthly gross','Annual gross','Diwali bonus','Annual CTC'];
     let ctcCards = '';
