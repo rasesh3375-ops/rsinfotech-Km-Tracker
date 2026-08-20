@@ -9772,6 +9772,16 @@ async function renderSalaryComparisonReport(){
     return;
   }
   const holidayMap = await getHolidayMap_local();
+  // This report calls computeSalaryForEmployee twice per employee — once for
+  // Last Month, once for Current Month — and each of those calls
+  // getAttendance(emp.id) itself. Without priming the shared read cache
+  // first, that was one real backend round trip per employee per month,
+  // sequentially: a 40-employee company meant roughly 80 network calls
+  // before this report could finish, which on a weak connection looked
+  // exactly like "Building comparison…" hanging forever rather than what it
+  // actually was — just very slow. One batched call up front, the same fix
+  // already used by the Salary Sheet.
+  await getAttendanceMany(employees.map(e => e.id));
 
   // Category-wise bifurcation: every payroll component gets its own
   // company-wide total for Last Month and Current Month, side by side, so
