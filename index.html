@@ -11789,6 +11789,8 @@ async function buildHrDashboardHome(box){
     <div class="kpi-row">
       ${kpi('👥','Employee Master', onRoll.length, 'Open employee records', 'indigo', null, 'employees')}
       ${kpi('🗓️','Attendance Sheet', '', 'Mark and review attendance', 'green', null, 'attendance')}
+      ${kpi('💳','Employee Loan & Advance', '', 'Add a loan straight from here', 'indigo', null, 'loans')}
+      ${kpi('💵','Salary Advance Payment', '', 'Add this month\'s advance', 'amber', null, 'advpay')}
       ${kpi('🚫','Absent Today', '—', 'Tap to see who', 'red', 'dashAbsentCount', null, 'toggleAbsentPanel()')}
       ${kpi('🌴','On Leave Today', '—', 'Approved leave — tap to see who', 'green', 'dashLeaveCount', null, 'toggleLeavePanel()')}
       ${kpi('📄','Documents Expiring', expiring.length, 'Within 30 days — tap to open', 'amber', null, 'expiry')}
