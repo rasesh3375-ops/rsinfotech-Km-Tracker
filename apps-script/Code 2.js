@@ -830,8 +830,15 @@ function doPost(e) {
     // that one person's attendance can be spread across several rows instead
     // of one, the old single remoteDelete('attendance:' + id) would have left
     // every year key behind.
+    // Same fix as the main write lock below: fail fast and in JSON rather
+    // than let an uncaught waitLock timeout come back as an unreadable
+    // response and leave this execution running in the background anyway.
     var lockD = LockService.getScriptLock();
-    lockD.waitLock(10000);
+    try {
+      lockD.waitLock(6000);
+    } catch (lockErrD) {
+      return jsonOut_({ error: 'busy', message: 'Server was busy with another save — please try again in a moment.' });
+    }
     var deletedCount = 0;
     try {
       var sheetD = getSheet_();
@@ -931,8 +938,28 @@ function doPost(e) {
     }
   }
 
+  // Every write — from any device, any employee, any key — fights over this
+  // one script-wide lock, so a burst of check-ins or edits arriving together
+  // (a whole team clocking in within the same minute) can genuinely queue up
+  // behind it. waitLock() used to be given 10s and nothing caught its
+  // timeout: when it couldn't get the lock in time it threw, doPost() never
+  // returned jsonOut_() at all, and Apps Script sent back its own default
+  // error page instead of JSON — which the client can only see as "the
+  // server sent back something unreadable," indistinguishable from a dead
+  // network. Worse, the client's own retry budget aborts one attempt at 8s
+  // and immediately fires another, but that first attempt keeps running here
+  // regardless — Apps Script has no way to cancel it from an aborted HTTP
+  // connection — so each retry added one more execution onto the same queue
+  // instead of replacing the one still waiting. Waiting less than the
+  // client's 8s attempt window (so a busy server fails fast, once, with a
+  // real answer) and catching the timeout (so that answer is JSON the client
+  // can actually read and retry against) breaks that pile-up.
   const lock = LockService.getScriptLock();
-  lock.waitLock(10000);
+  try {
+    lock.waitLock(6000);
+  } catch (lockErr) {
+    return jsonOut_({ error: 'busy', message: 'Server was busy with another save — please try again in a moment.' });
+  }
   try {
     if (body.action === 'set') {
       const sheet = getSheet_();

@@ -3030,7 +3030,17 @@ function onSessionExpired(){
 // fetches it on a cache miss changed.
 async function remoteGetAllEmployees_(){
   try{
-    const res = await apiFetch(API_URL + '?action=getAllEmployees&token=' + encodeURIComponent(sessionToken || ''));
+    // '&_=' + Date.now() — Apps Script's GET responses carry no Cache-Control
+    // header of their own, so a browser (or a network in between) is free to
+    // treat an identical GET URL as cacheable under the default heuristic for
+    // a 200 response. Within one login session every call here was the exact
+    // same URL (the token doesn't change), so a second device reading the
+    // same key after a first device had written new data could keep getting
+    // back whatever was cached from its own first read — indefinitely, since
+    // nothing about the URL ever changed again until that device logged out
+    // and back in for a new token. This forces every request to be a unique
+    // URL, so nothing upstream of the backend itself can serve a stale answer.
+    const res = await apiFetch(API_URL + '?action=getAllEmployees&token=' + encodeURIComponent(sessionToken || '') + '&_=' + Date.now() + Math.random().toString(36).slice(2));
     const text = await res.text();
     let data;
     try{ data = JSON.parse(text); }
@@ -3046,7 +3056,10 @@ async function remoteGetAllEmployees_(){
 async function remoteGet(key){
   if(key === 'employees') return remoteGetAllEmployees_();
   try{
-    const res = await apiFetch(API_URL + '?action=get&key=' + encodeURIComponent(key) + '&token=' + encodeURIComponent(sessionToken || ''));
+    // See the matching comment in remoteGetAllEmployees_ above — same
+    // cache-busting, same reason: this URL is otherwise identical every time
+    // this key is read within one login session.
+    const res = await apiFetch(API_URL + '?action=get&key=' + encodeURIComponent(key) + '&token=' + encodeURIComponent(sessionToken || '') + '&_=' + Date.now() + Math.random().toString(36).slice(2));
     const text = await res.text();
     let data;
     try{ data = JSON.parse(text); }
@@ -3943,20 +3956,31 @@ async function apiFetch(url, options, tries){
       const text = await res.text();
       if(/^\s*[\[{]/.test(text)){
         const data = JSON.parse(text);
-        // Mirror the whole Response surface the call sites actually use, not
-        // just json(). remoteGet and remoteSet read res.text() and res.status;
-        // returning an object without them threw "res.text is not a function"
-        // on every shared read and write, which their outer catch swallowed
-        // into null/false — so the app behaved exactly like a dead backend
-        // even when the server answered correctly.
-        return {
-          ok: true,
-          status: res.status,
-          text: async () => text,
-          json: async () => data
-        };
+        // {error:'busy'} is the backend's own script lock reporting it
+        // couldn't get a turn in time — not a dead connection, but exactly
+        // as worth retrying as one. Left as a normal "successful" response
+        // it would reach remoteSet/remoteSetMany/remoteDelete once and stop,
+        // even though the backend answered fast specifically so the retry
+        // this budget already pays for could have a real shot at landing.
+        if(data && data.error === 'busy'){
+          lastErr = new Error(data.message || 'Server was busy — retrying.');
+        } else {
+          // Mirror the whole Response surface the call sites actually use, not
+          // just json(). remoteGet and remoteSet read res.text() and res.status;
+          // returning an object without them threw "res.text is not a function"
+          // on every shared read and write, which their outer catch swallowed
+          // into null/false — so the app behaved exactly like a dead backend
+          // even when the server answered correctly.
+          return {
+            ok: true,
+            status: res.status,
+            text: async () => text,
+            json: async () => data
+          };
+        }
+      } else {
+        lastErr = new Error('Backend returned a non-JSON response');
       }
-      lastErr = new Error('Backend returned a non-JSON response');
     }catch(e){
       lastErr = e;
     }finally{
@@ -3973,7 +3997,10 @@ async function checkHrAccountExists(){
   // and offer to create one, hiding the login form over a momentary network
   // blip or a slow Apps Script cold start.
   try{
-    const res = await apiFetch(API_URL + '?action=hrAccountExists');
+    // Cache-busted for the same reason as remoteGet/remoteGetAllEmployees_ —
+    // this one's answer barely ever changes, but a cached "no account yet"
+    // from a stale response would wrongly hide the login form.
+    const res = await apiFetch(API_URL + '?action=hrAccountExists&_=' + Date.now() + Math.random().toString(36).slice(2));
     const data = await res.json();
     if(data && typeof data.exists === 'boolean') return data;
     return { error: 'Unexpected response from the server.' };
