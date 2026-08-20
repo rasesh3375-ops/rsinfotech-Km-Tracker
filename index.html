@@ -6335,7 +6335,13 @@ function calculatePfFor(emp, wage){
   }
 
   const c = computePf(w);
-  const edli  = w * PF_RULES.edliPct;
+  // EDLI = MIN(Basic, ₹15,000) × 0.5% — Basic only, never HRA, allowances,
+  // overtime or gross, and never the actual Basic once it is above the
+  // ceiling. This used to read the real wage here, which overcharged EDLI
+  // for anyone above ₹15,000 the same way Employer EPF did in the Fixed
+  // branch above before that was corrected.
+  const edliBase = Math.min(w, PF_RULES.epsWageCeiling);
+  const edli  = edliBase * PF_RULES.edliPct;
   const admin = w * PF_RULES.adminPct;
   const isUncapped = PF_RULES.uncappedPercentIds.indexOf(String((emp || {}).id)) !== -1;
   // Everyone except the two HR-confirmed exceptions is stopped here — Fixed
