@@ -15576,16 +15576,25 @@ async function renderReportsTab(){
   // every other report) plus its own hidden detail section — same two-piece
   // shape as the static reports below, just built from data instead of
   // written out by hand.
+  const totalOnRoll = employees.filter(e => e.employmentStatus !== 'left').length;
   const withDataCounts = {};
   reports.forEach(r => {
     withDataCounts[r.key] = employees.filter(e => e.employmentStatus !== 'left' && reportHasData(r.key, e)).length;
   });
+  // Diwali is the one card in this set where "with data" alone hides the
+  // number that actually answers the question HR asks of it — how many of
+  // the whole company are eligible, out of how many there are — so it gets
+  // its own wording; every other card in this generic set keeps the plain
+  // "N employees with data" line.
+  const cardSubtitle = r => r.key === 'diwali'
+    ? withDataCounts[r.key] + ' eligible of ' + totalOnRoll + ' total employees'
+    : withDataCounts[r.key] + ' employees with data';
   document.getElementById('reportCardsLandingBox').innerHTML = reports.map(r => {
     const meta = REPORT_CARD_META[r.key];
     return `<button type="button" class="gen-card" onclick="openReportsCard('rptSecReport_${r.key}')">
       <div class="gen-card-icon ${meta.tone}">${meta.icon}</div>
       <h3>${r.label}</h3>
-      <p>${withDataCounts[r.key]} employees with data</p>
+      <p>${cardSubtitle(r)}</p>
       <span class="btn full">View</span>
     </button>`;
   }).join('');
@@ -15598,7 +15607,7 @@ async function renderReportsTab(){
     <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
     <section class="block">
       <h2 style="margin:0 0 4px;">${r.label}</h2>
-      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">${withDataCounts[r.key]} employees with data</p>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">${cardSubtitle(r)}</p>
       ${monthPicker}
       <button class="btn full" data-kmt-generate onclick="withBusy(this,'Loading…',()=>viewReport('${r.key}','${r.label}',(document.getElementById('reportMonthSel_${r.key}')||{}).value||''))">View report</button>
       <div id="reportBox_${r.key}"></div>
@@ -16175,7 +16184,11 @@ function staticReportCardStats(employees){
     }) + ' employee(s) with data',
     pt: countWhere(e => (SALARY_HEADINGS[e.salaryHeading] || SALARY_HEADINGS.managerial).pt) + ' employee(s) with data',
     apprenticeSalary: countWhere(e => e.salaryHeading === 'apprentice') + ' employee(s) with data',
-    diwaliBonusSheet: countWhere(e => diwaliBonusSource(e) === 'entered') + ' employee(s) with data',
+    // "N with data" only ever answered "how many get paid" — HR also wants
+    // the total headcount right on the card, without opening it, so a count
+    // that looks low is immediately readable as "that's most of the
+    // company" or "that's most of the company still missing an amount."
+    diwaliBonusSheet: countWhere(e => diwaliBonusSource(e) === 'entered') + ' eligible of ' + onRoll.length + ' total employees',
     consultant: countWhere(e => CONSULTANT_REPORT_HEADINGS.indexOf(e.salaryHeading) !== -1) + ' employee(s) with data',
     overtime: countWhere(e => e.employeeType === 'field') + ' employee(s) with data'
   };
