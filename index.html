@@ -3019,6 +3019,25 @@ function populateMonthYearSelects(monthSelId, yearSelId){
     yearSel.value = String(getCurrentFYStartYear());
   }
 }
+// Every report/generator card with a Month/Year picker used the same
+// `<prefix>MonthSel`/`<prefix>YearSel` id pair, but most of them only ever
+// called populateMonthYearSelects() from inside their own "Generate" click
+// handler — so the pickers sat empty, with no default at all, for as long
+// as the card was open and nothing had been generated yet, which is
+// exactly the state a report opens into. Called once when a card is
+// opened, this finds every such pair inside it by id suffix and populates
+// it immediately, so Month/Year already show the current month the moment
+// the card appears — no report needs its own fix, and a report added later
+// gets this for free the same way. Calling populateMonthYearSelects again
+// later (when Generate is actually pressed) is a safe no-op by its own
+// design — it only sets the default the first time a select gets options.
+function autoDefaultMonthYearSelects_(scopeEl){
+  if(!scopeEl) return;
+  scopeEl.querySelectorAll('select[id$="MonthSel"]').forEach(monthSel => {
+    const yearId = monthSel.id.slice(0, -'MonthSel'.length) + 'YearSel';
+    if(document.getElementById(yearId)) populateMonthYearSelects(monthSel.id, yearId);
+  });
+}
 function getMonthYearValue(monthSelId, yearSelId){
   const month = Number(document.getElementById(monthSelId).value);
   const fyStart = Number(document.getElementById(yearSelId).value);
@@ -18299,6 +18318,7 @@ function openGeneratorCard(sectionId){
   kmtCaptureDeparture();
   document.getElementById('genLanding').classList.add('hidden');
   GENERATOR_SECTIONS.forEach(id => document.getElementById(id).classList.toggle('hidden', id !== sectionId));
+  autoDefaultMonthYearSelects_(document.getElementById(sectionId));
   kmtCommitArrival();
 }
 
@@ -18316,6 +18336,7 @@ function openReportsCard(sectionId){
   kmtCaptureDeparture();
   document.getElementById('reportsLanding').classList.add('hidden');
   document.querySelectorAll('#hrSubReports [id^="rptSec"]').forEach(el => el.classList.toggle('hidden', el.id !== sectionId));
+  autoDefaultMonthYearSelects_(document.getElementById(sectionId));
   kmtCommitArrival();
 }
 
