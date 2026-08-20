@@ -1821,6 +1821,8 @@
           <button onclick="switchDashSub('salary')" id="dashSubBtnSalary">Salary Sheet</button>
           <button onclick="switchDashSub('reminders')" id="dashSubBtnReminders">Increment Reminders</button>
           <button onclick="switchDashSub('expiry')" id="dashSubBtnExpiry">Document Expiry</button>
+          <button onclick="switchDashSub('loans')" id="dashSubBtnLoans">Employee Loan &amp; Advance</button>
+          <button onclick="switchDashSub('advpay')" id="dashSubBtnAdvpay">Salary Advance Payment</button>
           <button onclick="switchDashSub('activity')" id="dashSubBtnActivity">Activity Log</button>
         </div>
 
@@ -1892,6 +1894,50 @@
           <section class="block">
             <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Bond end dates coming up in the next 30 days, from Employee Master.</p>
             <div id="docExpiryList"></div>
+          </section>
+        </div>
+        <div id="dashSubLoans" class="hidden">
+          <section class="block">
+            <h2 style="margin:0 0 4px;">Employee Loan &amp; Advance</h2>
+            <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">A shortcut for the Loan &amp; EMI section already on the employee's own record — this saves straight to it, so the Salary Sheet, PF, ESI and every report pick it up exactly as if it had been entered in Employee Master. Nothing else on the record is touched.</p>
+            <label class="field">Employee</label>
+            <select class="field-input" id="dashLoanEmpSel" onchange="renderDashLoanExisting(this.value)"></select>
+            <div style="height:12px"></div>
+            <label class="field">Loan amount</label>
+            <input type="number" class="field-input" id="dashLoanAmount" placeholder="0">
+            <div style="height:12px"></div>
+            <label class="field">Monthly EMI</label>
+            <input type="number" class="field-input" id="dashLoanEmi" placeholder="0">
+            <div style="height:12px"></div>
+            <label class="field">Starting month</label>
+            <input type="month" class="field-input" id="dashLoanStart">
+            <div style="height:12px"></div>
+            <label class="field">Reason (optional)</label>
+            <input type="text" class="field-input" id="dashLoanReason" placeholder="e.g. Medical, Personal">
+            <div style="height:14px"></div>
+            <button class="btn full" onclick="withBusy(this,'Saving…',addLoanFromDashboard)">Add loan</button>
+            <div class="msg" id="dashLoanMsg"></div>
+            <div style="height:16px"></div>
+            <div id="dashLoanExisting"></div>
+          </section>
+        </div>
+        <div id="dashSubAdvpay" class="hidden">
+          <section class="block">
+            <h2 style="margin:0 0 4px;">Salary Advance Payment</h2>
+            <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">A shortcut for the Salary Advance Payment section already on the employee's own record — this saves straight to it. Add one entry per month; each month's Salary Sheet only ever recovers what is entered here for that exact month.</p>
+            <label class="field">Employee</label>
+            <select class="field-input" id="dashAdvEmpSel" onchange="renderDashAdvExisting(this.value)"></select>
+            <div style="height:12px"></div>
+            <label class="field">Month</label>
+            <input type="month" class="field-input" id="dashAdvMonth">
+            <div style="height:12px"></div>
+            <label class="field">Amount</label>
+            <input type="number" class="field-input" id="dashAdvAmount" placeholder="0">
+            <div style="height:14px"></div>
+            <button class="btn full" onclick="withBusy(this,'Saving…',addAdvanceFromDashboard)">Add salary advance</button>
+            <div class="msg" id="dashAdvMsg"></div>
+            <div style="height:16px"></div>
+            <div id="dashAdvExisting"></div>
           </section>
         </div>
         <div id="dashSubActivity" class="hidden">
@@ -11051,6 +11097,7 @@ async function getReminderEmail(){
 // nothing downstream had to change.
 const HR_PANELS = ['hrPageDashboard','hrTabTracking','hrTabMgmt','hrSubDash','hrSubMaster','hrSubReports',
   'hrSubGenerator','dashSubAttendance','dashSubSalary','dashSubReminders','dashSubExpiry',
+  'dashSubLoans','dashSubAdvpay',
   'dashSubActivity','secManageTeam','secExpenseRate','secLiveTracking','secGeofence','secDocStorage',
   'secAlwaysPresentBulk','secTeamOverview',
   'secDailySummary','secByCompany','secBackendConn'];
@@ -11083,6 +11130,8 @@ const HR_ROUTES = {
                 run:() => populateMonthYearSelects('salSheetMonthSel', 'salSheetYearSel') },
   reminders:  { label:'Increment Reminders', icon:'📈', show:['hrTabMgmt','hrSubDash','dashSubReminders'], run:() => refreshDashboard() },
   expiry:     { label:'Document Expiry',     icon:'📄', show:['hrTabMgmt','hrSubDash','dashSubExpiry'], run:() => renderDocExpiryList() },
+  loans:      { label:'Employee Loan & Advance', icon:'💳', show:['hrTabMgmt','hrSubDash','dashSubLoans'], run:() => populateDashLoanTab() },
+  advpay:     { label:'Salary Advance Payment', icon:'💵', show:['hrTabMgmt','hrSubDash','dashSubAdvpay'], run:() => populateDashAdvTab() },
   activity:   { label:'Activity Log',        icon:'🕘', show:['hrTabMgmt','hrSubDash','dashSubActivity'], run:() => renderActivityLogList() },
   reports:    { label:'Reports',             icon:'📊', show:['hrTabMgmt','hrSubReports'], run:() => renderReportsTab() },
   generator:  { label:'Generator',           icon:'✉️', show:['hrTabMgmt','hrSubGenerator'], run:() => renderGeneratorTab() },
@@ -11372,7 +11421,115 @@ function switchHrSub(sub){
   hrNavigate({ dash:'dashboard', master:'employees', reports:'reports', generator:'generator' }[sub] || 'dashboard');
 }
 function switchDashSub(sub){
-  hrNavigate({ attendance:'attendance', salary:'salary', reminders:'reminders', expiry:'expiry', activity:'activity' }[sub] || 'attendance');
+  hrNavigate({ attendance:'attendance', salary:'salary', reminders:'reminders', expiry:'expiry',
+    loans:'loans', advpay:'advpay', activity:'activity' }[sub] || 'attendance');
+}
+
+// ===== Dashboard shortcuts: Employee Loan & Advance / Salary Advance Payment =====
+// Both of these write into the exact same fields Employee Master's own Loan
+// & EMI / Salary Advance Payment sections use (emp.loans, emp.advanceHistory)
+// through saveOneEmployee_ — the same narrow single-employee save
+// approveLoanRequest already uses — so nothing about PF/ESI/PT/Salary Sheet
+// calculation can be disturbed: this is only a faster way to reach the same
+// data, not a second copy of it.
+async function populateDashEmpSelect_(selectId){
+  const sel = document.getElementById(selectId);
+  if(!sel) return;
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left')
+    .slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">Choose an employee…</option>' +
+    employees.map(e => `<option value="${e.id}">${escapeHtml(e.name)} (${e.id})</option>`).join('');
+  if(prev && employees.some(e => e.id === prev)) sel.value = prev;
+}
+async function populateDashLoanTab(){
+  await populateDashEmpSelect_('dashLoanEmpSel');
+  renderDashLoanExisting(document.getElementById('dashLoanEmpSel').value);
+}
+async function populateDashAdvTab(){
+  await populateDashEmpSelect_('dashAdvEmpSel');
+  renderDashAdvExisting(document.getElementById('dashAdvEmpSel').value);
+}
+async function renderDashLoanExisting(empId){
+  const box = document.getElementById('dashLoanExisting');
+  if(!box) return;
+  if(!empId){ box.innerHTML = ''; return; }
+  const emp = (await getEmployees()).find(e => e.id === empId);
+  if(!emp){ box.innerHTML = ''; return; }
+  const loans = loansOf(emp);
+  box.innerHTML = '<label class="field">Existing loans on file for ' + escapeHtml(emp.name) + '</label>' +
+    (loans.length ? loans.map(l => `<div class="emp-row"><div class="head"><strong>${rupees(l.amount)}</strong><span class="id">${l.status === 'closed' ? 'Closed' : 'Active'}</span></div>` +
+      `<div class="sub">EMI ${rupees(l.instalment)} · from ${l.startMonth ? fmtDateIN(l.startMonth + '-01') : '—'}${l.reason ? ' · ' + escapeHtml(l.reason) : ''}</div></div>`).join('')
+      : '<p class="hint">No loans on file yet.</p>');
+}
+async function renderDashAdvExisting(empId){
+  const box = document.getElementById('dashAdvExisting');
+  if(!box) return;
+  if(!empId){ box.innerHTML = ''; return; }
+  const emp = (await getEmployees()).find(e => e.id === empId);
+  if(!emp){ box.innerHTML = ''; return; }
+  const hist = (emp.advanceHistory || []).slice().sort((a, b) => (b.month || '').localeCompare(a.month || ''));
+  box.innerHTML = '<label class="field">Existing Salary Advance Payment entries for ' + escapeHtml(emp.name) + '</label>' +
+    (hist.length ? hist.slice(0, 12).map(h => `<div class="emp-row"><div class="head"><strong>${(MONTH_NAMES[Number((h.month || '').slice(5, 7)) - 1] || h.month || '—')} ${(h.month || '').slice(0, 4)}</strong><span class="id">${rupees(h.advance)}</span></div></div>`).join('')
+      : '<p class="hint">No Salary Advance Payment entries on file yet.</p>');
+}
+async function addLoanFromDashboard(){
+  const msg = document.getElementById('dashLoanMsg');
+  msg.textContent = ''; msg.classList.remove('error');
+  const empId = document.getElementById('dashLoanEmpSel').value;
+  if(!empId){ msg.textContent = 'Choose an employee first.'; msg.classList.add('error'); return; }
+  const amount = Number(document.getElementById('dashLoanAmount').value) || 0;
+  const instalment = Number(document.getElementById('dashLoanEmi').value) || 0;
+  const startMonth = document.getElementById('dashLoanStart').value || '';
+  const reason = document.getElementById('dashLoanReason').value.trim();
+  if(amount <= 0){ msg.textContent = 'Enter a loan amount.'; msg.classList.add('error'); return; }
+  if(instalment <= 0){ msg.textContent = 'Enter a monthly EMI.'; msg.classList.add('error'); return; }
+  if(!startMonth){ msg.textContent = 'Choose a starting month.'; msg.classList.add('error'); return; }
+
+  const employees = await getEmployees();
+  const emp = employees.find(e => e.id === empId);
+  if(!emp){ msg.textContent = 'Employee not found — try reopening this tab.'; msg.classList.add('error'); return; }
+  emp.loans = loansOf(emp);
+  emp.loans.push({ id: 'L-' + Date.now(), amount, instalment, startMonth, status: 'active', reason, approvedOn: todayStr() });
+  await saveOneEmployee_(emp);
+  invalidateDashboardSnapshot();
+  await addActivityLog('Added a loan of ' + rupees(amount) + ' for ' + emp.name + ' from the Dashboard shortcut');
+
+  msg.textContent = 'Loan added — saved to ' + emp.name + '’s record in Employee Master.';
+  document.getElementById('dashLoanAmount').value = '';
+  document.getElementById('dashLoanEmi').value = '';
+  document.getElementById('dashLoanStart').value = '';
+  document.getElementById('dashLoanReason').value = '';
+  renderDashLoanExisting(empId);
+}
+async function addAdvanceFromDashboard(){
+  const msg = document.getElementById('dashAdvMsg');
+  msg.textContent = ''; msg.classList.remove('error');
+  const empId = document.getElementById('dashAdvEmpSel').value;
+  if(!empId){ msg.textContent = 'Choose an employee first.'; msg.classList.add('error'); return; }
+  const month = document.getElementById('dashAdvMonth').value || '';
+  const amount = Number(document.getElementById('dashAdvAmount').value) || 0;
+  if(!month){ msg.textContent = 'Choose a month.'; msg.classList.add('error'); return; }
+  if(amount <= 0){ msg.textContent = 'Enter an amount.'; msg.classList.add('error'); return; }
+
+  const employees = await getEmployees();
+  const emp = employees.find(e => e.id === empId);
+  if(!emp){ msg.textContent = 'Employee not found — try reopening this tab.'; msg.classList.add('error'); return; }
+  const hist = Array.isArray(emp.advanceHistory) ? emp.advanceHistory : [];
+  const existing = hist.find(h => h.month === month);
+  // Each month recovers only what is entered for that exact month — replacing
+  // a figure already on file for the same month is a real change to what
+  // gets recovered, so it is confirmed rather than silently overwritten.
+  if(existing && !confirm('An entry for ' + month + ' already exists (' + rupees(existing.advance) + '). Replace it with ' + rupees(amount) + '?')) return;
+  emp.advanceHistory = hist.filter(h => h.month !== month).concat([{ month, advance: amount }]);
+  await saveOneEmployee_(emp);
+  invalidateDashboardSnapshot();
+  await addActivityLog('Added a Salary Advance Payment of ' + rupees(amount) + ' for ' + emp.name + ' (' + month + ') from the Dashboard shortcut');
+
+  msg.textContent = 'Salary advance added — saved to ' + emp.name + '’s record in Employee Master.';
+  document.getElementById('dashAdvMonth').value = '';
+  document.getElementById('dashAdvAmount').value = '';
+  renderDashAdvExisting(empId);
 }
 
 // ===== Dashboard overview =====
