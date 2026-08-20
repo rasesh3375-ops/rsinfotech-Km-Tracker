@@ -8240,6 +8240,22 @@ function legacyAdvanceTempForMonth_(emp, ym){
   return 0;
 }
 
+// Apprentice-only stipend paid straight to the employee's own bank account
+// rather than through this app's Salary Sheet, so it comes off Net Payable
+// as its own line instead of being paid a second time. Unlike Advance for
+// Temporary this was never meant to recur indefinitely — a direct-deposit
+// arrangement always has an end (the apprenticeship board or the scheme
+// itself sets one) — so an optional end month stops it automatically from
+// the month AFTER the one entered, the same "last month it applies" shape
+// bondStart/retentionMonths already uses for retention money. Blank end
+// month means the arrangement is still ongoing, same as every other
+// open-ended field in this file.
+function directPaidForMonth(emp, heading, monthYm){
+  if((emp || {}).directPaid !== 'yes' || heading !== SALARY_HEADINGS.apprentice) return 0;
+  if(emp.directPaidEndMonth && monthYm > emp.directPaidEndMonth) return 0;
+  return Number(emp.directPaidAmount) || 0;
+}
+
 // What is still owed on Salary Advance Payment once the given month's
 // recovery is taken — a cumulative sum of every advanceHistory entry up to
 // and including that month, not a month-by-month walk like a loan's
@@ -8489,8 +8505,7 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
   // Money already in the employee's account. It is not a statutory deduction
   // and must not sit inside Total Deduction — Gross, PF, ESI and PT are all
   // computed as if it were not there. It only reduces what is left to pay.
-  const directPaid = (emp.directPaid === 'yes' && heading === SALARY_HEADINGS.apprentice)
-    ? (Number(emp.directPaidAmount) || 0) : 0;
+  const directPaid = directPaidForMonth(emp, heading, monthYm);
   // Paid over and above the salary, not part of it. Deliberately outside Gross,
   // so it changes neither PF, ESI, PT nor the Diwali bonus — it is money for
   // petrol, not earnings. It is not reduced for leave either: a flat monthly
@@ -12307,6 +12322,10 @@ function employeeModalHtml(emp){
             <label class="field">Amount paid directly (per month)</label>
             <input type="number" class="field-input" id="f_directPaidAmount" placeholder="0" value="${emp.directPaidAmount||''}" oninput="renderPayrollBreakdown()">
             <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Money already in their account, so it comes off Net Payable and shows as its own line on the Salary Sheet. Everything above it — Gross, PF, ESI, PT — is untouched.</p>
+            <div style="height:10px"></div>
+            <label class="field">Last month this applies (optional)</label>
+            <input type="month" class="field-input" id="f_directPaidEndMonth" value="${escapeHtml(emp.directPaidEndMonth||'')}" oninput="renderPayrollBreakdown()">
+            <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Direct deposit always runs for a fixed period, not indefinitely. After this month the Salary Sheet stops taking it off Net Payable on its own — nobody has to remember to switch it off. Leave blank while the arrangement is still ongoing.</p>
           </div>
         </div>
       </div>
@@ -12616,11 +12635,15 @@ function toggleDirectPay(){
     sel.value = 'no';
     const amt = document.getElementById('f_directPaidAmount');
     if(amt) amt.value = '';
+    const endMonth = document.getElementById('f_directPaidEndMonth');
+    if(endMonth) endMonth.value = '';
   }
   if(amtWrap) amtWrap.classList.toggle('hidden', sel.value !== 'yes');
   if(sel.value !== 'yes'){
     const amt = document.getElementById('f_directPaidAmount');
     if(amt) amt.value = '';
+    const endMonth = document.getElementById('f_directPaidEndMonth');
+    if(endMonth) endMonth.value = '';
   }
   try{ renderPayrollBreakdown(); }catch(e){}
 }
@@ -14742,6 +14765,7 @@ async function saveEmployeeForm(){
     bondApplicable: document.getElementById('f_bondApplicable').value,
     directPaid: document.getElementById('f_directPaid').value,
     directPaidAmount: Number(document.getElementById('f_directPaidAmount').value)||0,
+    directPaidEndMonth: (document.getElementById('f_directPaidEndMonth') || {}).value || '',
     pfEligible: document.getElementById('f_pfEligible').value,
     pfContributionType: document.getElementById('f_pfContributionType').value,
     esiDisabled: document.getElementById('f_esiDisabled').value,
