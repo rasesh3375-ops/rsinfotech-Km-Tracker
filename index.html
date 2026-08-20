@@ -7142,6 +7142,7 @@ async function openDayTimeEditor(employeeId, dateStr){
   const employees = await getEmployees();
   const emp = employees.find(e => e.id === employeeId);
   if(!emp) return;
+  kmtLockBodyScroll('checklistModalRoot');
   // Just the one day. This used to read the employee's entire attendance
   // history — every day they have ever worked — to fill in two time boxes, and
   // it did it on every tap of a time chip. The month is almost always already
@@ -7174,6 +7175,7 @@ async function openDayTimeEditor(employeeId, dateStr){
 function closeDayTimeEditor(){
   document.getElementById('checklistModalRoot').innerHTML = '';
   dayTimeEditorFor = null;
+  kmtUnlockBodyScroll('checklistModalRoot');
 }
 
 // What the policy makes of the times, shown before anything is applied.
@@ -7502,6 +7504,26 @@ function reportLogoHeader(title){
 let fullscreenActiveId = null;
 let fullscreenOriginalParent = null;
 let fullscreenOriginalNextSibling = null;
+
+// Every .modal-overlay-based modal (Employee, Increment, Checklist/Left-
+// Employees/Day-Time-Editor, which share checklistModalRoot) plus this
+// full-screen viewer sits fixed over the real page. None of the modals used
+// to touch document.body.style.overflow at all — only this viewer did — so
+// the background page stayed scrollable underneath a modal on iOS, which is
+// exactly what let the employee list bleed through under the modal's footer
+// with the keyboard open, and again under iOS Display Zoom. Reference-counted
+// by owner name so closing an inner layer (e.g. Increment opened on top of
+// Employee) never re-enables scrolling while an outer one is still open.
+const kmtBodyLockOwners = new Set();
+function kmtLockBodyScroll(owner){
+  kmtBodyLockOwners.add(owner);
+  document.body.style.overflow = 'hidden';
+}
+function kmtUnlockBodyScroll(owner){
+  kmtBodyLockOwners.delete(owner);
+  if(!kmtBodyLockOwners.size) document.body.style.overflow = '';
+}
+
 function openFullscreenView(title, sourceId){
   const el = document.getElementById(sourceId);
   if(!el) return;
@@ -7548,7 +7570,7 @@ function openFullscreenView(title, sourceId){
   document.getElementById('fullscreenTitle').textContent = title;
   fsBody.appendChild(el);
   document.getElementById('fullscreenSheetRoot').classList.remove('hidden');
-  document.body.style.overflow = 'hidden';
+  kmtLockBodyScroll('fullscreen');
   resettleFixedOverlays_();
   // #fullscreenBody is one element reused for every report and letter — it
   // never gets torn down between them, only its contents swapped out — so
@@ -7646,7 +7668,7 @@ function closeFullscreenView(){
     if(el && fullscreenActiveId === 'docViewerRoot') el.classList.add('hidden');
   }
   document.getElementById('fullscreenSheetRoot').classList.add('hidden');
-  document.body.style.overflow = '';
+  kmtUnlockBodyScroll('fullscreen');
   fullscreenActiveId = null;
   updateSheetScrollNavVisibility();
   try{ if(document.fullscreenElement) document.exitFullscreen().catch(()=>{}); }catch(e){}
@@ -14645,6 +14667,7 @@ document.addEventListener('focusout', e => {
 });
 
 async function openAddEmployeeModal(id){
+  kmtLockBodyScroll('employeeModalRoot');
   editingEmployeeId = id || null;
   if(id){
     const employees = await getEmployees();
@@ -14707,6 +14730,7 @@ function closeEmployeeModal(force){
   document.getElementById('employeeModalRoot').innerHTML = '';
   editingEmployeeDraft = null;
   editingEmployeeId = null;
+  kmtUnlockBodyScroll('employeeModalRoot');
 }
 
 function employeeModalEscHandler(e){
@@ -14728,6 +14752,7 @@ async function openIncrementModal(id){
   const employees = await getEmployees();
   const emp = employees.find(e => e.id === id);
   if(!emp) return;
+  kmtLockBodyScroll('incrementModalRoot');
   const cur = currentRatePay(emp);
   document.getElementById('incrementModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeIncrementModal()">
     <div class="modal-box">
@@ -14754,6 +14779,7 @@ async function openIncrementModal(id){
 
 function closeIncrementModal(){
   document.getElementById('incrementModalRoot').innerHTML = '';
+  kmtUnlockBodyScroll('incrementModalRoot');
 }
 
 // The record of every Rate of Pay change on file, with a Remove link on
@@ -15355,6 +15381,7 @@ async function renderEmployeeList(){
 }
 
 function openLeftEmployeesModal(){
+  kmtLockBodyScroll('checklistModalRoot');
   getEmployees().then(employees => {
     const left = employees.filter(e => e.employmentStatus === 'left');
     if(!left.length){
@@ -15382,6 +15409,7 @@ function openLeftEmployeesModal(){
 }
 function closeLeftEmployeesModal(){
   document.getElementById('checklistModalRoot').innerHTML = '';
+  kmtUnlockBodyScroll('checklistModalRoot');
 }
 
 // ---- reports tab ----
@@ -17641,6 +17669,7 @@ async function viewReport(key, label, monthFilter){
 
 // ---- checklists ----
 function openChecklistPicker(type){
+  kmtLockBodyScroll('checklistModalRoot');
   currentChecklistType = type;
   getEmployees().then(employees => {
     if(!employees.length){
@@ -17682,6 +17711,7 @@ async function toggleChecklistItem(empId, label, checked){
 }
 function closeChecklistModal(){
   document.getElementById('checklistModalRoot').innerHTML = '';
+  kmtUnlockBodyScroll('checklistModalRoot');
 }
 
 // ---- joining kit / issued assets ----
