@@ -1847,7 +1847,7 @@
           <button onclick="switchDashSub('salary')" id="dashSubBtnSalary">Salary Sheet</button>
           <button onclick="switchDashSub('reminders')" id="dashSubBtnReminders">Increment Reminders</button>
           <button onclick="switchDashSub('expiry')" id="dashSubBtnExpiry">Document Expiry</button>
-          <button onclick="switchDashSub('loans')" id="dashSubBtnLoans">Employee Loan &amp; Advance</button>
+          <button onclick="switchDashSub('loans')" id="dashSubBtnLoans">Employee Loan &amp; EMI</button>
           <button onclick="switchDashSub('advpay')" id="dashSubBtnAdvpay">Salary Advance Payment</button>
           <button onclick="switchDashSub('activity')" id="dashSubBtnActivity">Activity Log</button>
         </div>
@@ -1925,7 +1925,7 @@
         <div id="dashSubLoans" class="hidden">
           <section class="block">
             <div class="row-inline" style="margin-bottom:10px;"><button class="btn ghost full" onclick="hrNavigate('dashboard')">✕ Close</button></div>
-            <h2 style="margin:0 0 4px;">Employee Loan &amp; Advance</h2>
+            <h2 style="margin:0 0 4px;">Employee Loan &amp; EMI</h2>
             <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">A shortcut for the Loan &amp; EMI section already on the employee's own record — this saves straight to it, so the Salary Sheet, PF, ESI and every report pick it up exactly as if it had been entered in Employee Master. Nothing else on the record is touched.</p>
             <label class="field">Employee</label>
             <select class="field-input" id="dashLoanEmpSel" onchange="renderDashLoanExisting(this.value)"></select>
@@ -11201,7 +11201,7 @@ const HR_ROUTES = {
                 run:() => populateMonthYearSelects('salSheetMonthSel', 'salSheetYearSel') },
   reminders:  { label:'Increment Reminders', icon:'📈', show:['hrTabMgmt','hrSubDash','dashSubReminders'], run:() => refreshDashboard() },
   expiry:     { label:'Document Expiry',     icon:'📄', show:['hrTabMgmt','hrSubDash','dashSubExpiry'], run:() => renderDocExpiryList() },
-  loans:      { label:'Employee Loan & Advance', icon:'💳', show:['hrTabMgmt','hrSubDash','dashSubLoans'], run:() => populateDashLoanTab() },
+  loans:      { label:'Employee Loan & EMI', icon:'💳', show:['hrTabMgmt','hrSubDash','dashSubLoans'], run:() => populateDashLoanTab() },
   advpay:     { label:'Salary Advance Payment', icon:'💵', show:['hrTabMgmt','hrSubDash','dashSubAdvpay'], run:() => populateDashAdvTab() },
   activity:   { label:'Activity Log',        icon:'🕘', show:['hrTabMgmt','hrSubDash','dashSubActivity'], run:() => renderActivityLogList() },
   reports:    { label:'Reports',             icon:'📊', show:['hrTabMgmt','hrSubReports'], run:() => renderReportsTab() },
@@ -11860,7 +11860,7 @@ async function buildHrDashboardHome(box){
     <div class="kpi-row">
       ${kpi('👥','Employee Master', onRoll.length, 'Open employee records', 'indigo', null, 'employees')}
       ${kpi('🗓️','Attendance Sheet', '', 'Mark and review attendance', 'green', null, 'attendance')}
-      ${kpi('💳','Employee Loan & Advance', '', 'Add a loan straight from here', 'indigo', null, 'loans')}
+      ${kpi('💳','Employee Loan & EMI', '', 'Add a loan straight from here', 'indigo', null, 'loans')}
       ${kpi('💵','Salary Advance Payment', '', 'Add this month\'s advance', 'amber', null, 'advpay')}
       ${kpi('🚫','Absent Today', '—', 'Tap to see who', 'red', 'dashAbsentCount', null, 'toggleAbsentPanel()')}
       ${kpi('🌴','On Leave Today', '—', 'Approved leave — tap to see who', 'green', 'dashLeaveCount', null, 'toggleLeavePanel()')}
