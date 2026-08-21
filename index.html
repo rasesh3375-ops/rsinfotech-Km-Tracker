@@ -17903,6 +17903,18 @@ function closeHolidayListOutput(){
 // closing what you closed. This just hides the letter and stays put, same
 // as every other report's Close already does.
 function closeLetterOutput(){
+  // Invalidates any generateLetter() call still in flight — see its own
+  // token comment. generateLetter() writes letterPaper's content early, then
+  // awaits several more backend calls (letters log, activity log, the Drive
+  // save) before it reopens full screen at the end; closing here used to
+  // only clear what's on screen right now, so a slow call that was already
+  // past its own write — on a cold or flaky Apps Script this can run to
+  // several seconds — carried on regardless and reopened full screen at the
+  // end with the right title but nothing left in letterPaper, since this
+  // had already emptied it out from under it. Bumping the token here makes
+  // that call's own late recheck (`myToken !== generateLetterToken`) catch
+  // it as superseded, the same way a second Generate press already does.
+  generateLetterToken++;
   if(fullscreenActiveId === 'letterOutput') closeFullscreenView();
   document.getElementById('letterOutput').classList.remove('show');
   document.getElementById('letterActionsBox').classList.add('hidden');
