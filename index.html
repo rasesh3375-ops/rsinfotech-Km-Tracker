@@ -118,11 +118,20 @@
      the backend before it can restore it — so a stray thumb swipe dropped
      people back at the login screen mid-task. Scrolling inside the page is
      unaffected; only the overscroll gesture is swallowed. */
-  html{overscroll-behavior-y:contain;}
+  html{overscroll-behavior-y:contain;overflow-x:hidden;}
 
+  /* overflow-x:hidden on top of that: with no explicit horizontal bound, iOS
+     Safari lets the whole page rubber-band sideways the moment ANY element
+     anywhere on it is even a pixel wider than the viewport (a long name in a
+     table cell, a row that hasn't wrapped yet) — felt as the entire screen
+     sliding left/right under a normal left-right touch drag, on forms with no
+     intentional side-scroll at all, like Add Employee. The deliberate
+     horizontal scrollers (.att-sheet-wrap, .rpt-wrap, .hr-tabs, etc.) each
+     scope their own overflow-x:auto already, so they're unaffected. */
   body{
     margin:0;
     overscroll-behavior-y:contain;
+    overflow-x:hidden;
     background:var(--cream);
     color:var(--navy);
     min-height:100vh;
@@ -329,6 +338,12 @@
   #hrTopbar .tb-left{display:flex;align-items:center;gap:10px;min-width:0;}
   #hrTopbar .tb-right{display:flex;align-items:center;gap:14px;font-size:13px;color:var(--muted);}
   #hrBurger{display:none;border:none;background:transparent;font-size:20px;cursor:pointer;color:var(--navy);padding:2px 4px;}
+  /* The persistent 🏠 icon in the top bar already jumps to Dashboard from any
+     screen, but on a phone it's one small icon among four crowded into a
+     corner — not something HR reliably spots as "how do I get out of here."
+     Desktop has no such problem (the sidebar itself is always on screen, so
+     switching screens IS the close action), so this stays mobile-only. */
+  #hrCloseBar{display:none;padding:10px 20px 0;}
   #hrContent{padding:20px;}
   #hrNavScrim{display:none;}
 
@@ -688,6 +703,7 @@
        it instead. */
     body.hr-nav-open{overflow:hidden;}
     #hrBurger{display:block;}
+    #hrCloseBar{display:block;padding:10px 14px 0;}
     #hrContent{padding:14px;}
     .dash-2col{grid-template-columns:1fr;}
   }
@@ -1671,6 +1687,9 @@
             </div>
           </div>
         </header>
+        <div id="hrCloseBar" class="hidden">
+          <button class="btn ghost full" onclick="kmtBack()">✕ Close</button>
+        </div>
         <div id="gsOverlay" class="gs-overlay hidden" onclick="if(event.target===this)closeGlobalSearch()">
           <div class="gs-panel" role="dialog" aria-modal="true" aria-label="Search">
             <input id="gsInput" class="gs-input" type="search" autocomplete="off"
@@ -11908,6 +11927,8 @@ async function hrNavigate(route, opts){
       : '<button class="crumb-up" onclick="hrNavigate(\'dashboard\')">Dashboard</button>' +
         '<span class="crumb-sep">›</span><span class="crumb-here">' + escapeHtml(cfg.label) + '</span>';
   }
+  const closeBar = document.getElementById('hrCloseBar');
+  if(closeBar) closeBar.classList.toggle('hidden', route === 'dashboard');
   noteRecentRoute(route);
   renderHrSideNav();
   toggleHrNav(false);
