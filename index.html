@@ -10017,12 +10017,21 @@ async function renderConsultantSummaryReport(){
   const dateList = [];
   for(let d=1; d<=monthDays; d++) dateList.push(year + '-' + String(month).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
 
+  // R.S.IT Solution has no PF or ESI, but PT still applies to it (see
+  // SALARY_HEADINGS.rsit.pt and the standalone PT Report, which already
+  // includes it) — so the employee population here is CONSULTANT_REPORT_
+  // HEADINGS plus 'rsit', wider than the PF/ESI/Allowance totals below need.
+  // Each of those stays correctly scoped to the core three on its own —
+  // heading.pf/heading.esi are already false for rsit, so it simply never
+  // matches those checks — only the PT sum, and isCoreHeading below, need
+  // to know about the wider population explicitly.
+  const PT_REPORT_HEADINGS = CONSULTANT_REPORT_HEADINGS.concat(['rsit']);
   const employees = (await getEmployees()).filter(e =>
     employedDuringPeriod_(e, dateList[0], dateList[dateList.length-1]) &&
-    CONSULTANT_REPORT_HEADINGS.indexOf(ratePayAsOf(e, dateList[0]).salaryHeading) !== -1);
+    PT_REPORT_HEADINGS.indexOf(ratePayAsOf(e, dateList[0]).salaryHeading) !== -1);
   if(!employees.length){
     box.innerHTML = '<div class="empty">No employees under ' +
-      CONSULTANT_REPORT_HEADINGS.map(k => SALARY_HEADINGS[k].label).join(', ') +
+      PT_REPORT_HEADINGS.map(k => SALARY_HEADINGS[k].label).join(', ') +
       ' for this month.</div>';
     return;
   }
@@ -10070,8 +10079,15 @@ async function renderConsultantSummaryReport(){
       }
     }
 
-    alw.basic += s.basic; alw.hra += s.hra; alw.conveyance += s.conveyance; alw.lta += s.lta;
-    ded.pf += s.pf; ded.pt += s.pt; ded.adv += s.advanceTemp + s.advance; ded.loan += s.loanEmi; ded.esi += s.esi;
+    // PT counts everyone in the wider population (R.S.IT Solution included) —
+    // everything else here stays scoped to R.S. Infotech's own three headings,
+    // the same population the PF/ESI totals above are already naturally
+    // limited to.
+    ded.pt += s.pt;
+    if(CONSULTANT_REPORT_HEADINGS.indexOf(headingKey) !== -1){
+      alw.basic += s.basic; alw.hra += s.hra; alw.conveyance += s.conveyance; alw.lta += s.lta;
+      ded.pf += s.pf; ded.adv += s.advanceTemp + s.advance; ded.loan += s.loanEmi; ded.esi += s.esi;
+    }
   }
 
   const acct1 = pf.empEmployee + pf.empEmployer;
@@ -10109,7 +10125,9 @@ async function renderConsultantSummaryReport(){
     hrRow('Basic', money(alw.basic)) + hrRow('HRA', money(alw.hra)) +
     hrRow('Conveyance', money(alw.conveyance)) + hrRow('LTA', money(alw.lta)) +
     hrRow('Total', money(alwTotal)) +
-    hrRow('P.F.', money(ded.pf)) + hrRow('P.T.', money(ded.pt)) + hrRow('Advance', money(ded.adv)) +
+    hrRow('P.F.', money(ded.pf)) +
+    hrRow('P.T.', money(ded.pt) + ' <span class="inc-sub" title="Basic/HRA/LTA above and the other deductions below are R.S. Infotech\'s own three headings only — P.T. also includes R.S.IT Solution, which has Professional Tax but no PF/ESI, so Net below is not a clean per-person figure for R.S.IT Solution employees.">incl. R.S.IT Solution</span>') +
+    hrRow('Advance', money(ded.adv)) +
     hrRow('L.W.F.', money(lwf) + ' <span class="inc-sub" title="Not tracked in this app — shown as ₹0">not tracked</span>') +
     hrRow('Loan', money(ded.loan)) + hrRow('E.S.I.', money(ded.esi)) +
     hrRow('Total Deduction', money(dedTotal)) +
