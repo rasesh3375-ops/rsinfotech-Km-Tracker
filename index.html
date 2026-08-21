@@ -4832,9 +4832,9 @@ function onEngLeaveTypeChange(){
 
 async function handleEngSickCert(event){
   const file = event.target.files[0];
-  const status = document.getElementById('engSickCertStatus');
+  let status = document.getElementById('engSickCertStatus');
   if(!file) return;
-  status.textContent = 'Uploading…';
+  if(status) status.textContent = 'Uploading…';
   try{
     const emp = await findEmployeeByTrackingUsername(engineerName);
     // Same treatment as the Add Employee document uploads — untouched
@@ -4859,12 +4859,16 @@ async function handleEngSickCert(event){
     });
     const data = await res.json();
     engSickCertUrl = (data && data.ok && data.fileUrl) ? data.fileUrl : '';
-    status.innerHTML = engSickCertUrl
+    // Re-fetched — see handleDocUpload's comment above for why a reference
+    // held across an await can end up pointing at a detached node.
+    status = document.getElementById('engSickCertStatus') || status;
+    if(status) status.innerHTML = engSickCertUrl
       ? '<span class="pol-ok">✓ Certificate attached — you can send the application now.</span>'
       : '<span class="pol-warn">Upload failed. Try again, or hand the certificate to HR directly.</span>';
   }catch(e){
     engSickCertUrl = '';
-    status.innerHTML = '<span class="pol-warn">Upload failed. Try again, or hand the certificate to HR directly.</span>';
+    status = document.getElementById('engSickCertStatus') || status;
+    if(status) status.innerHTML = '<span class="pol-warn">Upload failed. Try again, or hand the certificate to HR directly.</span>';
   }
   renderEngLeavePreview();
 }
@@ -14282,7 +14286,10 @@ function updateBonusPreview(){
 async function handleChequeUpload(event){
   const file = event.target.files[0];
   if(!file) return;
-  const box = document.getElementById('chequePreview');
+  // Re-fetched by id near the end instead — see handleDocUpload's comment
+  // for why a reference captured before the Drive upload's await can end up
+  // pointing at a detached node if the form redraws while it is in flight.
+  let box = document.getElementById('chequePreview');
   if(box) box.innerHTML = '<p class="dash-muted">Reading cheque…</p>';
   let originalDataUrl;
   try{
@@ -14306,6 +14313,7 @@ async function handleChequeUpload(event){
   // The freshly captured image is previewed either way, at full quality —
   // a Drive link needs sign-in to render inline, and the point is reading
   // the account number and IFSC back off it while typing.
+  box = document.getElementById('chequePreview') || box;
   if(box) box.innerHTML = '<img class="cheque-img" src="' + originalDataUrl + '" alt="Cancelled cheque">'
     + (stored ? '<p class="calc-note">Saved to Drive.</p>' : '');
   scheduleEmployeeDraftSave();
@@ -15185,16 +15193,24 @@ function addOtherDocSlot(){
   const idx = box.children.length;
   const wrap = document.createElement('div');
   wrap.style.marginTop = '10px';
+  // Given a stable id (unlike the eight named document fields, this one
+  // never had one) so handleOtherDocUpload can re-fetch it fresh once the
+  // Drive upload finishes, instead of trusting event.target — the same fix
+  // as handleDocUpload's, needed here because a dynamically added slot has
+  // no id to look up otherwise.
   wrap.innerHTML = `<label class="field">Document name</label>
     <input type="text" placeholder="e.g. 10th marksheet" onchange="editingEmployeeDraft.otherDocs[${idx}]=editingEmployeeDraft.otherDocs[${idx}]||{};editingEmployeeDraft.otherDocs[${idx}].name=this.value;">
     <div style="height:8px"></div>
-    <input type="file" accept="image/*,application/pdf" onchange="handleOtherDocUpload(event, ${idx})">`;
+    <input type="file" id="otherDocFile_${idx}" accept="image/*,application/pdf" onchange="handleOtherDocUpload(event, ${idx})">`;
   editingEmployeeDraft.otherDocs.push({ name:'', dataUrl:'' });
   box.appendChild(wrap);
 }
 async function handleOtherDocUpload(event, idx){
   const file = event.target.files[0];
   if(!file) return;
+  // See handleDocUpload's comment above for why this is captured now,
+  // before the Drive upload's await, and re-fetched by id at the end.
+  const inputId = event.target.id;
   let originalDataUrl;
   try{
     // Same treatment as handleDocUpload above. This one field never
@@ -15226,11 +15242,13 @@ async function handleOtherDocUpload(event, idx){
   // failure. Same docCardHtml() badge the eight named document fields use,
   // so a Drive upload here gets the same working "✓ Saved — view" button
   // instead of inert text.
-  if(event.target.nextElementSibling && event.target.nextElementSibling.classList.contains('doc-card')){
-    event.target.nextElementSibling.remove();
+  const liveInput = (inputId && document.getElementById(inputId)) || event.target;
+  if(!liveInput || !liveInput.isConnected) return;
+  if(liveInput.nextElementSibling && liveInput.nextElementSibling.classList.contains('doc-card')){
+    liveInput.nextElementSibling.remove();
   }
   const label = editingEmployeeDraft.otherDocs[idx].name || 'Document';
-  event.target.insertAdjacentHTML('afterend', docCardHtml(editingEmployeeDraft.otherDocs[idx].dataUrl, label));
+  liveInput.insertAdjacentHTML('afterend', docCardHtml(editingEmployeeDraft.otherDocs[idx].dataUrl, label));
 }
 
 // ---- employee form draft ----
@@ -18861,9 +18879,15 @@ async function uploadEmployeeHandbook(){
   }
   await saveEmployeeHandbook({ fileUrl: url, fileName, year, uploadedAt: new Date().toISOString() });
   await addActivityLog('Uploaded Employee Handbook' + (year ? ' (' + year + ')' : ''));
-  fileInput.value = '';
-  msg.textContent = 'Uploaded.';
-  msg.classList.remove('error');
+  // Re-fetched by id rather than reusing the references captured before the
+  // Drive upload's await — see handleDocUpload's comment for why. The file
+  // itself is already safely on Drive and in the record either way; this
+  // only affects whether the on-screen confirmation actually shows.
+  const fileInputNow = document.getElementById('handbookFile') || fileInput;
+  const msgNow = document.getElementById('handbookMsg') || msg;
+  fileInputNow.value = '';
+  msgNow.textContent = 'Uploaded.';
+  msgNow.classList.remove('error');
   await renderHandbookSection();
 }
 async function saveResidentPolicyFromForm(){
@@ -18902,9 +18926,14 @@ async function uploadPayrollDoc(){
   list.unshift({ id: randomHex(6), type, month: monthVal, fileName, url, uploadedAt: new Date().toISOString() });
   await savePayrollDocs(list);
   await addActivityLog('Uploaded ' + type + ' for ' + monthVal);
-  fileInput.value = '';
-  msg.textContent = 'Uploaded.';
-  msg.classList.remove('error');
+  // Re-fetched by id — see handleDocUpload's comment for why a reference
+  // held across an await can end up stale. The document is already saved
+  // either way; this only affects whether the confirmation text shows.
+  const fileInputNow = document.getElementById('payrollDocFile') || fileInput;
+  const msgNow = document.getElementById('payrollDocMsg') || msg;
+  fileInputNow.value = '';
+  msgNow.textContent = 'Uploaded.';
+  msgNow.classList.remove('error');
   await renderPayrollDocList();
 }
 async function renderPayrollDocList(){
@@ -18961,10 +18990,16 @@ async function uploadApprenticeDoc(){
   list.unshift({ id: randomHex(6), category, employeeId: empId, employeeName: emp ? emp.name : '', note, fileName, url, uploadedAt: new Date().toISOString() });
   await saveApprenticeDocs(list);
   await addActivityLog('Uploaded ' + category + (emp ? ' for ' + emp.name : ''));
-  fileInput.value = '';
-  document.getElementById('apprenticeDocNote').value = '';
-  msg.textContent = 'Uploaded.';
-  msg.classList.remove('error');
+  // Re-fetched by id — see handleDocUpload's comment for why a reference
+  // held across an await can end up stale. The document is already saved
+  // either way; this only affects whether the confirmation text shows.
+  const fileInputNow = document.getElementById('apprenticeDocFile') || fileInput;
+  const msgNow = document.getElementById('apprenticeDocMsg') || msg;
+  fileInputNow.value = '';
+  const noteEl = document.getElementById('apprenticeDocNote');
+  if(noteEl) noteEl.value = '';
+  msgNow.textContent = 'Uploaded.';
+  msgNow.classList.remove('error');
   await renderApprenticeDocList();
 }
 async function renderApprenticeDocList(){
@@ -19025,10 +19060,18 @@ async function uploadCompanyDoc(category, folderLabel){
   list.unshift({ id: randomHex(6), name: docName, fileName, url, uploadedAt: new Date().toISOString() });
   await saveCompanyDocs(category, list);
   await addActivityLog('Uploaded ' + folderLabel + ' document: ' + docName);
-  fileInput.value = '';
-  if(category === 'important') document.getElementById('importantDocName').value = '';
-  msg.textContent = 'Uploaded.';
-  msg.classList.remove('error');
+  // Re-fetched by id — see handleDocUpload's comment for why a reference
+  // held across an await can end up stale. The document is already saved
+  // either way; this only affects whether the confirmation text shows.
+  const fileInputNow = document.getElementById('companyDocFile_' + category) || fileInput;
+  const msgNow = document.getElementById('companyDocMsg_' + category) || msg;
+  fileInputNow.value = '';
+  if(category === 'important'){
+    const nameEl = document.getElementById('importantDocName');
+    if(nameEl) nameEl.value = '';
+  }
+  msgNow.textContent = 'Uploaded.';
+  msgNow.classList.remove('error');
   await renderCompanyDocList(category);
 }
 async function renderCompanyDocList(category){
