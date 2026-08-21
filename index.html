@@ -825,7 +825,16 @@
      itself (see there) and covers this modal along with every other —
      nothing employee-specific needed here any more. */
   #employeeModalOverlay{background:var(--paper);padding:0;}
-  #employeeModalOverlay .modal-box{border-radius:0;margin:0;min-height:100vh;}
+  /* min-height:100vh, then 100dvh — same fallback-then-override pattern as
+     every other full-screen fixed rule in the file (.modal-overlay itself,
+     .gs-overlay, #hrSidebar, #fullscreenSheetRoot). This one was the sole
+     spot still using bare 100vh alone: harmless on desktop, but exactly the
+     unit iOS is inconsistent about measuring against its own chrome/safe
+     areas, so it could plausibly fall short of the overlay's own (correct)
+     100dvh height and leave a gap at the bottom of the box, inside an
+     otherwise-full-height overlay, for whatever screen sits behind the
+     modal to show through. */
+  #employeeModalOverlay .modal-box{border-radius:0;margin:0;min-height:100vh;min-height:100dvh;}
 
   /* Add Employee: on a screen wide enough to make use of it, related sections
      sit two to a row instead of one long single-column scroll — the same 22
@@ -15680,8 +15689,25 @@ async function reconcileTrackingUsername(draft){
 function resettleFixedOverlays_(){
   if(!window.visualViewport) return;
   const vv = window.visualViewport;
-  const h = vv.height + 'px';
-  const t = vv.offsetTop + 'px';
+  // Only pin an inline height/top when the keyboard (or a picker) is
+  // actually shrinking the visual viewport below the layout viewport --
+  // CSS 100dvh already tracks everything else (toolbar collapsing on
+  // scroll, rotation, Display Zoom) correctly on its own, per the comment
+  // above. An earlier version set the inline override unconditionally,
+  // every frame, for as long as any overlay was open. That was fine while
+  // a keyboard was genuinely open, but on a device/mode where
+  // visualViewport.height doesn't land on exactly the same number as the
+  // true resting screen height (reported with no keyboard open at all,
+  // matching iOS's history of standalone-PWA viewport-measurement quirks),
+  // it permanently pinned that slightly-wrong height in front of the
+  // otherwise-correct dvh value for the overlay's whole lifetime -- worse
+  // than doing nothing. window.innerHeight is the layout viewport, which
+  // (like dvh) does not shrink for the keyboard, so a real gap between the
+  // two numbers is a reliable, keyboard-specific signal; anything smaller
+  // than that (rounding, a stray pixel) is left to CSS.
+  const keyboardOpen = vv.height < window.innerHeight - 1;
+  const h = keyboardOpen ? vv.height + 'px' : '';
+  const t = keyboardOpen ? vv.offsetTop + 'px' : '';
   document.querySelectorAll('.modal-overlay').forEach(el => { el.style.height = h; el.style.top = t; });
   const sheetRoot = document.getElementById('fullscreenSheetRoot');
   if(sheetRoot && !sheetRoot.classList.contains('hidden')){ sheetRoot.style.height = h; sheetRoot.style.top = t; }
