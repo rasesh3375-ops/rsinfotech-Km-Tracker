@@ -10107,7 +10107,7 @@ async function renderConsultantSummaryReport(){
   const pfCard = hrCard('<strong>PF Summary</strong>',
     hrRow('Total No Of Employees', pf.count) +
     hrRow('Total Wages', money(pf.wage)) +
-    hrRow('P.F. Account No 1', money(acct1) + ' <span class="inc-sub">(' + money(pf.empEmployee) + ' + ' + money(pf.empEmployer) + ')</span>') +
+    hrRow('P.F. Account No 1', money(acct1) + ' <span style="color:var(--muted);font-size:11px;white-space:nowrap;">(' + money(pf.empEmployee) + ' + ' + money(pf.empEmployer) + ')</span>') +
     hrRow('P.F. Account No 2', money(pf.admin)) +
     hrRow('P.F. Account No 10', money(pf.eps)) +
     hrRow('P.F. Account No 21', money(pf.edli)) +
