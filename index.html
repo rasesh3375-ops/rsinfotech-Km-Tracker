@@ -2484,6 +2484,12 @@
               <p>Payroll, apprentice and company documents, uniform &amp; ID tracking, the employee handbook.</p>
               <span class="btn full">Open</span>
             </button>
+            <button type="button" class="gen-card" onclick="openCtcCalculatorCard()">
+              <div class="gen-card-icon t1">🧮</div>
+              <h3>CTC Calculator</h3>
+              <p>Check the exact salary before appointing anyone — enter Take Home or CTC, either way.</p>
+              <span class="btn full">Open</span>
+            </button>
           </div>
         </div>
 
@@ -2864,6 +2870,55 @@
           <div class="msg" id="residentPolicyMsg"></div>
         </section>
 
+      </div>
+
+      <div id="genSecCtcCalculator" class="hidden">
+      <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Generator</button>
+      <section class="block">
+        <h2 style="margin:0 0 4px;">CTC Calculator</h2>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Check the exact CTC or take-home salary before appointing anyone — enter either one and the other is worked out from it, using the same Salary Heading split and PF/ESI/PT rules the Salary Sheet uses. Not tied to any employee record; nothing here is saved.</p>
+
+        <label class="field">Salary Heading</label>
+        <select class="field-input" id="ctcCalcHeading" onchange="updateCtcCalcPfTypeVisibility_()"></select>
+
+        <div id="ctcCalcPfTypeWrap" style="margin-top:12px;">
+          <label class="field">PF Contribution</label>
+          <select class="field-input" id="ctcCalcPfType">
+            <option value="percent">Percentage (12%)</option>
+            <option value="fixed">Fixed ₹1,800</option>
+          </select>
+        </div>
+
+        <div class="row-inline" style="margin-top:12px;">
+          <div>
+            <label class="field">I know</label>
+            <select class="field-input" id="ctcCalcMode" onchange="updateCtcCalcAmountLabel_()">
+              <option value="takehome">Take Home (monthly)</option>
+              <option value="ctc">CTC (annual)</option>
+            </select>
+          </div>
+          <div>
+            <label class="field" id="ctcCalcAmountLabel">Take Home (monthly)</label>
+            <input class="field-input" type="number" id="ctcCalcAmount" placeholder="e.g. 30000">
+          </div>
+        </div>
+
+        <div class="row-inline" style="margin-top:12px;">
+          <div>
+            <label class="field">Eligible Bonus <span style="font-weight:400;color:var(--muted);">(annual, optional)</span></label>
+            <input class="field-input" type="number" id="ctcCalcBonus" placeholder="0">
+          </div>
+          <div>
+            <label class="field">Other Allowances <span style="font-weight:400;color:var(--muted);">(monthly, optional)</span></label>
+            <input class="field-input" type="number" id="ctcCalcOtherAllowances" placeholder="0">
+          </div>
+        </div>
+
+        <div style="height:14px"></div>
+        <button class="btn full" onclick="withBusy(this,'Calculating…',renderCtcCalculator)">Calculate</button>
+        <div style="height:14px"></div>
+        <div id="ctcCalcBox"></div>
+      </section>
       </div>
 
       </div>
@@ -16713,6 +16768,124 @@ async function openLetterheadCard(){
   document.getElementById('coMsg').textContent = '';
 }
 
+// ---- CTC Calculator ----
+// A what-if tool for checking a prospective hire's exact numbers before
+// appointing them — not tied to any employee record, and nothing typed
+// here is saved anywhere. Deliberately no name field: this exists purely
+// to answer "what would this salary actually cost / actually pay out",
+// before there is an employee to attach the answer to.
+function openCtcCalculatorCard(){
+  openGeneratorCard('genSecCtcCalculator');
+  const sel = document.getElementById('ctcCalcHeading');
+  if(sel && !sel.options.length){
+    sel.innerHTML = SALARY_HEADING_ORDER.map(k => `<option value="${k}">${escapeHtml(SALARY_HEADINGS[k].label)}</option>`).join('');
+  }
+  updateCtcCalcPfTypeVisibility_();
+  updateCtcCalcAmountLabel_();
+}
+function updateCtcCalcPfTypeVisibility_(){
+  const heading = SALARY_HEADINGS[(document.getElementById('ctcCalcHeading') || {}).value] || SALARY_HEADINGS.managerial;
+  const wrap = document.getElementById('ctcCalcPfTypeWrap');
+  if(wrap) wrap.classList.toggle('hidden', !heading.pf);
+}
+function updateCtcCalcAmountLabel_(){
+  const mode = (document.getElementById('ctcCalcMode') || {}).value;
+  const label = document.getElementById('ctcCalcAmountLabel');
+  if(label) label.textContent = mode === 'ctc' ? 'CTC (annual)' : 'Take Home (monthly)';
+}
+
+// Rate of Pay, Basic/HRA/LTA and every downstream figure for one guess at
+// the Rate of Pay — calls calculatePfFor/computeEsi/monthlyPtFor exactly
+// as the Salary Sheet does, rather than re-deriving PF/ESI/PT here, so
+// this can never drift from what the Salary Sheet would actually charge
+// for the same heading and wage.
+function ctcCalcBreakdown_(rate, headingKey, pfType, otherAllowances, bonus){
+  const heading = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
+  let basic, hra, lta;
+  if(heading.flat){ basic = rate; hra = 0; lta = 0; }
+  else { basic = rate * heading.basicPct; hra = rate * heading.hraPct; lta = rate * heading.ltaPct; }
+  const gross = basic + hra + lta;
+  const pfWage = PF_RULES.wageComponents.reduce((t, k) => t + ({ basic, hra, lta }[k] || 0), 0);
+  // calculatePfFor already checks heading.pf itself and returns PF_ZERO when
+  // it doesn't apply — no need to gate the call here too.
+  const pf = calculatePfFor({ salaryHeading: headingKey, pfEligible: 'yes', pfContributionType: pfType,
+                               hasPriorUan: 'no', form11Submitted: 'no' }, pfWage);
+  const esi = heading.esi
+    ? computeEsi(gross, { isDisabled: false, coveredAtPeriodStart: false, eligible: true, asOf: todayStr() })
+    : { covered: false, employee: 0, employer: 0 };
+  const pt = heading.pt ? monthlyPtFor(gross, 0) : 0;
+  const employerMonthly = (pf.applicable ? (pf.employerEpf + pf.employerEps + pf.admin + pf.edli) : 0) +
+                           (esi.covered ? esi.employer : 0);
+  const netMonthly = gross - (pf.applicable ? pf.employee : 0) - (esi.covered ? esi.employee : 0) - pt;
+  const monthlyCtc = gross + employerMonthly + otherAllowances;
+  const annualCtc = monthlyCtc * 12 + bonus;
+  return { basic, hra, lta, gross, pf, esi, pt, employerMonthly, netMonthly, monthlyCtc, annualCtc };
+}
+
+// Binary search for the Rate of Pay that makes targetFn(breakdown) equal
+// target. PF, ESI and PT are each non-decreasing functions of gross (ESI
+// jumps to nil above its ceiling rather than tapering, but only upward —
+// never a reversal), so both Take Home and CTC are non-decreasing in Rate
+// of Pay too, and a plain bisection finds the answer reliably without
+// needing a closed-form inverse of rules that already live in
+// calculatePfFor/computeEsi/monthlyPtFor.
+function ctcCalcSolveRate_(target, headingKey, pfType, otherAllowances, bonus, targetFn){
+  let lo = 0, hi = 3000000; // generous enough for any realistic Rate of Pay
+  for(let i = 0; i < 60; i++){
+    const mid = (lo + hi) / 2;
+    const value = targetFn(ctcCalcBreakdown_(mid, headingKey, pfType, otherAllowances, bonus));
+    if(value < target) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+function renderCtcCalculator(){
+  const box = document.getElementById('ctcCalcBox');
+  const headingKey = document.getElementById('ctcCalcHeading').value;
+  const heading = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
+  const pfType = document.getElementById('ctcCalcPfType').value;
+  const mode = document.getElementById('ctcCalcMode').value;
+  const amount = Number(document.getElementById('ctcCalcAmount').value) || 0;
+  const bonus = Number(document.getElementById('ctcCalcBonus').value) || 0;
+  const otherAllowances = Number(document.getElementById('ctcCalcOtherAllowances').value) || 0;
+
+  if(!amount){
+    box.innerHTML = '<div class="empty">Enter a Take Home or CTC amount to calculate.</div>';
+    return;
+  }
+
+  const rate = ctcCalcSolveRate_(amount, headingKey, pfType, otherAllowances, bonus,
+    mode === 'ctc' ? b => b.annualCtc : b => b.netMonthly);
+  const b = ctcCalcBreakdown_(rate, headingKey, pfType, otherAllowances, bonus);
+  const money = rupees;
+
+  box.innerHTML = `
+    ${hrCard('<strong>Result</strong>',
+      hrRow('Take Home (monthly)', '<strong>' + money(b.netMonthly) + '</strong>') +
+      hrRow('CTC (annual)', '<strong>' + money(b.annualCtc) + '</strong>'),
+      'sal-grand-card')}
+    ${hrCard('<strong>Rate of Pay</strong>',
+      hrRow('Rate of Pay / month', money(b.gross)) +
+      hrRow('Basic', money(b.basic)) +
+      (heading.flat ? '' : hrRow('HRA', money(b.hra))) +
+      (heading.flat || !heading.ltaPct ? '' : hrRow('LTA', money(b.lta))))}
+    ${hrCard('<strong>Deductions (monthly)</strong>',
+      hrRow('PF — employee', b.pf.applicable ? money(b.pf.employee) : '—') +
+      hrRow('ESI — employee', heading.esi ? (b.esi.covered ? money(b.esi.employee) : '—') : '—') +
+      hrRow('PT', heading.pt ? money(b.pt) : '—') +
+      `<div class="hr-sheet-net"><span>Net (Take Home)</span><span>${money(b.netMonthly)}</span></div>`)}
+    ${hrCard('<strong>Employer cost (monthly)</strong>',
+      hrRow('PF — employer', b.pf.applicable ? money(b.pf.employerEpf + b.pf.employerEps + b.pf.admin + b.pf.edli) : '—') +
+      hrRow('ESI — employer', heading.esi ? (b.esi.covered ? money(b.esi.employer) : '—') : '—') +
+      hrRow('Other Allowances', money(otherAllowances)) +
+      `<div class="hr-sheet-net"><span>Monthly CTC</span><span>${money(b.monthlyCtc)}</span></div>`)}
+    ${hrCard('<strong>Annual CTC</strong>',
+      hrRow('Monthly CTC × 12', money(b.monthlyCtc * 12)) +
+      hrRow('Eligible Bonus', money(bonus)) +
+      `<div class="hr-sheet-net"><span>Annual CTC</span><span>${money(b.annualCtc)}</span></div>`)}
+  `;
+}
+
 // ---- bulk employee import ----
 async function saveCompanyProfileFromForm(){
   const msg = document.getElementById('coMsg');
@@ -18732,7 +18905,7 @@ function clearGeneratorEmployeeFields(){
 // toggles which of these wrapper divs is visible — no new report, letter or
 // calculation, only how you get to the ones that already existed.
 const GENERATOR_SECTIONS = ['genSecRoleReports','genSecLetterhead','genSecHolidayList',
-  'genSecLeaveEncashment','genSecChecklists','genSecLetters','genSecOfficeDocuments'];
+  'genSecLeaveEncashment','genSecChecklists','genSecLetters','genSecOfficeDocuments','genSecCtcCalculator'];
 function showGeneratorLanding(){
   document.getElementById('genLanding').classList.remove('hidden');
   GENERATOR_SECTIONS.forEach(id => document.getElementById(id).classList.add('hidden'));
