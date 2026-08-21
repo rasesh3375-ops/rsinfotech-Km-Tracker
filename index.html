@@ -803,7 +803,24 @@
      item interaction. 100vh fills the screen without touching how the box
      is sized as a flex item, so the overlay's own align-items:flex-start
      (unchanged) still applies and sticky keeps working. */
-  #employeeModalOverlay{background:var(--paper);padding:0;}
+  /* overflow-y:auto with no overflow-x set computes the x-axis to auto too
+     (that's the CSS spec, not a bug) — so anything inside this one long form
+     that ends up even a pixel wider than the box (a form control rendering
+     wider on iOS Safari than in this file's own dev browser, for instance)
+     let the whole modal drag sideways under a normal touch-scroll, cutting
+     off the left edge of every field exactly as reported. Nothing in this
+     modal is meant to scroll sideways — the deliberate horizontal scrollers
+     inside it (.emp-stepper, .calc-line) are their own separate, deeper-
+     nested boxes with their own overflow-x:auto and are unaffected by this. */
+  /* .modal-box itself must stay off this — giving it any non-visible
+     overflow value (even just on the x-axis; overflow-y defaults to auto
+     the moment overflow-x isn't visible, per spec) makes it a scroll
+     container of its own, and position:sticky then anchors #empStepper to
+     THAT instead of the overlay — the overlay is the one that actually
+     scrolls (see the comment above), so the stepper stops following the
+     page and scrolls away like ordinary content. Clipping at the overlay
+     alone already stops the sideways drag with no such side effect. */
+  #employeeModalOverlay{background:var(--paper);padding:0;overflow-x:hidden;}
   #employeeModalOverlay .modal-box{border-radius:0;margin:0;min-height:100vh;}
 
   /* Add Employee: on a screen wide enough to make use of it, related sections
