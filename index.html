@@ -782,7 +782,15 @@
      position:sticky for .modal-head/.modal-actions/#empStepper by anchoring
      them to the wrong ancestor (the overlay is the one that actually
      scrolls; see the .modal-head comment below). */
-  .modal-overlay{position:fixed;inset:0;height:100vh;height:100dvh;background:rgba(22,33,62,0.55);display:flex;align-items:flex-start;justify-content:center;padding:20px 12px;overflow-y:auto;overflow-x:hidden;z-index:var(--z-modal);}
+  /* transform:translateZ(0) — own GPU compositing layer. A fixed-position
+     element that is ALSO its own scroll container (this one: overflow-y:auto
+     on the same element as position:fixed) is exactly the combination behind
+     a known class of iOS Safari compositing bug where momentum-scrolling it
+     can let whatever's underneath show through for a frame, sharing a layer
+     with its content instead of being isolated. See the .modal-head comment
+     for the fuller reasoning — same bleed-through report, different (non-
+     sizing) cause than every previous attempt here assumed. */
+  .modal-overlay{position:fixed;inset:0;height:100vh;height:100dvh;background:rgba(22,33,62,0.55);display:flex;align-items:flex-start;justify-content:center;padding:20px 12px;overflow-y:auto;overflow-x:hidden;z-index:var(--z-modal);transform:translateZ(0);backface-visibility:hidden;}
   .modal-box{background:var(--paper);border-radius:14px;max-width:520px;width:100%;padding:22px;margin:20px 0 40px;}
   .modal-box h2{margin:0 0 6px;font-size:19px;}
   /* Title bar that stays put. The overlay is the scrolling element, so sticky
@@ -790,9 +798,23 @@
      scroller — which would mean restructuring every modal. Negative margins
      cancel the box padding so the bar spans the full width and content passes
      under it rather than beside it. */
+  /* transform:translateZ(0) forces its own GPU compositing layer — a
+     known class of iOS Safari bug lets a sticky/fixed element that shares
+     a layer with its scrolling ancestor visually reveal whatever is
+     underneath for a frame during momentum scroll, a pure rendering glitch
+     unrelated to any height or measurement math (unlike everything else
+     tried against the same bleed-through report so far, all of which
+     assumed a size/position mismatch). Confirmed live on a real device —
+     scrolling, not just a screenshot artifact — after 100dvh, the
+     visualViewport resettle loop and the modal-box height fallback all
+     failed to stop it, which is what points at compositing rather than
+     sizing. Own layer for the sticky header and footer, not just the
+     overlay, since they're the two elements actually reported showing
+     background content through them. */
   .modal-head{position:sticky;top:0;z-index:3;display:flex;align-items:center;gap:12px;
     margin:-22px -22px 14px;padding:16px 22px 12px;background:var(--paper);
-    border-radius:14px 14px 0 0;border-bottom:1px solid var(--line);}
+    border-radius:14px 14px 0 0;border-bottom:1px solid var(--line);
+    transform:translateZ(0);backface-visibility:hidden;}
   .modal-head h2{margin:0;flex:1;}
   /* Same circle-icon rule as .rpt-close-btn/.x-close (see there) — a bare
      26px × glyph with no border used to look like a different control from
@@ -1178,7 +1200,11 @@
   .modal-actions{display:flex;gap:10px;margin-top:18px;position:sticky;bottom:0;z-index:3;
     background:var(--paper);padding:14px 22px;margin-left:-22px;margin-right:-22px;
     margin-bottom:-22px;border-top:1px solid var(--line);border-radius:0 0 14px 14px;
-    flex-wrap:wrap;}
+    flex-wrap:wrap;
+    /* Own GPU compositing layer — see the .modal-head comment above for why.
+       This is the specific element every bleed-through report has shown
+       background content appearing under. */
+    transform:translateZ(0);backface-visibility:hidden;}
   .modal-actions .btn{flex:1;}
 
   .letter-choice{border:1px solid var(--line);border-left:4px solid transparent;border-radius:10px;padding:13px 14px;margin-bottom:8px;cursor:pointer;font-size:14px;display:flex;gap:12px;align-items:center;}
