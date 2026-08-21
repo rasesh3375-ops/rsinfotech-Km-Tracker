@@ -2896,6 +2896,7 @@
             <select class="field-input" id="ctcCalcMode" onchange="updateCtcCalcAmountLabel_()">
               <option value="takehome">Take Home (monthly)</option>
               <option value="ctc">CTC (annual)</option>
+              <option value="ctcMonthly">CTC (monthly)</option>
             </select>
           </div>
           <div>
@@ -16792,7 +16793,7 @@ function updateCtcCalcPfTypeVisibility_(){
 function updateCtcCalcAmountLabel_(){
   const mode = (document.getElementById('ctcCalcMode') || {}).value;
   const label = document.getElementById('ctcCalcAmountLabel');
-  if(label) label.textContent = mode === 'ctc' ? 'CTC (annual)' : 'Take Home (monthly)';
+  if(label) label.textContent = mode === 'ctc' ? 'CTC (annual)' : mode === 'ctcMonthly' ? 'CTC (monthly)' : 'Take Home (monthly)';
 }
 
 // Rate of Pay, Basic/HRA/LTA and every downstream figure for one guess at
@@ -16856,7 +16857,7 @@ function renderCtcCalculator(){
   }
 
   const rate = ctcCalcSolveRate_(amount, headingKey, pfType, otherAllowances, bonus,
-    mode === 'ctc' ? b => b.annualCtc : b => b.netMonthly);
+    mode === 'ctc' ? b => b.annualCtc : mode === 'ctcMonthly' ? b => b.monthlyCtc : b => b.netMonthly);
   const b = ctcCalcBreakdown_(rate, headingKey, pfType, otherAllowances, bonus);
   const money = rupees;
 
