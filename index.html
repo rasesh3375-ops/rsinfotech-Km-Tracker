@@ -3169,6 +3169,21 @@ function onSessionExpired(){
 // sharedReadCache, primeSharedRead/invalidateSharedRead('employees')) still
 // addresses one logical 'employees' entry exactly as before; only what
 // fetches it on a cache miss changed.
+// Kept only in memory, only for this one virtual key: since
+// migrateEmployeesToPerRecordKeys, nothing ever writes 'employees' through
+// safeSet anymore (each employee has their own employee:<id> key — see
+// saveOneEmployee_/saveEmployees), so the generic localStorage fallback
+// safeGet() uses for every other shared key (kmt_shared_employees) is a
+// frozen pre-migration snapshot that can never be refreshed again. Serving
+// it silently, whatever headcount it happened to hold from months earlier,
+// on any transient failure of the call below (Apps Script cold start, the
+// "Drive HTML error page" apiFetch already retries around) is exactly how
+// HR saw 20 employees instead of the real 41 after logging back in — a
+// number old enough to look plausible, with nothing on screen suggesting it
+// was stale. This variable is this tab's own last confirmed answer instead:
+// never older than the current page session, and only ever used when a
+// fresh fetch (already retried 3x by apiFetch) genuinely fails.
+let lastGoodEmployeesJson = null;
 async function remoteGetAllEmployees_(){
   try{
     // '&_=' + Date.now() — Apps Script's GET responses carry no Cache-Control
@@ -3187,12 +3202,16 @@ async function remoteGetAllEmployees_(){
     try{ data = JSON.parse(text); }
     catch(parseErr){
       lastBackendError = 'GET returned non-JSON (status ' + res.status + '): ' + text.slice(0, 200);
-      return null;
+      return lastGoodEmployeesJson !== null ? { value: lastGoodEmployeesJson } : null;
     }
     if(data && data.error === 'unauthorized'){ onSessionExpired(); return null; }
-    if(!data || !data.ok) return null;
-    return { value: JSON.stringify(data.employees || []) };
-  }catch(e){ lastBackendError = 'GET network error: ' + e.message; return null; }
+    if(!data || !data.ok) return lastGoodEmployeesJson !== null ? { value: lastGoodEmployeesJson } : null;
+    lastGoodEmployeesJson = JSON.stringify(data.employees || []);
+    return { value: lastGoodEmployeesJson };
+  }catch(e){
+    lastBackendError = 'GET network error: ' + e.message;
+    return lastGoodEmployeesJson !== null ? { value: lastGoodEmployeesJson } : null;
+  }
 }
 async function remoteGet(key){
   if(key === 'employees') return remoteGetAllEmployees_();
@@ -3518,7 +3537,14 @@ async function safeGet(key, shared){
         sharedReadCache.set(key, { value, until: Date.now() + readTtlFor(key) });
         return value;
       }
-      const local = localStorage.getItem('kmt_shared_' + key);
+      // 'employees' has its own in-session-only fallback inside
+      // remoteGetAllEmployees_ (lastGoodEmployeesJson) — if that returned
+      // null too, there is genuinely no answer to give this session, and
+      // this localStorage mirror is never a substitute for it: nothing
+      // writes kmt_shared_employees anymore since the per-employee-key
+      // migration, so it can only be a frozen snapshot from before it, of
+      // unknown age. Serving it was the "20 employees instead of 41" bug.
+      const local = key === 'employees' ? null : localStorage.getItem('kmt_shared_' + key);
       return local !== null ? local : null;
     })();
     inFlightReads.set(key, request);
@@ -4678,12 +4704,30 @@ async function enterHrMain(){
 }
 
 async function logoutHr(){
-  await addActivityLog('HR logout');
+  // Sign-out must not wait on the network. This used to await the activity
+  // log write and the server-side logout call in sequence — each going
+  // through apiFetch's own retry budget, which can run to several seconds
+  // on a slow or cold-starting Apps Script — so logging off could sit on
+  // the same screen for the best part of 20 seconds before the login
+  // screen even appeared. The token is captured up front and used directly
+  // (not the global, which is about to be cleared) so the background call
+  // still logs out the right session even after it's gone.
+  const token = sessionToken;
+  addActivityLog('HR logout').catch(()=>{});
+  setSession(null, null);
   await safeSet('hr_session', '', false);
-  await serverLogout();
   if(hrInterval){ clearInterval(hrInterval); hrInterval = null; }
   document.body.classList.remove('hr-shell', 'hr-nav-open');
+  // Nothing cached in this tab should carry into the next sign-in — see the
+  // lastGoodEmployeesJson comment in remoteGetAllEmployees_ for the bug this
+  // avoided (a stale headcount surviving a logout/login on the same device).
+  invalidateSharedRead();
   goHome();
+  apiFetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action: 'logout', token })
+  }).catch(()=>{});
 }
 
 async function loginEngineer(){
