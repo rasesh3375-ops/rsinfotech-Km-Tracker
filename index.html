@@ -7917,13 +7917,34 @@ let fullscreenOriginalNextSibling = null;
 // by owner name so closing an inner layer (e.g. Increment opened on top of
 // Employee) never re-enables scrolling while an outer one is still open.
 const kmtBodyLockOwners = new Set();
+// resettleFixedOverlays_ (defined further down) re-pins every open fixed
+// overlay to visualViewport's real height/top — the fix for iOS Safari
+// leaving one sized to a stale viewport (keyboard opening/closing, its own
+// toolbar collapsing on scroll, Display Zoom, rotation). Earlier attempts
+// only ran it for a fixed window around focus/blur (0/120/350ms delays,
+// then a full second of animation frames) and the same bleed-through kept
+// being reported outside whatever window was tried. Running it every frame
+// for as long as ANY overlay is open — driven by the same owner-counted
+// lock every overlay already goes through symmetrically — catches the
+// viewport drifting no matter when in the overlay's lifetime it happens,
+// instead of betting on a window around any one event.
+let kmtResettleRafId = null;
+function kmtResettleLoop_(){
+  resettleFixedOverlays_();
+  kmtResettleRafId = window.requestAnimationFrame(kmtResettleLoop_);
+}
 function kmtLockBodyScroll(owner){
+  const wasEmpty = !kmtBodyLockOwners.size;
   kmtBodyLockOwners.add(owner);
   document.body.style.overflow = 'hidden';
+  if(wasEmpty && !kmtResettleRafId) kmtResettleRafId = window.requestAnimationFrame(kmtResettleLoop_);
 }
 function kmtUnlockBodyScroll(owner){
   kmtBodyLockOwners.delete(owner);
-  if(!kmtBodyLockOwners.size) document.body.style.overflow = '';
+  if(!kmtBodyLockOwners.size){
+    document.body.style.overflow = '';
+    if(kmtResettleRafId){ window.cancelAnimationFrame(kmtResettleRafId); kmtResettleRafId = null; }
+  }
 }
 
 function openFullscreenView(title, sourceId){
@@ -12807,6 +12828,11 @@ let gsSel = 0;
 async function openGlobalSearch(){
   const ov = document.getElementById('gsOverlay');
   if(!ov) return;
+  // Same fixed-overlay-over-a-scrollable-background exposure every other
+  // modal already goes through kmtLockBodyScroll for (see the comment
+  // there) — this is a real text input opening the keyboard same as any
+  // Employee Master field, and had never been wired to it.
+  kmtLockBodyScroll('globalSearch');
   ov.classList.remove('hidden');
   const input = document.getElementById('gsInput');
   if(input){ input.value = ''; input.focus(); }
@@ -12828,6 +12854,7 @@ async function openGlobalSearch(){
 
 function closeGlobalSearch(){
   document.getElementById('gsOverlay')?.classList.add('hidden');
+  kmtUnlockBodyScroll('globalSearch');
 }
 
 function runGlobalSearch(){
@@ -15674,40 +15701,12 @@ if(window.visualViewport){
 // does not shrink for the keyboard at all, only for its own chrome; dvh
 // keeps tracking the full screen straight through a field's keyboard
 // opening, so the visualViewport listeners above remain the only thing that
-// actually catches THAT case, and evidently do not fire reliably for every
-// field — reported again with a keyboard genuinely open, on the Employee
-// modal's very first two fields, with a fixed round of resettles (0/120/
-// 350ms) already in place. That means the keyboard — plus, on a name field,
-// the QuickType suggestion bar loading in a moment after — can still settle
-// later than 350ms on a real device; guessing a longer fixed delay just
-// moves the same race further out. Runs every animation frame instead, for
-// a full second after focus/blur, so it keeps catching visualViewport's
-// true number for as long as the keyboard could plausibly still be
-// animating, rather than betting on any single delay being long enough.
-const FIXED_OVERLAY_SELECTOR = '.modal-overlay, #fullscreenSheetRoot, #gsOverlay';
-let kmtResettleRafId = null;
-function kmtResettleUntil_(deadline){
-  resettleFixedOverlays_();
-  if(window.performance.now() < deadline){
-    kmtResettleRafId = window.requestAnimationFrame(() => kmtResettleUntil_(deadline));
-  } else {
-    kmtResettleRafId = null;
-  }
-}
-function kmtStartResettleLoop_(){
-  if(kmtResettleRafId) window.cancelAnimationFrame(kmtResettleRafId);
-  kmtResettleUntil_(window.performance.now() + 1000);
-}
-document.addEventListener('focusin', e => {
-  if(!e.target || !e.target.closest) return;
-  if(!e.target.closest(FIXED_OVERLAY_SELECTOR)) return;
-  kmtStartResettleLoop_();
-});
-document.addEventListener('focusout', e => {
-  if(!e.target || !e.target.closest) return;
-  if(!e.target.closest(FIXED_OVERLAY_SELECTOR)) return;
-  kmtStartResettleLoop_();
-});
+// actually catches THAT case. This used to run only for a fixed window
+// around focus/blur (0/120/350ms delays, then a full second of animation
+// frames) — replaced by kmtResettleLoop_ (see kmtLockBodyScroll, near the
+// top of the file) running every frame for the overlay's whole open
+// lifetime, since the same bleed-through kept being reported outside
+// whatever fixed window was tried.
 
 async function openAddEmployeeModal(id){
   kmtLockBodyScroll('employeeModalRoot');
