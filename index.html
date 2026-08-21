@@ -6500,7 +6500,7 @@ function calculatePfFor(emp, wage){
              employerTotal:cFixed.employerEpf + cFixed.employerEps + edliFixed + adminFixed,
              grandTotal:f + cFixed.employerEpf + cFixed.employerEps + edliFixed + adminFixed,
              employerPfMerged:false,
-             reason:'Fixed ₹' + fmtMoney(f) + ' (employee) — employer side is Employer EPF + Pension/EPS (PF Account 10) + EDLI (PF Account 21) + Admin Charges (PF Account 2), calculated on the ₹' + fmtMoney(PF_RULES.epsWageCeiling) + ' ceiling, not the actual wage of ₹' + fmtMoney(w) };
+             reason:'Fixed ₹' + fmtMoney(f) + ' (employee) — employer side is Employer EPF + Pension/EPS + EDLI + Admin Charges, calculated on the ₹' + fmtMoney(PF_RULES.epsWageCeiling) + ' ceiling, not the actual wage of ₹' + fmtMoney(w) };
   }
 
   const c = computePf(w);
@@ -6537,14 +6537,14 @@ function calculatePfFor(emp, wage){
     grandTotal:employeeCharged + employerEpf + employerEps + edli + admin,
     employerPfMerged:isUncapped,
     reason: isUncapped
-      ? 'Percentage on a wage of ₹' + fmtMoney(w) + ' — Employee PF uncapped by standing HR agreement for this employee; Employer PF shown as one combined figure, not split into EPF and Pension/EPS (PF Account 10)'
+      ? 'Percentage on a wage of ₹' + fmtMoney(w) + ' — Employee PF uncapped by standing HR agreement for this employee; Employer PF shown as one combined figure, not split into EPF and Pension/EPS'
       : cfg.type === 'fixed'
         ? 'Percentage — Basic of ₹' + fmtMoney(w) + ' this month is at or below the ₹' + fmtMoney(PF_RULES.epsWageCeiling) +
           ' ceiling, so the usual Fixed ₹' + fmtMoney(PF_RULES.fixedAmount) + ' does not apply'
         : employeeCharged < c.employee
           ? 'Percentage — Employee PF capped at ₹' + fmtMoney(PF_RULES.fixedAmount) + ' on a wage of ₹' + fmtMoney(w)
           : c.capApplied
-            ? 'Percentage — EPS (PF Account 10) capped at ₹' + fmtMoney(PF_RULES.epsMonthlyCap) + ' on a wage of ₹' + fmtMoney(w)
+            ? 'Percentage — EPS capped at ₹' + fmtMoney(PF_RULES.epsMonthlyCap) + ' on a wage of ₹' + fmtMoney(w)
             : 'Percentage on a wage of ₹' + fmtMoney(w)
   };
 }
@@ -8921,10 +8921,10 @@ function salaryCardGroups(s){
       </div>
       <div class="hr-sheet-group">
         <h4>Employer Contribution</h4>
-        ${row('PEN (PF Account 10)', fmtMoney(s.pen))}
+        ${row('PEN', fmtMoney(s.pen))}
         ${row('Employer PF', fmtMoney(s.employerPf))}
-        ${row('PF Admin (PF Account 2)', fmtMoney(s.pfAdmin))}
-        ${row('EDLI (PF Account 21)', fmtMoney(s.edli))}
+        ${row('PF Admin', fmtMoney(s.pfAdmin))}
+        ${row('EDLI', fmtMoney(s.edli))}
         ${row('ESI Employer', fmtMoney(s.esiEmployer))}
         ${row('Employer Cont.', fmtMoney(s.employerCont))}
         ${row('CTC', fmtMoney(s.ctc))}
@@ -8995,7 +8995,7 @@ async function renderSalarySheet(){
   // company cost, not money withheld from the employee.
   const cols = ['SR NO','Name','Rate of Pay','Leave Days','Policy Half Days','Leave Amount','Basic','HRA','LTA','Gross',
     'PF','ESI','PT','Advance Temp','Advance','Loan EMI','Retention','Total Deduction','Conveyance','Net Before Direct','Paid Directly','Net Salary',
-    'PEN (PF Account 10)','Employer PF','PF Admin (PF Account 2)','EDLI (PF Account 21)','ESI Employer','Employer Cont.','CTC',
+    'PEN','Employer PF','PF Admin','EDLI','ESI Employer','Employer Cont.','CTC',
     'Advance Balance','Loan Balance','Full Day Leave Bal','Half Day Leave Bal'];
   // Everything NOT in this primary set is a secondary column, hidden by
   // default (see .sal-essential in the stylesheet) and reachable with the
@@ -10559,10 +10559,10 @@ const PAYROLL_MASTER = [
   { key:'lta',   label:'LTA',        group:'earning',   source:'split', part:'lta'   },
   { key:'gross', label:'Gross Salary', group:'total',   source:'sum',   of:['basic','hra','lta'] },
   { key:'pf',    label:'PF — employee (12%)', group:'deduction', source:'pfEmployee', flag:'pf' },
-  { key:'pfEmployerEps', label:'PF — employer to EPS (PF Account 10, 8.33%)', group:'employer', source:'pfEps', flag:'pf' },
+  { key:'pfEmployerEps', label:'PF — employer to EPS (8.33%)', group:'employer', source:'pfEps', flag:'pf' },
   { key:'pfEmployerEpf', label:'PF — employer to EPF (3.67%)', group:'employer', source:'pfEpf', flag:'pf' },
-  { key:'pfAdmin', label:'PF admin (PF Account 2, 0.5%)', group:'employer', source:'pfAdmin', flag:'pf' },
-  { key:'pfEdli',  label:'EDLI (PF Account 21, 0.5%)',     group:'employer', source:'pfEdli',  flag:'pf' },
+  { key:'pfAdmin', label:'PF admin (0.5%)', group:'employer', source:'pfAdmin', flag:'pf' },
+  { key:'pfEdli',  label:'EDLI (0.5%)',     group:'employer', source:'pfEdli',  flag:'pf' },
   { key:'esi',   label:'ESI — employee (0.75%)', group:'deduction', source:'esiEmployee', flag:'esi' },
   { key:'esiEmployer', label:'ESI — employer (3.25%)', group:'employer', source:'esiEmployer', flag:'esi' },
   { key:'pt',    label:'Professional Tax (PT)', group:'deduction', source:'ptRule', flag:'pt' },
@@ -13891,9 +13891,9 @@ function renderRatePayNote(){
   // What the company pays on top
   const employer = [];
   if(h.pf){
-    employer.push('PF (' + headingPct(PF_RULES.employerPct) + ', split into pension (PF Account 10) and EPF)');
-    employer.push('PF admin (PF Account 2, ' + headingPct(PF_RULES.adminPct) + ')');
-    employer.push('EDLI (PF Account 21, ' + headingPct(PF_RULES.edliPct) + ')');
+    employer.push('PF (' + headingPct(PF_RULES.employerPct) + ', split into pension and EPF)');
+    employer.push('PF admin (' + headingPct(PF_RULES.adminPct) + ')');
+    employer.push('EDLI (' + headingPct(PF_RULES.edliPct) + ')');
   }
   if(h.esi) employer.push('ESI (' + headingPct(ESI_RULES.employerPct) + ')');
   const para2 = employer.length
