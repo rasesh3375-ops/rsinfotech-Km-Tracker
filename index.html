@@ -338,12 +338,14 @@
   #hrTopbar .tb-left{display:flex;align-items:center;gap:10px;min-width:0;}
   #hrTopbar .tb-right{display:flex;align-items:center;gap:14px;font-size:13px;color:var(--muted);}
   #hrBurger{display:none;border:none;background:transparent;font-size:20px;cursor:pointer;color:var(--navy);padding:2px 4px;}
-  /* The persistent 🏠 icon in the top bar already jumps to Dashboard from any
-     screen, but on a phone it's one small icon among four crowded into a
-     corner — not something HR reliably spots as "how do I get out of here."
-     Desktop has no such problem (the sidebar itself is always on screen, so
-     switching screens IS the close action), so this stays mobile-only. */
-  #hrCloseBar{display:none;padding:10px 20px 0;}
+  /* Same 28px × circle every other close control in the app uses (see
+     .rpt-close-btn/.x-close), sitting in the top-right of the top bar
+     itself rather than a separate full-width bar — a screen already
+     carrying its own top-right × (a report card, the CTC Calculator, a
+     Dashboard shortcut) would otherwise show two. Desktop has no such
+     problem (the sidebar itself is always on screen, so switching screens
+     IS the close action), so this stays mobile-only. */
+  #hrCloseBtn{display:none;}
   #hrContent{padding:20px;}
   #hrNavScrim{display:none;}
 
@@ -508,12 +510,17 @@
   }
 
   /* ---- breadcrumb ---- */
-  #hrPageTitle{display:flex;align-items:center;gap:7px;font-size:15px;font-weight:700;}
-  .crumb-up{background:none;border:none;padding:0;font:inherit;font-weight:600;
+  /* min-width:0 lets this actually shrink inside the flex row instead of
+     forcing the row wider than the screen; overflow:hidden plus .crumb-here's
+     own ellipsis (below) is what turns a long report/generator name into a
+     single truncated line instead of wrapping onto a second one that used to
+     sit right on top of the top bar's own icons on a narrow phone. */
+  #hrPageTitle{display:flex;align-items:center;gap:7px;font-size:15px;font-weight:700;min-width:0;overflow:hidden;}
+  .crumb-up{background:none;border:none;padding:0;font:inherit;font-weight:600;flex-shrink:0;
     color:var(--muted);cursor:pointer;}
   .crumb-up:hover{color:var(--navy);text-decoration:underline;}
-  .crumb-sep{color:var(--muted);font-weight:400;}
-  .crumb-here{color:var(--navy);}
+  .crumb-sep{color:var(--muted);font-weight:400;flex-shrink:0;}
+  .crumb-here{color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
 
   /* ---- global search ---- */
   /* height:100dvh — same fixed-overlay-behind-a-keyboard exposure as
@@ -703,7 +710,7 @@
        it instead. */
     body.hr-nav-open{overflow:hidden;}
     #hrBurger{display:block;}
-    #hrCloseBar{display:block;padding:10px 14px 0;}
+    #hrCloseBtn{display:flex;}
     #hrContent{padding:14px;}
     .dash-2col{grid-template-columns:1fr;}
   }
@@ -769,9 +776,15 @@
     margin:-22px -22px 14px;padding:16px 22px 12px;background:var(--paper);
     border-radius:14px 14px 0 0;border-bottom:1px solid var(--line);}
   .modal-head h2{margin:0;flex:1;}
-  .modal-x{border:none;background:transparent;font-size:26px;line-height:1;color:var(--muted);
-    cursor:pointer;padding:0 2px;font-family:inherit;}
-  .modal-x:hover,.modal-x:focus{color:var(--navy);}
+  /* Same circle-icon rule as .rpt-close-btn/.x-close (see there) — a bare
+     26px × glyph with no border used to look like a different control from
+     every other close button in the app, sitting in the one place (the
+     modal's own sticky header) most likely to be seen right next to one of
+     them. flex-shrink:0 keeps it from being squeezed by the title next to it. */
+  .modal-x{width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+    border:1px solid var(--line);border-radius:50%;background:var(--paper);color:var(--muted);
+    font-size:13px;line-height:1;cursor:pointer;padding:0;font-family:inherit;}
+  .modal-x:hover,.modal-x:focus{background:#00000008;color:var(--navy);border-color:var(--navy);}
   .modal-box .hint{font-size:12.5px;color:var(--muted);margin:0 0 18px;}
   .field-group{margin-bottom:16px;}
   .field-group .sec-title{font-size:11.5px;font-weight:700;color:var(--amber-dark);text-transform:uppercase;letter-spacing:.5px;margin:18px 0 12px;padding-top:14px;border-top:1px dashed var(--line);}
@@ -956,10 +969,16 @@
   /* Icon-only, not "✕ Close" — a report already carries its own close button
      (reportActionBar's .rpt-close-btn) which this delegates to, so the label
      here was two close buttons arguing about wording for one action. */
+  /* Same 28px circle as .rpt-close-btn/.x-close/.modal-x everywhere else —
+     only the color is different here, and deliberately: this sits on the
+     dark navy header, where the light border/text every other close icon
+     uses would be unreadable. Same shape, same size, same position (top
+     right of its own header), the one dimension that has to differ for the
+     icon to still be visible against its background. */
   .fs-close-btn{
-    width:32px;height:32px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+    width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
     border:1px solid rgba(255,255,255,.4);border-radius:50%;background:transparent;color:#fff;
-    font-size:14px;line-height:1;cursor:pointer;
+    font-size:13px;line-height:1;cursor:pointer;
   }
   .fs-close-btn:hover{background:rgba(255,255,255,.12);}
   .fullscreen-body{flex:1;overflow:auto;padding:16px;-webkit-overflow-scrolling:touch;position:relative;}
@@ -1091,12 +1110,20 @@
      rather than stacked, which is most of the height saving. */
   .rpt-actions{margin-bottom:8px;}
   .rpt-actions-top{display:flex;justify-content:flex-end;}
-  .rpt-close-btn{
+  /* The one close icon used everywhere: reports, generator cards, modals,
+     Dashboard shortcut panels, the CTC Calculator, the top bar. One small ×
+     circle, top-right of whatever it belongs to, same size and shape
+     wherever it appears — no more "✕ Close" text button in one place and a
+     bare "Close" in another. .x-close is the same rule under a second,
+     more general name so non-report contexts don't read oddly as
+     "rpt-close-btn"; keeping both selectors on one rule means they can
+     never drift apart in size or style. */
+  .rpt-close-btn, .x-close{
     width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
     border:1px solid var(--line);border-radius:50%;background:var(--paper);color:var(--muted);
     font-size:13px;line-height:1;cursor:pointer;
   }
-  .rpt-close-btn:hover{background:#00000008;color:var(--navy);border-color:var(--navy);}
+  .rpt-close-btn:hover, .x-close:hover{background:#00000008;color:var(--navy);border-color:var(--navy);}
   .rpt-actions-row{
     display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;padding-top:6px;border-top:1px solid var(--line);
   }
@@ -1169,9 +1196,6 @@
   .gen-card p.gen-card-stat{flex:0 0 auto;font-size:11px;font-weight:700;color:var(--navy);margin-top:-4px;}
   .gen-card p.gen-card-stat:empty{display:none;}
   .gen-card .btn{margin-top:2px;pointer-events:none;}
-  .gen-back-btn{display:inline-flex;align-items:center;gap:6px;background:none;border:none;color:var(--navy);
-    font-size:13px;font-weight:700;cursor:pointer;padding:0;margin-bottom:14px;font-family:inherit;}
-  .gen-back-btn:hover{color:var(--amber-dark);}
 
   .letter-paper{display:none;}
   #letterOutput.show .letter-paper{display:block;margin:18px 0;font-size:13.5px;line-height:1.7;white-space:pre-wrap;}
@@ -1669,6 +1693,7 @@
             <strong id="hrPageTitle" style="font-size:15px;color:var(--navy);">Dashboard</strong>
           </div>
           <div class="tb-right">
+            <button id="hrCloseBtn" class="x-close hidden" onclick="kmtBack()" title="Close" aria-label="Close">✕</button>
             <span class="hide-sm" id="hrTopDate"></span>
             <button class="icon-btn" onclick="hrNavigate('activity')" title="Activity log — every action with its date and time" aria-label="Activity log">🕘</button>
             <div class="user-menu">
@@ -1687,9 +1712,6 @@
             </div>
           </div>
         </header>
-        <div id="hrCloseBar" class="hidden">
-          <button class="btn ghost full" onclick="kmtBack()">✕ Close</button>
-        </div>
         <div id="gsOverlay" class="gs-overlay hidden" onclick="if(event.target===this)closeGlobalSearch()">
           <div class="gs-panel" role="dialog" aria-modal="true" aria-label="Search">
             <input id="gsInput" class="gs-input" type="search" autocomplete="off"
@@ -1943,7 +1965,6 @@
         </div>
         <div id="dashSubLoans" class="hidden">
           <section class="block">
-            <div class="row-inline" style="margin-bottom:10px;"><button class="btn ghost full" onclick="hrNavigate('dashboard')">✕ Close</button></div>
             <h2 style="margin:0 0 4px;">Employee Loan &amp; EMI</h2>
             <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">A shortcut for the Loan &amp; EMI section already on the employee's own record — this saves straight to it, so the Salary Sheet, PF, ESI and every report pick it up exactly as if it had been entered in Employee Master. Nothing else on the record is touched.</p>
             <label class="field">Employee</label>
@@ -1969,7 +1990,6 @@
         </div>
         <div id="dashSubAdvpay" class="hidden">
           <section class="block">
-            <div class="row-inline" style="margin-bottom:10px;"><button class="btn ghost full" onclick="hrNavigate('dashboard')">✕ Close</button></div>
             <h2 style="margin:0 0 4px;">Salary Advance Payment</h2>
             <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">A shortcut for the Salary Advance Payment section already on the employee's own record — this saves straight to it. Add one entry per month; each month's Salary Sheet only ever recovers what is entered here for that exact month.</p>
             <label class="field">Employee</label>
@@ -2152,7 +2172,7 @@
         </div>
 
         <div id="rptSecAttendance" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">Attendance</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The same attendance the Attendance Sheet records for this employee — Present, Absent, EL/SL/LP and half-days — one employee's calendar at a time. Sundays and declared holidays are excluded from the Absent count automatically.</p>
@@ -2179,7 +2199,7 @@
         </div>
 
         <div id="rptSecHolidays" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">Holidays</h2>
           <div class="row-inline">
@@ -2200,7 +2220,7 @@
         </div>
 
         <div id="rptSecMonthlyLeave" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">Monthly Leave Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Every employee's leave days (EL + SL + LP, half-days counted as 0.5) broken down month by month across the financial year — April through March — so you can see each person's full-year leave pattern at a glance.</p>
@@ -2214,7 +2234,7 @@
         </div>
 
         <div id="rptSecMonthlyLeaveDetail" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">Monthly Leave Detail Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Every employee's late coming, EL/PL, SL, half days and short leaves for one month, side by side. Whoever has the highest count in a column is shown in red, so it's easy to see at a glance who to have a word with.</p>
@@ -2229,7 +2249,7 @@
         </div>
 
         <div id="rptSecYearlyLeaveDetail" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">Yearly Leave Detail Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The same breakdown — late coming, EL/PL, SL, half days, short leaves — one table per category, month by month across the financial year with a Total column. The highest count in each column is shown in red.</p>
@@ -2243,7 +2263,7 @@
         </div>
 
         <div id="rptSecPF" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">PF Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">PF deducted per employee for the month, pulled from the Salary Sheet. Apprentices, R.S.IT Solution and Contractors don't have PF, so they're excluded here.</p>
@@ -2258,7 +2278,7 @@
         </div>
 
         <div id="rptSecESI" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">ESI Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">ESI deducted per employee for the month, pulled from the Salary Sheet. Apprentices, R.S.IT Solution and Contractors don't have ESI, so they're excluded here.</p>
@@ -2273,7 +2293,7 @@
         </div>
 
         <div id="rptSecPT" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">PT Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Professional Tax deducted per employee for the month, pulled from the Salary Sheet. Apprentices and Contractors don't have PT — Managerial, Seniors, Junior Engineers, and R.S.IT Solution do, when Gross exceeds ₹12,000.</p>
@@ -2288,7 +2308,7 @@
         </div>
 
         <div id="rptSecApprenticeSalary" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">Apprentice Salary Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Full salary breakdown for employees under the Apprentices heading only, for the month you pick — pulled from the Salary Sheet.</p>
@@ -2303,7 +2323,7 @@
         </div>
 
         <div id="rptSecFinalSalary" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">Final Salary Sheet for Accountant</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The payment list: every employee grouped by salary heading, sorted by bank within each heading, with account number and the final amount payable after all deductions. Built for handing to the bank — one block per heading, subtotalled, with a grand total at the end.</p>
@@ -2318,7 +2338,7 @@
         </div>
 
         <div id="rptSecDiwaliBonus" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">Diwali Bonus Payment Sheet</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The payment list for the bonus, in the same shape as the Final Salary Sheet — grouped by salary heading, sorted by bank, with account number and the amount payable. An employee appears once they are marked eligible <em>and</em> have a Diwali bonus amount set on their record; anyone eligible without one is named above the table rather than left off quietly. No PF, ESI, Professional Tax, advance, loan or retention is deducted, and leave taken during the year does not reduce it.</p>
@@ -2332,7 +2352,7 @@
         </div>
 
         <div id="rptSecConsultant" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">Consultant Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The monthly attendance sheet in the exact column format the consultant asks for — one row per employee, built automatically from Employee Master and the month's attendance. Pick any month; export the CSV and send it on.</p>
@@ -2347,7 +2367,7 @@
         </div>
 
         <div id="rptSecConsultantSummary" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">Consultant Final Summary Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">PF Account No 1/2/10/21/22 and the ESI summary, totalled for the month across R.S. Infotech's own payroll headings — the same figures the consultant's filing sheet totals, pulled from Employee Master and this month's attendance.</p>
@@ -2365,7 +2385,7 @@
         </div>
 
         <div id="rptSecSalaryCompare" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">Month-wise Salary Comparison</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Last month's total salary against the month you pick, and exactly what explains the gap — each new joiner that added to it, each leaver that took away from it, and anyone whose own salary moved. The reasons add up to the difference.</p>
@@ -2380,7 +2400,7 @@
         </div>
 
         <div id="rptSecOvertime" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">Overtime Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Applies to Field Engineers per the overtime policy. Log hours HR has been informed of (by the following day, per policy) — this is manual since overtime is reported over WhatsApp, not through this app.</p>
@@ -2424,7 +2444,7 @@
         </div>
 
         <div id="rptSecEmployeeDetail" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">Employee Wise Detail Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">One consolidated profile for a single employee — pick anyone, including those who have left.</p>
@@ -2441,7 +2461,7 @@
         <div id="reportCardsBox"></div>
 
         <div id="rptSecLeaveRollover" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">Leave Balance Next Year Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">SL and EL together, for the financial year you pick — SL resets to the yearly allowance for each employee's type; EL is earned at 1 day per 25 days present (from the Attendance Sheet), unchanged from how the EL Calculation Sheet always worked. Resident Engineers are excluded from both; Work From Home and non-R.S. Infotech headings are excluded from SL only, shown as "—" in the SL columns. Run once, in April.</p>
@@ -2513,7 +2533,7 @@
         </div>
 
         <div id="genSecRoleReports" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Generator</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">Employee Role Reports</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A branded A4 report built from one employee's job profile, responsibilities, designation and department — the measures, risks and recommendations change with the role. Fill in Job profile and Key responsibilities in Employee Master first; without them the report falls back to designation and department and says so.</p>
@@ -2529,7 +2549,7 @@
         </div>
 
         <div id="genSecLetterhead" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Generator</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">Company letterhead</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Printed in the header and footer of every generated report. Anything left blank is left off the report rather than filled with a placeholder.</p>
@@ -2562,7 +2582,7 @@
         </div>
 
         <div id="genSecHolidayList" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Generator</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">Holiday List (to share with engineers)</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A printable holiday list with the company logo, for a chosen financial year (April–March) — built from the Holidays list above.</p>
@@ -2578,7 +2598,7 @@
         </div>
 
         <div id="genSecLeaveEncashment" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Generator</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">Leave Encashment Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">What is owed for unused privilege leave at the year end, as at 31 March. Grouped by salary heading and sorted by bank with account numbers, so it can be paid the same way as the salary and the bonus. Resident Engineers are outside the EL scheme and do not appear.</p>
@@ -2592,7 +2612,7 @@
         </div>
 
         <div id="genSecChecklists" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Generator</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">Checklists</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Joining checklist, items issued at joining, and the exit checklist — same lists that were under "Choose a letter" before, kept together here since they're not letters.</p>
@@ -2602,7 +2622,7 @@
         </div>
 
         <div id="genSecLetters" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Generator</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <section class="block">
           <h2 style="margin:0 0 4px;">Generate Letter</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 16px;">Choose a letter, select employee and generate your document.</p>
@@ -2766,7 +2786,7 @@
         </div>
         </div>
         <div id="genSecOfficeDocuments" class="hidden">
-        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Generator</button>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
 
         <section class="block">
           <h2 style="margin:0 0 4px;">1. Payroll Documents (monthly)</h2>
@@ -2892,9 +2912,8 @@
       </div>
 
       <div id="genSecCtcCalculator" class="hidden">
-      <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Generator</button>
+      <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
       <section class="block">
-        <div class="row-inline" style="margin-bottom:10px;"><button class="btn ghost full" onclick="kmtBack()">✕ Close</button></div>
         <h2 style="margin:0 0 4px;">CTC Calculator</h2>
         <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Check the exact CTC or take-home salary before appointing anyone — enter either one and the other is worked out from it, using the same Salary Heading split and PF/ESI/PT rules the Salary Sheet uses. Not tied to any employee record; nothing here is saved.</p>
 
@@ -7396,14 +7415,13 @@ function cancelAttendanceSheetView(){
   if(!attendanceDirtyCount()){ finishCloseAttendanceSheet(); return; }
   document.getElementById('closeSheetModalRoot').innerHTML = `<div class="modal-overlay" style="z-index:var(--z-modal-top);" onclick="if(event.target===this)dismissCloseAttendanceModal()">
     <div class="modal-box">
+      <div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="dismissCloseAttendanceModal()" title="Cancel" aria-label="Cancel">✕</button></div>
       <h2>Close Attendance Sheet</h2>
       <p class="hint">${attendanceDirtyCount()} attendance change(s) have not been saved. Save them before closing?</p>
       <div class="modal-actions" style="flex-direction:column;align-items:stretch;">
         <button class="btn full" onclick="closeAttendanceSheetAction('save')">Save attendance, then close</button>
         <div style="height:8px"></div>
         <button class="btn ghost full" onclick="closeAttendanceSheetAction('discard')">Discard changes and close</button>
-        <div style="height:8px"></div>
-        <button class="btn ghost full" onclick="dismissCloseAttendanceModal()" title="Cancel" aria-label="Cancel">✕</button>
       </div>
     </div>
   </div>`;
@@ -7517,6 +7535,7 @@ async function openDayTimeEditor(employeeId, dateStr){
   document.getElementById('checklistModalRoot').innerHTML = `
     <div class="modal-overlay" onclick="if(event.target===this)closeDayTimeEditor()">
       <div class="modal-box">
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="closeDayTimeEditor()" title="Close" aria-label="Close">✕</button></div>
         <h2 style="margin:0 0 4px;">${escapeHtml(emp.name)}</h2>
         <p class="hint" style="margin:0 0 14px;">${escapeHtml(dateStr)} · shift ${minToHHMM(LEAVE_POLICY.shift.startMin)} to ${minToHHMM(LEAVE_POLICY.shift.endMin)}</p>
         <label class="field">Time in</label>
@@ -8076,14 +8095,13 @@ function closeFullscreenHeaderButton(){
 function confirmCloseSalarySheet(){
   document.getElementById('closeSheetModalRoot').innerHTML = `<div class="modal-overlay" style="z-index:var(--z-modal-top);" onclick="if(event.target===this)dismissCloseSheetModal()">
     <div class="modal-box">
+      <div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="dismissCloseSheetModal()" title="Cancel" aria-label="Cancel">✕</button></div>
       <h2>Close Salary Sheet</h2>
       <p class="hint">Save this Salary Sheet as a PDF before closing?</p>
       <div class="modal-actions" style="flex-direction:column;align-items:stretch;">
         <button class="btn full" onclick="closeSalarySheetAction(true)">Save as PDF, then close</button>
         <div style="height:8px"></div>
         <button class="btn ghost full" onclick="closeSalarySheetAction(false)">Close without saving</button>
-        <div style="height:8px"></div>
-        <button class="btn ghost full" onclick="dismissCloseSheetModal()" title="Cancel" aria-label="Cancel">✕</button>
       </div>
     </div>
   </div>`;
@@ -9279,10 +9297,9 @@ async function renderSalarySheet(){
       }).join('')}</tr>${bodyRows}</table>`;
   // Laptop/desktop gets a small icon-only close, top-right, out of the way
   // of the data it sits above — the full-width "✕ Close" button ate a whole
-  // row for one tap that is used once per sheet. Mobile AND tablet keep the
-  // original full-width button unchanged — a small icon is a worse touch
-  // target on mobile, and this whole "give the data more room" set of
-  // changes was only ever asked for on laptop/desktop.
+  // row for one tap that is used once per sheet. Now used at every viewport,
+  // not just desktop's decluttered view — one close icon, same size and
+  // position, everywhere in the app, mobile included.
   // rpt-actions-top on the desktop wrapper: same reasoning as reportActionBar's
   // own use of that class — this close icon is redundant once the sheet is
   // sitting inside the full-screen viewer, which already has the one close
@@ -9296,9 +9313,7 @@ async function renderSalarySheet(){
   // used to get, since this sheet was deliberately the one exception that
   // fell through to a quick, unprompted exit instead (see that function's
   // comment). This restores that.
-  const closeBtnHtml = isSheetDeclutterView()
-    ? `<div class="row-inline rpt-actions-top" style="margin-bottom:6px;"><button class="rpt-close-btn" data-no-fs-delegate onclick="confirmCloseSalarySheet()" title="Close" aria-label="Close">✕</button></div>`
-    : `<div class="row-inline" style="margin-bottom:10px;"><button class="btn ghost full" onclick="confirmCloseSalarySheet()">✕ Close</button></div>`;
+  const closeBtnHtml = `<div class="row-inline rpt-actions-top" style="margin-bottom:6px;"><button class="rpt-close-btn" data-no-fs-delegate onclick="confirmCloseSalarySheet()" title="Close" aria-label="Close">✕</button></div>`;
   box.innerHTML = `${closeBtnHtml}
     <div class="sal-sheet-wrap print-isolate" id="salaryPrintArea">
       ${reportLogoHeader('Salary Sheet — ' + monthLabel(monthVal))}
@@ -11734,6 +11749,43 @@ function kmtActiveCard(){
   return null;
 }
 
+// Whether the current screen already offers its own way to close — a
+// report/generator card's own ×, or the Salary/Attendance Sheet's own
+// unsaved-changes-aware close (reportActionBar's .rpt-close-btn, wired to
+// confirmCloseSalarySheet/cancelAttendanceSheetView rather than a plain
+// kmtBack() once one of those is loaded). The top-bar × only shows when
+// nothing on screen already has one, so a screen never carries two.
+// offsetParent is null for a display:none (or display:none-ancestor)
+// element — cheaper than a layout-forcing getBoundingClientRect and just as
+// reliable here.
+function hrContentHasOwnCloseControl(){
+  // querySelector alone would only ever look at the first match in DOM
+  // order — with 26 report/generator cards each carrying their own (mostly
+  // hidden) ×, that first match is almost never the one card that's actually
+  // open. Every match has to be checked for the one that's actually visible.
+  const els = document.querySelectorAll('#hrContent .rpt-close-btn, #hrContent .x-close');
+  for(const el of els){ if(el.offsetParent !== null) return true; }
+  return false;
+}
+function updateHrCloseBtnVisibility(){
+  const btn = document.getElementById('hrCloseBtn');
+  if(!btn) return;
+  btn.classList.toggle('hidden', hrRoute === 'dashboard' || hrContentHasOwnCloseControl());
+}
+// Card open/close, a sheet loading or clearing, a report generating — all of
+// it already funnels through re-rendering some part of #hrContent, so
+// watching #hrContent itself catches every case this needs without a hand-
+// maintained list of "everywhere a close control might appear or vanish"
+// that a future report/card would silently fall outside of.
+let hrCloseBtnObserver = null;
+function armHrCloseBtnObserver(){
+  if(hrCloseBtnObserver) return;
+  const content = document.getElementById('hrContent');
+  if(!content) return;
+  hrCloseBtnObserver = new MutationObserver(updateHrCloseBtnVisibility);
+  hrCloseBtnObserver.observe(content, { childList:true, subtree:true, attributes:true, attributeFilter:['class'] });
+}
+
 // A snapshot of exactly what's on screen right now — the route, the open
 // card if any, whether fullscreen is active and for which box, scroll
 // position, and a generic id→value map of every select/input/textarea
@@ -11922,13 +11974,17 @@ async function hrNavigate(route, opts){
     // A breadcrumb rather than a bare heading: the Dashboard is always one tap
     // away and visibly the level above, which is what people were missing when
     // the sidebar is collapsed.
+    // "Dashboard ›" hides on a narrow phone (hide-sm) — the 🏠 icon right
+    // next to it already goes there in one tap, and the top bar has no room
+    // to spare for both once the close × joined it; the current page name
+    // stays the one thing always shown.
     title.innerHTML = route === 'dashboard'
       ? '<span class="crumb-here">Dashboard</span>'
-      : '<button class="crumb-up" onclick="hrNavigate(\'dashboard\')">Dashboard</button>' +
-        '<span class="crumb-sep">›</span><span class="crumb-here">' + escapeHtml(cfg.label) + '</span>';
+      : '<button class="crumb-up hide-sm" onclick="hrNavigate(\'dashboard\')">Dashboard</button>' +
+        '<span class="crumb-sep hide-sm">›</span><span class="crumb-here">' + escapeHtml(cfg.label) + '</span>';
   }
-  const closeBar = document.getElementById('hrCloseBar');
-  if(closeBar) closeBar.classList.toggle('hidden', route === 'dashboard');
+  armHrCloseBtnObserver();
+  updateHrCloseBtnVisibility();
   noteRecentRoute(route);
   renderHrSideNav();
   toggleHrNav(false);
@@ -13128,7 +13184,7 @@ function employeeModalHtml(emp){
     <div class="modal-box">
       <div class="modal-head">
         <h2>${editingEmployeeId ? 'Edit employee' : 'Add employee'}</h2>
-        <button class="modal-x" type="button" title="Close" aria-label="Close" onclick="closeEmployeeModal()">×</button>
+        <button class="modal-x" type="button" title="Close" aria-label="Close" onclick="closeEmployeeModal()">✕</button>
       </div>
       <p class="hint">This information is stored once and auto-fills letters and payslips for this employee — no need to retype it each time. Close it at any point with the × above — anything typed is kept on this device and offered back next time.</p>
 
@@ -13698,7 +13754,6 @@ function employeeModalHtml(emp){
 
       <div class="msg" id="empSaveMsg"></div>
       <div class="modal-actions">
-        <button class="btn ghost" onclick="closeEmployeeModal()">Cancel</button>
         <button class="btn" onclick="saveEmployeeForm()">Save employee</button>
         <span id="empDraftNote" class="draft-note"></span>
       </div>
@@ -15723,6 +15778,7 @@ async function openIncrementModal(id){
   const cur = currentRatePay(emp);
   document.getElementById('incrementModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeIncrementModal()">
     <div class="modal-box">
+      <div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="closeIncrementModal()" title="Close" aria-label="Close">✕</button></div>
       <h2>Record Increment — ${escapeHtml(emp.name || emp.id)}</h2>
       <p class="hint">Adds a new Rate of Pay effective from the date you choose. Every report dated before that day keeps showing ₹${fmtMoney(cur.ratePay)} — nothing already generated moves.</p>
       <label class="field">New Rate of Pay (monthly)</label>
@@ -15737,7 +15793,6 @@ async function openIncrementModal(id){
       </select>
       <p id="incMsg" class="hint" style="min-height:18px;"></p>
       <div class="modal-actions">
-        <button class="btn ghost" onclick="closeIncrementModal()">Cancel</button>
         <button class="btn" onclick="withBusy(this,'Saving…',()=>saveIncrement('${id}'))">Save increment</button>
       </div>
     </div>
@@ -16352,11 +16407,12 @@ function openLeftEmployeesModal(){
   getEmployees().then(employees => {
     const left = employees.filter(e => e.employmentStatus === 'left');
     if(!left.length){
-      document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeLeftEmployeesModal()"><div class="modal-box"><h2>Left employees</h2><p class="hint">No employees marked as left yet.</p><div class="modal-actions"><button class="btn full" onclick="closeLeftEmployeesModal()">Close</button></div></div></div>`;
+      document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeLeftEmployeesModal()"><div class="modal-box"><div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="closeLeftEmployeesModal()" title="Close" aria-label="Close">✕</button></div><h2>Left employees</h2><p class="hint">No employees marked as left yet.</p></div></div>`;
       return;
     }
     document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeLeftEmployeesModal()">
       <div class="modal-box">
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="closeLeftEmployeesModal()" title="Close" aria-label="Close">✕</button></div>
         <h2>Left employees</h2>
         <p class="hint">Their full record is kept on file — view details, reactivate if they rejoin, or delete permanently once there is no further reason to keep them on file. A complete backup is saved to Drive before a delete goes through.</p>
         ${left.map(e => `<div class="emp-row">
@@ -16369,7 +16425,6 @@ function openLeftEmployeesModal(){
                     title="Saves a complete backup to Drive, then permanently removes the record, attendance, tracking login and history from the app.">Delete</button>
           </div>
         </div>`).join('')}
-        <div class="modal-actions"><button class="btn ghost full" onclick="closeLeftEmployeesModal()">Close</button></div>
       </div>
     </div>`;
   });
@@ -16461,7 +16516,7 @@ async function renderReportsTab(){
       ? `withBusy(this,'Loading…',()=>viewReport('${r.key}','${r.label}',getMonthYearValue('report${capKey}MonthSel','report${capKey}YearSel')))`
       : `withBusy(this,'Loading…',()=>viewReport('${r.key}','${r.label}',(document.getElementById('reportMonthSel_${r.key}')||{}).value||''))`;
     return `<div id="rptSecReport_${r.key}" class="hidden">
-    <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
+    <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
     <section class="block">
       <h2 style="margin:0 0 4px;">${r.label}</h2>
       <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">${cardSubtitle(r)}</p>
@@ -18909,15 +18964,15 @@ function openChecklistPicker(type){
   currentChecklistType = type;
   getEmployees().then(employees => {
     if(!employees.length){
-      document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeChecklistModal()"><div class="modal-box"><h2>${type==='joining'?'Joining':'Exit'} checklist</h2><p class="hint">Add employees first in Employee Master.</p><div class="modal-actions"><button class="btn full" onclick="closeChecklistModal()">Close</button></div></div></div>`;
+      document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeChecklistModal()"><div class="modal-box"><div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="closeChecklistModal()" title="Close" aria-label="Close">✕</button></div><h2>${type==='joining'?'Joining':'Exit'} checklist</h2><p class="hint">Add employees first in Employee Master.</p></div></div>`;
       return;
     }
     document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeChecklistModal()">
       <div class="modal-box">
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="closeChecklistModal()" title="Close" aria-label="Close">✕</button></div>
         <h2>${type==='joining'?'Joining':'Exit'} checklist</h2>
         <p class="hint">Choose an employee to view or update their checklist.</p>
         ${employees.map(e => `<div class="emp-row" style="cursor:pointer;" onclick="openChecklistFor('${e.id}')"><div class="head"><strong>${escapeHtml(e.name)}</strong><span class="id">${e.id}</span></div></div>`).join('')}
-        <div class="modal-actions"><button class="btn ghost full" onclick="closeChecklistModal()">Close</button></div>
       </div>
     </div>`;
   });
@@ -18929,9 +18984,9 @@ async function openChecklistFor(empId){
   const state = (emp.checklists && emp.checklists[currentChecklistType]) || {};
   document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeChecklistModal()">
     <div class="modal-box">
+      <div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="closeChecklistModal()" title="Close" aria-label="Close">✕</button></div>
       <h2>${escapeHtml(emp.name)} — ${currentChecklistType === 'joining' ? 'Joining' : 'Exit'} checklist</h2>
       ${items.map((label,i) => `<div class="checklist-row"><input type="checkbox" id="chk_${i}" ${state[label] ? 'checked' : ''} onchange="toggleChecklistItem('${empId}','${label.replace(/'/g,"\\'")}',this.checked)"><label for="chk_${i}">${label}</label></div>`).join('')}
-      <div class="modal-actions"><button class="btn full" onclick="closeChecklistModal()">Done</button></div>
     </div>
   </div>`;
 }
