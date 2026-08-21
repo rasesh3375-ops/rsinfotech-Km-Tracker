@@ -2,7 +2,21 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- viewport-fit=cover: apple-mobile-web-app-status-bar-style=black-translucent
+     (below) already makes the status bar translucent and lets the app's real
+     rendering canvas run edge-to-edge behind it in standalone/home-screen
+     mode — but without viewport-fit=cover, CSS vh/dvh units can be computed
+     against a shorter reference frame than that true canvas, so a
+     position:fixed;height:100dvh overlay (any modal) ends up short of the
+     actual physical bottom of the screen while ordinary in-flow content
+     fills the real canvas correctly, letting it show through in the gap.
+     This is what was actually behind the repeated Add Employee modal
+     background-bleed-through reports — not a keyboard-timing or scroll-
+     compositing issue, both tried first. env(safe-area-inset-*) padding is
+     added everywhere a bar now sits at a true physical edge because of this
+     (see the safe-area comments at each one) so nothing new ends up
+     rendering under the notch/status bar/home indicator instead. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>R.S. Infotech — KM Tracker</title>
 
 <!-- Favicons (Mac / Windows / Linux desktop browsers) -->
@@ -135,6 +149,17 @@
     background:var(--cream);
     color:var(--navy);
     min-height:100vh;
+    /* viewport-fit=cover (see the <meta name="viewport"> comment) makes the
+       page run truly edge-to-edge in standalone/home-screen mode, which is
+       what let a fixed modal overlay's 100dvh height finally match the real
+       screen instead of falling short — but it also means ordinary in-flow
+       content (the engineer screen's header.top, the HR topbar) now starts
+       right at the physical top edge, under the notch/status bar, unless
+       padded away from it explicitly. env()'s second argument is the
+       fallback for a browser without safe-area support (or a non-notched
+       device, where it's just 0), so this is a no-op everywhere but the
+       one case it's for. */
+    padding-top: env(safe-area-inset-top, 0px);
   }
   .wrap{max-width:640px;margin:0 auto;padding:20px 16px 60px;}
   header.top{
@@ -323,8 +348,13 @@
      alone lets the x-axis compute to auto too, so a nav label ever a pixel
      wider than the fixed 242px would let the whole sidebar drag sideways
      rather than just wrapping or being clipped in place. */
+  /* padding-top adds the safe-area inset on top of the normal 18px — on
+     mobile this becomes position:fixed;top:0 (below), which after
+     viewport-fit=cover sits right against the physical top edge; on desktop
+     env() is just 0, so this is a no-op there. */
   #hrSidebar{width:242px;flex-shrink:0;background:var(--paper);border-right:1px solid var(--line);
-    min-height:100vh;position:sticky;top:0;display:flex;flex-direction:column;padding:18px 12px;overflow-y:auto;overflow-x:hidden;}
+    min-height:100vh;position:sticky;top:0;display:flex;flex-direction:column;
+    padding:calc(18px + env(safe-area-inset-top, 0px)) 12px 18px;overflow-y:auto;overflow-x:hidden;}
   #hrSidebar .side-title{font-size:16px;font-weight:700;color:var(--navy);padding:4px 10px 14px;}
   .side-link{display:flex;align-items:center;gap:11px;width:100%;text-align:left;border:none;
     background:transparent;color:var(--muted);font-size:13.5px;font-weight:600;padding:10px 12px;
@@ -812,8 +842,14 @@
      overlay, since they're the two elements actually reported showing
      background content through them. */
   .modal-head{position:sticky;top:0;z-index:3;display:flex;align-items:center;gap:12px;
-    margin:-22px -22px 14px;padding:16px 22px 12px;background:var(--paper);
+    margin:-22px -22px 14px;padding:calc(16px + env(safe-area-inset-top, 0px)) 22px 12px;background:var(--paper);
     border-radius:14px 14px 0 0;border-bottom:1px solid var(--line);
+    /* Add Employee opens truly edge-to-edge (#employeeModalOverlay zeroes
+       out the overlay's own padding), so this sticky header now sits right
+       at the physical top edge under viewport-fit=cover — the extra
+       safe-area padding keeps it clear of the notch/status bar there. Other
+       modals keep .modal-overlay's own 20px padding on top of this, which
+       is harmless, just a little extra breathing room. */
     transform:translateZ(0);backface-visibility:hidden;}
   .modal-head h2{margin:0;flex:1;}
   /* Same circle-icon rule as .rpt-close-btn/.x-close (see there) — a bare
@@ -1016,7 +1052,10 @@
   /* height:100dvh — see the .modal-overlay comment above; same reasoning,
      same fix, this is the other fixed full-viewport overlay in the app. */
   #fullscreenSheetRoot{position:fixed;inset:0;height:100vh;height:100dvh;background:var(--paper);z-index:var(--z-fullscreen);display:flex;flex-direction:column;}
-  .fullscreen-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line);background:var(--navy);color:#fff;flex-shrink:0;}
+  /* padding-top: env(safe-area-inset-top) — #fullscreenSheetRoot is
+     position:fixed;inset:0, same as .modal-overlay, so this header sits at
+     the true top edge after viewport-fit=cover. */
+  .fullscreen-header{display:flex;align-items:center;justify-content:space-between;padding:calc(14px + env(safe-area-inset-top, 0px)) 16px 14px;border-bottom:1px solid var(--line);background:var(--navy);color:#fff;flex-shrink:0;}
   .fullscreen-header strong{font-size:15px;}
   /* Icon-only, not "✕ Close" — a report already carries its own close button
      (reportActionBar's .rpt-close-btn) which this delegates to, so the label
@@ -1198,9 +1237,11 @@
   /* Save and Cancel pinned to the foot of the screen for the same reason —
      on a form this long they were a scroll away from wherever you were. */
   .modal-actions{display:flex;gap:10px;margin-top:18px;position:sticky;bottom:0;z-index:3;
-    background:var(--paper);padding:14px 22px;margin-left:-22px;margin-right:-22px;
+    background:var(--paper);padding:14px 22px calc(14px + env(safe-area-inset-bottom, 0px));margin-left:-22px;margin-right:-22px;
     margin-bottom:-22px;border-top:1px solid var(--line);border-radius:0 0 14px 14px;
     flex-wrap:wrap;
+    /* Same reasoning as .modal-head's safe-area padding, at the bottom edge
+       and the home indicator instead — see there. */
     /* Own GPU compositing layer — see the .modal-head comment above for why.
        This is the specific element every bleed-through report has shown
        background content appearing under. */
@@ -3121,7 +3162,7 @@ function showUpdateAvailableBanner_(){
   bar.id = 'kmtUpdateBanner';
   bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99999;'
     + 'background:var(--navy);color:#fff;text-align:center;font:600 13.5px -apple-system,sans-serif;'
-    + 'padding:12px 16px;display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;'
+    + 'padding:12px 16px calc(12px + env(safe-area-inset-bottom, 0px));display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;'
     + 'box-shadow:0 -4px 16px rgba(0,0,0,.18);';
   bar.innerHTML = '<span>A newer version of this app is available.</span>'
     + '<button type="button" style="background:var(--amber);color:var(--navy);border:none;border-radius:8px;'
@@ -3315,9 +3356,13 @@ if(IS_STAGING_BACKEND){
   stagingBar.textContent = '⚠ STAGING BACKEND — this is test data, not the live payroll sheet';
   stagingBar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;'
     + 'background:#B23A32;color:#fff;text-align:center;font:700 12.5px -apple-system,sans-serif;'
-    + 'padding:7px 12px;letter-spacing:.2px;';
+    + 'padding:calc(7px + env(safe-area-inset-top, 0px)) 12px 7px;letter-spacing:.2px;';
   document.body.prepend(stagingBar);
-  document.body.style.paddingTop = '32px';
+  // calc() on top of the body's own safe-area padding-top (see the body CSS
+  // rule), not a bare 32px replacing it — an inline style here would
+  // otherwise win over that stylesheet rule and undo it for as long as the
+  // staging banner is showing.
+  document.body.style.paddingTop = 'calc(32px + env(safe-area-inset-top, 0px))';
 }
 
 // Session token from server-side login (see serverLogin below). Required by
