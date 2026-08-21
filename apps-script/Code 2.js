@@ -498,7 +498,14 @@ function engineerMayRead_(key, username) {
 
 function engineerMayWrite_(key, username) {
   if (!key) return false;
-  return engineerScopedKeys_(username).indexOf(key) !== -1;
+  if (engineerScopedKeys_(username).indexOf(key) !== -1) return true;
+  // Check-in/checkout mark the engineer's own attendance day. Read access for
+  // this same key pattern already exists just above in engineerMayRead_ —
+  // write was missing entirely, so every check-in's attendance write came
+  // back forbidden and was silently dropped by safeSet's error-swallowing.
+  var empId = employeeIdForTrackingUser_(username);
+  if (empId && (key === 'attendance:' + empId || key.indexOf('attendance:' + empId + ':') === 0)) return true;
+  return false;
 }
 
 function forbidden_() {

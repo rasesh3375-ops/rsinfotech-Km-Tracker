@@ -3675,8 +3675,18 @@ async function getTrips(name){
   const v = await safeGet('trips:' + name, true);
   return v ? JSON.parse(v) : [];
 }
+// Same reason as saveRateVal/saveGeofences: safeSet swallows the backend's
+// success/failure, which let addManualTrip()/saveTripWithCompany() tell an
+// engineer "Trip added"/"Trip saved" — the figure their KM reimbursement is
+// based on — even when the write never reached the server.
 async function saveTrips(name, arr){
-  await safeSet('trips:' + name, JSON.stringify(arr), true);
+  const json = JSON.stringify(arr);
+  localStorage.setItem('kmt_shared_trips:' + name, json);
+  invalidateDashboardSnapshot();
+  invalidateSharedRead('trips:' + name);
+  const ok = await remoteSet('trips:' + name, json);
+  invalidateSharedRead('trips:' + name);
+  return ok;
 }
 async function getCheckins(name){
   const v = await safeGet('checkins:' + name, true);
@@ -4010,15 +4020,34 @@ async function getRate(){
   const v = await safeGet('rate_per_km', true);
   return v ? parseFloat(v) : 0;
 }
+// safeSet swallows the backend's success/failure and always reports nothing,
+// which used to let saveRate() tell HR "Rate saved" even when the write never
+// reached the server — a payroll-adjacent number (every engineer's KM
+// reimbursement) with no visible sign anything was wrong. remoteSet reports
+// whether the backend actually confirmed the write; safeSet cannot.
 async function saveRateVal(v){
-  await safeSet('rate_per_km', String(v), true);
+  localStorage.setItem('kmt_shared_rate_per_km', String(v));
+  invalidateDashboardSnapshot();
+  invalidateSharedRead('rate_per_km');
+  const ok = await remoteSet('rate_per_km', String(v));
+  invalidateSharedRead('rate_per_km');
+  return ok;
 }
 async function getGeofences(){
   const v = await safeGet('geofences', true);
   return v ? JSON.parse(v) : [];
 }
+// Same reason as saveRateVal: safeSet swallows the backend's success/failure,
+// which used to let addGeofenceZone()/deleteGeofenceZone() report "Zone
+// added"/removed even when the write never reached the server.
 async function saveGeofences(list){
-  await safeSet('geofences', JSON.stringify(list), true);
+  const json = JSON.stringify(list);
+  localStorage.setItem('kmt_shared_geofences', json);
+  invalidateDashboardSnapshot();
+  invalidateSharedRead('geofences');
+  const ok = await remoteSet('geofences', json);
+  invalidateSharedRead('geofences');
+  return ok;
 }
 async function getHolidays(){
   const v = await safeGet('holidays', true);
@@ -5003,6 +5032,14 @@ async function submitEngLeaveRequest(){
   msg.classList.remove('error');
   const emp = await findEmployeeByTrackingUsername(engineerName);
   if(!emp){ msg.textContent = 'Your employee record could not be read — ask HR to check your login is linked.'; msg.classList.add('error'); return; }
+  // Resident Engineers are outside the leave/short-leave/late-coming/overtime
+  // rules entirely (see CLAUDE.md) — renderEngLeave() already hides the
+  // "apply" button for them, this is the same rule enforced again here in
+  // case the form is still reachable (e.g. a stale cached page).
+  if(emp.employeeType === 'resident'){
+    msg.textContent = 'Resident Engineers are outside the EL/SL/late-coming scheme — apply through your site in-charge.';
+    msg.classList.add('error'); return;
+  }
   if(!r.from){ msg.textContent = 'Pick the date.'; msg.classList.add('error'); return; }
   if(engLeaveIsSick(r.code) && !engSickCertUrl){
     msg.textContent = 'Attach the doctor\'s certificate first — sick leave cannot be sent without it.';
@@ -5068,9 +5105,15 @@ async function renderEngLeave(){
     listBox.innerHTML = '';
     return;
   }
+  const toggleBtn = document.getElementById('engLeaveToggleBtn');
   if(emp.employeeType === 'resident'){
     balBox.innerHTML = '<p style="font-size:12.5px;color:var(--muted);margin:0;">Resident Engineers are outside the EL/SL scheme — apply through your site in-charge.</p>';
+    // Resident Engineers are outside the leave rules entirely, not just the
+    // balance display — the apply form/button used to stay fully reachable
+    // and functional here, contradicting that.
+    if(toggleBtn) toggleBtn.classList.add('hidden');
   } else {
+    if(toggleBtn) toggleBtn.classList.remove('hidden');
     const att = await getAttendance(emp.id);
     const used = leaveUsedThisFinancialYear(att, financialYearEnd(todayStr()), emp.leaveOpeningFrom);
     const el = Math.max(0, (Number(emp.elOpening) || 0) - used.el);
@@ -5268,8 +5311,15 @@ async function handleSelfieCapture(event){
   event.target.value = '';
   if(!file) return;
   const msg = document.getElementById('gpsMsg');
-  const user = await findUser(engineerName);
-  if(!user || user.enabled === false){
+  // findUser() reads the whole 'users' list, which an engineer session is not
+  // allowed to read (see engineerMayRead_ in Code 2.js) — that call always
+  // came back forbidden, so every check-in force-logged the engineer out with
+  // a false "account disabled" message. getMyProfile() is the safe, engineer-
+  // readable equivalent; same fallback shape selectRole() already uses.
+  const profile = await getMyProfile();
+  const user = profile ? null : await findUser(engineerName);   // older backend
+  const enabled = profile ? profile.enabled : !!(user && user.enabled !== false);
+  if(!enabled){
     await forceLogoutEngineer('Your account has been disabled by HR. Contact your manager.');
     return;
   }
@@ -5430,8 +5480,12 @@ function startWatch(resumed){
   if(heartbeatTimer) clearInterval(heartbeatTimer);
   heartbeatTimer = setInterval(async () => {
     if(!tracking) return;
-    const user = await findUser(engineerName);
-    if(!user || user.enabled === false){
+    // Same forbidden-'users'-read problem as handleSelfieCapture — use the
+    // engineer-readable getMyProfile() instead of findUser().
+    const profile = await getMyProfile();
+    const user = profile ? null : await findUser(engineerName);   // older backend
+    const enabled = profile ? profile.enabled : !!(user && user.enabled !== false);
+    if(!enabled){
       await forceLogoutEngineer('Your account has been disabled by HR. Tracking has been stopped.');
       return;
     }
@@ -5483,7 +5537,12 @@ async function saveTripWithCompany(){
   };
   const trips = await getTrips(engineerName);
   trips.push(trip);
-  await saveTrips(engineerName, trips);
+  const ok = await saveTrips(engineerName, trips);
+  if(!ok){
+    msg.textContent = 'Could not save the trip — the server did not respond. Press Save again.';
+    msg.classList.add('error');
+    return;
+  }
   await clearActive(engineerName);
 
   // Record the checkout time on today's attendance. Check-in already wrote
@@ -5590,7 +5649,12 @@ async function addManualTrip(){
   }
   const trips = await getTrips(engineerName);
   trips.push({ date, km: Math.round(km*100)/100, company, manual: true, startTime: date + 'T00:00:00', endTime: date + 'T00:00:00' });
-  await saveTrips(engineerName, trips);
+  const ok = await saveTrips(engineerName, trips);
+  if(!ok){
+    msg.textContent = 'Could not save — the server did not respond. Nothing was added there; press Add again.';
+    msg.classList.add('error');
+    return;
+  }
   msg.textContent = 'Trip added.';
   msg.classList.remove('error');
   document.getElementById('manualKm').value = '';
@@ -5608,7 +5672,12 @@ async function saveRate(){
     msg.classList.add('error');
     return;
   }
-  await saveRateVal(v);
+  const ok = await saveRateVal(v);
+  if(!ok){
+    msg.textContent = 'Could not save — the server did not respond. Nothing was changed there; press Save again.';
+    msg.classList.add('error');
+    return;
+  }
   msg.textContent = 'Rate saved: ₹' + v + ' per km';
   msg.classList.remove('error');
   await loadHR();
@@ -10580,14 +10649,20 @@ async function addGeofenceZone(){
   const lat = parseFloat(document.getElementById('zoneLatInput').value);
   const lon = parseFloat(document.getElementById('zoneLonInput').value);
   const radiusKm = parseFloat(document.getElementById('zoneRadiusInput').value);
-  if(!name || isNaN(lat) || isNaN(lon) || isNaN(radiusKm) || radiusKm <= 0){
-    msg.textContent = 'Enter a zone name, valid latitude/longitude and a radius greater than 0.';
+  if(!name || isNaN(lat) || isNaN(lon) || isNaN(radiusKm) || radiusKm <= 0 ||
+     lat < -90 || lat > 90 || lon < -180 || lon > 180){
+    msg.textContent = 'Enter a zone name, a latitude between -90 and 90, a longitude between -180 and 180, and a radius greater than 0.';
     msg.classList.add('error');
     return;
   }
   const zones = await getGeofences();
   zones.push({ id: randomHex(6), name, lat, lon, radiusKm });
-  await saveGeofences(zones);
+  const ok = await saveGeofences(zones);
+  if(!ok){
+    msg.textContent = 'Could not save — the server did not respond. Nothing was added there; press Add again.';
+    msg.classList.add('error');
+    return;
+  }
   await addActivityLog('Added geofence zone "' + name + '" (' + radiusKm + ' km radius)');
   document.getElementById('zoneNameInput').value = '';
   document.getElementById('zoneLatInput').value = '';
@@ -10603,7 +10678,11 @@ async function deleteGeofenceZone(id){
   let zones = await getGeofences();
   const zone = zones.find(z => z.id === id);
   zones = zones.filter(z => z.id !== id);
-  await saveGeofences(zones);
+  const ok = await saveGeofences(zones);
+  if(!ok){
+    alert('Could not remove the zone — the server did not respond. Nothing was changed there; try again.');
+    return;
+  }
   if(zone) await addActivityLog('Removed geofence zone "' + zone.name + '"');
   await renderGeofenceZones();
 }
@@ -11466,7 +11545,16 @@ async function saveEmployees(list){
   const entries = {};
   for(const e of list) entries['employee:' + e.id] = employeeSizeCheck_(e);
   const saved = await remoteSetMany(entries);
-  if(!saved) throw new Error('Could not save — the server did not respond.');
+  // remoteSetMany resolves to a Set even when the backend confirms zero (or
+  // only some) of the requested writes actually persisted — a plain
+  // `if(!saved)` never catches that, since an empty Set is still a truthy
+  // object. Every key requested must actually come back confirmed, the same
+  // "check membership, not truthiness" rule saveAttendanceChanges already
+  // follows for its own remoteSetMany call — this was the one bulk-save path
+  // (leave rollover, EL encashment, document migration, always-present bulk)
+  // that could report a clean success while some or all of it silently
+  // failed to save.
+  if(!saved || saved.size !== Object.keys(entries).length) throw new Error('Could not save — the server did not respond.');
   invalidateSharedRead('employees');
 }
 // Loan and advance requests, from the moment the form is generated to the
@@ -11536,7 +11624,11 @@ const HR_ROUTES = {
   tracking:   { label:'Tracking',            icon:'📍', show:['hrTabTracking','secManageTeam','secLiveTracking','secByCompany'],
                 run:() => { loadHR(); loadCompanyReport(); setTimeout(invalidateLiveMaps, 60); } },
   team:       { label:'Team Overview',       icon:'👤', show:['hrTabTracking','secTeamOverview'], run:() => loadHR() },
-  daily:      { label:'Daily Summary',       icon:'📬', show:['hrTabTracking','secDailySummary'] },
+  // generateDailySummary() reads lastHRRows, which only loadHR() populates —
+  // tracking/team already call it themselves; without a run step here,
+  // navigating straight to Daily Summary (an entirely ordinary path, not an
+  // edge case) showed a false "No team data yet" even with real trip data.
+  daily:      { label:'Daily Summary',       icon:'📬', show:['hrTabTracking','secDailySummary'], run:() => loadHR() },
   employees:  { label:'Employee Master',     icon:'👥', show:['hrTabMgmt','hrSubMaster'], run:() => renderEmployeeList() },
   attendance: { label:'Attendance Sheet',    icon:'🗓️', show:['hrTabMgmt','hrSubDash','dashSubAttendance'], run:() => renderAttendanceSheet() },
   // No auto-render: the Salary Sheet used to load the current month the
@@ -11550,8 +11642,16 @@ const HR_ROUTES = {
   // at all until pressing Load once — on an empty dropdown — populated them
   // after the fact. This only fills the pickers; it fetches nothing and
   // renders no table, so the "no auto-load" behaviour above is unchanged.
+  // cancelSalarySheetView() clears any table left over from an earlier visit
+  // to this route (plain re-navigation or a Back-restore alike) before
+  // populateMonthYearSelects() runs — the Salary Sheet has no
+  // data-kmt-generate button for a restore to re-click, so without this a
+  // stale, un-refreshed table for last month's rates/attendance could sit on
+  // screen indefinitely with nothing indicating it might be out of date.
+  // Consistent with the "no auto-load" decision below: entering this screen
+  // is always the empty state, never a resurrected old figure.
   salary:     { label:'Salary Sheet',        icon:'₹',  show:['hrTabMgmt','hrSubDash','dashSubSalary'],
-                run:() => populateMonthYearSelects('salSheetMonthSel', 'salSheetYearSel') },
+                run:() => { cancelSalarySheetView(); populateMonthYearSelects('salSheetMonthSel', 'salSheetYearSel'); } },
   reminders:  { label:'Increment Reminders', icon:'📈', show:['hrTabMgmt','hrSubDash','dashSubReminders'], run:() => refreshDashboard() },
   expiry:     { label:'Document Expiry',     icon:'📄', show:['hrTabMgmt','hrSubDash','dashSubExpiry'], run:() => renderDocExpiryList() },
   loans:      { label:'Employee Loan & EMI', icon:'💳', show:['hrTabMgmt','hrSubDash','dashSubLoans'], run:() => populateDashLoanTab() },
@@ -12760,12 +12860,17 @@ async function renderIncrementReminders(){
   const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
   const box = document.getElementById('incrementReminderList');
   if(!box) return;
-  const now = new Date();
-  const in30 = new Date(); in30.setDate(now.getDate() + 30);
+  // Compared at day granularity via daysUntilDate_ (both sides normalized to
+  // local midnight) rather than a raw Date >= Date check — that used to
+  // compare a target day's midnight against the real current instant, so an
+  // increment due TODAY always failed ">= now" (its own midnight already
+  // being hours in the past by the time anyone opens this) and silently
+  // never appeared, on the one date this list most needs to show.
+  const in30 = new Date(); in30.setHours(0,0,0,0); in30.setDate(in30.getDate() + 30);
   const upcoming = employees.filter(e => {
     if(!e.nextIncrement) return false;
-    const d = new Date(e.nextIncrement);
-    return d >= now && d <= in30;
+    const days = daysUntilDate_(e.nextIncrement);
+    return days !== null && days >= 0 && new Date(e.nextIncrement) <= in30;
   }).sort((a,b) => new Date(a.nextIncrement) - new Date(b.nextIncrement));
   if(!upcoming.length){
     box.innerHTML = '<div class="empty">No upcoming increment dates on file yet.</div>';
@@ -12778,7 +12883,7 @@ async function renderIncrementReminders(){
   {
     const fileName = `Increment Reminders - ${todayStr()}.csv`;
     const content = toCsv(['Name','Designation','Increment due','Days away'],
-      upcoming.map(e => [e.name, e.designation||'', fmtDateIN(e.nextIncrement), Math.ceil((new Date(e.nextIncrement) - now) / 86400000)]));
+      upcoming.map(e => [e.name, e.designation||'', fmtDateIN(e.nextIncrement), daysUntilDate_(e.nextIncrement)]));
     queueFileToDrive(hrYearPath(todayStr(), 'Dashboard', 'Increment Reminders'), fileName, content, 'text/csv');
     stashReportShare('Increment Reminders — ' + todayStr(), fileName, content, 'text/csv',
       'HR Management > ' + financialYearLabel(todayStr()) + ' > Dashboard > Increment Reminders', 'incrementReminderList');
@@ -12786,7 +12891,7 @@ async function renderIncrementReminders(){
   box.innerHTML = reportActionBar('Increment Reminders', 'incrementReminderList') +
     `<div class="print-isolate" id="incrementRemindersPrintArea">${reportLogoHeader('Increment Reminders')}` +
     upcoming.map(e => {
-      const days = Math.ceil((new Date(e.nextIncrement) - now) / 86400000);
+      const days = daysUntilDate_(e.nextIncrement);
       const subject = encodeURIComponent('Increment reminder: ' + e.name);
       const body = encodeURIComponent('Reminder: ' + e.name + ' (' + (e.designation||'') + ') has an increment due on ' + fmtDateIN(e.nextIncrement) + '.');
       const mailLink = email ? `mailto:${email}?subject=${subject}&body=${body}` : `mailto:?subject=${subject}&body=${body}`;
@@ -12803,16 +12908,18 @@ async function renderDocExpiryList(){
   const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
   const box = document.getElementById('docExpiryList');
   if(!box) return;
-  const now = new Date();
-  const in30 = new Date(); in30.setDate(now.getDate() + 30);
+  // Same day-granularity comparison as renderIncrementReminders — a raw
+  // Date>=Date check against the real current instant always excluded a
+  // date falling on today itself (see the comment there for why).
+  const in30 = new Date(); in30.setHours(0,0,0,0); in30.setDate(in30.getDate() + 30);
   const items = [];
   employees.forEach(e => {
     if(e.employmentStatus === 'left') return;
     [['bondEnd','Bond end date']].forEach(([field, label]) => {
       if(!e[field]) return;
-      const d = new Date(e[field]);
-      if(d >= now && d <= in30){
-        items.push({ name: e.name, designation: e.designation, docLabel: label, date: e[field], days: Math.ceil((d - now) / 86400000) });
+      const days = daysUntilDate_(e[field]);
+      if(days !== null && days >= 0 && new Date(e[field]) <= in30){
+        items.push({ name: e.name, designation: e.designation, docLabel: label, date: e[field], days });
       }
     });
   });
@@ -12983,6 +13090,18 @@ function employeeModalHtml(emp){
   const salHist = salaryHistoryOf(emp);
   const hasIncrementHistory = Array.isArray(emp.salaryHistory) && emp.salaryHistory.length > 0;
   const curPay = currentRatePay(emp);
+  // bondApplicable didn't exist until after retentionMoney/retentionMonths/
+  // bondStart did, so a legacy record can carry real, currently-deducting
+  // retention data with bondApplicable left unset. Defaulting the select to
+  // "No" for those records used to blank the retention fields the instant
+  // the form opened (toggleBondFields' own "No" branch) — invisible until
+  // the next save silently wrote the blanked fields back, permanently
+  // erasing a bond the Salary Sheet was correctly still charging every
+  // month (computeRetentionForMonth never looked at bondApplicable at all).
+  // Same presence-implies-yes fallback loansOf/salaryAdvanceForMonth already
+  // use for their own legacy flat fields.
+  const bondApplicable = emp.bondApplicable === 'yes' ||
+    (emp.bondApplicable !== 'no' && !!(emp.retentionMoney && emp.retentionMonths && emp.bondStart));
   return `
   <div class="modal-overlay" id="employeeModalOverlay" onclick="if(event.target===this)closeEmployeeModal()">
     <div class="modal-box">
@@ -13184,8 +13303,8 @@ function employeeModalHtml(emp){
         <div class="sec-title">Bond &amp; retention money</div>
         <label class="field">Is a retention bond applicable?</label>
         <select class="field-input" id="f_bondApplicable" onchange="toggleBondFields()">
-          <option value="no" ${emp.bondApplicable==='yes'?'':'selected'}>No</option>
-          <option value="yes" ${emp.bondApplicable==='yes'?'selected':''}>Yes</option>
+          <option value="no" ${bondApplicable?'':'selected'}>No</option>
+          <option value="yes" ${bondApplicable?'selected':''}>Yes</option>
         </select>
         <div id="bondFields" class="hidden">
         <div style="height:12px"></div>
@@ -18802,7 +18921,13 @@ async function toggleChecklistItem(empId, label, checked){
   if(!emp.checklists[currentChecklistType]) emp.checklists[currentChecklistType] = {};
   emp.checklists[currentChecklistType][label] = checked;
   await saveEmployees(employees);
-  await renderReportsTab();
+  // The "N complete" counts next to Joining/Exit Checklist live on the
+  // Generator landing grid — this used to call renderReportsTab() (the wrong
+  // tab entirely) and left the count stuck until the whole Generator tab was
+  // re-entered. refreshChecklistPickerCounts() updates just the count,
+  // without renderGeneratorTab()'s own landing-grid reset closing whatever
+  // card is open behind this modal.
+  await refreshChecklistPickerCounts(employees);
   await addActivityLog((checked ? 'Checked' : 'Unchecked') + ' "' + label + '" on ' + emp.name + '\'s ' + currentChecklistType + ' checklist');
 }
 function closeChecklistModal(){
@@ -18958,6 +19083,29 @@ function jumpToGenerator(letterLabel){
   if(idx >= 0) selectLetterType(idx);
   openGeneratorCard('genSecLetters');
 }
+// Just the "N employees, M complete" counts next to Joining/Exit Checklist on
+// the Generator landing grid. Split out of renderGeneratorTab() so a single
+// checklist toggle can refresh the count without renderGeneratorTab()'s own
+// unconditional showGeneratorLanding() reset yanking the user back to the
+// landing grid out from under whatever card (or the checklist modal sitting
+// on top of it) they're actually looking at.
+async function refreshChecklistPickerCounts(employees){
+  const list = document.getElementById('checklistPickerList');
+  if(!list) return;
+  employees = employees || await getEmployees();
+  const joiningDone = employees.filter(e => Object.values(e.checklists?.joining||{}).filter(Boolean).length === CHECKLIST_ITEMS.joining.length).length;
+  const exitDone = employees.filter(e => Object.values(e.checklists?.exit||{}).filter(Boolean).length === CHECKLIST_ITEMS.exit.length).length;
+  list.innerHTML = `
+    <div class="letter-choice" onclick="openChecklistPicker('joining')">
+      <span class="num">01</span> Joining Checklist <span style="margin-left:auto;color:var(--muted);font-weight:400;font-size:12px;">${employees.length} employees${joiningDone ? ', ' + joiningDone + ' complete' : ''}</span>
+    </div>
+    <div class="letter-choice" onclick="openJoiningKit()">
+      <span class="num">02</span> Joining Kit <span style="margin-left:auto;color:var(--muted);font-weight:400;font-size:12px;">uniform &amp; assets issued</span>
+    </div>
+    <div class="letter-choice" onclick="openChecklistPicker('exit')">
+      <span class="num">03</span> Exit Checklist <span style="margin-left:auto;color:var(--muted);font-weight:400;font-size:12px;">${employees.length} employees${exitDone ? ', ' + exitDone + ' complete' : ''}</span>
+    </div>`;
+}
 async function renderGeneratorTab(){
   // Runs on every visit to the Generator tab, including a jumpToGenerator()
   // from elsewhere in the app — reset to the landing grid first; a caller
@@ -18970,8 +19118,7 @@ async function renderGeneratorTab(){
   if(!(kmtPendingCardRestore && kmtPendingCardRestore.route === 'generator')) showGeneratorLanding();
 
   const employees = await getEmployees();
-  const joiningDone = employees.filter(e => Object.values(e.checklists?.joining||{}).filter(Boolean).length === CHECKLIST_ITEMS.joining.length).length;
-  const exitDone = employees.filter(e => Object.values(e.checklists?.exit||{}).filter(Boolean).length === CHECKLIST_ITEMS.exit.length).length;
+  await refreshChecklistPickerCounts(employees);
 
   const letterItems = LETTER_TYPES.map((t,i) => `
     <div class="letter-choice ${i===selectedLetterIdx?'active':''}" onclick="selectLetterType(${i})">
@@ -18986,17 +19133,6 @@ async function renderGeneratorTab(){
     letterTypeSel.innerHTML = LETTER_TYPES.map((t,i) => `<option value="${i}">${t}</option>`).join('');
     letterTypeSel.value = String(selectedLetterIdx);
   }
-
-  document.getElementById('checklistPickerList').innerHTML = `
-    <div class="letter-choice" onclick="openChecklistPicker('joining')">
-      <span class="num">01</span> Joining Checklist <span style="margin-left:auto;color:var(--muted);font-weight:400;font-size:12px;">${employees.length} employees${joiningDone ? ', ' + joiningDone + ' complete' : ''}</span>
-    </div>
-    <div class="letter-choice" onclick="openJoiningKit()">
-      <span class="num">02</span> Joining Kit <span style="margin-left:auto;color:var(--muted);font-weight:400;font-size:12px;">uniform &amp; assets issued</span>
-    </div>
-    <div class="letter-choice" onclick="openChecklistPicker('exit')">
-      <span class="num">03</span> Exit Checklist <span style="margin-left:auto;color:var(--muted);font-weight:400;font-size:12px;">${employees.length} employees${exitDone ? ', ' + exitDone + ' complete' : ''}</span>
-    </div>`;
 
   // The Role Reports card lives on this tab now, but its picker was only ever
   // populated from the Reports tab's render — fine when Reports was visited
