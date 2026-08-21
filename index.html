@@ -14582,6 +14582,19 @@ async function viewEmployeeHandbook(label){
 async function handleDocUpload(event, field){
   const file = event.target.files[0];
   if(!file) return;
+  // Captured now, before any await — Drive uploads of a real scan can take
+  // several seconds, and this handler used to keep using event.target
+  // itself at the end to find where to insert the "✓ Saved" card. If
+  // anything rebuilds the Documents section's markup while the upload is
+  // still in flight (a re-render triggered by another field changing, for
+  // instance), event.target is by then a detached node — insertAdjacentHTML
+  // on it still "succeeds", into a card nobody can see, while the actual
+  // upload and editingEmployeeDraft[field] are both completely fine. HR saw
+  // nothing happen and, not realising the field had genuinely gone through,
+  // only found it there the next time the record was opened fresh. Re-
+  // fetching the input by its stable id below finds wherever it currently
+  // lives instead of trusting a reference frozen before the await.
+  const inputId = event.target.id;
   let originalDataUrl;
   try{
     // Untouched unless it is unusually large (see readDocForDrive) — no
@@ -14619,6 +14632,14 @@ async function handleDocUpload(event, field){
       return;
     }
   }
+  // Re-fetched rather than reusing event.target — see the comment at the top
+  // of this function for why the element the upload started on may no
+  // longer be the one actually on screen by the time it finishes. If it's
+  // gone entirely (the record was closed mid-upload), there's nothing left
+  // to show a card on — editingEmployeeDraft[field] is already set, so the
+  // upload itself is not lost, only its on-screen confirmation here.
+  const liveInput = (inputId && document.getElementById(inputId)) || event.target;
+  if(!liveInput || !liveInput.isConnected) return;
   // All seven document inputs (Aadhaar, PAN, photo, ...) are siblings inside
   // one shared field-group, so parentElement.querySelector('.doc-card') found
   // the FIRST "✓ Saved" badge in the whole section rather than this input's
@@ -14626,8 +14647,8 @@ async function handleDocUpload(event, field){
   // confirmation off the screen (the upload itself was untouched; only the
   // on-screen badge vanished). Each field's own card is its immediate next
   // sibling in the template, so removal is scoped to that specifically.
-  if(event.target.nextElementSibling && event.target.nextElementSibling.classList.contains('doc-card')){
-    event.target.nextElementSibling.remove();
+  if(liveInput.nextElementSibling && liveInput.nextElementSibling.classList.contains('doc-card')){
+    liveInput.nextElementSibling.remove();
   }
   // Was a plain "✓ Saved" div with no way to open what had just been
   // uploaded — reopening the employee record afterwards rendered the exact
@@ -14635,9 +14656,9 @@ async function handleDocUpload(event, field){
   // button, so the document was never actually unreachable, only unreachable
   // until the next time the record was opened. Reusing docCardHtml() here
   // makes the card identical either way, so "view" works immediately.
-  const label = (event.target.previousElementSibling && event.target.previousElementSibling.tagName === 'LABEL')
-    ? event.target.previousElementSibling.textContent : 'Document';
-  event.target.insertAdjacentHTML('afterend', docCardHtml(editingEmployeeDraft[field], label));
+  const label = (liveInput.previousElementSibling && liveInput.previousElementSibling.tagName === 'LABEL')
+    ? liveInput.previousElementSibling.textContent : 'Document';
+  liveInput.insertAdjacentHTML('afterend', docCardHtml(editingEmployeeDraft[field], label));
 }
 
 // ---- loan ledger, employee form ----
