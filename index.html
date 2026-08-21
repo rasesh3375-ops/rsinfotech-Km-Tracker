@@ -2095,6 +2095,12 @@
               <p id="cardStat_consultant" class="gen-card-stat"></p>
               <span class="btn full">View</span>
             </button>
+            <button type="button" class="gen-card" onclick="openReportsCard('rptSecConsultantSummary')">
+              <div class="gen-card-icon t1">🧮</div>
+              <h3>Consultant Final Summary Report</h3>
+              <p>PF and ESI account-wise totals plus the wage and deduction summary, in the consultant's filing format.</p>
+              <span class="btn full">View</span>
+            </button>
             <button type="button" class="gen-card" onclick="openReportsCard('rptSecSalaryCompare')">
               <div class="gen-card-icon t1">⚖️</div>
               <h3>Month-wise Salary Comparison</h3>
@@ -2321,6 +2327,24 @@
         </section>
         </div>
 
+        <div id="rptSecConsultantSummary" class="hidden">
+        <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
+        <section class="block">
+          <h2 style="margin:0 0 4px;">Consultant Final Summary Report</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">PF Account No 1/2/10/21/22 and the ESI summary, totalled for the month across R.S. Infotech's own payroll headings — the same figures the consultant's filing sheet totals, pulled from Employee Master and this month's attendance.</p>
+          <div class="row-inline">
+            <div><label class="field">Month</label><select class="field-input" id="consultantSummaryMonthSel"></select></div>
+            <div><label class="field">Year</label><select class="field-input" id="consultantSummaryYearSel"></select></div>
+          </div>
+          <label class="field">Pay Date <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
+          <input type="date" class="field-input" id="consultantSummaryPayDate">
+          <div style="height:12px"></div>
+          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building report…',renderConsultantSummaryReport)">Generate summary report</button>
+          <div style="height:14px"></div>
+          <div id="consultantSummaryReportBox"></div>
+        </section>
+        </div>
+
         <div id="rptSecSalaryCompare" class="hidden">
         <button type="button" class="gen-back-btn" onclick="kmtBack()">← Back to Reports</button>
         <section class="block">
@@ -2495,6 +2519,13 @@
           <div style="height:10px"></div>
           <label class="field">Website</label>
           <input class="field-input" type="text" id="coWebsite" placeholder="www.example.com">
+          <div style="height:10px"></div>
+          <label class="field">PF Code No</label>
+          <input class="field-input" type="text" id="coPfCodeNo" placeholder="e.g. VDBRD3096973000">
+          <div style="height:10px"></div>
+          <label class="field">ESI Code No</label>
+          <input class="field-input" type="text" id="coEsiCodeNo" placeholder="e.g. 38000596560000999">
+          <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Used on the Consultant Final Summary Report.</p>
           <div style="height:10px"></div>
           <label class="field">HR Signatory</label>
           <select class="field-input" id="coHrSignatory"></select>
@@ -9960,6 +9991,188 @@ async function renderConsultantReport(){
   openFullscreenView('Consultant Report — ' + monthLabel(monthVal), 'consultantReportBox');
 }
 
+// ---- Consultant Final Summary Report ----
+// The one-page PF/ESI account-wise totals sheet the consultant files
+// alongside the detailed wage register — not a per-employee listing (see
+// renderConsultantReport above for that), just the same totals the Salary
+// Sheet, PF Report and ESI Report already compute correctly, added up once
+// more. Scoped to CONSULTANT_REPORT_HEADINGS — R.S. Infotech's own payroll,
+// same population the Consultant Report already covers — since Apprentices,
+// R.S.IT Solution and Contractors are separate books the consultant does
+// not process.
+//
+// PF Account No 1 is Employee PF + Employer EPF (the non-pension share) —
+// Employer EPS/Pension is Account No 10 and stays out of Account No 1, the
+// same split EPFO's own challan uses. Account No 22 (EDLI admin) is not
+// something this app tracks — EPFO currently waives it to 0% anyway, so it
+// is shown as ₹0 rather than left blank. L.W.F. (Labour Welfare Fund) has
+// no field anywhere in this app either; shown as ₹0 with a note rather than
+// silently a real, verified zero.
+async function renderConsultantSummaryReport(){
+  const box = document.getElementById('consultantSummaryReportBox');
+  populateMonthYearSelects('consultantSummaryMonthSel', 'consultantSummaryYearSel');
+  const monthVal = getMonthYearValue('consultantSummaryMonthSel', 'consultantSummaryYearSel');
+  const [year, month] = monthVal.split('-').map(Number);
+  const monthDays = new Date(year, month, 0).getDate();
+  const dateList = [];
+  for(let d=1; d<=monthDays; d++) dateList.push(year + '-' + String(month).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
+
+  const employees = (await getEmployees()).filter(e =>
+    employedDuringPeriod_(e, dateList[0], dateList[dateList.length-1]) &&
+    CONSULTANT_REPORT_HEADINGS.indexOf(ratePayAsOf(e, dateList[0]).salaryHeading) !== -1);
+  if(!employees.length){
+    box.innerHTML = '<div class="empty">No employees under ' +
+      CONSULTANT_REPORT_HEADINGS.map(k => SALARY_HEADINGS[k].label).join(', ') +
+      ' for this month.</div>';
+    return;
+  }
+  const holidayMap = await getHolidayMap_local();
+  await getAttendanceMany(employees.map(e => e.id));
+
+  const pf = { count:0, wage:0, empEmployee:0, empEmployer:0, admin:0, eps:0, edli:0 };
+  const esiT = { count:0, wage:0, employee:0, employer:0 };
+  const alw = { basic:0, hra:0, conveyance:0, lta:0 };
+  const ded = { pf:0, pt:0, adv:0, loan:0, esi:0 };
+
+  for(const emp of employees){
+    const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
+    const headingKey = ratePayAsOf(emp, dateList[0]).salaryHeading || 'managerial';
+    const heading = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
+
+    // Same two checks renderStatutoryReport already uses for the PF Report —
+    // heading.pf gates whether this heading attracts PF at all, s.pfApplicable
+    // additionally covers an employee-level pfEligible:'no' or a not-yet-
+    // configured contribution type, either of which means nothing to add.
+    if(heading.pf && s.pfApplicable){
+      pf.count++;
+      pf.wage += s.pfWage;
+      pf.empEmployee += s.pf;
+      pf.empEmployer += s.employerPf;
+      pf.admin += s.pfAdmin;
+      pf.eps += s.pen;
+      pf.edli += s.edli;
+    }
+    // Same computeEsi call and .covered check the PF/ESI Report already
+    // makes — "once covered, always covered" for the rest of the
+    // contribution period, not just gross-under-ceiling this one month.
+    if(heading.esi){
+      const r = computeEsi(s.gross, {
+        isDisabled: emp.esiDisabled === 'yes',
+        coveredAtPeriodStart: emp.esiCoveredAtPeriodStart === 'yes',
+        eligible: emp.esiEligible !== 'no',
+        asOf: dateList[0]
+      });
+      if(r.covered){
+        esiT.count++;
+        esiT.wage += s.gross;
+        esiT.employee += r.employee;
+        esiT.employer += r.employer;
+      }
+    }
+
+    alw.basic += s.basic; alw.hra += s.hra; alw.conveyance += s.conveyance; alw.lta += s.lta;
+    ded.pf += s.pf; ded.pt += s.pt; ded.adv += s.advanceTemp + s.advance; ded.loan += s.loanEmi; ded.esi += s.esi;
+  }
+
+  const acct1 = pf.empEmployee + pf.empEmployer;
+  const acct22 = 0; // EDLI admin charge — see the function comment above
+  const pfTotal = acct1 + pf.admin + pf.eps + pf.edli + acct22;
+  const esiTotal = esiT.employee + esiT.employer;
+  const alwTotal = alw.basic + alw.hra + alw.conveyance + alw.lta;
+  const lwf = 0; // Labour Welfare Fund — see the function comment above
+  const dedTotal = ded.pf + ded.pt + ded.adv + lwf + ded.loan + ded.esi;
+  const net = alwTotal - dedTotal;
+
+  const co = await getCompanyProfile();
+  const signatory = await getHrSignatory();
+  const payDate = (document.getElementById('consultantSummaryPayDate') || {}).value || '';
+  const money = rupees;
+
+  const pfCard = hrCard('<strong>PF Summary</strong>',
+    hrRow('Total No Of Employees', pf.count) +
+    hrRow('Total Wages', money(pf.wage)) +
+    hrRow('P.F. Account No 1', money(acct1) + ' <span class="inc-sub">(' + money(pf.empEmployee) + ' + ' + money(pf.empEmployer) + ')</span>') +
+    hrRow('P.F. Account No 2', money(pf.admin)) +
+    hrRow('P.F. Account No 10', money(pf.eps)) +
+    hrRow('P.F. Account No 21', money(pf.edli)) +
+    hrRow('P.F. Account No 22', money(acct22)) +
+    `<div class="hr-sheet-net"><span>Total P.F.</span><span>${money(pfTotal)}</span></div>`);
+
+  const esiCard = hrCard('<strong>E S I Summary</strong>',
+    hrRow('Total No Of Employees', esiT.count) +
+    hrRow('Total Wage', money(esiT.wage)) +
+    hrRow('Employee Contribution', money(esiT.employee)) +
+    hrRow('Employer Contribution', money(esiT.employer)) +
+    `<div class="hr-sheet-net"><span>Total</span><span>${money(esiTotal)}</span></div>`);
+
+  const alwCard = hrCard('<strong>Allowance &amp; Deduction Summary</strong>',
+    hrRow('Basic', money(alw.basic)) + hrRow('HRA', money(alw.hra)) +
+    hrRow('Conveyance', money(alw.conveyance)) + hrRow('LTA', money(alw.lta)) +
+    hrRow('Total', money(alwTotal)) +
+    hrRow('P.F.', money(ded.pf)) + hrRow('P.T.', money(ded.pt)) + hrRow('Advance', money(ded.adv)) +
+    hrRow('L.W.F.', money(lwf) + ' <span class="inc-sub" title="Not tracked in this app — shown as ₹0">not tracked</span>') +
+    hrRow('Loan', money(ded.loan)) + hrRow('E.S.I.', money(ded.esi)) +
+    hrRow('Total Deduction', money(dedTotal)) +
+    `<div class="hr-sheet-net"><span>Net</span><span>${money(net)}</span></div>`);
+
+  const signOff = `<table class="rpt-sign-tbl" style="margin-top:14px;"><tbody><tr>
+    <td style="width:100%;"><div class="rpt-sign-line"></div>For ${escapeHtml(co.name)}<br>${signatory ? escapeHtml(signatory.name) + '<br>Authorised Signatory' : 'Authorised Signatory'}</td>
+  </tr></tbody></table>`;
+
+  box.innerHTML = `${reportActionBar('Consultant Final Summary Report — ' + monthLabel(monthVal), 'consultantSummaryReportBox')}
+    <div class="sal-sheet-wrap print-isolate" id="consultantSummaryPrintArea">
+      ${reportLogoHeader('Consultant Final Summary Report — ' + monthLabel(monthVal))}
+      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">
+        ${co.address ? escapeHtml(co.address) + '<br>' : ''}
+        PF Code No: <strong>${co.pfCodeNo ? escapeHtml(co.pfCodeNo) : 'Not set — add it under Company Letterhead'}</strong> &nbsp;·&nbsp;
+        ESI Code No: <strong>${co.esiCodeNo ? escapeHtml(co.esiCodeNo) : 'Not set — add it under Company Letterhead'}</strong>
+        ${payDate ? ' &nbsp;·&nbsp; Pay Date: <strong>' + fmtDateIN(payDate) + '</strong>' : ''}
+      </p>
+      <div class="hr-sheet-cards">${pfCard}${esiCard}${alwCard}</div>
+      ${signOff}
+    </div>`;
+
+  const csvHeader = ['Section','Item','Amount'];
+  const csvRows = [
+    ['PF Summary','Total No Of Employees', pf.count],
+    ['PF Summary','Total Wages', Math.round(pf.wage)],
+    ['PF Summary','P.F. Account No 1', Math.round(acct1)],
+    ['PF Summary','P.F. Account No 1 — Employee share', Math.round(pf.empEmployee)],
+    ['PF Summary','P.F. Account No 1 — Employer EPF share', Math.round(pf.empEmployer)],
+    ['PF Summary','P.F. Account No 2', Math.round(pf.admin)],
+    ['PF Summary','P.F. Account No 10', Math.round(pf.eps)],
+    ['PF Summary','P.F. Account No 21', Math.round(pf.edli)],
+    ['PF Summary','P.F. Account No 22', Math.round(acct22)],
+    ['PF Summary','Total P.F.', Math.round(pfTotal)],
+    ['ESI Summary','Total No Of Employees', esiT.count],
+    ['ESI Summary','Total Wage', Math.round(esiT.wage)],
+    ['ESI Summary','Employee Contribution', Math.round(esiT.employee)],
+    ['ESI Summary','Employer Contribution', Math.round(esiT.employer)],
+    ['ESI Summary','Total', Math.round(esiTotal)],
+    ['Allowance','Basic', Math.round(alw.basic)],
+    ['Allowance','HRA', Math.round(alw.hra)],
+    ['Allowance','Conveyance', Math.round(alw.conveyance)],
+    ['Allowance','LTA', Math.round(alw.lta)],
+    ['Allowance','Total', Math.round(alwTotal)],
+    ['Deduction','P.F.', Math.round(ded.pf)],
+    ['Deduction','P.T.', Math.round(ded.pt)],
+    ['Deduction','Advance', Math.round(ded.adv)],
+    ['Deduction','L.W.F. (not tracked)', Math.round(lwf)],
+    ['Deduction','Loan', Math.round(ded.loan)],
+    ['Deduction','E.S.I.', Math.round(ded.esi)],
+    ['Deduction','Total Deduction', Math.round(dedTotal)],
+    ['Net','Net', Math.round(net)]
+  ];
+  {
+    const fileName = `Consultant Final Summary Report - ${monthVal}.csv`;
+    const content = toCsv(csvHeader, csvRows);
+    queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Consultant Final Summary Report'), fileName, content, 'text/csv');
+    stashReportShare('Consultant Final Summary Report — ' + monthLabel(monthVal), fileName, content, 'text/csv',
+      'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > Consultant Final Summary Report', 'consultantSummaryReportBox');
+  }
+  openFullscreenView('Consultant Final Summary Report — ' + monthLabel(monthVal), 'consultantSummaryReportBox');
+}
+
 // ---- Month-wise Salary Comparison ----
 // Bridges last month's payroll total to the selected month's and names every
 // reason for the gap, so the reasons always add back up to the difference.
@@ -10899,8 +11112,12 @@ const COMPANY_WEBSITE_DEFAULT = 'www.rsinfotech.net';
 async function getCompanyProfile(){
   const v = await safeGet('company_profile', true);
   const saved = v ? JSON.parse(v) : {};
+  // pfCodeNo/esiCodeNo default to the real numbers already on file with the
+  // PF/ESI departments (seen on the consultant's own filed returns), not a
+  // placeholder — editable from here if either ever changes.
   return Object.assign({ name: COMPANY_NAME, address: COMPANY_ADDRESS_DEFAULT, phone:'',
-    email: COMPANY_EMAIL_DEFAULT, website: COMPANY_WEBSITE_DEFAULT, hrSignatoryId:'' }, saved);
+    email: COMPANY_EMAIL_DEFAULT, website: COMPANY_WEBSITE_DEFAULT, hrSignatoryId:'',
+    pfCodeNo: 'VDBRD3096973000', esiCodeNo: '38000596560000999' }, saved);
 }
 async function saveCompanyProfile(p){
   await safeSet('company_profile', JSON.stringify(p), true);
@@ -16431,6 +16648,8 @@ async function openLetterheadCard(){
   document.getElementById('coPhone').value = co.phone;
   document.getElementById('coEmail').value = co.email;
   document.getElementById('coWebsite').value = co.website;
+  document.getElementById('coPfCodeNo').value = co.pfCodeNo || '';
+  document.getElementById('coEsiCodeNo').value = co.esiCodeNo || '';
   const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
   document.getElementById('coHrSignatory').innerHTML = '<option value="">— None selected —</option>' +
     employees.map(e => `<option value="${e.id}"${e.id === co.hrSignatoryId ? ' selected' : ''}>${escapeHtml(e.name)}${e.designation ? ' — ' + escapeHtml(e.designation) : ''}</option>`).join('');
@@ -16445,6 +16664,8 @@ async function saveCompanyProfileFromForm(){
   co.phone   = document.getElementById('coPhone').value.trim();
   co.email   = document.getElementById('coEmail').value.trim();
   co.website = document.getElementById('coWebsite').value.trim();
+  co.pfCodeNo = document.getElementById('coPfCodeNo').value.trim();
+  co.esiCodeNo = document.getElementById('coEsiCodeNo').value.trim();
   co.hrSignatoryId = document.getElementById('coHrSignatory').value;
   await saveCompanyProfile(co);
   msg.textContent = 'Letterhead saved — it will appear on every report from now on.';
