@@ -2888,6 +2888,11 @@
             <option value="percent">Percentage (12%)</option>
             <option value="fixed">Fixed ₹1,800</option>
           </select>
+          <label class="field" style="margin-top:12px;">Employer's PF share added to CTC?</label>
+          <select class="field-input" id="ctcCalcPfBoth">
+            <option value="yes">Yes — both sides (employee + employer PF count towards CTC)</option>
+            <option value="no">No — employee side only (employer PF kept off the CTC figure)</option>
+          </select>
         </div>
 
         <div class="row-inline" style="margin-top:12px;">
@@ -16801,7 +16806,7 @@ function updateCtcCalcAmountLabel_(){
 // as the Salary Sheet does, rather than re-deriving PF/ESI/PT here, so
 // this can never drift from what the Salary Sheet would actually charge
 // for the same heading and wage.
-function ctcCalcBreakdown_(rate, headingKey, pfType, otherAllowances, bonus){
+function ctcCalcBreakdown_(rate, headingKey, pfType, otherAllowances, bonus, pfBothSides){
   const heading = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
   let basic, hra, lta;
   if(heading.flat){ basic = rate; hra = 0; lta = 0; }
@@ -16816,12 +16821,18 @@ function ctcCalcBreakdown_(rate, headingKey, pfType, otherAllowances, bonus){
     ? computeEsi(gross, { isDisabled: false, coveredAtPeriodStart: false, eligible: true, asOf: todayStr() })
     : { covered: false, employee: 0, employer: 0 };
   const pt = heading.pt ? monthlyPtFor(gross, 0) : 0;
-  const employerMonthly = (pf.applicable ? (pf.employerEpf + pf.employerEps + pf.admin + pf.edli) : 0) +
-                           (esi.covered ? esi.employer : 0);
+  // Employer's PF share (EPF+EPS+admin+EDLI) is still paid either way — it's
+  // statutory. This toggle only controls whether it's counted into the CTC
+  // figure shown here, matching the two ways companies structure a CTC
+  // letter: "both sides" (employer PF added on top of gross) vs. "employee
+  // side only" (CTC stops at gross + other statutory employer cost, employer
+  // PF kept off the number quoted to the candidate).
+  const employerPf = pf.applicable ? (pf.employerEpf + pf.employerEps + pf.admin + pf.edli) : 0;
+  const employerMonthly = (pfBothSides ? employerPf : 0) + (esi.covered ? esi.employer : 0);
   const netMonthly = gross - (pf.applicable ? pf.employee : 0) - (esi.covered ? esi.employee : 0) - pt;
   const monthlyCtc = gross + employerMonthly + otherAllowances;
   const annualCtc = monthlyCtc * 12 + bonus;
-  return { basic, hra, lta, gross, pf, esi, pt, employerMonthly, netMonthly, monthlyCtc, annualCtc };
+  return { basic, hra, lta, gross, pf, esi, pt, employerPf, employerMonthly, netMonthly, monthlyCtc, annualCtc };
 }
 
 // Binary search for the Rate of Pay that makes targetFn(breakdown) equal
@@ -16831,11 +16842,11 @@ function ctcCalcBreakdown_(rate, headingKey, pfType, otherAllowances, bonus){
 // of Pay too, and a plain bisection finds the answer reliably without
 // needing a closed-form inverse of rules that already live in
 // calculatePfFor/computeEsi/monthlyPtFor.
-function ctcCalcSolveRate_(target, headingKey, pfType, otherAllowances, bonus, targetFn){
+function ctcCalcSolveRate_(target, headingKey, pfType, otherAllowances, bonus, targetFn, pfBothSides){
   let lo = 0, hi = 3000000; // generous enough for any realistic Rate of Pay
   for(let i = 0; i < 60; i++){
     const mid = (lo + hi) / 2;
-    const value = targetFn(ctcCalcBreakdown_(mid, headingKey, pfType, otherAllowances, bonus));
+    const value = targetFn(ctcCalcBreakdown_(mid, headingKey, pfType, otherAllowances, bonus, pfBothSides));
     if(value < target) lo = mid; else hi = mid;
   }
   return (lo + hi) / 2;
@@ -16846,6 +16857,7 @@ function renderCtcCalculator(){
   const headingKey = document.getElementById('ctcCalcHeading').value;
   const heading = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
   const pfType = document.getElementById('ctcCalcPfType').value;
+  const pfBothSides = document.getElementById('ctcCalcPfBoth').value === 'yes';
   const mode = document.getElementById('ctcCalcMode').value;
   const amount = Number(document.getElementById('ctcCalcAmount').value) || 0;
   const bonus = Number(document.getElementById('ctcCalcBonus').value) || 0;
@@ -16857,8 +16869,9 @@ function renderCtcCalculator(){
   }
 
   const rate = ctcCalcSolveRate_(amount, headingKey, pfType, otherAllowances, bonus,
-    mode === 'ctc' ? b => b.annualCtc : mode === 'ctcMonthly' ? b => b.monthlyCtc : b => b.netMonthly);
-  const b = ctcCalcBreakdown_(rate, headingKey, pfType, otherAllowances, bonus);
+    mode === 'ctc' ? b => b.annualCtc : mode === 'ctcMonthly' ? b => b.monthlyCtc : b => b.netMonthly,
+    pfBothSides);
+  const b = ctcCalcBreakdown_(rate, headingKey, pfType, otherAllowances, bonus, pfBothSides);
   const money = rupees;
 
   box.innerHTML = `
@@ -16877,7 +16890,8 @@ function renderCtcCalculator(){
       hrRow('PT', heading.pt ? money(b.pt) : '—') +
       `<div class="hr-sheet-net"><span>Net (Take Home)</span><span>${money(b.netMonthly)}</span></div>`)}
     ${hrCard('<strong>Employer cost (monthly)</strong>',
-      hrRow('PF — employer', b.pf.applicable ? money(b.pf.employerEpf + b.pf.employerEps + b.pf.admin + b.pf.edli) : '—') +
+      hrRow(pfBothSides ? 'PF — employer' : 'PF — employer (paid, not counted in CTC)',
+        b.pf.applicable ? money(b.employerPf) : '—') +
       hrRow('ESI — employer', heading.esi ? (b.esi.covered ? money(b.esi.employer) : '—') : '—') +
       hrRow('Other Allowances', money(otherAllowances)) +
       `<div class="hr-sheet-net"><span>Monthly CTC</span><span>${money(b.monthlyCtc)}</span></div>`)}
