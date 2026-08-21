@@ -44,6 +44,37 @@ function saveFile_(pathParts, fileName, content, mimeType) {
   folder.createFile(fileName, content, mimeType || MimeType.PLAIN_TEXT);
 }
 
+// For a document that must exist exactly once for its owner regardless of
+// which financial year it was most recently (re)issued in — the Generator's
+// one-time HR letters (Offer/Appointment/Experience/Relieving/Exit/No Dues/
+// Full & Final Settlement). saveFile_ above only replaces a same-named file
+// within the ONE folder it's given, and every folder here is a year folder
+// (see hrYearPath) — so reissuing the same letter in a later financial year
+// used to leave the old year's copy behind as an orphan instead of
+// replacing it, the opposite of what re-saving the same letter should do.
+// This walks every year folder directly under "HR Management" and removes
+// any file at the same tail path (e.g. ['Generator', 'Appointment Letter'])
+// with the same name, before saveFile_ writes the new one — so there is
+// always exactly one copy, in whichever year folder the current issue date
+// belongs to.
+function deleteAcrossYearFolders_(pathTail, fileName) {
+  const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
+  const hrMgmtIt = root.getFoldersByName('HR Management');
+  if (!hrMgmtIt.hasNext()) return;
+  const yearFolders = hrMgmtIt.next().getFolders();
+  while (yearFolders.hasNext()) {
+    let folder = yearFolders.next();
+    let ok = true;
+    for (let i = 0; i < pathTail.length && ok; i++) {
+      const it = folder.getFoldersByName(pathTail[i]);
+      if (it.hasNext()) folder = it.next(); else ok = false;
+    }
+    if (!ok) continue;
+    const files = folder.getFilesByName(fileName);
+    while (files.hasNext()) files.next().setTrashed(true);
+  }
+}
+
 // ===== NEW: sessions (replaces "trust anyone with the URL") =====
 
 const SESSION_SHEET_NAME = 'SESSIONS';
@@ -1016,6 +1047,10 @@ function doPost(e) {
       }
       return jsonOut_({ ok: true, many: true, saved: savedKeys });
     } else if (body.action === 'saveFile') {
+      // dedupeTail is only ever sent for the one-time HR letters — see
+      // deleteAcrossYearFolders_ above. Every other caller omits it and this
+      // is a no-op, unchanged from before.
+      if (body.dedupeTail) deleteAcrossYearFolders_(body.dedupeTail, body.fileName);
       saveFile_(body.folderPath, body.fileName, body.content, body.mimeType);
     }
   } finally {

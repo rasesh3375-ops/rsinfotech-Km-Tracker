@@ -3316,12 +3316,20 @@ function hrYearPath(forDate, ...rest){
 // Saves a file into the matching tab/report folder in Google Drive, under
 // "R.S. Infotech HR Dashboard". Folder path mirrors the app's own tab names.
 // Non-blocking: if it fails, the report/letter itself still works normally.
-async function saveFileToDrive(folderPath, fileName, content, mimeType){
+// dedupeTail is only ever passed for the Generator's one-time HR letters
+// (see generateLetter) — everywhere else it's undefined and JSON.stringify
+// drops it, so the backend never sees the field and behaves exactly as
+// before. When set, it names the folder path AFTER the year folder (e.g.
+// ['Generator', 'Appointment Letter']) so the backend can remove any prior
+// copy of this same file sitting in a DIFFERENT year folder before saving —
+// otherwise reissuing the same letter in a later financial year would leave
+// the old year's copy behind as an orphan instead of replacing it.
+async function saveFileToDrive(folderPath, fileName, content, mimeType, dedupeTail){
   try{
     await apiFetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'saveFile', folderPath, fileName, content, mimeType: mimeType || 'text/plain', token: sessionToken })
+      body: JSON.stringify({ action: 'saveFile', folderPath, fileName, content, mimeType: mimeType || 'text/plain', dedupeTail, token: sessionToken })
     });
   }catch(e){
     // Drive save is a bonus, not a requirement — the report already rendered fine either way
@@ -19661,11 +19669,36 @@ async function generateLetter(){
   await addActivityLog('Generated ' + type + ' for ' + name);
 
   const safeType = type.replace(/\//g, '-'); // matches the Drive folder name (no slashes in folder names)
-  const letterFileName = `${name} - ${f.issueDate}.txt`;
+  // A one-time letter (Offer/Appointment/Experience/Relieving/Exit/No Dues/
+  // Full & Final Settlement) is the same document whenever it's reissued for
+  // this employee — HR reprinting an Appointment Letter three months later
+  // is a correction to the one record, not a new one. Its filename used to
+  // include the issue date, which defaults to today and so changes on every
+  // regenerate, meaning every reissue silently created a second copy in
+  // Drive instead of replacing the first. Dropping the date makes the name
+  // stable; dedupeTail (below) also clears out any copy left behind in a
+  // DIFFERENT year folder from an earlier issue date, so there is always
+  // exactly one file for this employee and letter type.
+  //
+  // A Salary Slip is not one-time — a real, separate slip exists for every
+  // month — but its figures come from monthlyPayFor(matched) with no month
+  // argument, i.e. always the current month's pay (see generateLetter
+  // above), not from whatever day-of-month issueDate happens to hold. Keying
+  // the filename off issueDate's exact day meant regenerating the same
+  // month's slip more than once (a typo fixed, a second look) still created
+  // a new file each time it was done on a different day. Keying it off
+  // today's month instead matches what the content actually represents, so
+  // re-saves within the same month overwrite and a new month still gets its
+  // own file, same as every other month-scoped report in this app.
+  const isOneTimeLetter = FORMAL_LETTERS.indexOf(type) !== -1;
+  const letterFileName = isOneTimeLetter ? `${name}.txt`
+    : type === 'Salary Slip' ? `${name} - Salary Slip - ${todayStr().slice(0, 7)}.txt`
+    : `${name} - ${f.issueDate}.txt`;
   // Saved to Drive regardless of staleness — this letter really was
   // generated and the audit trail (this, the letters log and the activity
   // log above) records that whether or not it is still what's on screen.
-  saveFileToDrive(hrYearPath(f.issueDate, 'Generator', safeType), letterFileName, text, 'text/plain');
+  saveFileToDrive(hrYearPath(f.issueDate, 'Generator', safeType), letterFileName, text, 'text/plain',
+    isOneTimeLetter ? ['Generator', safeType] : undefined);
   if(myToken !== generateLetterToken) return; // superseded — leave the current letter, and its Email/WhatsApp share content, alone
   stashReportShare(type + ' — ' + name, letterFileName, text, 'text/plain',
     'HR Management > ' + financialYearLabel(f.issueDate) + ' > Generator > ' + safeType, 'letterOutput');
