@@ -319,8 +319,12 @@
      Transitioned so it reads as folding away rather than snapping. */
   #hrSidebar{transition:width .18s ease;}
   body.hr-rail #hrSidebar{width:0;overflow:hidden;border-right:none;}
+  /* Same overflow-x:hidden reasoning as .modal-overlay: overflow-y:auto
+     alone lets the x-axis compute to auto too, so a nav label ever a pixel
+     wider than the fixed 242px would let the whole sidebar drag sideways
+     rather than just wrapping or being clipped in place. */
   #hrSidebar{width:242px;flex-shrink:0;background:var(--paper);border-right:1px solid var(--line);
-    min-height:100vh;position:sticky;top:0;display:flex;flex-direction:column;padding:18px 12px;overflow-y:auto;}
+    min-height:100vh;position:sticky;top:0;display:flex;flex-direction:column;padding:18px 12px;overflow-y:auto;overflow-x:hidden;}
   #hrSidebar .side-title{font-size:16px;font-weight:700;color:var(--navy);padding:4px 10px 14px;}
   .side-link{display:flex;align-items:center;gap:11px;width:100%;text-align:left;border:none;
     background:transparent;color:var(--muted);font-size:13.5px;font-weight:600;padding:10px 12px;
@@ -764,7 +768,21 @@
      support, but dvh is the one that actually stays correct through every
      case, including ones no listener ever caught — plain scrolling that
      collapses Safari's own toolbar without any keyboard involved at all. */
-  .modal-overlay{position:fixed;inset:0;height:100vh;height:100dvh;background:rgba(22,33,62,0.55);display:flex;align-items:flex-start;justify-content:center;padding:20px 12px;overflow-y:auto;z-index:var(--z-modal);}
+  /* overflow-x:hidden alongside overflow-y:auto: without it, the x-axis
+     computes to auto too (per the CSS overflow spec, whenever one axis is
+     non-visible the other stops meaning visible), and any modal whose
+     content ends up even a pixel wider than the box — a form control
+     rendering wider on a real phone than in a desktop dev browser, for
+     instance — lets the whole thing drag sideways under a normal touch
+     gesture. Every modal in the app shares this one rule, so fixing it here
+     covers all of them at once rather than each modal needing its own
+     override the way #employeeModalOverlay first did. Scoped to the
+     overlay, never .modal-box — giving .modal-box any non-visible overflow
+     value makes it a scroll container of its own, which breaks
+     position:sticky for .modal-head/.modal-actions/#empStepper by anchoring
+     them to the wrong ancestor (the overlay is the one that actually
+     scrolls; see the .modal-head comment below). */
+  .modal-overlay{position:fixed;inset:0;height:100vh;height:100dvh;background:rgba(22,33,62,0.55);display:flex;align-items:flex-start;justify-content:center;padding:20px 12px;overflow-y:auto;overflow-x:hidden;z-index:var(--z-modal);}
   .modal-box{background:var(--paper);border-radius:14px;max-width:520px;width:100%;padding:22px;margin:20px 0 40px;}
   .modal-box h2{margin:0 0 6px;font-size:19px;}
   /* Title bar that stays put. The overlay is the scrolling element, so sticky
@@ -803,24 +821,10 @@
      item interaction. 100vh fills the screen without touching how the box
      is sized as a flex item, so the overlay's own align-items:flex-start
      (unchanged) still applies and sticky keeps working. */
-  /* overflow-y:auto with no overflow-x set computes the x-axis to auto too
-     (that's the CSS spec, not a bug) — so anything inside this one long form
-     that ends up even a pixel wider than the box (a form control rendering
-     wider on iOS Safari than in this file's own dev browser, for instance)
-     let the whole modal drag sideways under a normal touch-scroll, cutting
-     off the left edge of every field exactly as reported. Nothing in this
-     modal is meant to scroll sideways — the deliberate horizontal scrollers
-     inside it (.emp-stepper, .calc-line) are their own separate, deeper-
-     nested boxes with their own overflow-x:auto and are unaffected by this. */
-  /* .modal-box itself must stay off this — giving it any non-visible
-     overflow value (even just on the x-axis; overflow-y defaults to auto
-     the moment overflow-x isn't visible, per spec) makes it a scroll
-     container of its own, and position:sticky then anchors #empStepper to
-     THAT instead of the overlay — the overlay is the one that actually
-     scrolls (see the comment above), so the stepper stops following the
-     page and scrolls away like ordinary content. Clipping at the overlay
-     alone already stops the sideways drag with no such side effect. */
-  #employeeModalOverlay{background:var(--paper);padding:0;overflow-x:hidden;}
+  /* The sideways-drag fix now lives on the shared .modal-overlay rule
+     itself (see there) and covers this modal along with every other —
+     nothing employee-specific needed here any more. */
+  #employeeModalOverlay{background:var(--paper);padding:0;}
   #employeeModalOverlay .modal-box{border-radius:0;margin:0;min-height:100vh;}
 
   /* Add Employee: on a screen wide enough to make use of it, related sections
