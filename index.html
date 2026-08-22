@@ -8172,7 +8172,13 @@ function openFullscreenView(title, sourceId){
   // pressed again without leaving full screen first) must not push a second
   // history entry on top of the one already there for this exact view.
   const kmtIsNewFullscreen = fullscreenActiveId !== sourceId;
-  if(kmtIsNewFullscreen) kmtCaptureDeparture();
+  // The whole kmtCaptureDeparture/kmtCommitArrival replay stack is HR-only
+  // infrastructure (see closeFullscreenHeaderButton's comment) — every entry
+  // in it is replayed through hrNavigate. Pushing one from the engineer
+  // side's only fullscreen use (viewEmployeeHandbook) left a kmtView entry
+  // a later hardware/swipe Back press would pop straight into hrNavigate(),
+  // meaningless there. Skip the whole stack off the HR side.
+  if(kmtIsNewFullscreen && currentRole === 'hr') kmtCaptureDeparture();
   // stashReportShare() now takes sourceId itself, at every call site — this
   // used to be the ONLY place it got set (every report/letter calls
   // stashReportShare() immediately before this, so whichever box was just
@@ -8224,7 +8230,7 @@ function openFullscreenView(title, sourceId){
   fsBody.scrollTop = 0;
   fsBody.scrollLeft = 0;
   updateSheetScrollNavVisibility();
-  if(kmtIsNewFullscreen) kmtCommitArrival();
+  if(kmtIsNewFullscreen && currentRole === 'hr') kmtCommitArrival();
   // Deliberately NOT calling the native Fullscreen API here (requestFullscreen()
   // used to be called on #fullscreenSheetRoot) — the CSS overlay already
   // covers the whole viewport on its own (position:fixed;inset:0), so it was
@@ -8336,6 +8342,19 @@ function closeFullscreenHeaderButton(){
     const ownClose = box && box.querySelector('.rpt-close-btn:not([data-no-fs-delegate])');
     if(ownClose){ ownClose.click(); return; }
   }
+  // kmtBack()'s history-replay stack (kmtCaptureDeparture/kmtCommitArrival)
+  // is HR-only infrastructure — every entry in it describes an hrRoute/card,
+  // pushed only from hrNavigate/openReportsCard/openGeneratorCard. The
+  // engineer side never pushes any of those, so its only fullscreen view —
+  // viewEmployeeHandbook, opened straight off the engineer dashboard — had
+  // no kmtView entry to fall back to: kmtBack() still saw fullscreenActiveId's
+  // own history.pushState from openFullscreenView above it and called
+  // history.back() anyway, which popped straight through to the sign-out
+  // exit-guard's "Are you sure you want to exit?" confirm — and however that
+  // was answered, closeFullscreenView() was never actually called, so the
+  // handbook stayed stuck open with a ✕ that appeared to do nothing. Skip
+  // the HR replay stack entirely off the HR side and just close.
+  if(currentRole !== 'hr'){ closeFullscreenView(); return; }
   // No owned close button to delegate to (the Salary Sheet's own dedicated
   // close still routes through its separate PDF-prompt flow above, unaffected
   // by this) — kmtBack() lands on exactly the same "not full screen, same
