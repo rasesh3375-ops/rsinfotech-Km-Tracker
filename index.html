@@ -8058,6 +8058,20 @@ function kmtResettleLoop_(){
 // again, directly replicating what "sweeping tabs" was shown to fix.
 function kmtNudgeRepaint_(){
   const els = document.querySelectorAll('.modal-overlay');
+  // A real scroll event, not just a style/transform change, since that
+  // alone (tried first) still needed a manual app-switch to actually fix
+  // the stale paint -- confirmed on a real device. .modal-overlay is
+  // genuinely scrollable (unlike body, which is overflow:hidden for as
+  // long as any modal is open), so nudging its own scrollTop by 1px and
+  // back fires a real scroll, the same class of event this file's own
+  // 100dvh comment already documents WebKit as reliably recalculating
+  // geometry for (Safari's toolbar collapsing on scroll) -- a much closer
+  // match to whatever a genuine app-switch triggers than a style change.
+  els.forEach(el => {
+    const y = el.scrollTop;
+    el.scrollTop = y + 1;
+    el.scrollTop = y;
+  });
   els.forEach(el => { el.style.transform = 'translateZ(0.001px)'; });
   window.requestAnimationFrame(() => {
     els.forEach(el => { el.style.transform = 'translateZ(0)'; });
@@ -16005,6 +16019,14 @@ async function openAddEmployeeModal(id){
   initEmpStepper();
   updateEmpStepGroupSpans();
   resettleFixedOverlays_();
+  // kmtLockBodyScroll (called at the very top of this function, before the
+  // awaits above) already schedules a kmtNudgeRepaint_ of its own -- but at
+  // that point #employeeModalOverlay doesn't exist in the DOM yet (this
+  // function hadn't reached the innerHTML assignment above), so
+  // querySelectorAll('.modal-overlay') inside it almost certainly found
+  // nothing and nudged nothing. Calling it again here, now that the overlay
+  // genuinely exists, is what actually nudges the real element.
+  kmtNudgeRepaint_();
 
   // Offer the draft back only when it belongs to this form — a half-finished
   // new employee must never be poured into someone else's record.
