@@ -8038,11 +8038,49 @@ function kmtResettleLoop_(){
   resettleFixedOverlays_();
   kmtResettleRafId = window.requestAnimationFrame(kmtResettleLoop_);
 }
+// A diagnostic line with NO relation to any modal's own CSS/JS -- a plain
+// position:fixed element sitting directly on document.body -- was confirmed
+// rendering shifted upward and cut off at the exact moments the background-
+// bleed-through bug was visible, and rendering perfectly the moment the user
+// switched to another app and back ("sweeping tabs"). Since that box's
+// numbers (window.innerHeight, the safe-area insets, the overlay's actual
+// applied height) all measured exactly correct even while it was visibly
+// cut off, this was never a wrong-value problem -- every fix so far
+// computed the right numbers. It's WebKit itself leaving its own PAINTED
+// position of fixed elements stale until something forces a recomposite,
+// and switching apps is exactly the kind of event that forces one.
+// document.body.style.overflow toggling (right below) is a known trigger
+// for this exact class of iOS staleness. kmtNudgeRepaint_ forces a
+// recomposite of every fixed overlay by toggling its transform (a
+// transform change is guaranteed to touch its compositing layer, unlike a
+// content-only change a stale layer can end up skipping) -- run once
+// whenever a modal opens, and again whenever the page becomes visible
+// again, directly replicating what "sweeping tabs" was shown to fix.
+function kmtNudgeRepaint_(){
+  const els = document.querySelectorAll('.modal-overlay');
+  els.forEach(el => { el.style.transform = 'translateZ(0.001px)'; });
+  window.requestAnimationFrame(() => {
+    els.forEach(el => { el.style.transform = 'translateZ(0)'; });
+    resettleFixedOverlays_();
+  });
+}
+if(!window.KMT_NUDGE_LISTENERS_ARMED_){
+  window.KMT_NUDGE_LISTENERS_ARMED_ = true;
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState === 'visible' && kmtBodyLockOwners.size) kmtNudgeRepaint_();
+  });
+  window.addEventListener('pageshow', () => {
+    if(kmtBodyLockOwners.size) kmtNudgeRepaint_();
+  });
+}
 function kmtLockBodyScroll(owner){
   const wasEmpty = !kmtBodyLockOwners.size;
   kmtBodyLockOwners.add(owner);
   document.body.style.overflow = 'hidden';
-  if(wasEmpty && !kmtResettleRafId) kmtResettleRafId = window.requestAnimationFrame(kmtResettleLoop_);
+  if(wasEmpty){
+    if(!kmtResettleRafId) kmtResettleRafId = window.requestAnimationFrame(kmtResettleLoop_);
+    window.requestAnimationFrame(kmtNudgeRepaint_);
+  }
 }
 function kmtUnlockBodyScroll(owner){
   kmtBodyLockOwners.delete(owner);
