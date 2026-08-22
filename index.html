@@ -1319,6 +1319,34 @@
   .gen-card p.gen-card-stat:empty{display:none;}
   .gen-card .btn{margin-top:2px;pointer-events:none;}
 
+  /* ===== Generator accordion: every section collapsed by default, header
+     stays put once opened (unlike .gen-card, which the old grid replaced
+     entirely with whichever card was clicked) so switching to a different
+     section is one tap, not a Close then a re-pick. Reuses the same
+     numbered-circle badge .gen-step-num already uses for the Letters wizard,
+     same reasoning: one look, not a second component for the same idea. ===== */
+  .gen-accordion-list{display:flex;flex-direction:column;gap:10px;margin-top:18px;}
+  .gen-accordion-header{background:var(--paper);border:1px solid var(--line);border-radius:14px;
+    padding:14px 16px;cursor:pointer;display:flex;align-items:center;gap:12px;text-align:left;
+    font-family:inherit;width:100%;transition:border-color .15s,box-shadow .15s;}
+  .gen-accordion-header:hover{border-color:var(--amber-dark);box-shadow:0 2px 12px rgba(22,33,62,.08);}
+  .gen-accordion-header.active{border-color:var(--amber-dark);box-shadow:0 2px 12px rgba(22,33,62,.08);}
+  .gen-accordion-num{width:26px;height:26px;border-radius:50%;background:var(--navy);color:#fff;flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12.5px;}
+  .gen-accordion-headtext{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
+  .gen-accordion-title{font-size:15px;color:var(--navy);}
+  .gen-accordion-desc{font-size:12px;color:var(--muted);line-height:1.5;}
+  .gen-accordion-chevron{flex-shrink:0;color:var(--muted);font-size:12px;transition:transform .15s;}
+  .gen-accordion-header.active .gen-accordion-chevron{transform:rotate(180deg);color:var(--amber-dark);}
+  /* The expanded content isn't physically nested inside its header — each
+     genSecXxx target div sits in its own original spot in the markup,
+     further down #hrSubGenerator, exactly as before this became an
+     accordion. But every other one stays .hidden, so nothing else renders
+     in between, and the one open section still lands visually right under
+     the (still-visible) header list in document order, same as if it were
+     nested. This margin is what keeps it from sitting flush against it. */
+  .gen-accordion-body{margin-top:10px;}
+
   .letter-paper{display:none;}
   #letterOutput.show .letter-paper{display:block;margin:18px 0;font-size:13.5px;line-height:1.7;white-space:pre-wrap;}
   .holiday-list-paper{display:none;}
@@ -2638,61 +2666,105 @@
       <div id="hrSubGenerator" class="hidden">
         <div id="genLanding" class="gen-landing">
           <h1>Generator</h1>
-          <p>Generate HR reports, letters and calculation sheets — pick what you need below.</p>
-          <div class="gen-card-grid">
-            <button type="button" class="gen-card" onclick="openGeneratorCard('genSecRoleReports')">
-              <div class="gen-card-icon t1">👤</div>
-              <h3>Employee Role Reports</h3>
-              <p>A4 report built from one employee's job profile and responsibilities.</p>
-              <span class="btn full">Generate</span>
+          <p>Generate HR reports, letters and calculation sheets — tap a section to open it.</p>
+          <!-- Flattened accordion: every Generator section as one peer list,
+               collapsed by default, one open at a time (toggleGenAccordion_
+               below closes every other one first). Office Documents' seven
+               sections (Payroll, Apprentice, Holiday List upload, Company
+               Profile, Important Documents, Uniform/ID, Handbook) used to
+               live together under one "Office Documents" card — they're
+               peers here too now, not nested under it, so GENERATOR_SECTIONS
+               lists all fourteen and there is no "genSecOfficeDocuments"
+               entry any more. -->
+          <div class="gen-accordion-list">
+            <button type="button" class="gen-accordion-header" data-target="genSecRoleReports" onclick="openGeneratorCard('genSecRoleReports')" aria-expanded="false">
+              <span class="gen-accordion-num">1</span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Employee Role Reports</strong>
+                <span class="gen-accordion-desc">A4 report built from one employee's job profile and responsibilities.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
-            <button type="button" class="gen-card" onclick="openGeneratorCard('genSecLetters')">
-              <div class="gen-card-icon t2">✉️</div>
-              <h3>Letters</h3>
-              <p>Offer, Appointment, Experience and more, plus leave and loan request forms.</p>
-              <span class="btn full">Generate</span>
+            <button type="button" class="gen-accordion-header" data-target="genSecLetters" onclick="openGeneratorCard('genSecLetters')" aria-expanded="false">
+              <span class="gen-accordion-num">2</span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Letters</strong>
+                <span class="gen-accordion-desc">Offer, Appointment, Experience and more, plus leave and loan request forms.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
-            <button type="button" class="gen-card" onclick="openGeneratorCard('genSecChecklists')">
-              <div class="gen-card-icon t3">✅</div>
-              <h3>Checklists</h3>
-              <p>Joining checklist, joining kit and exit checklist.</p>
-              <span class="btn full">Open</span>
+            <button type="button" class="gen-accordion-header" data-target="genSecChecklists" onclick="openGeneratorCard('genSecChecklists')" aria-expanded="false">
+              <span class="gen-accordion-num">3</span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Checklists</strong>
+                <span class="gen-accordion-desc">Joining checklist, joining kit and exit checklist.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
-            <button type="button" class="gen-card" onclick="openGeneratorCard('genSecHolidayList')">
-              <div class="gen-card-icon t4">📅</div>
-              <h3>Holiday List</h3>
-              <p>A printable holiday list for engineers, by financial year.</p>
-              <span class="btn full">Generate</span>
+            <button type="button" class="gen-accordion-header" data-target="genSecHolidayList" onclick="openGeneratorCard('genSecHolidayList')" aria-expanded="false">
+              <span class="gen-accordion-num">4</span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Holiday List (Generate)</strong>
+                <span class="gen-accordion-desc">A printable holiday list for engineers, by financial year.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
-            <button type="button" class="gen-card" onclick="openGeneratorCard('genSecLeaveEncashment')">
-              <div class="gen-card-icon t2">💰</div>
-              <h3>Leave Encashment Report</h3>
-              <p>What is owed for unused privilege leave at the year end.</p>
-              <span class="btn full">Generate</span>
+            <button type="button" class="gen-accordion-header" data-target="genSecLeaveEncashment" onclick="openGeneratorCard('genSecLeaveEncashment')" aria-expanded="false">
+              <span class="gen-accordion-num">5</span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Leave Encashment Report</strong>
+                <span class="gen-accordion-desc">What is owed for unused privilege leave at the year end.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
-            <button type="button" class="gen-card" onclick="openLetterheadCard()">
-              <div class="gen-card-icon t3">🏢</div>
-              <h3>Company Letterhead</h3>
-              <p>Address, phone, email, website and the HR signatory printed on every generated report.</p>
-              <span class="btn full">Open</span>
+            <button type="button" class="gen-accordion-header" data-target="genSecLetterhead" onclick="openLetterheadCard()" aria-expanded="false">
+              <span class="gen-accordion-num">6</span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Company Letterhead</strong>
+                <span class="gen-accordion-desc">Address, phone, email, website and the HR signatory printed on every generated report.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
-            <button type="button" class="gen-card" onclick="openGeneratorCard('genSecOfficeDocuments')">
-              <div class="gen-card-icon t4">🗂️</div>
-              <h3>Office Documents</h3>
-              <p>Payroll, apprentice and company documents, uniform &amp; ID tracking, the employee handbook.</p>
-              <span class="btn full">Open</span>
+            <button type="button" class="gen-accordion-header" data-target="genSecPayrollDocs" onclick="openGeneratorCard('genSecPayrollDocs')" aria-expanded="false">
+              <span class="gen-accordion-num">7</span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Payroll Documents (monthly)</strong>
+                <span class="gen-accordion-desc">PF, ESI and Professional Tax challans, ECRs and payment receipts — filed by year, month, category and type.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
-            <button type="button" class="gen-card" onclick="openCtcCalculatorCard()">
-              <div class="gen-card-icon t1">🧮</div>
-              <h3>CTC Calculator</h3>
-              <p>Check the exact salary before appointing anyone — enter Take Home or CTC, either way.</p>
-              <span class="btn full">Open</span>
+            <button type="button" class="gen-accordion-header" data-target="genSecApprenticeDocs" onclick="openGeneratorCard('genSecApprenticeDocs')" aria-expanded="false">
+              <span class="gen-accordion-num">8</span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Apprentice Documents</strong>
+                <span class="gen-accordion-desc">Apprentice claim documents, contracts, and other important apprentice paperwork.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
+            </button>
+            <button type="button" class="gen-accordion-header" data-target="genSecHolidayUpload" onclick="openGeneratorCard('genSecHolidayUpload')" aria-expanded="false">
+              <span class="gen-accordion-num">9</span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Holiday List (Upload)</strong>
+                <span class="gen-accordion-desc">Upload an official signed/stamped copy of the holiday list for record-keeping.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
+            </button>
+            <button type="button" class="gen-accordion-header" data-target="genSecCompanyProfile" onclick="openGeneratorCard('genSecCompanyProfile')" aria-expanded="false">
+              <span class="gen-accordion-num">10</span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">R.S. Infotech Profile</strong>
+                <span class="gen-accordion-desc">Company profile documents — brochures, presentations, credentials.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
+            </button>
+            <button type="button" class="gen-accordion-header" data-target="genSecImportantDocs" onclick="openGeneratorCard('genSecImportantDocs')" aria-expanded="false">
+              <span class="gen-accordion-num">11</span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">R.S. Infotech Important Documents</strong>
+                <span class="gen-accordion-desc">Registration certificates, licenses, and other important company documents.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
+            </button>
+            <button type="button" class="gen-accordion-header" data-target="genSecUniformId" onclick="openGeneratorCard('genSecUniformId')" aria-expanded="false">
+              <span class="gen-accordion-num">12</span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Uniform &amp; ID List</strong>
+                <span class="gen-accordion-desc">Track uniform and ID card issue status for one employee at a time.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
+            </button>
+            <button type="button" class="gen-accordion-header" data-target="genSecHandbook" onclick="openGeneratorCard('genSecHandbook')" aria-expanded="false">
+              <span class="gen-accordion-num">13</span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Employee Handbook</strong>
+                <span class="gen-accordion-desc">The full handbook for Field/WFH engineers, and the Resident Engineer Policy text.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
+            </button>
+            <button type="button" class="gen-accordion-header" data-target="genSecCtcCalculator" onclick="openCtcCalculatorCard()" aria-expanded="false">
+              <span class="gen-accordion-num">14</span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">CTC Calculator</strong>
+                <span class="gen-accordion-desc">Check the exact salary before appointing anyone — enter Take Home or CTC, either way.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
           </div>
         </div>
 
-        <div id="genSecRoleReports" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="genSecRoleReports" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">Employee Role Reports</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A branded A4 report built from one employee's job profile, responsibilities, designation and department — the measures, risks and recommendations change with the role. Fill in Job profile and Key responsibilities in Employee Master first; without them the report falls back to designation and department and says so.</p>
@@ -2707,8 +2779,7 @@
         </section>
         </div>
 
-        <div id="genSecLetterhead" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="genSecLetterhead" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">Company letterhead</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Printed in the header and footer of every generated report. Anything left blank is left off the report rather than filled with a placeholder.</p>
@@ -2740,8 +2811,7 @@
         </section>
         </div>
 
-        <div id="genSecHolidayList" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="genSecHolidayList" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">Holiday List (to share with engineers)</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">A printable holiday list with the company logo, for a chosen financial year (April–March) — built from the Holidays list above.</p>
@@ -2756,8 +2826,7 @@
         </section>
         </div>
 
-        <div id="genSecLeaveEncashment" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="genSecLeaveEncashment" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">Leave Encashment Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">What is owed for unused privilege leave at the year end, as at 31 March. Grouped by salary heading and sorted by bank with account numbers, so it can be paid the same way as the salary and the bonus. Resident Engineers are outside the EL scheme and do not appear.</p>
@@ -2770,8 +2839,7 @@
         </section>
         </div>
 
-        <div id="genSecChecklists" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="genSecChecklists" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">Checklists</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Joining checklist, items issued at joining, and the exit checklist — same lists that were under "Choose a letter" before, kept together here since they're not letters.</p>
@@ -2780,8 +2848,7 @@
         </section>
         </div>
 
-        <div id="genSecLetters" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="genSecLetters" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">Generate Letter</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 16px;">Choose a letter, select employee and generate your document.</p>
@@ -2944,9 +3011,14 @@
           <div class="letter-paper" id="letterPaper"></div>
         </div>
         </div>
-        <div id="genSecOfficeDocuments" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
-
+        <!-- Office Documents used to be one more card wrapping these seven —
+             now each is its own accordion peer (see GENERATOR_SECTIONS),
+             flattened alongside every other Generator section. Nothing
+             inside any of them changed: same ids, same fields, same
+             handlers, same numbering in their own headings — only the
+             wrapping div that used to hide/show all seven together is
+             gone, replaced by seven that hide/show independently. -->
+        <div id="genSecPayrollDocs" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">1. Payroll Documents (monthly)</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">PF, ESI and Professional Tax challans, ECRs and payment receipts, filed by financial year, month, category and document type — with a compliance dashboard, search and a full change history. Files are stored in Google Drive, not in the app itself.</p>
@@ -2954,7 +3026,9 @@
           <button class="btn full" onclick="openPayrollDocsModule()">Open Payroll Documents</button>
         </section>
         <div id="payrollDocsRoot" class="hidden"></div>
+        </div>
 
+        <div id="genSecApprenticeDocs" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">2. Apprentice Documents</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Apprentice claim documents, contracts, and other important apprentice paperwork.</p>
@@ -2981,7 +3055,9 @@
           <div style="height:14px"></div>
           <div id="apprenticeDocList"></div>
         </section>
+        </div>
 
+        <div id="genSecHolidayUpload" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">3. Holiday List — R.S. Infotech, Vadodara</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The generated holiday list already lives in Reports → Holiday List. If you also have an official signed/stamped copy, upload it here for record-keeping.</p>
@@ -2993,7 +3069,9 @@
           <div style="height:14px"></div>
           <div id="companyDocList_holidaylist"></div>
         </section>
+        </div>
 
+        <div id="genSecCompanyProfile" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">4. R.S. Infotech Profile</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Company profile documents — brochures, presentations, credentials.</p>
@@ -3005,7 +3083,9 @@
           <div style="height:14px"></div>
           <div id="companyDocList_profile"></div>
         </section>
+        </div>
 
+        <div id="genSecImportantDocs" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">5. R.S. Infotech Important Documents</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Registration certificates, licenses, and other important company documents.</p>
@@ -3020,7 +3100,9 @@
           <div style="height:14px"></div>
           <div id="companyDocList_important"></div>
         </section>
+        </div>
 
+        <div id="genSecUniformId" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">6. Uniform &amp; ID List</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Track uniform and ID card issue status for one employee at a time, with supporting documents.</p>
@@ -3030,7 +3112,9 @@
           </select>
           <div id="uniformIdList" style="margin-top:14px;"></div>
         </section>
+        </div>
 
+        <div id="genSecHandbook" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">7. Employee Handbook</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Field and WFH engineers see the whole handbook. Resident Engineers only see the Resident Engineer Policy section below — not the full document. Update either whenever the policy changes, typically once a year.</p>
@@ -3054,8 +3138,7 @@
 
       </div>
 
-      <div id="genSecCtcCalculator" class="hidden">
-      <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+      <div id="genSecCtcCalculator" class="hidden gen-accordion-body">
       <section class="block">
         <h2 style="margin:0 0 4px;">CTC Calculator</h2>
         <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Check the exact CTC or take-home salary before appointing anyone — enter either one and the other is worked out from it, using the same Salary Heading split and PF/ESI/PT rules the Salary Sheet uses. Not tied to any employee record; nothing here is saved.</p>
@@ -19468,21 +19551,49 @@ function clearGeneratorEmployeeFields(){
   });
 }
 
-// Generator landing: a card grid picking which of the existing forms below to
-// open, instead of showing all six stacked on one long page. Each card just
-// toggles which of these wrapper divs is visible — no new report, letter or
-// calculation, only how you get to the ones that already existed.
-const GENERATOR_SECTIONS = ['genSecRoleReports','genSecLetterhead','genSecHolidayList',
-  'genSecLeaveEncashment','genSecChecklists','genSecLetters','genSecOfficeDocuments','genSecCtcCalculator'];
+// Generator accordion: every existing form/report/upload section below,
+// collapsed by default — clicking a header shows its content right below
+// the (still visible) header list and collapses whatever else was open;
+// clicking the same header again collapses it. No new report, letter or
+// calculation, only how you get to the ones that already existed. Office
+// Documents used to be one more card wrapping seven sections together
+// (Payroll, Apprentice, Holiday List upload, Company Profile, Important
+// Documents, Uniform/ID, Handbook) — they're peers here now, not nested
+// under it, so this list has fourteen entries where the old card grid had
+// eight, and there is no "genSecOfficeDocuments" any more.
+const GENERATOR_SECTIONS = ['genSecRoleReports','genSecLetters','genSecChecklists',
+  'genSecHolidayList','genSecLeaveEncashment','genSecLetterhead',
+  'genSecPayrollDocs','genSecApprenticeDocs','genSecHolidayUpload','genSecCompanyProfile',
+  'genSecImportantDocs','genSecUniformId','genSecHandbook','genSecCtcCalculator'];
+// Syncs every header's .active class, chevron and aria-expanded to whichever
+// one section (if any) is actually open — called after every open/collapse
+// rather than toggled by hand at each call site, so it can never drift out
+// of sync with the real hidden-class state driving what's on screen.
+function updateGenAccordionHeaders_(){
+  document.querySelectorAll('.gen-accordion-header[data-target]').forEach(btn => {
+    const target = document.getElementById(btn.dataset.target);
+    const open = !!target && !target.classList.contains('hidden');
+    btn.classList.toggle('active', open);
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+}
 function showGeneratorLanding(){
-  document.getElementById('genLanding').classList.remove('hidden');
   GENERATOR_SECTIONS.forEach(id => document.getElementById(id).classList.add('hidden'));
+  updateGenAccordionHeaders_();
 }
 function openGeneratorCard(sectionId){
   kmtCaptureDeparture();
-  document.getElementById('genLanding').classList.add('hidden');
-  GENERATOR_SECTIONS.forEach(id => document.getElementById(id).classList.toggle('hidden', id !== sectionId));
-  autoDefaultMonthYearSelects_(document.getElementById(sectionId));
+  // A second tap on the open section's own header collapses it — the
+  // accordion's stated way to close something, same as every other header
+  // click, just landing back on "nothing open" instead of switching to a
+  // different one.
+  const alreadyOpen = !document.getElementById(sectionId).classList.contains('hidden');
+  GENERATOR_SECTIONS.forEach(id => document.getElementById(id).classList.add('hidden'));
+  if(!alreadyOpen){
+    document.getElementById(sectionId).classList.remove('hidden');
+    autoDefaultMonthYearSelects_(document.getElementById(sectionId));
+  }
+  updateGenAccordionHeaders_();
   kmtCommitArrival();
 }
 
