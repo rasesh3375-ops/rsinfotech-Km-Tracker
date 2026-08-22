@@ -20048,24 +20048,35 @@ async function renderPayrollDocsBrowse_(body){
   const cat = payrollDocCategoryByKey_(payrollDocsState_.category);
   if(!payrollDocsState_.docType){
     body.innerHTML = crumb + `<div class="payroll-docs-list">` + cat.types.map(t => {
-      const rec = records.find(r => r.month===payrollDocsState_.month && r.category===cat.key && r.docType===t.key);
+      // Every document type is meant to hold exactly one active record a
+      // month — a second one almost always means a later upload picked the
+      // wrong Document Type instead of replacing the first (Upload always
+      // adds a new record; Replace is the action that swaps a file in
+      // place). Filter, not find, so a stray duplicate is visible here
+      // rather than silently shadowed by whichever one happened to be
+      // first in the array.
+      const matches = records.filter(r => r.month===payrollDocsState_.month && r.category===cat.key && r.docType===t.key);
+      const rec = matches[0];
       return `<div class="emp-row payroll-docs-clickrow" onclick="payrollDocsSetLevel_({docType:'${t.key}'})">
         <div class="head"><strong>${escapeHtml(t.label)}</strong>
-          <span class="pill ${rec ? 'new' : 'warn'}">${rec ? 'Uploaded' : 'Not uploaded'}</span></div>
-        ${rec ? `<div class="sub">${escapeHtml(rec.docName || rec.fileName)}</div>` : ''}
+          <span class="pill ${rec ? (matches.length > 1 ? 'live' : 'new') : 'warn'}">${rec ? (matches.length > 1 ? matches.length + ' documents' : 'Uploaded') : 'Not uploaded'}</span></div>
+        ${matches.length > 1 ? `<div class="sub">More than one — check these aren't a document that should have used Replace instead</div>`
+          : rec ? `<div class="sub">${escapeHtml(rec.docName || rec.fileName)}</div>` : ''}
       </div>`;
     }).join('') + `</div>`;
     return;
   }
 
   const typeInfo = payrollDocTypeInfo_(cat.key, payrollDocsState_.docType);
-  const rec = records.find(r => r.month===payrollDocsState_.month && r.category===cat.key && r.docType===payrollDocsState_.docType);
-  if(!rec){
+  const matchingRecs = records.filter(r => r.month===payrollDocsState_.month && r.category===cat.key && r.docType===payrollDocsState_.docType);
+  if(!matchingRecs.length){
     body.innerHTML = crumb + `<div class="empty">No ${escapeHtml(typeInfo.label)} uploaded for ${payrollDocMonthLabel_(payrollDocsState_.month)} ${escapeHtml(fy)} yet.</div>
       <button type="button" class="btn" style="margin-top:10px;" onclick="openPayrollDocUploadModal({fy:'${fy}',month:${payrollDocsState_.month},category:'${cat.key}',docType:'${payrollDocsState_.docType}'})">Upload ${escapeHtml(typeInfo.label)}</button>`;
     return;
   }
-  body.innerHTML = crumb + payrollDocRecordCardHtml_(rec);
+  body.innerHTML = crumb +
+    (matchingRecs.length > 1 ? `<div class="empty pol-warn" style="margin-bottom:10px;">${matchingRecs.length} documents are filed as ${escapeHtml(typeInfo.label)} for this month — reclassify the ones that are actually a different document type, or delete a genuine duplicate.</div>` : '') +
+    `<div class="payroll-docs-list">` + matchingRecs.map(payrollDocRecordCardHtml_).join('') + `</div>`;
 }
 function payrollDocRecordCardHtml_(rec){
   const safeUrl = (rec.url||'').replace(/'/g,"\\'");
@@ -20216,7 +20227,22 @@ function payrollDocModalHtml_(){
 }
 function payrollDocFormCategoryChanged_(){
   const cat = payrollDocCategoryByKey_(document.getElementById('pdFormCategory').value);
-  document.getElementById('pdFormDocType').innerHTML = cat ? cat.types.map(t=>`<option value="${t.key}">${escapeHtml(t.label)}</option>`).join('') : '';
+  // A blank first option that is never auto-selected as a real answer —
+  // without it the browser silently pre-selects whichever type happens to
+  // be first in the category's list, and a Save with nobody having
+  // deliberately touched Document Type went through as that type anyway.
+  // That's exactly how three separate uploads (Challan, ECR, Receipt) could
+  // all land tagged as the same "PF Challan": Category defaults sensibly to
+  // 'pf' every time, but Document Type doesn't reset for a second or third
+  // upload the way a person expects unless openPayrollDocUploadModal was
+  // given an explicit prefill (Browse's own "Upload X" shortcut always
+  // supplies one; the toolbar's "+ Upload document" button never does).
+  // The existing "Choose a document type" validation in savePayrollDocForm_
+  // already rejects an empty value — it just could never actually fire
+  // before, because the select was never blank to begin with.
+  document.getElementById('pdFormDocType').innerHTML = cat
+    ? '<option value="">— Choose a document type —</option>' + cat.types.map(t=>`<option value="${t.key}">${escapeHtml(t.label)}</option>`).join('')
+    : '';
 }
 function payrollDocSetModalGroups_(visibleGroups){
   ['classify','details','file','status'].forEach(g => {
