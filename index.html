@@ -19671,6 +19671,15 @@ const PAYROLL_DOC_CATEGORIES = [
   { key:'pt', label:'Professional Tax', types:[
       {key:'ptChallan', label:'Professional Tax Challan'},
       {key:'ptReceipt', label:'Professional Tax Payment Receipt'} ]},
+  // No Challan/Receipt cycle for either of these — one document a month,
+  // so one document type each, same as every other category's shape.
+  // Deliberately no "/" in the label: it becomes a literal Drive folder
+  // name via hrYearPath below, and Drive folder names allow the character
+  // but it reads as a path separator to a human browsing there.
+  { key:'wages', label:'Wages & Salary', types:[
+      {key:'wagesRegister', label:'Wages Register'} ]},
+  { key:'payslip', label:'Payslip', types:[
+      {key:'payslip', label:'Payslip'} ]},
 ];
 function payrollDocCategoryByKey_(key){ return PAYROLL_DOC_CATEGORIES.find(c => c.key === key) || null; }
 function payrollDocTypeInfo_(categoryKey, typeKey){
@@ -19741,13 +19750,20 @@ async function savePayrollDocsUnclassified_(list){
 
 // ---- one-time migration from the old office_payroll_docs flat list ----
 // The old dropdown only ever offered 5 values (PF/ESI/PT Challan, Wages
-// Register, Pay Slip) — only the first three map onto a category+type in
-// the new scheme; Wages Register/Pay Slip (and anything malformed) go to
-// Unclassified rather than being force-fit or silently dropped.
+// Register, Pay Slip) — all five now map onto a category+type in the new
+// scheme; anything else (malformed month, unrecognized type — not expected
+// in practice) goes to Unclassified rather than being force-fit or
+// silently dropped. A record already migrated into Unclassified before the
+// Wages/Payslip categories existed is unaffected by this — this map only
+// runs once per environment (payroll_docs_migration_done) — but it can
+// still be moved out by hand with the ordinary Classify action, which
+// picks up these two categories the same as any other.
 const PAYROLL_DOC_LEGACY_TYPE_MAP_ = {
   'PF Challan': ['pf','pfChallan'],
   'ESI Challan': ['esi','esiChallan'],
   'PT Challan': ['pt','ptChallan'],
+  'Wages Register': ['wages','wagesRegister'],
+  'Pay Slip': ['payslip','payslip'],
 };
 async function payrollDocsMigrationNeeded_(){
   const done = await safeGet('payroll_docs_migration_done', true);
@@ -19888,32 +19904,71 @@ async function renderPayrollDocsViewBody_(){
   if(payrollDocsState_.view === 'unclassified') return renderPayrollDocsUnclassified_(body);
 }
 
-// ---- Dashboard: Month | PF | ESI | PT | Overall Status ----
+// ---- Dashboard: Month | PF | ESI | Professional Tax | Wages & Salary | Payslip ----
+// No Overall column — HR only ever acted on which category was short, and it
+// grows one wider every time a category is added (five now); on top of the
+// Month column itself that already forced sideways scroll on a phone. The
+// per-category status is exactly the same signal without the extra column.
+//
+// Same width problem, worse: a five-category table plus Month is six
+// columns, comfortably wider than a phone screen no matter how the table
+// itself is styled. Below isCompactSheetView()'s breakpoint (the same one
+// the Attendance/Salary sheets already switch on) this renders as a stack
+// of month cards instead, reusing payroll-docs-clickrow/emp-row exactly as
+// Browse's own month list does, rather than a table nobody could read
+// without scrolling it sideways one column at a time.
 async function renderPayrollDocsDashboard_(body){
   const fy = payrollDocsState_.fy;
   const records = (await getPayrollDocsForFY(fy)).filter(r => r.status === 'active');
   const rows = FY_MONTH_ORDER.map(monthNum => ({ monthNum, status: payrollDocsMonthStatus_(records, fy, monthNum) }));
-  body.innerHTML = `
+  const fyPicker = `
     <div class="payroll-docs-fy-picker">
       <label class="field">Financial Year</label>
       <select class="field-input" id="payrollDocsDashFySel" onchange="payrollDocsState_.fy=this.value;renderPayrollDocsViewBody_();">
         ${payrollDocsFyOptions_().map(l => `<option value="${l}" ${l===fy?'selected':''}>${l}</option>`).join('')}
       </select>
-    </div>
+    </div>`;
+  if(isCompactSheetView()){
+    body.innerHTML = fyPicker + `<div class="payroll-docs-list">` + rows.map(r => `
+      <div class="hr-sheet-card payroll-docs-clickrow" onclick="payrollDocsJumpToMonth_(${r.monthNum})">
+        <div class="head"><strong>${payrollDocMonthLabel_(r.monthNum)}</strong></div>
+        ${PAYROLL_DOC_CATEGORIES.map(c => hrRow(escapeHtml(c.label),
+          `<span class="pill ${payrollDocsStatusPillClass_(r.status[c.key])}">${PAYROLL_DOC_STATUS_LABEL_[r.status[c.key]]}</span>`)).join('')}
+      </div>`).join('') + `</div>`;
+    return;
+  }
+  body.innerHTML = fyPicker + `
     <div class="payroll-docs-table-wrap">
     <table class="payroll-docs-table">
-      <thead><tr><th>Month</th>${PAYROLL_DOC_CATEGORIES.map(c => `<th>${escapeHtml(c.label)}</th>`).join('')}<th>Overall</th></tr></thead>
+      <thead><tr><th>Month</th>${PAYROLL_DOC_CATEGORIES.map(c => `<th>${escapeHtml(c.label)}</th>`).join('')}</tr></thead>
       <tbody>
         ${rows.map(r => `
           <tr class="payroll-docs-month-row" onclick="payrollDocsJumpToMonth_(${r.monthNum})">
             <td><strong>${payrollDocMonthLabel_(r.monthNum)}</strong></td>
             ${PAYROLL_DOC_CATEGORIES.map(c => `<td><span class="pill ${payrollDocsStatusPillClass_(r.status[c.key])}">${PAYROLL_DOC_STATUS_LABEL_[r.status[c.key]]}</span></td>`).join('')}
-            <td><span class="pill ${payrollDocsStatusPillClass_(r.status.overall)}">${PAYROLL_DOC_STATUS_LABEL_[r.status.overall]}</span></td>
           </tr>`).join('')}
       </tbody>
     </table>
     </div>`;
 }
+// Re-renders the Dashboard if it's actually on screen when a resize crosses
+// isCompactSheetView()'s breakpoint — same debounce-and-compare pattern the
+// Attendance/Salary sheets use above, so rotating a phone (or resizing a
+// browser window) while looking at the Dashboard swaps table<->cards instead
+// of leaving the wrong shape on screen until the next visit.
+let payrollDocsCompactLast = isCompactSheetView();
+let payrollDocsResizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(payrollDocsResizeTimer);
+  payrollDocsResizeTimer = setTimeout(() => {
+    const now = isCompactSheetView();
+    if(now === payrollDocsCompactLast) return;
+    payrollDocsCompactLast = now;
+    if(payrollDocsState_.view === 'dashboard' && document.getElementById('payrollDocsViewBody')){
+      renderPayrollDocsViewBody_();
+    }
+  }, 300);
+});
 function payrollDocsJumpToMonth_(monthNum){
   payrollDocsState_.view = 'browse';
   payrollDocsState_.month = monthNum;
