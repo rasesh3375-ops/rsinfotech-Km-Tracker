@@ -13933,7 +13933,18 @@ function initEmpStepper(){
       const stepperH = stepper.offsetHeight;
       const overlayTop = overlay.getBoundingClientRect().top;
       const y = overlay.scrollTop + (target.getBoundingClientRect().top - overlayTop) - stepperH - 6;
-      overlay.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
+      // behavior:'auto' (instant), not 'smooth' -- an animated scrollTo
+      // landing on a position:sticky element that is also its own GPU
+      // compositing layer (.emp-stepper picked up transform:translateZ(0)
+      // for an unrelated reason, see its CSS comment) is a known class of
+      // WebKit bug where the sticky element freezes at a stale, pre-repaint
+      // position once the animation ends and never corrects itself --
+      // reported exactly that way: tapping a step number left the stepper's
+      // own safe-area padding not applied, staying wrong indefinitely, only
+      // after a tap-jump specifically, never after a manual scroll. An
+      // instant jump sidesteps the animation entirely rather than fighting
+      // whatever WebKit does mid-transition.
+      overlay.scrollTo({ top: Math.max(0, y), behavior: 'auto' });
     };
   });
   // Whichever banner is the last one to have scrolled past the strip is the
