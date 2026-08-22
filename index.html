@@ -15767,28 +15767,51 @@ async function reconcileTrackingUsername(draft){
 // viewport (offsetTop > 0) to bring a lower field above the keyboard, and a
 // fixed element that only corrects its height would then sit short of
 // where the visible area actually starts.
+// True only for the installed home-screen app, never a Safari tab (this is
+// the same detection the early entry-role script above uses). Confirmed by
+// directly comparing the two on the same device: Add Employee renders
+// correctly end to end in Safari, viewport-fit=cover and all, but the same
+// build still left a gap under the sticky Save button in the home-screen
+// app, even freshly deleted and re-added. That means CSS 100dvh (and
+// viewport-fit=cover) genuinely cannot be trusted inside the standalone
+// WebClip container on this device -- not a caching problem, not something
+// re-adding the icon can fix -- so standalone mode drives the overlay's
+// height from JS unconditionally instead of leaning on CSS for it at all.
+const KMT_IS_STANDALONE = window.matchMedia('(display-mode: standalone)').matches ||
+  window.navigator.standalone === true;
 function resettleFixedOverlays_(){
   if(!window.visualViewport) return;
   const vv = window.visualViewport;
-  // Only pin an inline height/top when the keyboard (or a picker) is
-  // actually shrinking the visual viewport below the layout viewport --
-  // CSS 100dvh already tracks everything else (toolbar collapsing on
-  // scroll, rotation, Display Zoom) correctly on its own, per the comment
-  // above. An earlier version set the inline override unconditionally,
-  // every frame, for as long as any overlay was open. That was fine while
-  // a keyboard was genuinely open, but on a device/mode where
-  // visualViewport.height doesn't land on exactly the same number as the
-  // true resting screen height (reported with no keyboard open at all,
-  // matching iOS's history of standalone-PWA viewport-measurement quirks),
-  // it permanently pinned that slightly-wrong height in front of the
-  // otherwise-correct dvh value for the overlay's whole lifetime -- worse
-  // than doing nothing. window.innerHeight is the layout viewport, which
-  // (like dvh) does not shrink for the keyboard, so a real gap between the
-  // two numbers is a reliable, keyboard-specific signal; anything smaller
-  // than that (rounding, a stray pixel) is left to CSS.
-  const keyboardOpen = vv.height < window.innerHeight - 1;
-  const h = keyboardOpen ? vv.height + 'px' : '';
-  const t = keyboardOpen ? vv.offsetTop + 'px' : '';
+  let h, t;
+  if(KMT_IS_STANDALONE){
+    // window.innerHeight is the layout viewport -- like dvh, it does not
+    // shrink for the keyboard, unlike visualViewport.height, which iOS's
+    // standalone WebClip container has been shown (above) to sometimes
+    // under-report even at rest; fall to visualViewport's smaller numbers
+    // only while the keyboard (or a picker) is actually open. The Safari-
+    // tab branch below can use a 1px threshold because there vv.height is
+    // trustworthy at rest -- here it isn't, so the same 1px threshold would
+    // treat the very under-reporting this branch exists to correct as "the
+    // keyboard is open" and use the wrong number anyway. 150px is nowhere
+    // near any resting-state discrepancy that's been seen, and nowhere near
+    // how little an iPhone keyboard ever shrinks the screen by.
+    const keyboardOpen = vv.height < window.innerHeight - 150;
+    h = (keyboardOpen ? vv.height : window.innerHeight) + 'px';
+    t = (keyboardOpen ? vv.offsetTop : 0) + 'px';
+  } else {
+    // Safari tab: confirmed working correctly on CSS 100dvh alone. Only pin
+    // an inline height/top when the keyboard is actually shrinking the
+    // visual viewport below the layout viewport -- an earlier version did
+    // this unconditionally and, on a device/mode where visualViewport.height
+    // didn't land on exactly the true resting screen height, permanently
+    // pinned a slightly-wrong value in front of the otherwise-correct dvh
+    // one. A real gap between the two numbers is a reliable, keyboard-
+    // specific signal; anything smaller (rounding, a stray pixel) is left
+    // to CSS.
+    const keyboardOpen = vv.height < window.innerHeight - 1;
+    h = keyboardOpen ? vv.height + 'px' : '';
+    t = keyboardOpen ? vv.offsetTop + 'px' : '';
+  }
   document.querySelectorAll('.modal-overlay').forEach(el => { el.style.height = h; el.style.top = t; });
   const sheetRoot = document.getElementById('fullscreenSheetRoot');
   if(sheetRoot && !sheetRoot.classList.contains('hidden')){ sheetRoot.style.height = h; sheetRoot.style.top = t; }
