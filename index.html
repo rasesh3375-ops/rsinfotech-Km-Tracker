@@ -20012,8 +20012,19 @@ async function renderPayrollDocsBrowse_(body){
   const crumb = payrollDocsBreadcrumb_();
 
   if(!payrollDocsState_.month){
+    // The only level with no breadcrumb "up" to fall back on for changing
+    // year — every deeper level can always climb back to here via the
+    // breadcrumb's own FY crumb, but this level had no way to change year
+    // at all without leaving Browse for the Dashboard first.
+    const fyPicker = `
+      <div class="payroll-docs-fy-picker">
+        <label class="field">Financial Year</label>
+        <select class="field-input" id="payrollDocsBrowseFySel" onchange="payrollDocsState_.fy=this.value;renderPayrollDocsViewBody_();">
+          ${payrollDocsFyOptions_().map(l => `<option value="${l}" ${l===fy?'selected':''}>${l}</option>`).join('')}
+        </select>
+      </div>`;
     const rows = FY_MONTH_ORDER.map(m => ({ m, status: payrollDocsMonthStatus_(records, fy, m) }));
-    body.innerHTML = crumb + `<div class="payroll-docs-list">` + rows.map(r => `
+    body.innerHTML = crumb + fyPicker + `<div class="payroll-docs-list">` + rows.map(r => `
       <div class="emp-row payroll-docs-clickrow" onclick="payrollDocsSetLevel_({month:${r.m}})">
         <div class="head"><strong>${payrollDocMonthLabel_(r.m)}</strong>
           <span class="pill ${payrollDocsStatusPillClass_(r.status.overall)}">${PAYROLL_DOC_STATUS_LABEL_[r.status.overall]}</span></div>
@@ -20098,15 +20109,9 @@ async function renderPayrollDocsSearch_(body){
       <div><label class="field">Month</label><select class="field-input" id="pdSearchMonth"><option value="">All months</option>${FY_MONTH_ORDER.map(m=>`<option value="${m}">${payrollDocMonthLabel_(m)}</option>`).join('')}</select></div>
       <div><label class="field">Category</label><select class="field-input" id="pdSearchCategory" onchange="payrollDocsSearchCategoryChanged_()"><option value="">All categories</option>${PAYROLL_DOC_CATEGORIES.map(c=>`<option value="${c.key}">${escapeHtml(c.label)}</option>`).join('')}</select></div>
       <div><label class="field">Document Type</label><select class="field-input" id="pdSearchDocType"><option value="">All document types</option></select></div>
-      <div><label class="field">Document Name</label><input class="field-input" id="pdSearchName" placeholder="Search by name"></div>
-      <div><label class="field">Document Date</label><input class="field-input" type="date" id="pdSearchDocDate"></div>
-      <div><label class="field">Upload Date</label><input class="field-input" type="date" id="pdSearchUploadDate"></div>
-      <div><label class="field">Uploaded By</label><input class="field-input" id="pdSearchUploadedBy" placeholder="Search by name"></div>
-      <div><label class="field">Status</label><select class="field-input" id="pdSearchStatus"><option value="active">Active</option><option value="deleted">Deleted</option><option value="">All</option></select></div>
     </div>
     <button type="button" class="btn full" style="margin:14px 0;" onclick="withBusy(this,'Searching…',runPayrollDocsSearch_)">Search</button>
     <div id="pdSearchResults"></div>`;
-  document.getElementById('pdSearchStatus').value = 'active';
 }
 function payrollDocsSearchCategoryChanged_(){
   const catKey = document.getElementById('pdSearchCategory').value;
@@ -20119,11 +20124,6 @@ async function runPayrollDocsSearch_(){
   const month = document.getElementById('pdSearchMonth').value;
   const category = document.getElementById('pdSearchCategory').value;
   const docType = document.getElementById('pdSearchDocType').value;
-  const name = document.getElementById('pdSearchName').value.trim().toLowerCase();
-  const docDate = document.getElementById('pdSearchDocDate').value;
-  const uploadDate = document.getElementById('pdSearchUploadDate').value;
-  const uploadedBy = document.getElementById('pdSearchUploadedBy').value.trim().toLowerCase();
-  const status = document.getElementById('pdSearchStatus').value;
 
   const fys = fy ? [fy] : await getPayrollDocsFyIndex_();
   const batch = await getPayrollDocsBatch_(fys);
@@ -20134,11 +20134,10 @@ async function runPayrollDocsSearch_(){
     if(month && r.month !== Number(month)) return false;
     if(category && r.category !== category) return false;
     if(docType && r.docType !== docType) return false;
-    if(name && !((r.docName||'') + ' ' + (r.fileName||'')).toLowerCase().includes(name)) return false;
-    if(docDate && r.docDate !== docDate) return false;
-    if(uploadDate && (r.uploadedAt||'').slice(0,10) !== uploadDate) return false;
-    if(uploadedBy && !(r.uploadedBy||'').toLowerCase().includes(uploadedBy)) return false;
-    if(status && r.status !== status) return false;
+    // Deleted documents are still reachable — through the record's own
+    // History, from wherever it's classified — just never through Search,
+    // which only ever needs to find a document that's actually in force.
+    if(r.status !== 'active') return false;
     return true;
   });
   results.sort((a,b) => (b.uploadedAt||'').localeCompare(a.uploadedAt||''));
