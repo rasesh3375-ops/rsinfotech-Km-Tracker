@@ -19597,6 +19597,25 @@ function openGeneratorCard(sectionId){
   kmtCommitArrival();
 }
 
+// Each genSecXxx target div was authored in its own original spot further
+// down the page (unchanged from before this became an accordion, so none
+// of that markup had to be touched) while its header lives in the list
+// above — leaving them there meant the one open section always rendered
+// after the WHOLE header list, not under the specific header that opened
+// it: clicking section 7 of 14 dropped its content below section 14, not
+// between 7 and 8, which looked exactly like "opens at the bottom of the
+// page" no matter which tab was actually pressed. Moving each target to
+// sit right after its own header — once, here, using the real elements
+// already on the page rather than rebuilding anything — makes it a true
+// accordion: the open section expands directly under the tab that opened
+// it, and the page doesn't jump, because nothing above the click moved.
+(function moveGenAccordionBodiesUnderTheirHeaders_(){
+  document.querySelectorAll('.gen-accordion-header[data-target]').forEach(btn => {
+    const target = document.getElementById(btn.dataset.target);
+    if(target) btn.insertAdjacentElement('afterend', target);
+  });
+})();
+
 // Same "click a card, see one thing at a time" shape as the Generator tab
 // above, for the Reports tab's own landing grid. Every report's wrapper div
 // is matched by its "rptSec" id prefix rather than a hardcoded list — the
