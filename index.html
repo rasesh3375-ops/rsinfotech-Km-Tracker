@@ -2171,6 +2171,16 @@
         <div id="reportsLanding" class="gen-landing">
           <h1>Reports</h1>
           <p>View attendance, leave, payroll and employee reports — pick what you need below.</p>
+          <!-- Card order matches HR's requested sequence: Attendance, Holidays
+               (kept next to Attendance — not one of the named reports, so left
+               at its existing natural neighbor rather than guessed at a new
+               spot), then the rest in the exact order asked for. The dynamic
+               reports (built from the `reports` array in renderReportsTab(),
+               not written out here) needed four separate placeholder slots
+               instead of the original single one, since this time they land
+               at several different points in the sequence rather than one
+               contiguous block — see renderReportsTab() for which report keys
+               go in which slot. -->
           <div class="gen-card-grid">
             <button type="button" class="gen-card" onclick="openReportsCard('rptSecAttendance')">
               <div class="gen-card-icon t1">🗓️</div>
@@ -2186,25 +2196,20 @@
               <p id="cardStat_holidays" class="gen-card-stat"></p>
               <span class="btn full">View</span>
             </button>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecMonthlyLeave')">
-              <div class="gen-card-icon t3">🌴</div>
-              <h3>Monthly Leave Report</h3>
-              <p>EL + SL + LP days per employee, month by month across the financial year.</p>
-              <p id="cardStat_monthlyLeave" class="gen-card-stat"></p>
+            <div id="reportCardsLandingBox1" style="display:contents"></div>
+            <button type="button" class="gen-card" onclick="openReportsCard('rptSecOvertime')">
+              <div class="gen-card-icon t2">⏱️</div>
+              <h3>Overtime Report</h3>
+              <p>Log and review overtime hours for Field Engineers.</p>
+              <p id="cardStat_overtime" class="gen-card-stat"></p>
               <span class="btn full">View</span>
             </button>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecMonthlyLeaveDetail')">
-              <div class="gen-card-icon t4">📋</div>
-              <h3>Monthly Leave Detail Report</h3>
-              <p>Late coming, EL/PL, SL, half days and short leaves for one month — highest in red.</p>
-              <p id="cardStat_monthlyLeaveDetail" class="gen-card-stat"></p>
-              <span class="btn full">View</span>
-            </button>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecYearlyLeaveDetail')">
-              <div class="gen-card-icon t1">📆</div>
-              <h3>Yearly Leave Detail Report</h3>
-              <p>The same breakdown, one table per category, month by month across the year.</p>
-              <p id="cardStat_yearlyLeaveDetail" class="gen-card-stat"></p>
+            <div id="reportCardsLandingBox2" style="display:contents"></div>
+            <button type="button" class="gen-card" onclick="openReportsCard('rptSecSalaryCompare')">
+              <div class="gen-card-icon t1">⚖️</div>
+              <h3>Month-wise Salary Comparison</h3>
+              <p>Last month's total against this month's, and exactly what explains the gap.</p>
+              <p id="cardStat_salaryCompare" class="gen-card-stat"></p>
               <span class="btn full">View</span>
             </button>
             <button type="button" class="gen-card" onclick="openReportsCard('rptSecPF')">
@@ -2235,18 +2240,18 @@
               <p id="cardStat_apprenticeSalary" class="gen-card-stat"></p>
               <span class="btn full">View</span>
             </button>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecFinalSalary')">
-              <div class="gen-card-icon t2">💵</div>
-              <h3>Final Salary Sheet for Accountant</h3>
-              <p>The payment list for the bank — grouped by heading, sorted by bank, with a grand total.</p>
-              <p id="cardStat_finalSalary" class="gen-card-stat"></p>
+            <button type="button" class="gen-card" onclick="openReportsCard('rptSecMonthlyLeave')">
+              <div class="gen-card-icon t3">🌴</div>
+              <h3>Monthly Leave Report</h3>
+              <p>EL + SL + LP days per employee, month by month across the financial year.</p>
+              <p id="cardStat_monthlyLeave" class="gen-card-stat"></p>
               <span class="btn full">View</span>
             </button>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecDiwaliBonus')">
-              <div class="gen-card-icon t3">🪔</div>
-              <h3>Diwali Bonus Payment Sheet</h3>
-              <p>The bonus payment list, in the same shape as the Final Salary Sheet.</p>
-              <p id="cardStat_diwaliBonusSheet" class="gen-card-stat"></p>
+            <button type="button" class="gen-card" onclick="openReportsCard('rptSecMonthlyLeaveDetail')">
+              <div class="gen-card-icon t4">📋</div>
+              <h3>Monthly Leave Detail Report</h3>
+              <p>Late coming, EL/PL, SL, half days and short leaves for one month — highest in red.</p>
+              <p id="cardStat_monthlyLeaveDetail" class="gen-card-stat"></p>
               <span class="btn full">View</span>
             </button>
             <button type="button" class="gen-card" onclick="openReportsCard('rptSecConsultant')">
@@ -2262,20 +2267,14 @@
               <p>PF and ESI account-wise totals plus the wage and deduction summary, in the consultant's filing format.</p>
               <span class="btn full">View</span>
             </button>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecSalaryCompare')">
-              <div class="gen-card-icon t1">⚖️</div>
-              <h3>Month-wise Salary Comparison</h3>
-              <p>Last month's total against this month's, and exactly what explains the gap.</p>
-              <p id="cardStat_salaryCompare" class="gen-card-stat"></p>
+            <button type="button" class="gen-card" onclick="openReportsCard('rptSecFinalSalary')">
+              <div class="gen-card-icon t2">💵</div>
+              <h3>Final Salary Sheet for Accountant</h3>
+              <p>The payment list for the bank — grouped by heading, sorted by bank, with a grand total.</p>
+              <p id="cardStat_finalSalary" class="gen-card-stat"></p>
               <span class="btn full">View</span>
             </button>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecOvertime')">
-              <div class="gen-card-icon t2">⏱️</div>
-              <h3>Overtime Report</h3>
-              <p>Log and review overtime hours for Field Engineers.</p>
-              <p id="cardStat_overtime" class="gen-card-stat"></p>
-              <span class="btn full">View</span>
-            </button>
+            <div id="reportCardsLandingBox3" style="display:contents"></div>
             <button type="button" class="gen-card" onclick="openReportsCard('rptSecEmployeeDetail')">
               <div class="gen-card-icon t4">🧾</div>
               <h3>Employee Wise Detail Report</h3>
@@ -2283,7 +2282,21 @@
               <p id="cardStat_employeeDetail" class="gen-card-stat"></p>
               <span class="btn full">View</span>
             </button>
-            <div id="reportCardsLandingBox" style="display:contents"></div>
+            <div id="reportCardsLandingBox4" style="display:contents"></div>
+            <button type="button" class="gen-card" onclick="openReportsCard('rptSecDiwaliBonus')">
+              <div class="gen-card-icon t3">🪔</div>
+              <h3>Diwali Bonus Payment Sheet</h3>
+              <p>The bonus payment list, in the same shape as the Final Salary Sheet.</p>
+              <p id="cardStat_diwaliBonusSheet" class="gen-card-stat"></p>
+              <span class="btn full">View</span>
+            </button>
+            <button type="button" class="gen-card" onclick="openReportsCard('rptSecYearlyLeaveDetail')">
+              <div class="gen-card-icon t1">📆</div>
+              <h3>Yearly Leave Detail Report</h3>
+              <p>The same breakdown, one table per category, month by month across the year.</p>
+              <p id="cardStat_yearlyLeaveDetail" class="gen-card-stat"></p>
+              <span class="btn full">View</span>
+            </button>
             <button type="button" class="gen-card" onclick="openReportsCard('rptSecLeaveRollover')">
               <div class="gen-card-icon t3">🔄</div>
               <h3>Leave Balance Next Year Report</h3>
@@ -16743,16 +16756,20 @@ async function renderReportsTab(){
   // race only to have this immediately undo it.
   if(!(kmtPendingCardRestore && kmtPendingCardRestore.route === 'reports')) showReportsLanding();
   const employees = await getEmployees();
+  // Order matches HR's requested landing-grid sequence — see the four
+  // reportCardsLandingBox1-4 placeholders in the static markup above this
+  // function, and REPORT_CARD_LANDING_GROUPS below, for which slot each one
+  // renders into.
   const reports = [
-    {key:'contact', label:'Employee Contact Report'},
-    {key:'birthday', label:'Birthday Report'},
     {key:'increment', label:'Increment Report'},
-    {key:'diwali', label:'Diwali Bonus Report'},
+    {key:'loan', label:'Loan & Advance Report'},
     {key:'salary', label:'Salary Report'},
     {key:'ctc', label:'Cost to Company Report'},
-    {key:'loan', label:'Loan & Advance Report'},
+    {key:'contact', label:'Employee Contact Report'},
+    {key:'birthday', label:'Birthday Report'},
     {key:'assets', label:'Employee Assets'},
-    {key:'insurance', label:'Employee Insurance Details'}
+    {key:'insurance', label:'Employee Insurance Details'},
+    {key:'diwali', label:'Diwali Bonus Report'}
   ];
   // Birthday and Increment recur every year on the same month regardless of
   // which year it falls in, so the filter here is month-only — no year — and
@@ -16781,7 +16798,17 @@ async function renderReportsTab(){
   const cardSubtitle = r => r.key === 'diwali'
     ? withDataCounts[r.key] + ' eligible of ' + totalOnRoll + ' total employees'
     : withDataCounts[r.key] + ' employees with data';
-  document.getElementById('reportCardsLandingBox').innerHTML = reports.map(r => {
+  // These landed at one contiguous point in the grid before; the requested
+  // sequence now interleaves them among the static cards at four separate
+  // points instead, so each group of keys renders into its own placeholder
+  // rather than all of them into one.
+  const REPORT_CARD_LANDING_GROUPS = {
+    reportCardsLandingBox1: ['increment', 'loan'],
+    reportCardsLandingBox2: ['salary'],
+    reportCardsLandingBox3: ['ctc'],
+    reportCardsLandingBox4: ['contact', 'birthday', 'assets', 'insurance', 'diwali'],
+  };
+  const cardButtonHtml = r => {
     const meta = REPORT_CARD_META[r.key];
     return `<button type="button" class="gen-card" onclick="openReportsCard('rptSecReport_${r.key}')">
       <div class="gen-card-icon ${meta.tone}">${meta.icon}</div>
@@ -16789,7 +16816,10 @@ async function renderReportsTab(){
       <p>${cardSubtitle(r)}</p>
       <span class="btn full">View</span>
     </button>`;
-  }).join('');
+  };
+  Object.entries(REPORT_CARD_LANDING_GROUPS).forEach(([boxId, keys]) => {
+    document.getElementById(boxId).innerHTML = keys.map(k => cardButtonHtml(reports.find(r => r.key === k))).join('');
+  });
   document.getElementById('reportCardsBox').innerHTML = reports.map(r => {
     const monthPicker = MONTH_FILTER_REPORTS[r.key] ? `<select class="field-input" id="reportMonthSel_${r.key}" style="margin-bottom:10px;">
         <option value="">All months</option>
