@@ -13340,11 +13340,18 @@ function employeeModalHtml(emp){
         <button class="modal-x" type="button" title="Close" aria-label="Close" onclick="closeEmployeeModal()">✕</button>
       </div>
       <p class="hint">This information is stored once and auto-fills letters and payslips for this employee — no need to retype it each time. Close it at any point with the × above — anything typed is kept on this device and offered back next time.</p>
-      <!-- TEMPORARY diagnostic line -- not a real feature, remove once the
-           standalone-mode bleed-through report is finally understood. Kept
-           updated live by resettleFixedOverlays_ so a screenshot shows the
-           actual runtime values in play, not a guess. -->
-      <p id="kmtDebugLine" style="font-size:10.5px;font-family:ui-monospace,monospace;color:#B23A32;word-break:break-all;background:#FDECEC;padding:6px 8px;border-radius:6px;"></p>
+      <!-- TEMPORARY diagnostic line -- see kmtUpdateDebugLine_ (JS, near
+           resettleFixedOverlays_). It's created there directly on
+           document.body, not here, because a position:fixed element nested
+           inside .modal-box still scrolls away with the rest of that
+           content -- .modal-overlay's own transform:translateZ(0) makes it
+           the containing block for a fixed descendant, but that only
+           exempts a fixed element that sits OUTSIDE the content .modal-
+           overlay scrolls, not one nested inside it. First attempt at this
+           line was placed here and (confirmed in testing) scrolled away
+           with the form instead of staying on screen; not repeating that
+           mistake. -->
+
 
       <div class="emp-stepper" id="empStepper">
         <button type="button" class="step" data-target="empStep_basic"><span class="dot">1</span><span class="lbl">Basic</span></button>
@@ -15858,16 +15865,28 @@ function resettleFixedOverlays_(){
   if(gsOverlay && !gsOverlay.classList.contains('hidden')){ gsOverlay.style.height = h; gsOverlay.style.top = t; }
   kmtUpdateDebugLine_();
 }
-// TEMPORARY -- writes the actual live runtime values into #kmtDebugLine (see
-// its markup comment in employeeModalHtml) so the next report shows exactly
-// what's happening instead of another guess. Safe no-op when the element
-// isn't in the DOM (every screen but the open Employee modal). Remove this
-// function and its call site above once the standalone bleed-through report
-// is actually understood.
+// TEMPORARY -- writes the actual live runtime values into #kmtDebugLine so
+// the next report shows exactly what's happening instead of another guess.
+// Created directly on document.body (see the markup comment in
+// employeeModalHtml for why: a position:fixed element nested inside
+// .modal-box scrolls away with the rest of that content instead of staying
+// on screen). Hidden, not just left stale, whenever the Employee modal
+// isn't open. Remove this function, its call site above, and the element it
+// creates once the standalone bleed-through report is actually understood.
 function kmtUpdateDebugLine_(){
-  const line = document.getElementById('kmtDebugLine');
-  if(!line) return;
   const overlay = document.getElementById('employeeModalOverlay');
+  let line = document.getElementById('kmtDebugLine');
+  if(!overlay){
+    if(line) line.style.display = 'none';
+    return;
+  }
+  if(!line){
+    line = document.createElement('p');
+    line.id = 'kmtDebugLine';
+    line.style.cssText = 'position:fixed;top:6px;left:6px;right:6px;z-index:99999;font-size:10px;font-family:ui-monospace,monospace;color:#B23A32;word-break:break-all;background:#FDECEC;padding:5px 7px;border-radius:6px;border:1px solid #B23A32;';
+    document.body.appendChild(line);
+  }
+  line.style.display = 'block';
   const stepper = document.getElementById('empStepper');
   const probe = document.createElement('div');
   probe.style.cssText = 'position:fixed;top:0;left:0;visibility:hidden;pointer-events:none;padding-top:env(safe-area-inset-top, 0px);padding-bottom:env(safe-area-inset-bottom, 0px);';
