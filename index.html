@@ -820,7 +820,22 @@
      with its content instead of being isolated. See the .modal-head comment
      for the fuller reasoning — same bleed-through report, different (non-
      sizing) cause than every previous attempt here assumed. */
-  .modal-overlay{position:fixed;inset:0;height:100vh;height:100dvh;background:rgba(22,33,62,0.55);display:flex;align-items:flex-start;justify-content:center;padding:20px 12px;overflow-y:auto;overflow-x:hidden;z-index:var(--z-modal);transform:translateZ(0);backface-visibility:hidden;}
+  /* overscroll-behavior:contain — stops iOS's elastic rubber-band bounce at
+     the top/bottom of this scroll from propagating, which is known to
+     visually reveal whatever's behind a position:fixed element that is also
+     its own scroll container (this one) for the duration of the bounce.
+     scroll-padding-top/bottom: env(safe-area-inset-*) — the actual cause of
+     the two remaining bleed-through reports (background content under the
+     status bar at the top, another employee's row under Save at the
+     bottom): a field's native "scroll me into view above the keyboard"
+     behavior has no notion of the notch/home-indicator safe areas and can
+     scroll .modal-overlay's content past y:0 or its true bottom into that
+     unsafe zone, which the fixed height/GPU-layer fixes above never
+     constrained since they're about how tall the overlay reports itself,
+     not how far its own content is allowed to scroll. scroll-padding tells
+     the browser's own scrollIntoView machinery to always leave that much
+     clearance, the same as the sticky elements already get via padding. */
+  .modal-overlay{position:fixed;inset:0;height:100vh;height:100dvh;background:rgba(22,33,62,0.55);display:flex;align-items:flex-start;justify-content:center;padding:20px 12px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scroll-padding-top:env(safe-area-inset-top, 0px);scroll-padding-bottom:env(safe-area-inset-bottom, 0px);z-index:var(--z-modal);transform:translateZ(0);backface-visibility:hidden;}
   .modal-box{background:var(--paper);border-radius:14px;max-width:520px;width:100%;padding:22px;margin:20px 0 40px;}
   .modal-box h2{margin:0 0 6px;font-size:19px;}
   /* Title bar that stays put. The overlay is the scrolling element, so sticky
