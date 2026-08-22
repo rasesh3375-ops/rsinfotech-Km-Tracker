@@ -13340,6 +13340,11 @@ function employeeModalHtml(emp){
         <button class="modal-x" type="button" title="Close" aria-label="Close" onclick="closeEmployeeModal()">✕</button>
       </div>
       <p class="hint">This information is stored once and auto-fills letters and payslips for this employee — no need to retype it each time. Close it at any point with the × above — anything typed is kept on this device and offered back next time.</p>
+      <!-- TEMPORARY diagnostic line -- not a real feature, remove once the
+           standalone-mode bleed-through report is finally understood. Kept
+           updated live by resettleFixedOverlays_ so a screenshot shows the
+           actual runtime values in play, not a guess. -->
+      <p id="kmtDebugLine" style="font-size:10.5px;font-family:ui-monospace,monospace;color:#B23A32;word-break:break-all;background:#FDECEC;padding:6px 8px;border-radius:6px;"></p>
 
       <div class="emp-stepper" id="empStepper">
         <button type="button" class="step" data-target="empStep_basic"><span class="dot">1</span><span class="lbl">Basic</span></button>
@@ -15851,6 +15856,41 @@ function resettleFixedOverlays_(){
   // Master field — same keyboard, same exposure.
   const gsOverlay = document.getElementById('gsOverlay');
   if(gsOverlay && !gsOverlay.classList.contains('hidden')){ gsOverlay.style.height = h; gsOverlay.style.top = t; }
+  kmtUpdateDebugLine_();
+}
+// TEMPORARY -- writes the actual live runtime values into #kmtDebugLine (see
+// its markup comment in employeeModalHtml) so the next report shows exactly
+// what's happening instead of another guess. Safe no-op when the element
+// isn't in the DOM (every screen but the open Employee modal). Remove this
+// function and its call site above once the standalone bleed-through report
+// is actually understood.
+function kmtUpdateDebugLine_(){
+  const line = document.getElementById('kmtDebugLine');
+  if(!line) return;
+  const overlay = document.getElementById('employeeModalOverlay');
+  const stepper = document.getElementById('empStepper');
+  const probe = document.createElement('div');
+  probe.style.cssText = 'position:fixed;top:0;left:0;visibility:hidden;pointer-events:none;padding-top:env(safe-area-inset-top, 0px);padding-bottom:env(safe-area-inset-bottom, 0px);';
+  document.body.appendChild(probe);
+  const probeCs = getComputedStyle(probe);
+  const envTop = probeCs.paddingTop, envBottom = probeCs.paddingBottom;
+  document.body.removeChild(probe);
+  const parts = [
+    'standalone=' + KMT_IS_STANDALONE,
+    'mm=' + window.matchMedia('(display-mode: standalone)').matches,
+    'navStandalone=' + window.navigator.standalone,
+    'innerH=' + window.innerHeight,
+    'vvH=' + (window.visualViewport ? Math.round(window.visualViewport.height) : 'n/a'),
+    'envTop=' + envTop, 'envBottom=' + envBottom,
+  ];
+  if(overlay){
+    const r = overlay.getBoundingClientRect();
+    parts.push('ovStyleH=' + overlay.style.height, 'ovRectH=' + Math.round(r.height), 'ovRectTop=' + Math.round(r.top), 'ovRectBottom=' + Math.round(r.bottom));
+  }
+  if(stepper){
+    parts.push('stepPadTop=' + getComputedStyle(stepper).paddingTop);
+  }
+  line.textContent = parts.join(' | ');
 }
 if(window.visualViewport){
   window.visualViewport.addEventListener('resize', resettleFixedOverlays_);
