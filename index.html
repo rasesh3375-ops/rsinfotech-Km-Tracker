@@ -15818,6 +15818,13 @@ async function reconcileTrackingUsername(draft){
 const KMT_IS_STANDALONE = window.matchMedia('(display-mode: standalone)').matches ||
   window.navigator.standalone === true;
 function resettleFixedOverlays_(){
+  // TEMPORARY -- runs before the visualViewport guard below on purpose. If
+  // window.visualViewport is ever unavailable in this standalone WebClip
+  // context, the guard immediately below would silently no-op this entire
+  // function (and, with it, every JS-driven fix this session has shipped
+  // that lives past this point) -- the debug line needs to run regardless,
+  // or it can never actually show that happening.
+  kmtUpdateDebugLine_();
   if(!window.visualViewport) return;
   const vv = window.visualViewport;
   let h, t;
@@ -15863,7 +15870,7 @@ function resettleFixedOverlays_(){
   // Master field — same keyboard, same exposure.
   const gsOverlay = document.getElementById('gsOverlay');
   if(gsOverlay && !gsOverlay.classList.contains('hidden')){ gsOverlay.style.height = h; gsOverlay.style.top = t; }
-  kmtUpdateDebugLine_();
+  kmtUpdateDebugLine_(); // second call, now with vv/h/t in scope -- see the one at the top of this function for why there are two
 }
 // TEMPORARY -- writes the actual live runtime values into #kmtDebugLine so
 // the next report shows exactly what's happening instead of another guess.
@@ -15873,6 +15880,7 @@ function resettleFixedOverlays_(){
 // on screen). Hidden, not just left stale, whenever the Employee modal
 // isn't open. Remove this function, its call site above, and the element it
 // creates once the standalone bleed-through report is actually understood.
+let kmtDebugLineCalls_ = 0; // TEMPORARY -- proves the line is actually updating live, not frozen
 function kmtUpdateDebugLine_(){
   const overlay = document.getElementById('employeeModalOverlay');
   let line = document.getElementById('kmtDebugLine');
@@ -15894,8 +15902,11 @@ function kmtUpdateDebugLine_(){
   const probeCs = getComputedStyle(probe);
   const envTop = probeCs.paddingTop, envBottom = probeCs.paddingBottom;
   document.body.removeChild(probe);
+  kmtDebugLineCalls_++;
   const parts = [
+    'calls=' + kmtDebugLineCalls_,
     'standalone=' + KMT_IS_STANDALONE,
+    'hasVV=' + !!window.visualViewport,
     'mm=' + window.matchMedia('(display-mode: standalone)').matches,
     'navStandalone=' + window.navigator.standalone,
     'innerH=' + window.innerHeight,
