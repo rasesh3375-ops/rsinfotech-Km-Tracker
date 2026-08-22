@@ -1563,6 +1563,30 @@
   .rolecard::after{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--amber);transform:scaleX(0);transition:transform .2s ease;}
   .rolecard:hover::after{transform:scaleX(1);}
   ::selection{background:var(--amber);color:var(--navy);}
+
+  /* ===== Payroll Documents (Office Documents -> Payroll Documents) ===== */
+  .payroll-docs-shell{display:flex;flex-direction:column;gap:14px;}
+  .payroll-docs-migrate-banner{display:flex;flex-wrap:wrap;align-items:center;gap:10px;justify-content:space-between;
+    background:#FDECC8;border:1px solid var(--amber-dark);border-radius:10px;padding:10px 14px;font-size:12.5px;color:var(--navy);}
+  .payroll-docs-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;justify-content:space-between;}
+  .payroll-docs-tabs{display:flex;flex-wrap:wrap;gap:6px;}
+  .payroll-docs-tab{border:1px solid var(--line);background:#fff;color:var(--navy);border-radius:20px;padding:6px 14px;
+    font-size:12.5px;font-weight:700;cursor:pointer;transition:background .15s ease,color .15s ease,border-color .15s ease;}
+  .payroll-docs-tab.active{background:var(--navy);border-color:var(--navy);color:#fff;}
+  .payroll-docs-breadcrumb{display:flex;flex-wrap:wrap;align-items:center;gap:4px;font-size:12.5px;margin-bottom:10px;}
+  .payroll-docs-list{display:flex;flex-direction:column;gap:8px;}
+  .payroll-docs-clickrow{cursor:pointer;transition:box-shadow .15s ease;}
+  .payroll-docs-clickrow:hover{box-shadow:0 1px 2px rgba(22,33,62,.08), 0 2px 10px rgba(22,33,62,.1);}
+  .payroll-docs-fy-picker{display:flex;align-items:center;gap:10px;max-width:260px;margin-bottom:10px;}
+  .payroll-docs-fy-picker .field{margin:0;white-space:nowrap;}
+  .payroll-docs-table-wrap{overflow-x:auto;}
+  .payroll-docs-table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  .payroll-docs-table th, .payroll-docs-table td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap;}
+  .payroll-docs-table th{color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;}
+  .payroll-docs-month-row{cursor:pointer;transition:background .15s ease;}
+  .payroll-docs-month-row:hover{background:var(--cream);}
+  .payroll-docs-search-filters{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;}
+  .payroll-docs-search-filters .field{margin:0 0 3px;}
 </style>
 </head>
 <body>
@@ -2925,27 +2949,11 @@
 
         <section class="block">
           <h2 style="margin:0 0 4px;">1. Payroll Documents (monthly)</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">PF Challan, ESI Challan, PT Challan, Wages Register, Pay Slip — upload each month's document manually; files are stored in Google Drive, not in the app itself.</p>
-          <label class="field">Document type</label>
-          <select class="field-input" id="payrollDocType">
-            <option value="PF Challan">PF Challan</option>
-            <option value="ESI Challan">ESI Challan</option>
-            <option value="PT Challan">PT Challan</option>
-            <option value="Wages Register">Wages Register</option>
-            <option value="Pay Slip">Pay Slip</option>
-          </select>
-          <div class="row-inline" style="margin-top:12px;">
-            <div><label class="field">Month</label><select class="field-input" id="payrollDocMonthSel"></select></div>
-            <div><label class="field">Year</label><select class="field-input" id="payrollDocYearSel"></select></div>
-          </div>
-          <label class="field">File</label>
-          <input type="file" id="payrollDocFile" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx">
-          <div style="height:12px"></div>
-          <button class="btn full" onclick="withBusy(this,'Uploading…',uploadPayrollDoc)">Upload document</button>
-          <div class="msg" id="payrollDocMsg"></div>
-          <div style="height:14px"></div>
-          <div id="payrollDocList"></div>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">PF, ESI and Professional Tax challans, ECRs and payment receipts, filed by financial year, month, category and document type — with a compliance dashboard, search and a full change history. Files are stored in Google Drive, not in the app itself.</p>
+          <p id="payrollDocCardStat" style="font-size:11px;font-weight:700;color:var(--amber-dark);margin:0 0 10px;"></p>
+          <button class="btn full" onclick="openPayrollDocsModule()">Open Payroll Documents</button>
         </section>
+        <div id="payrollDocsRoot"></div>
 
         <section class="block">
           <h2 style="margin:0 0 4px;">2. Apprentice Documents</h2>
@@ -4235,12 +4243,14 @@ async function saveHolidays(list){
 }
 
 // ---- office documents: metadata only (small), files themselves live in Drive ----
+// Legacy flat list from the old single-category-of-three-types Payroll
+// Documents flow — read-only now. migratePayrollDocsIfNeeded_ (near the new
+// payroll-documents module, further down) is the only remaining reader;
+// this key is never written to again and never deleted, so it stays a
+// permanent, untouched backup of whatever was uploaded before the rebuild.
 async function getPayrollDocs(){
   const v = await safeGet('office_payroll_docs', true);
   return v ? JSON.parse(v) : [];
-}
-async function savePayrollDocs(list){
-  await safeSet('office_payroll_docs', JSON.stringify(list), true);
 }
 async function getApprenticeDocs(){
   const v = await safeGet('office_apprentice_docs', true);
@@ -19548,15 +19558,13 @@ async function renderGeneratorTab(){
 // (names, links, dates) is kept in the app's shared storage.
 // =======================================================================
 async function renderOfficeDocumentsTab(){
-  populateMonthYearSelects('payrollDocMonthSel', 'payrollDocYearSel');
-
   const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
   const apprentices = employees.filter(e => (e.salaryHeading||'') === 'apprentice');
   const apprenticeSel = document.getElementById('apprenticeDocEmpSelect');
   apprenticeSel.innerHTML = '<option value="">— Not linked to a specific apprentice —</option>' +
     apprentices.map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('');
 
-  await renderPayrollDocList();
+  await refreshPayrollDocCardStat_();
   await renderApprenticeDocList();
   await renderCompanyDocList('holidaylist');
   await renderCompanyDocList('profile');
@@ -19620,64 +19628,836 @@ async function saveResidentPolicyFromForm(){
 }
 
 // ---- 1. Payroll documents (monthly) ----
-async function uploadPayrollDoc(){
-  const msg = document.getElementById('payrollDocMsg');
-  const fileInput = document.getElementById('payrollDocFile');
-  const file = fileInput.files[0];
-  if(!file){
-    msg.textContent = 'Choose a file to upload.';
-    msg.classList.add('error');
-    return;
-  }
-  const type = document.getElementById('payrollDocType').value;
-  const monthVal = getMonthYearValue('payrollDocMonthSel', 'payrollDocYearSel');
-  msg.textContent = 'Uploading…';
-  msg.classList.remove('error');
-  const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
-  const fileName = `${type} - ${monthVal}${ext}`;
-  const url = await uploadDocumentToDrive(hrYearPath(monthVal + '-01', 'Office Documents', 'Payroll Documents', type), fileName, file);
-  if(!url){
-    msg.textContent = 'Upload failed — check your connection and try again.';
-    msg.classList.add('error');
-    return;
-  }
-  const list = await getPayrollDocs();
-  list.unshift({ id: randomHex(6), type, month: monthVal, fileName, url, uploadedAt: new Date().toISOString() });
-  await savePayrollDocs(list);
-  await addActivityLog('Uploaded ' + type + ' for ' + monthVal);
-  // Re-fetched by id — see handleDocUpload's comment for why a reference
-  // held across an await can end up stale. The document is already saved
-  // either way; this only affects whether the confirmation text shows.
-  const fileInputNow = document.getElementById('payrollDocFile') || fileInput;
-  const msgNow = document.getElementById('payrollDocMsg') || msg;
-  fileInputNow.value = '';
-  msgNow.textContent = 'Uploaded.';
-  msgNow.classList.remove('error');
-  await renderPayrollDocList();
+// A full document-management system: Financial Year -> Month -> Payroll
+// Category -> Document Type -> File, replacing the old flat list of three
+// hand-typed type strings. Categories/types live in one config array
+// (PAYROLL_DOC_CATEGORIES) so a new category or document type is a config
+// edit, never an architecture change. Records are sharded one key per
+// financial year (payroll_docs:<fy>, e.g. payroll_docs:2026-27) rather than
+// one unbounded array, the same reason attendance moved to
+// attendance:<id>:<fy> — a flat list here would eventually hit the
+// 50,000-char cell limit CLAUDE.md warns about. HR-only throughout: none of
+// these keys are on ENGINEER_SHARED_READ (Code 2.js), so an engineer
+// session is refused by the backend whitelist automatically, the same
+// "unlisted = forbidden" model every other HR-only key already relies on.
+
+const PAYROLL_DOC_CATEGORIES = [
+  { key:'pf', label:'PF', types:[
+      {key:'pfChallan', label:'PF Challan'},
+      {key:'pfEcr', label:'PF ECR'},
+      {key:'pfReceipt', label:'PF Payment Receipt'} ]},
+  { key:'esi', label:'ESI', types:[
+      {key:'esiChallan', label:'ESI Challan'},
+      {key:'esiReceipt', label:'ESI Payment Receipt'} ]},
+  { key:'pt', label:'Professional Tax', types:[
+      {key:'ptChallan', label:'Professional Tax Challan'},
+      {key:'ptReceipt', label:'Professional Tax Payment Receipt'} ]},
+];
+function payrollDocCategoryByKey_(key){ return PAYROLL_DOC_CATEGORIES.find(c => c.key === key) || null; }
+function payrollDocTypeInfo_(categoryKey, typeKey){
+  const cat = payrollDocCategoryByKey_(categoryKey);
+  return cat ? (cat.types.find(t => t.key === typeKey) || null) : null;
 }
-async function renderPayrollDocList(){
-  const box = document.getElementById('payrollDocList');
-  const list = await getPayrollDocs();
-  if(!list.length){
-    box.innerHTML = '<div class="empty">No payroll documents uploaded yet.</div>';
-    return;
+function payrollDocMonthLabel_(monthNum){ return MONTH_NAMES[monthNum-1]; }
+// 'R.S. Infotech' -> 'RS-Infotech' — strip periods before hyphenating, so
+// the filename matches the spec's exact example while staying derived from
+// the real company profile (getCompanyProfile) rather than hardcoded, in
+// case the name on file ever changes.
+function payrollDocCompanySlug_(name){
+  return String(name || COMPANY_NAME).replace(/\./g,'').trim().replace(/\s+/g,'-');
+}
+function payrollDocCleanFileName_(fy, monthNum, docTypeLabel, ext, companyName){
+  return `${fy}_${payrollDocMonthLabel_(monthNum)}_${docTypeLabel.replace(/\s+/g,'-')}_${payrollDocCompanySlug_(companyName)}${ext}`;
+}
+
+// ---- data layer ----
+// payroll_docs_fy_index: a small registry of which payroll_docs:<fy> keys
+// actually have data, so "search all financial years" knows what to fetch
+// without guessing a lookback window that could silently miss an old year.
+async function getPayrollDocsFyIndex_(){
+  const v = await safeGet('payroll_docs_fy_index', true);
+  return v ? JSON.parse(v) : [];
+}
+async function notePayrollDocsFy_(fy){
+  const idx = await getPayrollDocsFyIndex_();
+  if(!idx.includes(fy)){
+    idx.push(fy);
+    await safeSet('payroll_docs_fy_index', JSON.stringify(idx), true);
   }
-  box.innerHTML = list.map(d => `
-    <div class="emp-row">
-      <div class="head"><strong>${d.type}</strong><span class="id">${d.month}</span></div>
-      <div class="sub">${d.fileName}</div>
-      <div class="actions">
-        <button type="button" class="btn ghost" onclick="viewEmployeeDocument('${(d.url||'').replace(/'/g,"\\'")}','${(d.fileName||d.type||'Document').replace(/'/g,"\\'")}')">Open</button>
-        <button class="btn ghost" onclick="deletePayrollDoc('${d.id}')">Remove</button>
+}
+async function getPayrollDocsForFY(fy){
+  const v = await safeGet('payroll_docs:' + fy, true);
+  return v ? JSON.parse(v) : [];
+}
+async function savePayrollDocsForFY(fy, list){
+  await safeSet('payroll_docs:' + fy, JSON.stringify(list), true);
+  await notePayrollDocsFy_(fy);
+}
+// One request for many financial years at once (getBatch, the same primitive
+// getAttendanceBuckets already uses), not one request per year.
+async function getPayrollDocsBatch_(fyLabels){
+  const out = {};
+  if(!fyLabels.length) return out;
+  const keys = fyLabels.map(fy => 'payroll_docs:' + fy);
+  try{
+    const data = await backendAction({ action:'getBatch', keys });
+    if(data && data.batch && data.values){
+      fyLabels.forEach(fy => {
+        const raw = data.values['payroll_docs:' + fy];
+        try{ out[fy] = raw ? JSON.parse(raw) : []; }catch(e){ out[fy] = []; }
+      });
+      return out;
+    }
+  }catch(e){}
+  await Promise.all(fyLabels.map(async fy => { out[fy] = await getPayrollDocsForFY(fy); }));
+  return out;
+}
+async function getPayrollDocsUnclassified_(){
+  const v = await safeGet('payroll_docs_unclassified', true);
+  return v ? JSON.parse(v) : [];
+}
+async function savePayrollDocsUnclassified_(list){
+  await safeSet('payroll_docs_unclassified', JSON.stringify(list), true);
+}
+
+// ---- one-time migration from the old office_payroll_docs flat list ----
+// The old dropdown only ever offered 5 values (PF/ESI/PT Challan, Wages
+// Register, Pay Slip) — only the first three map onto a category+type in
+// the new scheme; Wages Register/Pay Slip (and anything malformed) go to
+// Unclassified rather than being force-fit or silently dropped.
+const PAYROLL_DOC_LEGACY_TYPE_MAP_ = {
+  'PF Challan': ['pf','pfChallan'],
+  'ESI Challan': ['esi','esiChallan'],
+  'PT Challan': ['pt','ptChallan'],
+};
+async function payrollDocsMigrationNeeded_(){
+  const done = await safeGet('payroll_docs_migration_done', true);
+  if(done) return false;
+  const legacy = await getPayrollDocs();
+  return legacy.length > 0;
+}
+async function migratePayrollDocsIfNeeded_(){
+  const done = await safeGet('payroll_docs_migration_done', true);
+  if(done) return { ran:false, migratedCount:0, unclassifiedCount:0 };
+  const legacy = await getPayrollDocs();
+  const byFy = {};
+  const unclassified = await getPayrollDocsUnclassified_();
+  let migratedCount = 0, unclassifiedCount = 0;
+  for(const d of legacy){
+    const mapped = PAYROLL_DOC_LEGACY_TYPE_MAP_[d.type];
+    const monthMatch = /^(\d{4})-(\d{2})$/.exec(d.month || '');
+    if(mapped && monthMatch){
+      const monthNum = Number(monthMatch[2]);
+      const fy = financialYearLabel(d.month + '-01');
+      const [category, docType] = mapped;
+      const typeInfo = payrollDocTypeInfo_(category, docType);
+      const at = d.uploadedAt || new Date().toISOString();
+      const rec = {
+        id: randomHex(6), fy, month: monthNum, monthLabel: payrollDocMonthLabel_(monthNum),
+        category, docType, docTypeLabel: typeInfo.label,
+        docName: d.type + ' - ' + d.month, docDate: d.month + '-01', remarks: '',
+        fileName: d.fileName, url: d.url,
+        uploadedBy: 'Migrated', uploadedAt: at, status: 'active',
+        history: [{ action:'upload', at, by:'Migration', note:'Migrated from the old Payroll Documents list' }],
+      };
+      (byFy[fy] = byFy[fy] || []).push(rec);
+      migratedCount++;
+    } else {
+      unclassified.push({
+        id: randomHex(6), originalType: d.type, originalMonth: d.month,
+        fileName: d.fileName, url: d.url, uploadedAt: d.uploadedAt || new Date().toISOString(),
+        note: 'From the old Payroll Documents list — could not be automatically classified.',
+      });
+      unclassifiedCount++;
+    }
+  }
+  for(const fy of Object.keys(byFy)){
+    const existing = await getPayrollDocsForFY(fy);
+    await savePayrollDocsForFY(fy, existing.concat(byFy[fy]));
+  }
+  if(unclassifiedCount) await savePayrollDocsUnclassified_(unclassified);
+  await safeSet('payroll_docs_migration_done', 'true', true);
+  if(migratedCount || unclassifiedCount){
+    await addActivityLog(`Migrated payroll documents: ${migratedCount} classified, ${unclassifiedCount} sent to Unclassified`);
+  }
+  return { ran:true, migratedCount, unclassifiedCount };
+}
+async function runPayrollDocsMigration_(){
+  const result = await migratePayrollDocsIfNeeded_();
+  await refreshPayrollDocCardStat_();
+  await renderPayrollDocsModule_();
+  alert(result.ran
+    ? `Migration complete: ${result.migratedCount} classified, ${result.unclassifiedCount} sent to Unclassified.`
+    : 'Already migrated — nothing to do.');
+}
+async function refreshPayrollDocCardStat_(){
+  const el = document.getElementById('payrollDocCardStat');
+  if(!el) return;
+  el.textContent = (await payrollDocsMigrationNeeded_())
+    ? 'Older documents from before this upgrade need migrating — open Payroll Documents to migrate them.' : '';
+}
+
+// ---- compliance status ----
+const PAYROLL_DOC_STATUS_LABEL_ = { complete:'Complete', pending:'Pending', notUploaded:'Not Uploaded' };
+function payrollDocsStatusPillClass_(status){
+  return status === 'complete' ? 'new' : (status === 'pending' ? 'live' : 'warn');
+}
+// records must already be filtered to status:'active' by the caller.
+function payrollDocsMonthStatus_(records, fy, monthNum){
+  const out = {};
+  PAYROLL_DOC_CATEGORIES.forEach(cat => {
+    const required = cat.types.map(t => t.key);
+    const present = new Set(records.filter(r => r.fy === fy && r.month === monthNum && r.category === cat.key).map(r => r.docType));
+    const count = required.filter(t => present.has(t)).length;
+    out[cat.key] = count === 0 ? 'notUploaded' : (count === required.length ? 'complete' : 'pending');
+  });
+  const vals = PAYROLL_DOC_CATEGORIES.map(c => out[c.key]);
+  out.overall = vals.includes('notUploaded') ? 'notUploaded' : (vals.includes('pending') ? 'pending' : 'complete');
+  return out;
+}
+
+// ---- module shell ----
+let payrollDocsState_ = { view:'dashboard', fy:null, month:null, category:null, docType:null };
+async function openPayrollDocsModule(){
+  if(!payrollDocsState_.fy) payrollDocsState_.fy = financialYearLabel();
+  await renderPayrollDocsModule_();
+  openFullscreenView('Payroll Documents', 'payrollDocsRoot');
+}
+function payrollDocsFyOptions_(){
+  const currentFy = getCurrentFYStartYear();
+  const starts = [];
+  for(let y = currentFy - 2; y <= currentFy + 1; y++) starts.push(y);
+  const labels = starts.map(y => financialYearLabel(y + '-04-01'));
+  if(payrollDocsState_.fy && !labels.includes(payrollDocsState_.fy)) labels.unshift(payrollDocsState_.fy);
+  return labels;
+}
+async function renderPayrollDocsModule_(){
+  const root = document.getElementById('payrollDocsRoot');
+  if(!root) return;
+  const migNeeded = await payrollDocsMigrationNeeded_();
+  root.innerHTML = `
+    <div class="payroll-docs-shell">
+      ${migNeeded ? `<div class="payroll-docs-migrate-banner">
+          <span>Older payroll documents from before this upgrade haven't been sorted into the new Financial Year → Month → Category → Document Type structure yet.</span>
+          <button type="button" class="btn" onclick="withBusy(this,'Migrating…',runPayrollDocsMigration_)">Migrate existing documents</button>
+        </div>` : ''}
+      <div class="payroll-docs-toolbar">
+        <div class="payroll-docs-tabs">
+          <button type="button" class="payroll-docs-tab ${payrollDocsState_.view==='dashboard'?'active':''}" onclick="switchPayrollDocsView_('dashboard')">Dashboard</button>
+          <button type="button" class="payroll-docs-tab ${payrollDocsState_.view==='browse'?'active':''}" onclick="switchPayrollDocsView_('browse')">Browse</button>
+          <button type="button" class="payroll-docs-tab ${payrollDocsState_.view==='search'?'active':''}" onclick="switchPayrollDocsView_('search')">Search</button>
+          <button type="button" class="payroll-docs-tab ${payrollDocsState_.view==='unclassified'?'active':''}" onclick="switchPayrollDocsView_('unclassified')">Unclassified</button>
+        </div>
+        <button type="button" class="btn" onclick="openPayrollDocUploadModal()">+ Upload document</button>
       </div>
-    </div>`).join('');
+      <div id="payrollDocsViewBody"></div>
+    </div>
+    <div id="payrollDocModalRoot"></div>`;
+  await renderPayrollDocsViewBody_();
 }
-async function deletePayrollDoc(id){
-  if(!confirm('Remove this from the list? The file will stay in Drive as an archive — this only removes it from this list.')) return;
-  let list = await getPayrollDocs();
-  list = list.filter(d => d.id !== id);
-  await savePayrollDocs(list);
-  await renderPayrollDocList();
+function switchPayrollDocsView_(view){
+  payrollDocsState_.view = view;
+  if(view === 'browse'){ payrollDocsState_.month = null; payrollDocsState_.category = null; payrollDocsState_.docType = null; }
+  renderPayrollDocsModule_();
+}
+async function renderPayrollDocsViewBody_(){
+  const body = document.getElementById('payrollDocsViewBody');
+  if(!body) return;
+  if(payrollDocsState_.view === 'dashboard') return renderPayrollDocsDashboard_(body);
+  if(payrollDocsState_.view === 'browse') return renderPayrollDocsBrowse_(body);
+  if(payrollDocsState_.view === 'search') return renderPayrollDocsSearch_(body);
+  if(payrollDocsState_.view === 'unclassified') return renderPayrollDocsUnclassified_(body);
+}
+
+// ---- Dashboard: Month | PF | ESI | PT | Overall Status ----
+async function renderPayrollDocsDashboard_(body){
+  const fy = payrollDocsState_.fy;
+  const records = (await getPayrollDocsForFY(fy)).filter(r => r.status === 'active');
+  const rows = FY_MONTH_ORDER.map(monthNum => ({ monthNum, status: payrollDocsMonthStatus_(records, fy, monthNum) }));
+  body.innerHTML = `
+    <div class="payroll-docs-fy-picker">
+      <label class="field">Financial Year</label>
+      <select class="field-input" id="payrollDocsDashFySel" onchange="payrollDocsState_.fy=this.value;renderPayrollDocsViewBody_();">
+        ${payrollDocsFyOptions_().map(l => `<option value="${l}" ${l===fy?'selected':''}>${l}</option>`).join('')}
+      </select>
+    </div>
+    <div class="payroll-docs-table-wrap">
+    <table class="payroll-docs-table">
+      <thead><tr><th>Month</th>${PAYROLL_DOC_CATEGORIES.map(c => `<th>${escapeHtml(c.label)}</th>`).join('')}<th>Overall</th></tr></thead>
+      <tbody>
+        ${rows.map(r => `
+          <tr class="payroll-docs-month-row" onclick="payrollDocsJumpToMonth_(${r.monthNum})">
+            <td><strong>${payrollDocMonthLabel_(r.monthNum)}</strong></td>
+            ${PAYROLL_DOC_CATEGORIES.map(c => `<td><span class="pill ${payrollDocsStatusPillClass_(r.status[c.key])}">${PAYROLL_DOC_STATUS_LABEL_[r.status[c.key]]}</span></td>`).join('')}
+            <td><span class="pill ${payrollDocsStatusPillClass_(r.status.overall)}">${PAYROLL_DOC_STATUS_LABEL_[r.status.overall]}</span></td>
+          </tr>`).join('')}
+      </tbody>
+    </table>
+    </div>`;
+}
+function payrollDocsJumpToMonth_(monthNum){
+  payrollDocsState_.view = 'browse';
+  payrollDocsState_.month = monthNum;
+  payrollDocsState_.category = null;
+  payrollDocsState_.docType = null;
+  renderPayrollDocsModule_();
+}
+
+// ---- Browse: breadcrumb drill-down FY -> Month -> Category -> Document Type -> file ----
+function payrollDocsBreadcrumb_(){
+  const parts = [{ label: payrollDocsState_.fy, level:'fy' }];
+  if(payrollDocsState_.month) parts.push({ label: payrollDocMonthLabel_(payrollDocsState_.month), level:'month' });
+  if(payrollDocsState_.category){
+    const cat = payrollDocCategoryByKey_(payrollDocsState_.category);
+    parts.push({ label: cat ? cat.label : payrollDocsState_.category, level:'category' });
+  }
+  if(payrollDocsState_.docType){
+    const typeInfo = payrollDocTypeInfo_(payrollDocsState_.category, payrollDocsState_.docType);
+    parts.push({ label: typeInfo ? typeInfo.label : payrollDocsState_.docType, level:'docType' });
+  }
+  return `<div class="payroll-docs-breadcrumb">` + parts.map((p,i) => {
+    const isLast = i === parts.length - 1;
+    return (i>0 ? `<span class="crumb-sep">›</span>` : '') +
+      (isLast ? `<span class="crumb-here">${escapeHtml(p.label)}</span>`
+              : `<button type="button" class="crumb-up" onclick="payrollDocsBreadcrumbJump_('${p.level}')">${escapeHtml(p.label)}</button>`);
+  }).join('') + `</div>`;
+}
+function payrollDocsBreadcrumbJump_(level){
+  if(level === 'fy'){ payrollDocsState_.month = null; payrollDocsState_.category = null; payrollDocsState_.docType = null; }
+  else if(level === 'month'){ payrollDocsState_.category = null; payrollDocsState_.docType = null; }
+  else if(level === 'category'){ payrollDocsState_.docType = null; }
+  renderPayrollDocsViewBody_();
+}
+function payrollDocsSetLevel_(patch){
+  Object.assign(payrollDocsState_, patch);
+  renderPayrollDocsViewBody_();
+}
+async function renderPayrollDocsBrowse_(body){
+  const fy = payrollDocsState_.fy;
+  const records = (await getPayrollDocsForFY(fy)).filter(r => r.status === 'active');
+  const crumb = payrollDocsBreadcrumb_();
+
+  if(!payrollDocsState_.month){
+    const rows = FY_MONTH_ORDER.map(m => ({ m, status: payrollDocsMonthStatus_(records, fy, m) }));
+    body.innerHTML = crumb + `<div class="payroll-docs-list">` + rows.map(r => `
+      <div class="emp-row payroll-docs-clickrow" onclick="payrollDocsSetLevel_({month:${r.m}})">
+        <div class="head"><strong>${payrollDocMonthLabel_(r.m)}</strong>
+          <span class="pill ${payrollDocsStatusPillClass_(r.status.overall)}">${PAYROLL_DOC_STATUS_LABEL_[r.status.overall]}</span></div>
+      </div>`).join('') + `</div>`;
+    return;
+  }
+
+  if(!payrollDocsState_.category){
+    const status = payrollDocsMonthStatus_(records, fy, payrollDocsState_.month);
+    body.innerHTML = crumb + `<div class="payroll-docs-list">` + PAYROLL_DOC_CATEGORIES.map(cat => {
+      const missing = cat.types.filter(t => !records.some(r => r.month===payrollDocsState_.month && r.category===cat.key && r.docType===t.key));
+      return `<div class="emp-row payroll-docs-clickrow" onclick="payrollDocsSetLevel_({category:'${cat.key}'})">
+        <div class="head"><strong>${escapeHtml(cat.label)}</strong>
+          <span class="pill ${payrollDocsStatusPillClass_(status[cat.key])}">${PAYROLL_DOC_STATUS_LABEL_[status[cat.key]]}</span></div>
+        <div class="sub">${missing.length ? 'Missing: ' + missing.map(t=>escapeHtml(t.label)).join(', ') : 'All document types uploaded'}</div>
+      </div>`;
+    }).join('') + `</div>`;
+    return;
+  }
+
+  const cat = payrollDocCategoryByKey_(payrollDocsState_.category);
+  if(!payrollDocsState_.docType){
+    body.innerHTML = crumb + `<div class="payroll-docs-list">` + cat.types.map(t => {
+      const rec = records.find(r => r.month===payrollDocsState_.month && r.category===cat.key && r.docType===t.key);
+      return `<div class="emp-row payroll-docs-clickrow" onclick="payrollDocsSetLevel_({docType:'${t.key}'})">
+        <div class="head"><strong>${escapeHtml(t.label)}</strong>
+          <span class="pill ${rec ? 'new' : 'warn'}">${rec ? 'Uploaded' : 'Not uploaded'}</span></div>
+        ${rec ? `<div class="sub">${escapeHtml(rec.docName || rec.fileName)}</div>` : ''}
+      </div>`;
+    }).join('') + `</div>`;
+    return;
+  }
+
+  const typeInfo = payrollDocTypeInfo_(cat.key, payrollDocsState_.docType);
+  const rec = records.find(r => r.month===payrollDocsState_.month && r.category===cat.key && r.docType===payrollDocsState_.docType);
+  if(!rec){
+    body.innerHTML = crumb + `<div class="empty">No ${escapeHtml(typeInfo.label)} uploaded for ${payrollDocMonthLabel_(payrollDocsState_.month)} ${escapeHtml(fy)} yet.</div>
+      <button type="button" class="btn" style="margin-top:10px;" onclick="openPayrollDocUploadModal({fy:'${fy}',month:${payrollDocsState_.month},category:'${cat.key}',docType:'${payrollDocsState_.docType}'})">Upload ${escapeHtml(typeInfo.label)}</button>`;
+    return;
+  }
+  body.innerHTML = crumb + payrollDocRecordCardHtml_(rec);
+}
+function payrollDocRecordCardHtml_(rec){
+  const safeUrl = (rec.url||'').replace(/'/g,"\\'");
+  const safeFileName = (rec.fileName||rec.docTypeLabel||'Document').replace(/'/g,"\\'");
+  return `<div class="emp-row">
+    <div class="head"><strong>${escapeHtml(rec.docName || rec.docTypeLabel)}</strong><span class="id">${escapeHtml(rec.fy)} · ${escapeHtml(rec.monthLabel)}</span></div>
+    <div class="sub">${escapeHtml(rec.docTypeLabel)} — ${escapeHtml(rec.fileName)}</div>
+    <div class="sub">Document date: ${fmtDateIN(rec.docDate)} · Uploaded by ${escapeHtml(rec.uploadedBy||'—')} on ${fmtDateIN(rec.uploadedAt)}</div>
+    ${rec.remarks ? `<div class="sub">Remarks: ${escapeHtml(rec.remarks)}</div>` : ''}
+    ${rec.status === 'deleted' ? `<div class="sub"><span class="pill warn">Deleted</span></div>` : ''}
+    <div class="actions">
+      <button type="button" class="btn ghost" onclick="viewEmployeeDocument('${safeUrl}','${safeFileName}')">View / Download</button>
+      <button type="button" class="btn ghost" onclick="openPayrollDocEditModal('${rec.fy}','${rec.id}')">Edit</button>
+      <button type="button" class="btn ghost" onclick="openPayrollDocReclassifyModal('${rec.fy}','${rec.id}')">Reclassify</button>
+      <button type="button" class="btn ghost" onclick="openPayrollDocReplaceModal('${rec.fy}','${rec.id}')">Replace</button>
+      <button type="button" class="btn ghost" onclick="openPayrollDocHistoryModal('${rec.fy}','${rec.id}')">History</button>
+      ${rec.status !== 'deleted' ? `<button type="button" class="btn ghost" onclick="deletePayrollDocRecord_('${rec.fy}','${rec.id}')">Delete</button>` : ''}
+    </div>
+  </div>`;
+}
+async function deletePayrollDocRecord_(fy, id){
+  if(!confirm('Delete this document? The file stays in Drive as an archive, and the record moves to Status = Deleted so it can still be found in Search with its full history — nothing is permanently erased.')) return;
+  const list = await getPayrollDocsForFY(fy);
+  const rec = list.find(r => r.id === id);
+  if(!rec) return;
+  let by = 'HR';
+  try{ by = localStorage.getItem('kmt_payroll_doc_uploader') || 'HR'; }catch(e){}
+  rec.status = 'deleted';
+  rec.history = rec.history || [];
+  rec.history.push({ action:'delete', at: new Date().toISOString(), by });
+  await savePayrollDocsForFY(fy, list);
+  await addActivityLog(`Deleted ${rec.docTypeLabel} for ${rec.monthLabel} ${rec.fy}`);
+  await renderPayrollDocsModule_();
+}
+
+// ---- Search ----
+async function renderPayrollDocsSearch_(body){
+  body.innerHTML = `
+    <div class="payroll-docs-search-filters">
+      <div><label class="field">Financial Year</label><select class="field-input" id="pdSearchFy"><option value="">All financial years</option>${payrollDocsFyOptions_().map(l=>`<option value="${l}">${l}</option>`).join('')}</select></div>
+      <div><label class="field">Month</label><select class="field-input" id="pdSearchMonth"><option value="">All months</option>${FY_MONTH_ORDER.map(m=>`<option value="${m}">${payrollDocMonthLabel_(m)}</option>`).join('')}</select></div>
+      <div><label class="field">Category</label><select class="field-input" id="pdSearchCategory" onchange="payrollDocsSearchCategoryChanged_()"><option value="">All categories</option>${PAYROLL_DOC_CATEGORIES.map(c=>`<option value="${c.key}">${escapeHtml(c.label)}</option>`).join('')}</select></div>
+      <div><label class="field">Document Type</label><select class="field-input" id="pdSearchDocType"><option value="">All document types</option></select></div>
+      <div><label class="field">Document Name</label><input class="field-input" id="pdSearchName" placeholder="Search by name"></div>
+      <div><label class="field">Document Date</label><input class="field-input" type="date" id="pdSearchDocDate"></div>
+      <div><label class="field">Upload Date</label><input class="field-input" type="date" id="pdSearchUploadDate"></div>
+      <div><label class="field">Uploaded By</label><input class="field-input" id="pdSearchUploadedBy" placeholder="Search by name"></div>
+      <div><label class="field">Status</label><select class="field-input" id="pdSearchStatus"><option value="active">Active</option><option value="deleted">Deleted</option><option value="">All</option></select></div>
+    </div>
+    <button type="button" class="btn full" style="margin:14px 0;" onclick="withBusy(this,'Searching…',runPayrollDocsSearch_)">Search</button>
+    <div id="pdSearchResults"></div>`;
+  document.getElementById('pdSearchStatus').value = 'active';
+}
+function payrollDocsSearchCategoryChanged_(){
+  const catKey = document.getElementById('pdSearchCategory').value;
+  const cat = payrollDocCategoryByKey_(catKey);
+  document.getElementById('pdSearchDocType').innerHTML = '<option value="">All document types</option>' +
+    (cat ? cat.types.map(t=>`<option value="${t.key}">${escapeHtml(t.label)}</option>`).join('') : '');
+}
+async function runPayrollDocsSearch_(){
+  const fy = document.getElementById('pdSearchFy').value;
+  const month = document.getElementById('pdSearchMonth').value;
+  const category = document.getElementById('pdSearchCategory').value;
+  const docType = document.getElementById('pdSearchDocType').value;
+  const name = document.getElementById('pdSearchName').value.trim().toLowerCase();
+  const docDate = document.getElementById('pdSearchDocDate').value;
+  const uploadDate = document.getElementById('pdSearchUploadDate').value;
+  const uploadedBy = document.getElementById('pdSearchUploadedBy').value.trim().toLowerCase();
+  const status = document.getElementById('pdSearchStatus').value;
+
+  const fys = fy ? [fy] : await getPayrollDocsFyIndex_();
+  const batch = await getPayrollDocsBatch_(fys);
+  let results = [];
+  fys.forEach(f => { results = results.concat(batch[f] || []); });
+
+  results = results.filter(r => {
+    if(month && r.month !== Number(month)) return false;
+    if(category && r.category !== category) return false;
+    if(docType && r.docType !== docType) return false;
+    if(name && !((r.docName||'') + ' ' + (r.fileName||'')).toLowerCase().includes(name)) return false;
+    if(docDate && r.docDate !== docDate) return false;
+    if(uploadDate && (r.uploadedAt||'').slice(0,10) !== uploadDate) return false;
+    if(uploadedBy && !(r.uploadedBy||'').toLowerCase().includes(uploadedBy)) return false;
+    if(status && r.status !== status) return false;
+    return true;
+  });
+  results.sort((a,b) => (b.uploadedAt||'').localeCompare(a.uploadedAt||''));
+
+  const box = document.getElementById('pdSearchResults');
+  if(!results.length){ box.innerHTML = '<div class="empty">No documents match these filters.</div>'; return; }
+  box.innerHTML = `<div class="payroll-docs-list">` + results.map(payrollDocRecordCardHtml_).join('') + `</div>`;
+}
+
+// ---- Unclassified ----
+async function renderPayrollDocsUnclassified_(body){
+  const list = await getPayrollDocsUnclassified_();
+  if(!list.length){
+    body.innerHTML = '<div class="empty">Nothing unclassified — every payroll document has a financial year, month, category and document type.</div>';
+    return;
+  }
+  body.innerHTML = `<div class="payroll-docs-list">` + list.map(d => `
+    <div class="emp-row">
+      <div class="head"><strong>${escapeHtml(d.originalType || 'Unknown type')}</strong><span class="id">${escapeHtml(d.originalMonth || '')}</span></div>
+      <div class="sub">${escapeHtml(d.fileName || '')}</div>
+      ${d.note ? `<div class="sub">${escapeHtml(d.note)}</div>` : ''}
+      <div class="actions">
+        <button type="button" class="btn ghost" onclick="viewEmployeeDocument('${(d.url||'').replace(/'/g,"\\'")}','${(d.fileName||'Document').replace(/'/g,"\\'")}')">View</button>
+        <button type="button" class="btn ghost" onclick="openPayrollDocClassifyModal('${d.id}')">Classify</button>
+      </div>
+    </div>`).join('') + `</div>`;
+}
+
+// ---- shared upload / edit / reclassify / replace / classify modal ----
+// One template, four field groups (classify / details / file / status) shown
+// or hidden per mode via payrollDocSetModalGroups_ — simpler and less error
+// prone than five separate modal templates that would drift apart over time.
+let payrollDocModalCtx_ = null;
+function payrollDocModalHtml_(){
+  return `
+  <div class="modal-overlay" id="payrollDocModalOverlay" onclick="if(event.target===this)closePayrollDocModal()">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h2 id="payrollDocModalTitle"></h2>
+        <button class="modal-x" type="button" title="Close" aria-label="Close" onclick="closePayrollDocModal()">✕</button>
+      </div>
+      <div id="pdFormClassifyGroup">
+        <div class="row-inline">
+          <div><label class="field">Financial Year</label><select class="field-input" id="pdFormFy"></select></div>
+          <div><label class="field">Month</label><select class="field-input" id="pdFormMonth">${FY_MONTH_ORDER.map(m=>`<option value="${m}">${payrollDocMonthLabel_(m)}</option>`).join('')}</select></div>
+        </div>
+        <div class="row-inline">
+          <div><label class="field">Payroll Category</label><select class="field-input" id="pdFormCategory" onchange="payrollDocFormCategoryChanged_()">${PAYROLL_DOC_CATEGORIES.map(c=>`<option value="${c.key}">${escapeHtml(c.label)}</option>`).join('')}</select></div>
+          <div><label class="field">Document Type</label><select class="field-input" id="pdFormDocType"></select></div>
+        </div>
+      </div>
+      <div id="pdFormDetailsGroup">
+        <label class="field">Document Name</label>
+        <input class="field-input" id="pdFormDocName" placeholder="e.g. April PF Challan">
+        <div class="row-inline">
+          <div><label class="field">Document Date</label><input class="field-input" type="date" id="pdFormDocDate"></div>
+          <div><label class="field">Uploaded By</label><input class="field-input" id="pdFormUploadedBy" placeholder="Your name"></div>
+        </div>
+        <label class="field">Remarks</label>
+        <textarea class="field-input" id="pdFormRemarks" rows="2"></textarea>
+      </div>
+      <div id="pdFormFileGroup">
+        <label class="field" id="pdFormFileLabel">File</label>
+        <input type="file" id="pdFormFile" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx">
+      </div>
+      <div id="pdFormStatusGroup">
+        <label class="field">Status</label>
+        <select class="field-input" id="pdFormStatus"><option value="active">Active</option><option value="deleted">Deleted</option></select>
+      </div>
+      <div class="msg" id="pdFormMsg"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="withBusy(this,'Saving…',savePayrollDocForm_)">Save</button>
+      </div>
+    </div>
+  </div>`;
+}
+function payrollDocFormCategoryChanged_(){
+  const cat = payrollDocCategoryByKey_(document.getElementById('pdFormCategory').value);
+  document.getElementById('pdFormDocType').innerHTML = cat ? cat.types.map(t=>`<option value="${t.key}">${escapeHtml(t.label)}</option>`).join('') : '';
+}
+function payrollDocSetModalGroups_(visibleGroups){
+  ['classify','details','file','status'].forEach(g => {
+    const el = document.getElementById('pdForm' + g.charAt(0).toUpperCase() + g.slice(1) + 'Group');
+    if(el) el.classList.toggle('hidden', !visibleGroups.includes(g));
+  });
+  const fileInput = document.getElementById('pdFormFile');
+  if(fileInput) fileInput.toggleAttribute('required', visibleGroups.includes('file'));
+}
+function closePayrollDocModal(){
+  const root = document.getElementById('payrollDocModalRoot');
+  if(root) root.innerHTML = '';
+  kmtUnlockBodyScroll('payrollDocModal');
+}
+function payrollDocRememberedUploader_(){
+  try{ return localStorage.getItem('kmt_payroll_doc_uploader') || ''; }catch(e){ return ''; }
+}
+function payrollDocRememberUploader_(name){
+  if(!name) return;
+  try{ localStorage.setItem('kmt_payroll_doc_uploader', name); }catch(e){}
+}
+
+function openPayrollDocUploadModal(prefill){
+  payrollDocModalCtx_ = { mode:'upload' };
+  document.getElementById('payrollDocModalRoot').innerHTML = payrollDocModalHtml_();
+  kmtLockBodyScroll('payrollDocModal');
+  payrollDocSetModalGroups_(['classify','details','file']);
+  document.getElementById('payrollDocModalTitle').textContent = 'Upload document';
+  document.getElementById('pdFormFy').innerHTML = payrollDocsFyOptions_().map(l=>`<option value="${l}">${l}</option>`).join('');
+  document.getElementById('pdFormFy').value = (prefill && prefill.fy) || payrollDocsState_.fy;
+  document.getElementById('pdFormMonth').value = (prefill && prefill.month) || (payrollDocsState_.month || (new Date().getMonth()+1));
+  document.getElementById('pdFormCategory').value = (prefill && prefill.category) || 'pf';
+  payrollDocFormCategoryChanged_();
+  if(prefill && prefill.docType) document.getElementById('pdFormDocType').value = prefill.docType;
+  document.getElementById('pdFormDocDate').value = todayStr();
+  document.getElementById('pdFormFileLabel').textContent = 'File';
+  document.getElementById('pdFormUploadedBy').value = payrollDocRememberedUploader_();
+}
+async function openPayrollDocEditModal(fy, id){
+  const list = await getPayrollDocsForFY(fy);
+  const rec = list.find(r => r.id === id);
+  if(!rec) return;
+  payrollDocModalCtx_ = { mode:'edit', fy, id };
+  document.getElementById('payrollDocModalRoot').innerHTML = payrollDocModalHtml_();
+  kmtLockBodyScroll('payrollDocModal');
+  payrollDocSetModalGroups_(['details','status']);
+  document.getElementById('payrollDocModalTitle').textContent = 'Edit document details — ' + rec.docTypeLabel;
+  document.getElementById('pdFormDocName').value = rec.docName || '';
+  document.getElementById('pdFormDocDate').value = rec.docDate || '';
+  document.getElementById('pdFormRemarks').value = rec.remarks || '';
+  document.getElementById('pdFormUploadedBy').value = rec.uploadedBy || payrollDocRememberedUploader_();
+  document.getElementById('pdFormStatus').value = rec.status;
+}
+async function openPayrollDocReclassifyModal(fy, id){
+  const list = await getPayrollDocsForFY(fy);
+  const rec = list.find(r => r.id === id);
+  if(!rec) return;
+  payrollDocModalCtx_ = { mode:'reclassify', fy, id };
+  document.getElementById('payrollDocModalRoot').innerHTML = payrollDocModalHtml_();
+  kmtLockBodyScroll('payrollDocModal');
+  payrollDocSetModalGroups_(['classify']);
+  document.getElementById('payrollDocModalTitle').textContent = 'Reclassify document';
+  document.getElementById('pdFormFy').innerHTML = payrollDocsFyOptions_().map(l=>`<option value="${l}">${l}</option>`).join('');
+  document.getElementById('pdFormFy').value = rec.fy;
+  document.getElementById('pdFormMonth').value = rec.month;
+  document.getElementById('pdFormCategory').value = rec.category;
+  payrollDocFormCategoryChanged_();
+  document.getElementById('pdFormDocType').value = rec.docType;
+  document.getElementById('pdFormUploadedBy').value = payrollDocRememberedUploader_() || rec.uploadedBy || '';
+}
+async function openPayrollDocReplaceModal(fy, id){
+  const list = await getPayrollDocsForFY(fy);
+  const rec = list.find(r => r.id === id);
+  if(!rec) return;
+  payrollDocModalCtx_ = { mode:'replace', fy, id };
+  document.getElementById('payrollDocModalRoot').innerHTML = payrollDocModalHtml_();
+  kmtLockBodyScroll('payrollDocModal');
+  payrollDocSetModalGroups_(['file']);
+  document.getElementById('payrollDocModalTitle').textContent = 'Replace file — ' + rec.docTypeLabel + ' (' + rec.monthLabel + ' ' + rec.fy + ')';
+  document.getElementById('pdFormFileLabel').textContent = 'New file — the current one is kept, not deleted, and stays reachable from History';
+  document.getElementById('pdFormUploadedBy').value = payrollDocRememberedUploader_() || rec.uploadedBy || '';
+}
+function openPayrollDocClassifyModal(unclassifiedId){
+  payrollDocModalCtx_ = { mode:'classify', id: unclassifiedId };
+  document.getElementById('payrollDocModalRoot').innerHTML = payrollDocModalHtml_();
+  kmtLockBodyScroll('payrollDocModal');
+  payrollDocSetModalGroups_(['classify','details']);
+  document.getElementById('payrollDocModalTitle').textContent = 'Classify document';
+  document.getElementById('pdFormFy').innerHTML = payrollDocsFyOptions_().map(l=>`<option value="${l}">${l}</option>`).join('');
+  document.getElementById('pdFormFy').value = payrollDocsState_.fy;
+  document.getElementById('pdFormMonth').value = new Date().getMonth()+1;
+  document.getElementById('pdFormCategory').value = 'pf';
+  payrollDocFormCategoryChanged_();
+  document.getElementById('pdFormDocDate').value = todayStr();
+  document.getElementById('pdFormUploadedBy').value = payrollDocRememberedUploader_();
+}
+async function openPayrollDocHistoryModal(fy, id){
+  const list = await getPayrollDocsForFY(fy);
+  const rec = list.find(r => r.id === id);
+  if(!rec) return;
+  const history = (rec.history || []).slice().reverse();
+  document.getElementById('payrollDocModalRoot').innerHTML = `
+  <div class="modal-overlay" id="payrollDocHistoryOverlay" onclick="if(event.target===this)closePayrollDocModal()">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h2>History — ${escapeHtml(rec.docTypeLabel)} (${escapeHtml(rec.monthLabel)} ${escapeHtml(rec.fy)})</h2>
+        <button class="modal-x" type="button" title="Close" aria-label="Close" onclick="closePayrollDocModal()">✕</button>
+      </div>
+      ${history.length ? `<div class="payroll-docs-list">` + history.map(payrollDocHistoryEntryHtml_).join('') + `</div>` : '<div class="empty">No history recorded.</div>'}
+    </div>
+  </div>`;
+  kmtLockBodyScroll('payrollDocModal');
+}
+function payrollDocHistoryEntryHtml_(h){
+  const actionLabel = { upload:'Uploaded', edit:'Edited', reclassify:'Reclassified', replace:'Replaced', delete:'Deleted' }[h.action] || h.action;
+  let detail = '';
+  if(h.changes){
+    detail = Object.entries(h.changes).map(([k,v]) =>
+      `${escapeHtml(k)}: ${escapeHtml(String((v&&v.from) ?? ''))} → ${escapeHtml(String((v&&v.to) ?? ''))}`).join('<br>');
+  }
+  if(h.oldFileName){
+    const safeOldUrl = (h.oldUrl||'').replace(/'/g,"\\'");
+    const safeOldName = (h.oldFileName||'').replace(/'/g,"\\'");
+    detail += (detail?'<br>':'') + `Previous file: <a href="#" onclick="viewEmployeeDocument('${safeOldUrl}','${safeOldName}');return false;">${escapeHtml(h.oldFileName)}</a>`;
+  }
+  if(h.note) detail += (detail?'<br>':'') + escapeHtml(h.note);
+  return `<div class="emp-row">
+    <div class="head"><strong>${escapeHtml(actionLabel)}</strong><span class="id">${fmtDateIN(h.at)}</span></div>
+    <div class="sub">By ${escapeHtml(h.by||'—')}</div>
+    ${detail ? `<div class="sub">${detail}</div>` : ''}
+  </div>`;
+}
+
+async function savePayrollDocForm_(){
+  const ctx = payrollDocModalCtx_;
+  if(!ctx) return;
+  const msg = document.getElementById('pdFormMsg');
+  msg.textContent = ''; msg.classList.remove('error');
+  const uploadedByField = document.getElementById('pdFormUploadedBy');
+  const now = new Date().toISOString();
+
+  if(ctx.mode === 'upload'){
+    const file = document.getElementById('pdFormFile').files[0];
+    if(!file){ msg.textContent = 'Choose a file to upload.'; msg.classList.add('error'); return; }
+    const fy = document.getElementById('pdFormFy').value;
+    const month = Number(document.getElementById('pdFormMonth').value);
+    const category = document.getElementById('pdFormCategory').value;
+    const docType = document.getElementById('pdFormDocType').value;
+    const docName = document.getElementById('pdFormDocName').value.trim();
+    const docDate = document.getElementById('pdFormDocDate').value;
+    const remarks = document.getElementById('pdFormRemarks').value.trim();
+    if(!docDate){ msg.textContent = 'Document date is required.'; msg.classList.add('error'); return; }
+    const typeInfo = payrollDocTypeInfo_(category, docType);
+    if(!typeInfo){ msg.textContent = 'Choose a document type.'; msg.classList.add('error'); return; }
+    const uploadedBy = uploadedByField.value.trim() || 'HR';
+    payrollDocRememberUploader_(uploadedBy);
+    msg.textContent = 'Uploading…';
+    const companyName = (await getCompanyProfile()).name;
+    const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
+    const cleanName = payrollDocCleanFileName_(fy, month, typeInfo.label, ext, companyName);
+    // The actual Drive filename always carries a short unique suffix, even on
+    // a first upload — doUploadDocument_ (Code 2.js) trashes any existing
+    // same-named file in that folder before writing a new one, so reusing
+    // the clean name verbatim would risk a future replace silently deleting
+    // this file. The displayed/download name (docName record's fileName
+    // field) stays the clean spec-format name regardless.
+    const driveFileName = cleanName.replace(/(\.[^.]*)?$/, m => '_' + randomHex(4) + m);
+    const folderPath = hrYearPath(docDate, 'Office Documents', 'Payroll Documents', payrollDocMonthLabel_(month), payrollDocCategoryByKey_(category).label);
+    const url = await uploadDocumentToDrive(folderPath, driveFileName, file);
+    if(!url){ msg.textContent = 'Upload failed — check your connection and try again.'; msg.classList.add('error'); return; }
+    const list = await getPayrollDocsForFY(fy);
+    list.unshift({
+      id: randomHex(6), fy, month, monthLabel: payrollDocMonthLabel_(month),
+      category, docType, docTypeLabel: typeInfo.label,
+      docName: docName || typeInfo.label, docDate, remarks,
+      fileName: cleanName, url, uploadedBy, uploadedAt: now, status:'active',
+      history: [{ action:'upload', at: now, by: uploadedBy }],
+    });
+    await savePayrollDocsForFY(fy, list);
+    await addActivityLog(`Uploaded ${typeInfo.label} for ${payrollDocMonthLabel_(month)} ${fy}`);
+    closePayrollDocModal();
+    await refreshPayrollDocCardStat_();
+    await renderPayrollDocsModule_();
+    return;
+  }
+
+  if(ctx.mode === 'edit'){
+    const list = await getPayrollDocsForFY(ctx.fy);
+    const rec = list.find(r => r.id === ctx.id);
+    if(!rec) return;
+    const newDocName = document.getElementById('pdFormDocName').value.trim();
+    const newDocDate = document.getElementById('pdFormDocDate').value;
+    const newRemarks = document.getElementById('pdFormRemarks').value.trim();
+    const newUploadedBy = uploadedByField.value.trim() || rec.uploadedBy;
+    const newStatus = document.getElementById('pdFormStatus').value;
+    payrollDocRememberUploader_(newUploadedBy);
+    const changes = {};
+    if(newDocName !== (rec.docName||'')) changes.docName = { from: rec.docName, to: newDocName };
+    if(newDocDate !== (rec.docDate||'')) changes.docDate = { from: rec.docDate, to: newDocDate };
+    if(newRemarks !== (rec.remarks||'')) changes.remarks = { from: rec.remarks, to: newRemarks };
+    if(newStatus !== rec.status) changes.status = { from: rec.status, to: newStatus };
+    rec.docName = newDocName; rec.docDate = newDocDate; rec.remarks = newRemarks;
+    rec.uploadedBy = newUploadedBy; rec.status = newStatus;
+    if(Object.keys(changes).length){
+      rec.history = rec.history || [];
+      rec.history.push({ action: (changes.status && newStatus==='deleted') ? 'delete' : 'edit', at: now, by: newUploadedBy, changes });
+    }
+    await savePayrollDocsForFY(ctx.fy, list);
+    await addActivityLog(`Edited ${rec.docTypeLabel} for ${rec.monthLabel} ${rec.fy}`);
+    closePayrollDocModal();
+    await renderPayrollDocsModule_();
+    return;
+  }
+
+  if(ctx.mode === 'reclassify'){
+    const list = await getPayrollDocsForFY(ctx.fy);
+    const idx = list.findIndex(r => r.id === ctx.id);
+    if(idx === -1) return;
+    const rec = list[idx];
+    const newFy = document.getElementById('pdFormFy').value;
+    const newMonth = Number(document.getElementById('pdFormMonth').value);
+    const newCategory = document.getElementById('pdFormCategory').value;
+    const newDocType = document.getElementById('pdFormDocType').value;
+    const newTypeInfo = payrollDocTypeInfo_(newCategory, newDocType);
+    if(!newTypeInfo) return;
+    const uploadedBy = uploadedByField.value.trim() || rec.uploadedBy || 'HR';
+    payrollDocRememberUploader_(uploadedBy);
+    rec.history = rec.history || [];
+    rec.history.push({ action:'reclassify', at: now, by: uploadedBy, changes: {
+      fy: { from: rec.fy, to: newFy }, month: { from: rec.monthLabel, to: payrollDocMonthLabel_(newMonth) },
+      category: { from: payrollDocCategoryByKey_(rec.category).label, to: payrollDocCategoryByKey_(newCategory).label },
+      docType: { from: rec.docTypeLabel, to: newTypeInfo.label },
+    }});
+    rec.fy = newFy; rec.month = newMonth; rec.monthLabel = payrollDocMonthLabel_(newMonth);
+    rec.category = newCategory; rec.docType = newDocType; rec.docTypeLabel = newTypeInfo.label;
+    rec.uploadedBy = uploadedBy;
+    if(newFy === ctx.fy){
+      await savePayrollDocsForFY(ctx.fy, list);
+    } else {
+      list.splice(idx, 1);
+      await savePayrollDocsForFY(ctx.fy, list);
+      const destList = await getPayrollDocsForFY(newFy);
+      destList.unshift(rec);
+      await savePayrollDocsForFY(newFy, destList);
+    }
+    await addActivityLog(`Reclassified a document to ${newTypeInfo.label} for ${payrollDocMonthLabel_(newMonth)} ${newFy}`);
+    closePayrollDocModal();
+    payrollDocsState_.fy = newFy; payrollDocsState_.month = null; payrollDocsState_.category = null; payrollDocsState_.docType = null;
+    await renderPayrollDocsModule_();
+    return;
+  }
+
+  if(ctx.mode === 'replace'){
+    const file = document.getElementById('pdFormFile').files[0];
+    if(!file){ msg.textContent = 'Choose a replacement file.'; msg.classList.add('error'); return; }
+    const list = await getPayrollDocsForFY(ctx.fy);
+    const rec = list.find(r => r.id === ctx.id);
+    if(!rec) return;
+    const uploadedBy = uploadedByField.value.trim() || rec.uploadedBy || 'HR';
+    payrollDocRememberUploader_(uploadedBy);
+    msg.textContent = 'Uploading…';
+    const companyName = (await getCompanyProfile()).name;
+    const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
+    const cleanName = payrollDocCleanFileName_(rec.fy, rec.month, rec.docTypeLabel, ext, companyName);
+    const driveFileName = cleanName.replace(/(\.[^.]*)?$/, m => '_' + randomHex(4) + m);
+    const folderPath = hrYearPath(rec.docDate, 'Office Documents', 'Payroll Documents', rec.monthLabel, payrollDocCategoryByKey_(rec.category).label);
+    const url = await uploadDocumentToDrive(folderPath, driveFileName, file);
+    if(!url){ msg.textContent = 'Upload failed — check your connection and try again.'; msg.classList.add('error'); return; }
+    rec.history = rec.history || [];
+    rec.history.push({ action:'replace', at: now, by: uploadedBy, oldUrl: rec.url, oldFileName: rec.fileName });
+    rec.fileName = cleanName; rec.url = url; rec.uploadedBy = uploadedBy; rec.uploadedAt = now;
+    await savePayrollDocsForFY(ctx.fy, list);
+    await addActivityLog(`Replaced ${rec.docTypeLabel} for ${rec.monthLabel} ${rec.fy}`);
+    closePayrollDocModal();
+    await renderPayrollDocsModule_();
+    return;
+  }
+
+  if(ctx.mode === 'classify'){
+    const fy = document.getElementById('pdFormFy').value;
+    const month = Number(document.getElementById('pdFormMonth').value);
+    const category = document.getElementById('pdFormCategory').value;
+    const docType = document.getElementById('pdFormDocType').value;
+    const docDate = document.getElementById('pdFormDocDate').value;
+    if(!docDate){ msg.textContent = 'Document date is required.'; msg.classList.add('error'); return; }
+    const typeInfo = payrollDocTypeInfo_(category, docType);
+    if(!typeInfo){ msg.textContent = 'Choose a document type.'; msg.classList.add('error'); return; }
+    const unclassified = await getPayrollDocsUnclassified_();
+    const idx = unclassified.findIndex(d => d.id === ctx.id);
+    if(idx === -1) return;
+    const d = unclassified[idx];
+    const uploadedBy = uploadedByField.value.trim() || 'HR';
+    payrollDocRememberUploader_(uploadedBy);
+    const rec = {
+      id: randomHex(6), fy, month, monthLabel: payrollDocMonthLabel_(month),
+      category, docType, docTypeLabel: typeInfo.label,
+      docName: document.getElementById('pdFormDocName').value.trim() || (d.originalType || typeInfo.label),
+      docDate, remarks: document.getElementById('pdFormRemarks').value.trim() || (d.note || ''),
+      fileName: d.fileName, url: d.url, uploadedBy, uploadedAt: d.uploadedAt || now, status:'active',
+      history: [
+        { action:'upload', at: d.uploadedAt || now, by:'Migration', note: d.note || 'From the old Payroll Documents list' },
+        { action:'reclassify', at: now, by: uploadedBy, note:'Classified out of Unclassified' },
+      ],
+    };
+    unclassified.splice(idx, 1);
+    await savePayrollDocsUnclassified_(unclassified);
+    const destList = await getPayrollDocsForFY(fy);
+    destList.unshift(rec);
+    await savePayrollDocsForFY(fy, destList);
+    await addActivityLog(`Classified a document as ${typeInfo.label} for ${payrollDocMonthLabel_(month)} ${fy}`);
+    closePayrollDocModal();
+    await renderPayrollDocsModule_();
+    return;
+  }
 }
 
 // ---- 2. Apprentice documents ----
