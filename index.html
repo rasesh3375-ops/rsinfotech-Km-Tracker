@@ -2953,7 +2953,7 @@
           <p id="payrollDocCardStat" style="font-size:11px;font-weight:700;color:var(--amber-dark);margin:0 0 10px;"></p>
           <button class="btn full" onclick="openPayrollDocsModule()">Open Payroll Documents</button>
         </section>
-        <div id="payrollDocsRoot"></div>
+        <div id="payrollDocsRoot" class="hidden"></div>
 
         <section class="block">
           <h2 style="margin:0 0 4px;">2. Apprentice Documents</h2>
@@ -8306,12 +8306,16 @@ function closeFullscreenView(){
       if(fullscreenOriginalNextSibling) fullscreenOriginalParent.insertBefore(el, fullscreenOriginalNextSibling);
       else fullscreenOriginalParent.appendChild(el);
     }
-    // #docViewerRoot is the one box here that has no visible life of its own
-    // outside full screen (every report box does — it's just where that
-    // report normally sits on its own tab) — put back exactly as
-    // viewEmployeeDocument/viewEmployeeHandbook found it, or it would sit in
-    // the page as a bare, unstyled block the moment full screen closes.
-    if(el && fullscreenActiveId === 'docViewerRoot') el.classList.add('hidden');
+    // #docViewerRoot and #payrollDocsRoot are the two boxes here with no
+    // visible life of their own outside full screen (every report box does
+    // — it's just where that report normally sits on its own tab) — put
+    // back exactly as found, or the whole rendered module sits there as a
+    // bare, un-full-screened block the moment full screen closes: still on
+    // the Office Documents card, still showing whichever of Dashboard/
+    // Browse/Search/Unclassified was last open, but with no header and no
+    // Close button of its own since it's no longer actually in full screen
+    // — which is exactly what looked like "there's no way to close this."
+    if(el && (fullscreenActiveId === 'docViewerRoot' || fullscreenActiveId === 'payrollDocsRoot')) el.classList.add('hidden');
   }
   document.getElementById('fullscreenSheetRoot').classList.add('hidden');
   kmtUnlockBodyScroll('fullscreen');
@@ -19819,6 +19823,7 @@ async function migratePayrollDocsIfNeeded_(){
 }
 async function runPayrollDocsMigration_(){
   const result = await migratePayrollDocsIfNeeded_();
+  payrollDocsMigNeededCache_ = false; // migratePayrollDocsIfNeeded_ guarantees this either way
   await refreshPayrollDocCardStat_();
   await renderPayrollDocsModule_();
   alert(result.ran
@@ -19855,6 +19860,11 @@ function payrollDocsMonthStatus_(records, fy, monthNum){
 let payrollDocsState_ = { view:'dashboard', fy:null, month:null, category:null, docType:null };
 async function openPayrollDocsModule(){
   if(!payrollDocsState_.fy) payrollDocsState_.fy = financialYearLabel();
+  // See viewEmployeeDocument's identical line for why — #payrollDocsRoot
+  // starts class="hidden" in the static markup (closeFullscreenView puts it
+  // back that way too) so it stays invisible the rest of the time; moving
+  // it into the fullscreen overlay doesn't by itself undo that.
+  document.getElementById('payrollDocsRoot').classList.remove('hidden');
   await renderPayrollDocsModule_();
   openFullscreenView('Payroll Documents', 'payrollDocsRoot');
 }
@@ -19866,10 +19876,23 @@ function payrollDocsFyOptions_(){
   if(payrollDocsState_.fy && !labels.includes(payrollDocsState_.fy)) labels.unshift(payrollDocsState_.fy);
   return labels;
 }
+// Cached rather than awaited fresh on every renderPayrollDocsModule_() call
+// — switchPayrollDocsView_ (every tab click) and almost every action in
+// this module (jumping to a month, saving the upload/edit/reclassify form,
+// deleting a record) all call renderPayrollDocsModule_() to refresh the
+// whole shell, not just the part that changed. payrollDocsMigrationNeeded_
+// used to run its own network round trip on every single one of those —
+// clicking Search right after Dashboard paid for a fetch that had nothing
+// to do with Search, and felt exactly like the module was just slow.
+// Migration status only ever goes from needed to not-needed, and the only
+// thing that can flip it is runPayrollDocsMigration_ below, which updates
+// this cache directly — so a cached `false` (or `true`) is never stale.
+let payrollDocsMigNeededCache_ = null;
 async function renderPayrollDocsModule_(){
   const root = document.getElementById('payrollDocsRoot');
   if(!root) return;
-  const migNeeded = await payrollDocsMigrationNeeded_();
+  if(payrollDocsMigNeededCache_ === null) payrollDocsMigNeededCache_ = await payrollDocsMigrationNeeded_();
+  const migNeeded = payrollDocsMigNeededCache_;
   root.innerHTML = `
     <div class="payroll-docs-shell">
       ${migNeeded ? `<div class="payroll-docs-migrate-banner">
