@@ -8058,23 +8058,35 @@ function kmtResettleLoop_(){
 // again, directly replicating what "sweeping tabs" was shown to fix.
 function kmtNudgeRepaint_(){
   const els = document.querySelectorAll('.modal-overlay');
-  // A real scroll event, not just a style/transform change, since that
-  // alone (tried first) still needed a manual app-switch to actually fix
-  // the stale paint -- confirmed on a real device. .modal-overlay is
-  // genuinely scrollable (unlike body, which is overflow:hidden for as
-  // long as any modal is open), so nudging its own scrollTop by 1px and
-  // back fires a real scroll, the same class of event this file's own
+  // A real scroll event, not just a style/transform change -- tried first,
+  // confirmed on a real device to still need a manual app-switch. .modal-
+  // overlay is genuinely scrollable (unlike body, which is overflow:hidden
+  // for as long as any modal is open), so nudging its own scrollTop by 1px
+  // and back fires a real scroll, the same class of event this file's own
   // 100dvh comment already documents WebKit as reliably recalculating
-  // geometry for (Safari's toolbar collapsing on scroll) -- a much closer
-  // match to whatever a genuine app-switch triggers than a style change.
+  // geometry for (Safari's toolbar collapsing on scroll).
   els.forEach(el => {
     const y = el.scrollTop;
     el.scrollTop = y + 1;
     el.scrollTop = y;
   });
   els.forEach(el => { el.style.transform = 'translateZ(0.001px)'; });
+  // Retrying the scroll+transform combination five times over the settle
+  // window (see kmtSettleAndReveal_) STILL didn't reliably fix it --
+  // confirmed on a real device, cut-off diagnostic line and bleed-through
+  // both still present. That means the technique itself, not just the
+  // number of attempts, wasn't forcing what an app-switch forces. Toggling
+  // the viewport meta tag's own content attribute is a more authoritative,
+  // widely-documented lever for forcing iOS to fully reprocess viewport
+  // metrics than any in-page style or scroll change -- worth trying
+  // alongside the scroll/transform nudge, not instead of it, since there's
+  // no certainty yet which (if either) actually works on this device.
+  const meta = document.querySelector('meta[name="viewport"]');
+  const metaOriginal = meta ? meta.getAttribute('content') : null;
+  if(meta) meta.setAttribute('content', metaOriginal + ', maximum-scale=1');
   window.requestAnimationFrame(() => {
     els.forEach(el => { el.style.transform = 'translateZ(0)'; });
+    if(meta) meta.setAttribute('content', metaOriginal);
     resettleFixedOverlays_();
   });
 }
