@@ -13429,18 +13429,6 @@ function employeeModalHtml(emp){
         <button class="modal-x" type="button" title="Close" aria-label="Close" onclick="closeEmployeeModal()">✕</button>
       </div>
       <p class="hint">This information is stored once and auto-fills letters and payslips for this employee — no need to retype it each time. Close it at any point with the × above — anything typed is kept on this device and offered back next time.</p>
-      <!-- TEMPORARY diagnostic line -- see kmtUpdateDebugLine_ (JS, near
-           resettleFixedOverlays_). It's created there directly on
-           document.body, not here, because a position:fixed element nested
-           inside .modal-box still scrolls away with the rest of that
-           content -- .modal-overlay's own transform:translateZ(0) makes it
-           the containing block for a fixed descendant, but that only
-           exempts a fixed element that sits OUTSIDE the content .modal-
-           overlay scrolls, not one nested inside it. First attempt at this
-           line was placed here and (confirmed in testing) scrolled away
-           with the form instead of staying on screen; not repeating that
-           mistake. -->
-
 
       <div class="emp-stepper" id="empStepper">
         <button type="button" class="step" data-target="empStep_basic"><span class="dot">1</span><span class="lbl">Basic</span></button>
@@ -15907,13 +15895,6 @@ async function reconcileTrackingUsername(draft){
 const KMT_IS_STANDALONE = window.matchMedia('(display-mode: standalone)').matches ||
   window.navigator.standalone === true;
 function resettleFixedOverlays_(){
-  // TEMPORARY -- runs before the visualViewport guard below on purpose. If
-  // window.visualViewport is ever unavailable in this standalone WebClip
-  // context, the guard immediately below would silently no-op this entire
-  // function (and, with it, every JS-driven fix this session has shipped
-  // that lives past this point) -- the debug line needs to run regardless,
-  // or it can never actually show that happening.
-  kmtUpdateDebugLine_();
   if(!window.visualViewport) return;
   const vv = window.visualViewport;
   let h, t;
@@ -15959,61 +15940,6 @@ function resettleFixedOverlays_(){
   // Master field — same keyboard, same exposure.
   const gsOverlay = document.getElementById('gsOverlay');
   if(gsOverlay && !gsOverlay.classList.contains('hidden')){ gsOverlay.style.height = h; gsOverlay.style.top = t; }
-  kmtUpdateDebugLine_(); // second call, now with vv/h/t in scope -- see the one at the top of this function for why there are two
-}
-// TEMPORARY -- writes the actual live runtime values into #kmtDebugLine so
-// the next report shows exactly what's happening instead of another guess.
-// Created directly on document.body (see the markup comment in
-// employeeModalHtml for why: a position:fixed element nested inside
-// .modal-box scrolls away with the rest of that content instead of staying
-// on screen). Hidden, not just left stale, whenever the Employee modal
-// isn't open. Remove this function, its call site above, and the element it
-// creates once the standalone bleed-through report is actually understood.
-let kmtDebugLineCalls_ = 0; // TEMPORARY -- proves the line is actually updating live, not frozen
-function kmtUpdateDebugLine_(){
-  const overlay = document.getElementById('employeeModalOverlay');
-  let line = document.getElementById('kmtDebugLine');
-  if(!overlay){
-    if(line) line.style.display = 'none';
-    return;
-  }
-  if(!line){
-    line = document.createElement('p');
-    line.id = 'kmtDebugLine';
-    // top: calc(6px + env(safe-area-inset-top)) -- without this the box
-    // itself sits under the status bar/notch and gets visually confused
-    // with the actual reported bug on every screenshot, even on the
-    // increasing number of opens where the real app content is clean.
-    line.style.cssText = 'position:fixed;top:calc(6px + env(safe-area-inset-top, 0px));left:6px;right:6px;z-index:99999;font-size:10px;font-family:ui-monospace,monospace;color:#B23A32;word-break:break-all;background:#FDECEC;padding:5px 7px;border-radius:6px;border:1px solid #B23A32;';
-    document.body.appendChild(line);
-  }
-  line.style.display = 'block';
-  const stepper = document.getElementById('empStepper');
-  const probe = document.createElement('div');
-  probe.style.cssText = 'position:fixed;top:0;left:0;visibility:hidden;pointer-events:none;padding-top:env(safe-area-inset-top, 0px);padding-bottom:env(safe-area-inset-bottom, 0px);';
-  document.body.appendChild(probe);
-  const probeCs = getComputedStyle(probe);
-  const envTop = probeCs.paddingTop, envBottom = probeCs.paddingBottom;
-  document.body.removeChild(probe);
-  kmtDebugLineCalls_++;
-  const parts = [
-    'calls=' + kmtDebugLineCalls_,
-    'standalone=' + KMT_IS_STANDALONE,
-    'hasVV=' + !!window.visualViewport,
-    'mm=' + window.matchMedia('(display-mode: standalone)').matches,
-    'navStandalone=' + window.navigator.standalone,
-    'innerH=' + window.innerHeight,
-    'vvH=' + (window.visualViewport ? Math.round(window.visualViewport.height) : 'n/a'),
-    'envTop=' + envTop, 'envBottom=' + envBottom,
-  ];
-  if(overlay){
-    const r = overlay.getBoundingClientRect();
-    parts.push('ovStyleH=' + overlay.style.height, 'ovRectH=' + Math.round(r.height), 'ovRectTop=' + Math.round(r.top), 'ovRectBottom=' + Math.round(r.bottom));
-  }
-  if(stepper){
-    parts.push('stepPadTop=' + getComputedStyle(stepper).paddingTop);
-  }
-  line.textContent = parts.join(' | ');
 }
 if(window.visualViewport){
   window.visualViewport.addEventListener('resize', resettleFixedOverlays_);
