@@ -8078,6 +8078,31 @@ function kmtNudgeRepaint_(){
     resettleFixedOverlays_();
   });
 }
+// Hides el, retries kmtNudgeRepaint_ a handful of times over ~200ms, then
+// reveals it. A single nudge (kmtNudgeRepaint_ alone) was confirmed still
+// unreliable on a real device -- two screenshots taken a minute apart on a
+// fresh open, no app-switching, one correct and one not -- meaning it's a
+// genuine race against WebKit's own readiness to recompute, not something
+// one attempt can be guaranteed to win. Retrying blind (rather than trying
+// to detect "is it settled yet" some other way) and hiding el for the
+// duration means every one of those attempts is invisible to the user
+// instead of only the winning one.
+function kmtSettleAndReveal_(el){
+  if(!el) return;
+  el.style.visibility = 'hidden';
+  let attempts = 0;
+  const tick = () => {
+    kmtNudgeRepaint_();
+    attempts++;
+    if(attempts < 5){
+      setTimeout(tick, 40);
+    } else {
+      el.style.visibility = '';
+      resettleFixedOverlays_();
+    }
+  };
+  tick();
+}
 if(!window.KMT_NUDGE_LISTENERS_ARMED_){
   window.KMT_NUDGE_LISTENERS_ARMED_ = true;
   document.addEventListener('visibilitychange', () => {
@@ -16024,9 +16049,18 @@ async function openAddEmployeeModal(id){
   // that point #employeeModalOverlay doesn't exist in the DOM yet (this
   // function hadn't reached the innerHTML assignment above), so
   // querySelectorAll('.modal-overlay') inside it almost certainly found
-  // nothing and nudged nothing. Calling it again here, now that the overlay
-  // genuinely exists, is what actually nudges the real element.
-  kmtNudgeRepaint_();
+  // nothing and nudged nothing. A SINGLE correctly-timed nudge here (tried
+  // first) still wasn't reliable either -- confirmed on a real device: two
+  // screenshots taken a minute apart, on a fresh open with no app-switching
+  // involved, one rendered correctly and one didn't. That means this isn't
+  // "nudge once, done" -- it's a genuine race against whenever WebKit
+  // actually becomes ready to recompute, won unpredictably. Rather than
+  // keep gambling on a single attempt, kmtSettleAndReveal_ hides the
+  // overlay, retries the nudge several times over a couple hundred ms, and
+  // only then reveals it -- so on the tries where a single nudge would have
+  // lost the race, the user never sees the broken paint at all instead of
+  // sometimes getting lucky and sometimes not.
+  kmtSettleAndReveal_(document.getElementById('employeeModalOverlay'));
 
   // Offer the draft back only when it belongs to this form — a half-finished
   // new employee must never be poured into someone else's record.
