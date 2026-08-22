@@ -15784,20 +15784,26 @@ function resettleFixedOverlays_(){
   const vv = window.visualViewport;
   let h, t;
   if(KMT_IS_STANDALONE){
-    // window.innerHeight is the layout viewport -- like dvh, it does not
-    // shrink for the keyboard, unlike visualViewport.height, which iOS's
-    // standalone WebClip container has been shown (above) to sometimes
-    // under-report even at rest; fall to visualViewport's smaller numbers
-    // only while the keyboard (or a picker) is actually open. The Safari-
-    // tab branch below can use a 1px threshold because there vv.height is
-    // trustworthy at rest -- here it isn't, so the same 1px threshold would
-    // treat the very under-reporting this branch exists to correct as "the
-    // keyboard is open" and use the wrong number anyway. 150px is nowhere
-    // near any resting-state discrepancy that's been seen, and nowhere near
-    // how little an iPhone keyboard ever shrinks the screen by.
-    const keyboardOpen = vv.height < window.innerHeight - 150;
-    h = (keyboardOpen ? vv.height : window.innerHeight) + 'px';
-    t = (keyboardOpen ? vv.offsetTop : 0) + 'px';
+    // Always window.innerHeight/0, never visualViewport, not even while a
+    // keyboard is open. The previous version fell back to vv.height/
+    // vv.offsetTop for a detected keyboard gap (a >150px threshold, to
+    // avoid mistaking the resting-state under-report for a keyboard) --
+    // reported still bleeding background content through, this time in the
+    // gap between the sticky footer and the keyboard's own accessory bar,
+    // while a field was genuinely focused and being typed into. That means
+    // visualViewport isn't just wrong at rest inside this WebClip container,
+    // it's unreliable full stop, including mid-keyboard -- so there's no
+    // safe way to use it here at all, not even narrowed to a "keyboard is
+    // definitely open" window. Keeping the overlay at the full, stable
+    // window.innerHeight the whole time means the keyboard simply covers
+    // the bottom of it while open, the same as most mobile web forms behave
+    // -- the sticky footer reappears correctly the moment the keyboard
+    // closes (same code path, already confirmed working) -- and the
+    // browser's native "scroll the focused field into view" behavior, which
+    // needs no viewport math at all, keeps whatever's being typed visible
+    // above the keyboard in the meantime.
+    h = window.innerHeight + 'px';
+    t = '0px';
   } else {
     // Safari tab: confirmed working correctly on CSS 100dvh alone. Only pin
     // an inline height/top when the keyboard is actually shrinking the
