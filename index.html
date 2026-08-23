@@ -18,6 +18,15 @@
      rendering under the notch/status bar/home indicator instead. -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>R.S. Infotech — KM Tracker</title>
+<!-- A one-line summary of the latest deploy, shown in the "A newer version
+     is available" banner (see checkForNewerVersion_ near PROD_API_URL) so
+     someone still on the old version — HR is a single shared login, so
+     more than one person can genuinely be mid-task on it at once — knows
+     what actually changed before deciding whether to reload now or finish
+     what they're doing first. Update this content whenever a change worth
+     mentioning ships; it's read straight out of the newly-fetched page's
+     raw HTML text, not executed, so it has to stay this one plain tag. -->
+<meta name="app-update-note" content="Generator tab reorganised into collapsible sections; Apprentice Documents now has a searchable apprentice list with contract details.">
 
 <!-- Favicons (Mac / Windows / Linux desktop browsers) -->
 <link rel="icon" href="/favicon.ico" sizes="any">
@@ -3311,17 +3320,33 @@ async function fetchFreshPageSource_(){
 (async function captureInitialPageSource_(){
   try{ pageSourceAtLoad = await fetchFreshPageSource_(); }catch(e){ /* offline at load */ }
 })();
-function showUpdateAvailableBanner_(){
+// Pulled from the freshly-fetched (not-yet-running) page's raw HTML text via
+// a plain string match — that text is never parsed into a document or
+// executed, so this can't reach into it any other way. Matches the literal
+// <meta name="app-update-note" content="..."> tag right after <title> above.
+function extractUpdateNote_(html){
+  const m = /<meta\s+name="app-update-note"\s+content="([^"]*)"/i.exec(html || '');
+  return m ? m[1].replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,'&') : '';
+}
+function showUpdateAvailableBanner_(note){
   if(document.getElementById('kmtUpdateBanner')) return;
   const bar = document.createElement('div');
   bar.id = 'kmtUpdateBanner';
   bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99999;'
-    + 'background:var(--navy);color:#fff;text-align:center;font:600 13.5px -apple-system,sans-serif;'
+    + 'background:var(--navy);color:#fff;text-align:left;font:600 13.5px -apple-system,sans-serif;'
     + 'padding:12px 16px calc(12px + env(safe-area-inset-bottom, 0px));display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;'
     + 'box-shadow:0 -4px 16px rgba(0,0,0,.18);';
-  bar.innerHTML = '<span>A newer version of this app is available.</span>'
+  bar.innerHTML = '<div style="display:flex;flex-direction:column;gap:2px;min-width:0;">'
+    + '<span>A newer version of this app is available.</span>'
+    // Only HR staff ever see this (engineers never get pushed a mid-session
+    // rebuild worth narrating), and it's their one shared login — someone
+    // else could genuinely be mid-task on the version still running, so
+    // this exists to tell them what they'd actually be reloading into,
+    // not just that something changed.
+    + (note ? '<span style="font-weight:400;font-size:12px;opacity:.85;">' + escapeHtml(note) + '</span>' : '')
+    + '</div>'
     + '<button type="button" style="background:var(--amber);color:var(--navy);border:none;border-radius:8px;'
-    + 'padding:8px 18px;font-weight:700;font-size:13.5px;cursor:pointer;font-family:inherit;" '
+    + 'padding:8px 18px;font-weight:700;font-size:13.5px;cursor:pointer;font-family:inherit;flex-shrink:0;" '
     + 'onclick="location.reload()">Reload now</button>';
   document.body.appendChild(bar);
 }
@@ -3330,7 +3355,7 @@ async function checkForNewerVersion_(){
   if(document.getElementById('kmtUpdateBanner')) return; // already told, no need to keep checking
   try{
     const latest = await fetchFreshPageSource_();
-    if(latest && latest !== pageSourceAtLoad) showUpdateAvailableBanner_();
+    if(latest && latest !== pageSourceAtLoad) showUpdateAvailableBanner_(extractUpdateNote_(latest));
   }catch(e){ /* offline — try again next time */ }
 }
 document.addEventListener('visibilitychange', () => {
