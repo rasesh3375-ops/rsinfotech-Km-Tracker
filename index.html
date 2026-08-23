@@ -1347,6 +1347,23 @@
      nested. This margin is what keeps it from sitting flush against it. */
   .gen-accordion-body{margin-top:10px;}
 
+  /* ===== Apprentice Details panel (Office Documents -> Apprentice Documents) =====
+     Same navy-bar-plus-white-✕ language as .fullscreen-header/.fs-close-btn,
+     just without that header's extra safe-area padding — this sits inline in
+     the page, not pinned to the top of the viewport, so it doesn't need it. */
+  .apprentice-detail-panel{border:1px solid var(--line);border-radius:14px;overflow:hidden;margin:4px 0 14px;}
+  .apprentice-detail-head{display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding:12px 16px;background:var(--navy);color:#fff;}
+  .apprentice-detail-body{padding:16px;display:flex;flex-direction:column;gap:12px;background:var(--paper);}
+  .apprentice-detail-top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+  .apprentice-avatar{width:40px;height:40px;border-radius:50%;background:var(--cream);color:var(--navy);
+    display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;flex-shrink:0;}
+  .apprentice-detail-name{display:flex;flex-direction:column;flex:1;min-width:120px;}
+  .apprentice-detail-name .id{font-size:11.5px;color:var(--muted);}
+  .apprentice-detail-body .row-inline{margin-bottom:0;}
+  .apprentice-detail-body .row-inline>div{flex:1;min-width:140px;}
+  .apprentice-detail-body label.field{margin-bottom:2px;}
+
   .letter-paper{display:none;}
   #letterOutput.show .letter-paper{display:block;margin:18px 0;font-size:13.5px;line-height:1.7;white-space:pre-wrap;}
   .holiday-list-paper{display:none;}
@@ -3032,6 +3049,15 @@
         <section class="block">
           <h2 style="margin:0 0 4px;">2. Apprentice Documents</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Apprentice claim documents, contracts, and other important apprentice paperwork.</p>
+
+          <div class="sec-title">Apprentice List</div>
+          <input type="search" class="field-input" id="apprenticeListSearch" placeholder="Search by name or ID" oninput="renderApprenticeList_()">
+          <div style="height:10px"></div>
+          <div id="apprenticeListTableWrap"></div>
+          <div id="apprenticeDetailPanelRoot"></div>
+          <p class="empty" id="apprenticeListCount" style="margin:8px 0 0;"></p>
+          <div style="height:18px"></div>
+
           <label class="field">Category</label>
           <select class="field-input" id="apprenticeDocCategory">
             <option value="Apprentice Claim Document">Apprentice Claim Document</option>
@@ -6814,6 +6840,11 @@ const SALARY_HEADING_ORDER = ['managerial','senior','junior','apprentice','rsit'
 // separate books and are not the consultant's to process. Kept here beside the
 // headings so the two are changed together.
 const CONSULTANT_REPORT_HEADINGS = ['managerial','senior','junior'];
+// The categories the Apprentices Act itself recognises — shown only on an
+// apprentice's own record (salaryHeading === 'apprentice'), config so a new
+// category is a one-line edit rather than a form change.
+const APPRENTICE_CATEGORIES = ['Graduate Apprentice', 'Technician Apprentice',
+  'Technician (Vocational) Apprentice', 'Trade Apprentice', 'Diploma Apprentice'];
 // PT is the one deduction whose amount is decided by a rule rather than typed
 // in per employee. Named so the Salary Sheet and the heading explainer below
 // read the same numbers — the calculation is unchanged.
@@ -13472,6 +13503,7 @@ function emptyEmployee(){
     workLocation:'', shiftTime:'',
     salaryHeading:'managerial', ratePay:0,
     fatherName:'', motherName:'',
+    apprenticeCategory:'', apprenticeContractStart:'', apprenticeContractEnd:'', apprenticeContractDetails:'',
     bondStart:'', bondEnd:'', retentionMoney:0, retentionMonths:0,
     aadhaarCardImg:'', panCardImg:'', educationCertImg:'', signatureImg:'', otherDocs:[],
     checklists:{ joining:{}, exit:{} },
@@ -13902,6 +13934,26 @@ function employeeModalHtml(emp){
         <div style="height:12px"></div>
         <label class="field">Mother's full name</label>
         <input type="text" id="f_motherName" placeholder="Full name as on records" value="${escapeHtml(emp.motherName||'')}">
+        <div style="height:12px"></div>
+        <label class="field">Apprentice category</label>
+        <select class="field-input" id="f_apprenticeCategory">
+          <option value="">— Not set —</option>
+          ${APPRENTICE_CATEGORIES.map(c => `<option value="${escapeHtml(c)}" ${emp.apprenticeCategory===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
+        </select>
+        <div class="row-inline">
+          <div>
+            <label class="field">Contract start date</label>
+            <input type="date" class="field-input" id="f_apprenticeContractStart" value="${escapeHtml(emp.apprenticeContractStart||'')}">
+          </div>
+          <div>
+            <label class="field">Contract end date</label>
+            <input type="date" class="field-input" id="f_apprenticeContractEnd" value="${escapeHtml(emp.apprenticeContractEnd||'')}">
+          </div>
+        </div>
+        <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">The apprenticeship contract's own term — separate from Date of Joining, since the registered contract period does not always start the same day they first came in.</p>
+        <div style="height:12px"></div>
+        <label class="field">Contract details</label>
+        <textarea class="field-input" id="f_apprenticeContractDetails" rows="2" placeholder="e.g. 12 Months Training Program as per Apprenticeship Act">${escapeHtml(emp.apprenticeContractDetails||'')}</textarea>
         <div id="directPayWrap" class="hidden">
           <div style="height:12px"></div>
           <label class="field">Paid directly to the employee's account?</label>
@@ -14380,7 +14432,8 @@ function toggleFamilyFields(){
   if(!box) return;
   box.classList.toggle('hidden', !isApprentice);
   if(!isApprentice){
-    ['f_fatherName','f_motherName'].forEach(id => {
+    ['f_fatherName','f_motherName','f_apprenticeCategory','f_apprenticeContractStart',
+     'f_apprenticeContractEnd','f_apprenticeContractDetails'].forEach(id => {
       const el = document.getElementById(id);
       if(el) el.value = '';
     });
@@ -16492,6 +16545,10 @@ async function saveEmployeeForm(){
     shiftTime: ((document.getElementById('f_shiftTime') || {}).value || '').trim(),
     fatherName: ((document.getElementById('f_fatherName') || {}).value || '').trim(),
     motherName: ((document.getElementById('f_motherName') || {}).value || '').trim(),
+    apprenticeCategory: ((document.getElementById('f_apprenticeCategory') || {}).value || '').trim(),
+    apprenticeContractStart: (document.getElementById('f_apprenticeContractStart') || {}).value || '',
+    apprenticeContractEnd: (document.getElementById('f_apprenticeContractEnd') || {}).value || '',
+    apprenticeContractDetails: ((document.getElementById('f_apprenticeContractDetails') || {}).value || '').trim(),
     salaryHeading: document.getElementById('f_salaryHeading').value,
     ratePay: Number(document.getElementById('f_ratePay').value)||0,
     advanceHistory: collectAdvanceRows(),
@@ -19718,6 +19775,7 @@ async function renderOfficeDocumentsTab(){
     apprentices.map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('');
 
   await refreshPayrollDocCardStat_();
+  await renderApprenticeList_();
   await renderApprenticeDocList();
   await renderCompanyDocList('holidaylist');
   await renderCompanyDocList('profile');
@@ -20713,6 +20771,127 @@ async function savePayrollDocForm_(){
 }
 
 // ---- 2. Apprentice documents ----
+// Apprentice List + View: reads straight from Employee Master (the one
+// place this data is entered — see the apprentice-only fields on the Add/
+// Edit Employee form) rather than keeping any copy of its own, the same
+// "one function, called by every surface" rule every other figure in the
+// app already follows. Direct Bank Deposit Eligible is the existing
+// directPaid field under its clearer name here — same value, same meaning
+// (the stipend goes straight to the apprentice's own account, outside
+// payroll), just labelled for what it actually means rather than the
+// Salary Sheet's own internal field name.
+let apprenticeDetailOpenId_ = null;
+async function renderApprenticeList_(){
+  const wrap = document.getElementById('apprenticeListTableWrap');
+  if(!wrap) return;
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left' && (e.salaryHeading||'') === 'apprentice');
+  const q = (document.getElementById('apprenticeListSearch').value || '').trim().toLowerCase();
+  const list = q ? employees.filter(e => (e.name||'').toLowerCase().includes(q) || (e.id||'').toLowerCase().includes(q)) : employees;
+  const countEl = document.getElementById('apprenticeListCount');
+  if(countEl) countEl.textContent = list.length + ' apprentice(s) found.';
+
+  if(!list.length){
+    wrap.innerHTML = '<div class="empty">No apprentices found.</div>';
+    return;
+  }
+  if(isCompactSheetView()){
+    wrap.innerHTML = `<div class="payroll-docs-list">` + list.map((e,i) => `
+      <div class="emp-row payroll-docs-clickrow" onclick="toggleApprenticeDetail_('${e.id}')">
+        <div class="head"><strong>${escapeHtml(e.name)}</strong><span class="id">${escapeHtml(e.id)}</span></div>
+        <div class="sub">${apprenticeContractPeriodText_(e)}</div>
+        <div class="sub">Direct Bank Deposit Eligible <span class="pill ${e.directPaid==='yes'?'new':'warn'}">${e.directPaid==='yes'?'Yes':'No'}</span></div>
+      </div>`).join('') + `</div>`;
+    return;
+  }
+  wrap.innerHTML = `<div class="payroll-docs-table-wrap">
+    <table class="payroll-docs-table">
+      <thead><tr><th>#</th><th>Apprentice Name</th><th>Contract Period</th><th>Direct Bank Deposit Eligible</th><th>Action</th></tr></thead>
+      <tbody>
+        ${list.map((e,i) => `
+          <tr>
+            <td>${i+1}</td>
+            <td><strong>${escapeHtml(e.name)}</strong><br><span style="color:var(--muted);font-size:11px;">${escapeHtml(e.id)}</span></td>
+            <td>${apprenticeContractPeriodText_(e)}</td>
+            <td><span class="pill ${e.directPaid==='yes'?'new':'warn'}">${e.directPaid==='yes'?'Yes':'No'}</span></td>
+            <td><button type="button" class="btn ghost" onclick="toggleApprenticeDetail_('${e.id}')">👁 View</button></td>
+          </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+function apprenticeContractPeriodText_(e){
+  if(!e.apprenticeContractStart && !e.apprenticeContractEnd) return '—';
+  return fmtDateIN(e.apprenticeContractStart) + ' to ' + fmtDateIN(e.apprenticeContractEnd);
+}
+// Same "one open at a time, click again to collapse" shape as the Generator
+// tab's own accordion (openGeneratorCard) — this list sits inside one of
+// those sections, so a second, nested accordion here reads as the same
+// pattern rather than a different interaction the moment you're one level
+// deeper.
+async function toggleApprenticeDetail_(empId){
+  const panel = document.getElementById('apprenticeDetailPanelRoot');
+  if(!panel) return;
+  if(apprenticeDetailOpenId_ === empId){
+    apprenticeDetailOpenId_ = null;
+    panel.innerHTML = '';
+    return;
+  }
+  const employees = await getEmployees();
+  const e = employees.find(x => x.id === empId);
+  if(!e) return;
+  apprenticeDetailOpenId_ = empId;
+  panel.innerHTML = apprenticeDetailPanelHtml_(e);
+}
+function closeApprenticeDetail_(){
+  apprenticeDetailOpenId_ = null;
+  const panel = document.getElementById('apprenticeDetailPanelRoot');
+  if(panel) panel.innerHTML = '';
+}
+function apprenticeDetailPanelHtml_(e){
+  const initials = (e.name||'').trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase() || '?';
+  const eligible = e.directPaid === 'yes';
+  return `<div class="apprentice-detail-panel">
+    <div class="apprentice-detail-head">
+      <strong>Apprentice Details</strong>
+      <button type="button" class="fs-close-btn" onclick="closeApprenticeDetail_()" title="Close" aria-label="Close">✕</button>
+    </div>
+    <div class="apprentice-detail-body">
+      <div class="apprentice-detail-top">
+        <span class="apprentice-avatar">${escapeHtml(initials)}</span>
+        <span class="apprentice-detail-name"><strong>${escapeHtml(e.name)}</strong><span class="id">${escapeHtml(e.id)}</span></span>
+        <span class="pill ${eligible?'new':'warn'}">Direct Bank Deposit Eligible: ${eligible?'Yes':'No'}</span>
+      </div>
+      <div class="row-inline">
+        <div><label class="field">Contract Start Date</label><div>${fmtDateIN(e.apprenticeContractStart)}</div></div>
+        <div><label class="field">Contract End Date</label><div>${fmtDateIN(e.apprenticeContractEnd)}</div></div>
+      </div>
+      <div class="row-inline">
+        <div><label class="field">Apprentice Category</label><div>${escapeHtml(e.apprenticeCategory || '—')}</div></div>
+        <div><label class="field">Department</label><div>${escapeHtml(e.department || '—')}</div></div>
+      </div>
+      <label class="field">Contract Details</label>
+      <div>${escapeHtml(e.apprenticeContractDetails || '—')}</div>
+    </div>
+    <button type="button" class="btn ghost full" onclick="closeApprenticeDetail_()">Close</button>
+  </div>`;
+}
+// Same debounce-and-compare resize pattern the Attendance/Salary sheets and
+// the Payroll Documents Dashboard already use — re-renders the list (table
+// <-> cards) if the compact-view breakpoint is crossed while it's on screen.
+let apprenticeListCompactLast_ = isCompactSheetView();
+let apprenticeListResizeTimer_ = null;
+window.addEventListener('resize', () => {
+  clearTimeout(apprenticeListResizeTimer_);
+  apprenticeListResizeTimer_ = setTimeout(() => {
+    const now = isCompactSheetView();
+    if(now === apprenticeListCompactLast_) return;
+    apprenticeListCompactLast_ = now;
+    if(document.getElementById('apprenticeListTableWrap') && document.getElementById('apprenticeListTableWrap').offsetParent !== null){
+      renderApprenticeList_();
+    }
+  }, 300);
+});
+
 async function uploadApprenticeDoc(){
   const msg = document.getElementById('apprenticeDocMsg');
   const fileInput = document.getElementById('apprenticeDocFile');
