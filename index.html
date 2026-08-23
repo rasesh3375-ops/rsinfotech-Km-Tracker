@@ -1930,7 +1930,63 @@
       <div id="userListTable"></div>
     </section>
 
-    <section class="block" id="secExpenseRate">
+    <div id="hrSubSettings" class="hidden">
+    <div id="settingsLanding" class="gen-landing">
+      <h1>Settings</h1>
+      <p>Expense rate, geofence zones, document storage and connection tools — tap a section to open it.</p>
+      <!-- Same flattened accordion as Generator/Reports: collapsed by
+           default, one open at a time, expanding directly under the header
+           that was tapped — see openSettingsCard() and
+           moveAccordionBodiesUnderTheirHeaders_(). Settings' five sections
+           are physically scattered through #hrTabTracking as written (three
+           of them separated by Live Tracking and other sections that belong
+           to the separate Tracking route, left exactly where they are) —
+           Backend Connection in particular used to sit nested inside the
+           Activity Log route's own container, where #hrTabMgmt's own hidden
+           class made it unreachable no matter what Settings' own show-list
+           said. moveAccordionBodiesUnderTheirHeaders_() relocating each
+           target to sit right after its own header — which lives in this
+           list, inside #hrSubSettings — pulls all five into this wrapper
+           regardless of where they started, the same way it makes a tapped
+           header expand in place; #hrSubSettings itself (not each section
+           individually) is what the Settings route shows and hides, so
+           nothing leaks into Tracking/Team/Daily's shared container. -->
+      <div class="gen-accordion-list">
+        <button type="button" class="gen-accordion-header" data-target="secExpenseRate" onclick="openSettingsCard('secExpenseRate')" aria-expanded="false">
+          <span class="gen-accordion-num">1</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Expense rate</strong>
+            <span class="gen-accordion-desc">Per-kilometre rate used to calculate engineer travel expenses.</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <button type="button" class="gen-accordion-header" data-target="secGeofence" onclick="openSettingsCard('secGeofence')" aria-expanded="false">
+          <span class="gen-accordion-num">2</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Geofence zones</strong>
+            <span class="gen-accordion-desc">Office and client zones an engineer's check-in location is checked against.</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <button type="button" class="gen-accordion-header" data-target="secDocStorage" onclick="openSettingsCard('secDocStorage')" aria-expanded="false">
+          <span class="gen-accordion-num">3</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Document storage</strong>
+            <span class="gen-accordion-desc">Move older inline documents to Drive, and clean up unused space on employee records.</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <button type="button" class="gen-accordion-header" data-target="secAlwaysPresentBulk" onclick="openSettingsCard('secAlwaysPresentBulk')" aria-expanded="false">
+          <span class="gen-accordion-num">4</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Always mark Present — bulk apply</strong>
+            <span class="gen-accordion-desc">Set "Always mark Present from" on several employees at once, instead of one at a time.</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <button type="button" class="gen-accordion-header" data-target="secBackendConn" onclick="openSettingsCard('secBackendConn')" aria-expanded="false">
+          <span class="gen-accordion-num">5</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Backend connection</strong>
+            <span class="gen-accordion-desc">Check whether this device can actually read and write to the Google Sheet backend.</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+      </div>
+    </div>
+    </div><!-- /hrSubSettings -->
+
+    <section class="block hidden gen-accordion-body" id="secExpenseRate">
       <h2>Expense rate</h2>
       <div class="row-inline">
         <div>
@@ -1960,7 +2016,7 @@
       <div id="liveStatusList"></div>
     </section>
 
-    <section class="block" id="secGeofence">
+    <section class="block hidden gen-accordion-body" id="secGeofence">
       <h2 style="margin:0 0 4px;">Geofence zones</h2>
       <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Define office or client zones — an engineer checked in outside all of these will be flagged as "outside zone" on the map and status list above.</p>
       <div class="row-inline">
@@ -1992,7 +2048,7 @@
       <div id="geofenceZoneList"></div>
     </section>
 
-    <section class="block" id="secDocStorage">
+    <section class="block hidden gen-accordion-body" id="secDocStorage">
       <h2 style="margin:0 0 4px;">Document storage</h2>
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">New documents go straight to Google Drive, filed per employee, and the record keeps only the link. Records saved earlier still hold their images inside that employee's own record — which has a 50,000 character limit. Move them out here.</p>
       <button class="btn full" onclick="withBusy(this,'Working…',migrateDocumentsToDrive)">Move stored documents to Drive</button>
@@ -2015,7 +2071,7 @@
       <div id="dupNameCheckBox" style="margin-top:10px;"></div>
     </section>
 
-    <section class="block" id="secAlwaysPresentBulk">
+    <section class="block hidden gen-accordion-body" id="secAlwaysPresentBulk">
       <h2 style="margin:0 0 4px;">Always mark Present — bulk apply</h2>
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">For owners, family or anyone else who doesn't punch in day to day — this is the same "Always mark Present from" field as on each employee's own Employee Master record, just set on several at once instead of opening each one's Edit form individually. Tick everyone this should apply to, pick the date it starts from, and Apply.</p>
       <div id="alwaysPresentBulkList" style="max-height:320px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:4px 12px;"></div>
@@ -2208,7 +2264,7 @@
             </div>
             <div id="activityLogList"></div>
           </section>
-          <section class="block" id="secBackendConn">
+          <section class="block hidden gen-accordion-body" id="secBackendConn">
             <h2 style="margin:0 0 4px;font-size:15px;">Backend connection</h2>
             <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Checks whether this device can actually write to and read from your Google Sheet backend — not just whether it's configured.</p>
             <button class="btn ghost full" onclick="withBusy(this,'Testing…',testBackendConnection)">Test connection</button>
@@ -12041,11 +12097,10 @@ async function getReminderEmail(){
 // — every existing element id and render function is left exactly as it was, so
 // nothing downstream had to change.
 const HR_PANELS = ['hrPageDashboard','hrTabTracking','hrTabMgmt','hrSubDash','hrSubMaster','hrSubReports',
-  'hrSubGenerator','dashSubAttendance','dashSubSalary','dashSubReminders','dashSubExpiry',
+  'hrSubGenerator','hrSubSettings','dashSubAttendance','dashSubSalary','dashSubReminders','dashSubExpiry',
   'dashSubLoans','dashSubAdvpay',
-  'dashSubActivity','secManageTeam','secExpenseRate','secLiveTracking','secGeofence','secDocStorage',
-  'secAlwaysPresentBulk','secTeamOverview',
-  'secDailySummary','secByCompany','secBackendConn'];
+  'dashSubActivity','secManageTeam','secLiveTracking','secTeamOverview',
+  'secDailySummary','secByCompany'];
 
 // Grouped rather than listed in the order each route was added: Dashboard on
 // its own, then everything under the Tracking tab together, then everything
@@ -12092,8 +12147,9 @@ const HR_ROUTES = {
   activity:   { label:'Activity Log',        icon:'🕘', show:['hrTabMgmt','hrSubDash','dashSubActivity'], run:() => renderActivityLogList() },
   reports:    { label:'Reports',             icon:'📊', show:['hrTabMgmt','hrSubReports'], run:() => renderReportsTab() },
   generator:  { label:'Generator',           icon:'✉️', show:['hrTabMgmt','hrSubGenerator'], run:() => renderGeneratorTab() },
-  settings:   { label:'Settings',            icon:'⚙️', show:['hrTabTracking','secExpenseRate','secGeofence','secDocStorage','secAlwaysPresentBulk','secBackendConn'],
+  settings:   { label:'Settings',            icon:'⚙️', show:['hrTabTracking','hrSubSettings'],
                 run: async () => {
+                  if(!(kmtPendingCardRestore && kmtPendingCardRestore.route === 'settings')) showSettingsLanding();
                   const el = document.getElementById('rateInput');
                   if(el) el.value = (await getRate()) || '';
                   renderGeofenceZones();
@@ -12141,6 +12197,12 @@ function kmtActiveCard(){
   }
   if(hrRoute === 'generator'){
     for(const id of GENERATOR_SECTIONS){
+      const el = document.getElementById(id);
+      if(el && !el.classList.contains('hidden')) return id;
+    }
+  }
+  if(hrRoute === 'settings'){
+    for(const id of SETTINGS_SECTIONS){
       const el = document.getElementById(id);
       if(el && !el.classList.contains('hidden')) return id;
     }
@@ -12268,6 +12330,7 @@ async function kmtRestoreView(descriptor){
     if(descriptor.card){
       if(descriptor.route === 'reports') openReportsCard(descriptor.card);
       else if(descriptor.route === 'generator') openGeneratorCard(descriptor.card);
+      else if(descriptor.route === 'settings') openSettingsCard(descriptor.card);
     }
     Object.keys(descriptor.fields || {}).forEach(id => {
       const el = document.getElementById(id);
@@ -19704,6 +19767,23 @@ function openReportsCard(sectionId){
     document.getElementById(sectionId).classList.remove('hidden');
     autoDefaultMonthYearSelects_(document.getElementById(sectionId));
   }
+  updateAccordionHeaders_();
+  kmtCommitArrival();
+}
+
+// Same accordion again for Settings' five sections — a fixed list rather
+// than the generic id-prefix match Reports uses, since these are static
+// (never rebuilt per visit) exactly like Generator's fourteen.
+const SETTINGS_SECTIONS = ['secExpenseRate','secGeofence','secDocStorage','secAlwaysPresentBulk','secBackendConn'];
+function showSettingsLanding(){
+  SETTINGS_SECTIONS.forEach(id => document.getElementById(id).classList.add('hidden'));
+  updateAccordionHeaders_();
+}
+function openSettingsCard(sectionId){
+  kmtCaptureDeparture();
+  const alreadyOpen = !document.getElementById(sectionId).classList.contains('hidden');
+  SETTINGS_SECTIONS.forEach(id => document.getElementById(id).classList.add('hidden'));
+  if(!alreadyOpen) document.getElementById(sectionId).classList.remove('hidden');
   updateAccordionHeaders_();
   kmtCommitArrival();
 }
