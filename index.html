@@ -1306,34 +1306,24 @@
   .gen-quick-grid .letter-choice{margin-bottom:0;}
   @media (max-width:360px){ .gen-quick-grid{grid-template-columns:1fr;} }
 
-  /* ===== Generator landing: a card grid picking which existing form to open ===== */
+  /* ===== Generator/Reports landing: the accordion header list, plus the
+     h1/intro paragraph shared by both tabs' landing wrapper. ===== */
   .gen-landing h1{font-size:20px;margin:0 0 4px;color:var(--navy);}
   .gen-landing>p{font-size:13px;color:var(--muted);margin:0;}
-  .gen-card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin-top:18px;}
-  .gen-card{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:18px;cursor:pointer;
-    display:flex;flex-direction:column;gap:10px;text-align:left;font-family:inherit;transition:border-color .15s,box-shadow .15s;}
-  .gen-card:hover{border-color:var(--amber-dark);box-shadow:0 2px 12px rgba(22,33,62,.08);}
-  .gen-card-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;}
-  .gen-card-icon.t1{background:#E7EAF3;}
-  .gen-card-icon.t2{background:#FDECC8;}
-  .gen-card-icon.t3{background:#E1F0E7;}
-  .gen-card-icon.t4{background:#FBE4E1;}
-  .gen-card h3{font-size:15px;margin:0;color:var(--navy);}
-  .gen-card p{font-size:12px;color:var(--muted);margin:0;line-height:1.5;flex:1;}
-  /* The description above already takes flex:1 so cards with a short
-     sentence still line their View buttons up with cards that have a long
-     one. This stat line sits fixed-height right above the button instead —
-     empty (and collapsed by :empty) until renderReportsTab() fills it in. */
-  .gen-card p.gen-card-stat{flex:0 0 auto;font-size:11px;font-weight:700;color:var(--navy);margin-top:-4px;}
-  .gen-card p.gen-card-stat:empty{display:none;}
-  .gen-card .btn{margin-top:2px;pointer-events:none;}
+  /* The stat line ("40 employee(s) with data", "11 holiday(s) added", ...)
+     used to sit fixed-height above each card's View button when this was a
+     card grid. The accordion header has no room for it — and Generator's
+     headers never had one — so it now sits inside the section's own body,
+     just under the description, filled in by renderReportsTab(). Empty
+     (and collapsed by :empty) until then. */
+  .gen-accordion-body p.gen-card-stat{font-size:11px;font-weight:700;color:var(--navy);margin:-6px 0 10px;}
+  .gen-accordion-body p.gen-card-stat:empty{display:none;}
 
-  /* ===== Generator accordion: every section collapsed by default, header
-     stays put once opened (unlike .gen-card, which the old grid replaced
-     entirely with whichever card was clicked) so switching to a different
-     section is one tap, not a Close then a re-pick. Reuses the same
-     numbered-circle badge .gen-step-num already uses for the Letters wizard,
-     same reasoning: one look, not a second component for the same idea. ===== */
+  /* ===== Generator/Reports accordion: every section collapsed by default,
+     header stays put once opened, so switching to a different section is
+     one tap, not a Close then a re-pick. Reuses the same numbered-circle
+     badge .gen-step-num already uses for the Letters wizard, same
+     reasoning: one look, not a second component for the same idea. ===== */
   .gen-accordion-list{display:flex;flex-direction:column;gap:10px;margin-top:18px;}
   .gen-accordion-header{background:var(--paper);border:1px solid var(--line);border-radius:14px;
     padding:14px 16px;cursor:pointer;display:flex;align-items:center;gap:12px;text-align:left;
@@ -1347,13 +1337,15 @@
   .gen-accordion-desc{font-size:12px;color:var(--muted);line-height:1.5;}
   .gen-accordion-chevron{flex-shrink:0;color:var(--muted);font-size:12px;transition:transform .15s;}
   .gen-accordion-header.active .gen-accordion-chevron{transform:rotate(180deg);color:var(--amber-dark);}
-  /* The expanded content isn't physically nested inside its header — each
-     genSecXxx target div sits in its own original spot in the markup,
-     further down #hrSubGenerator, exactly as before this became an
-     accordion. But every other one stays .hidden, so nothing else renders
-     in between, and the one open section still lands visually right under
-     the (still-visible) header list in document order, same as if it were
-     nested. This margin is what keeps it from sitting flush against it. */
+  /* The expanded content isn't physically nested inside its header in the
+     markup as written — each genSecXxx/rptSecXxx target div sits in its own
+     original spot further down the page (or, for Reports' nine
+     employee-scoped reports, is built fresh by renderReportsTab()).
+     moveAccordionBodiesUnderTheirHeaders_() relocates each one to be the
+     literal next DOM sibling of its own header, so every other one stays
+     .hidden and the one open section lands visually right under the
+     (still-visible) header list, same as if it were nested to begin with.
+     This margin is what keeps it from sitting flush against it. */
   .gen-accordion-body{margin-top:10px;}
 
   /* ===== Apprentice Details panel (Office Documents -> Apprentice Documents) =====
@@ -2248,147 +2240,135 @@
       <div id="hrSubReports" class="hidden">
         <div id="reportsLanding" class="gen-landing">
           <h1>Reports</h1>
-          <p>View attendance, leave, payroll and employee reports — pick what you need below.</p>
-          <!-- Card order matches HR's requested sequence: Attendance, Holidays
-               (kept next to Attendance — not one of the named reports, so left
-               at its existing natural neighbor rather than guessed at a new
-               spot), then the rest in the exact order asked for. The dynamic
-               reports (built from the `reports` array in renderReportsTab(),
-               not written out here) needed four separate placeholder slots
-               instead of the original single one, since this time they land
-               at several different points in the sequence rather than one
-               contiguous block — see renderReportsTab() for which report keys
-               go in which slot. -->
-          <div class="gen-card-grid">
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecAttendance')">
-              <div class="gen-card-icon t1">🗓️</div>
-              <h3>Attendance</h3>
-              <p>Load, view and edit any engineer's attendance calendar for a month.</p>
-              <p id="cardStat_attendance" class="gen-card-stat"></p>
-              <span class="btn full">View</span>
+          <p>View attendance, leave, payroll and employee reports — tap a section to open it.</p>
+          <!-- Flattened accordion, same shape as the Generator tab's: every
+               report collapsed by default, one open at a time, tapping a
+               header expands its content directly below that same header —
+               see moveAccordionBodiesUnderTheirHeaders_() and
+               openReportsCard(). Numbers are filled in by renderReportsTab()
+               rather than hardcoded, since the nine employee-scoped reports
+               below are interleaved among the static ones at four different
+               points (their reportCardsLandingBoxN placeholders) and a
+               hardcoded sequence would drift the moment one of them changed.
+               Order matches HR's requested sequence: Attendance, Holidays
+               (kept next to Attendance — not one of the named reports, so
+               left at its existing natural neighbor), then the rest in the
+               exact order asked for. -->
+          <div class="gen-accordion-list">
+            <button type="button" class="gen-accordion-header" data-target="rptSecAttendance" onclick="openReportsCard('rptSecAttendance')" aria-expanded="false">
+              <span class="gen-accordion-num"></span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Attendance</strong>
+                <span class="gen-accordion-desc">Load, view and edit any engineer's attendance calendar for a month.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecHolidays')">
-              <div class="gen-card-icon t2">📅</div>
-              <h3>Holidays</h3>
-              <p>Add festivals and declared holidays so they're excluded from attendance and leave.</p>
-              <p id="cardStat_holidays" class="gen-card-stat"></p>
-              <span class="btn full">View</span>
+            <button type="button" class="gen-accordion-header" data-target="rptSecHolidays" onclick="openReportsCard('rptSecHolidays')" aria-expanded="false">
+              <span class="gen-accordion-num"></span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Holidays</strong>
+                <span class="gen-accordion-desc">Add festivals and declared holidays so they're excluded from attendance and leave.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
             <div id="reportCardsLandingBox1" style="display:contents"></div>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecOvertime')">
-              <div class="gen-card-icon t2">⏱️</div>
-              <h3>Overtime Report</h3>
-              <p>Log and review overtime hours for Field Engineers.</p>
-              <p id="cardStat_overtime" class="gen-card-stat"></p>
-              <span class="btn full">View</span>
+            <button type="button" class="gen-accordion-header" data-target="rptSecOvertime" onclick="openReportsCard('rptSecOvertime')" aria-expanded="false">
+              <span class="gen-accordion-num"></span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Overtime Report</strong>
+                <span class="gen-accordion-desc">Log and review overtime hours for Field Engineers.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
             <div id="reportCardsLandingBox2" style="display:contents"></div>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecSalaryCompare')">
-              <div class="gen-card-icon t1">⚖️</div>
-              <h3>Month-wise Salary Comparison</h3>
-              <p>Last month's total against this month's, and exactly what explains the gap.</p>
-              <p id="cardStat_salaryCompare" class="gen-card-stat"></p>
-              <span class="btn full">View</span>
+            <button type="button" class="gen-accordion-header" data-target="rptSecSalaryCompare" onclick="openReportsCard('rptSecSalaryCompare')" aria-expanded="false">
+              <span class="gen-accordion-num"></span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Month-wise Salary Comparison</strong>
+                <span class="gen-accordion-desc">Last month's total against this month's, and exactly what explains the gap.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecPF')">
-              <div class="gen-card-icon t2">🏦</div>
-              <h3>PF Report</h3>
-              <p>PF deducted per employee for the month, pulled from the Salary Sheet.</p>
-              <p id="cardStat_pf" class="gen-card-stat"></p>
-              <span class="btn full">View</span>
+            <button type="button" class="gen-accordion-header" data-target="rptSecPF" onclick="openReportsCard('rptSecPF')" aria-expanded="false">
+              <span class="gen-accordion-num"></span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">PF Report</strong>
+                <span class="gen-accordion-desc">PF deducted per employee for the month, pulled from the Salary Sheet.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecESI')">
-              <div class="gen-card-icon t3">🩺</div>
-              <h3>ESI Report</h3>
-              <p>ESI deducted per employee for the month, pulled from the Salary Sheet.</p>
-              <p id="cardStat_esi" class="gen-card-stat"></p>
-              <span class="btn full">View</span>
+            <button type="button" class="gen-accordion-header" data-target="rptSecESI" onclick="openReportsCard('rptSecESI')" aria-expanded="false">
+              <span class="gen-accordion-num"></span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">ESI Report</strong>
+                <span class="gen-accordion-desc">ESI deducted per employee for the month, pulled from the Salary Sheet.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecPT')">
-              <div class="gen-card-icon t4">🧾</div>
-              <h3>PT Report</h3>
-              <p>Professional Tax deducted per employee for the month, pulled from the Salary Sheet.</p>
-              <p id="cardStat_pt" class="gen-card-stat"></p>
-              <span class="btn full">View</span>
+            <button type="button" class="gen-accordion-header" data-target="rptSecPT" onclick="openReportsCard('rptSecPT')" aria-expanded="false">
+              <span class="gen-accordion-num"></span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">PT Report</strong>
+                <span class="gen-accordion-desc">Professional Tax deducted per employee for the month, pulled from the Salary Sheet.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecApprenticeSalary')">
-              <div class="gen-card-icon t1">🎓</div>
-              <h3>Apprentice Salary Report</h3>
-              <p>Full salary breakdown for employees under the Apprentices heading.</p>
-              <p id="cardStat_apprenticeSalary" class="gen-card-stat"></p>
-              <span class="btn full">View</span>
+            <button type="button" class="gen-accordion-header" data-target="rptSecApprenticeSalary" onclick="openReportsCard('rptSecApprenticeSalary')" aria-expanded="false">
+              <span class="gen-accordion-num"></span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Apprentice Salary Report</strong>
+                <span class="gen-accordion-desc">Full salary breakdown for employees under the Apprentices heading.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecMonthlyLeave')">
-              <div class="gen-card-icon t3">🌴</div>
-              <h3>Monthly Leave Report</h3>
-              <p>EL + SL + LP days per employee, month by month across the financial year.</p>
-              <p id="cardStat_monthlyLeave" class="gen-card-stat"></p>
-              <span class="btn full">View</span>
+            <button type="button" class="gen-accordion-header" data-target="rptSecMonthlyLeave" onclick="openReportsCard('rptSecMonthlyLeave')" aria-expanded="false">
+              <span class="gen-accordion-num"></span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Monthly Leave Report</strong>
+                <span class="gen-accordion-desc">EL + SL + LP days per employee, month by month across the financial year.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecMonthlyLeaveDetail')">
-              <div class="gen-card-icon t4">📋</div>
-              <h3>Monthly Leave Detail Report</h3>
-              <p>Late coming, EL/PL, SL, half days and short leaves for one month — highest in red.</p>
-              <p id="cardStat_monthlyLeaveDetail" class="gen-card-stat"></p>
-              <span class="btn full">View</span>
+            <button type="button" class="gen-accordion-header" data-target="rptSecMonthlyLeaveDetail" onclick="openReportsCard('rptSecMonthlyLeaveDetail')" aria-expanded="false">
+              <span class="gen-accordion-num"></span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Monthly Leave Detail Report</strong>
+                <span class="gen-accordion-desc">Late coming, EL/PL, SL, half days and short leaves for one month — highest in red.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecConsultant')">
-              <div class="gen-card-icon t4">📊</div>
-              <h3>Consultant Report</h3>
-              <p>The monthly attendance sheet in the consultant's exact column format.</p>
-              <p id="cardStat_consultant" class="gen-card-stat"></p>
-              <span class="btn full">View</span>
+            <button type="button" class="gen-accordion-header" data-target="rptSecConsultant" onclick="openReportsCard('rptSecConsultant')" aria-expanded="false">
+              <span class="gen-accordion-num"></span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Consultant Report</strong>
+                <span class="gen-accordion-desc">The monthly attendance sheet in the consultant's exact column format.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecConsultantSummary')">
-              <div class="gen-card-icon t1">🧮</div>
-              <h3>Consultant Final Summary Report</h3>
-              <p>PF and ESI account-wise totals plus the wage and deduction summary, in the consultant's filing format.</p>
-              <span class="btn full">View</span>
+            <button type="button" class="gen-accordion-header" data-target="rptSecConsultantSummary" onclick="openReportsCard('rptSecConsultantSummary')" aria-expanded="false">
+              <span class="gen-accordion-num"></span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Consultant Final Summary Report</strong>
+                <span class="gen-accordion-desc">PF and ESI account-wise totals plus the wage and deduction summary, in the consultant's filing format.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecFinalSalary')">
-              <div class="gen-card-icon t2">💵</div>
-              <h3>Final Salary Sheet for Accountant</h3>
-              <p>The payment list for the bank — grouped by heading, sorted by bank, with a grand total.</p>
-              <p id="cardStat_finalSalary" class="gen-card-stat"></p>
-              <span class="btn full">View</span>
+            <button type="button" class="gen-accordion-header" data-target="rptSecFinalSalary" onclick="openReportsCard('rptSecFinalSalary')" aria-expanded="false">
+              <span class="gen-accordion-num"></span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Final Salary Sheet for Accountant</strong>
+                <span class="gen-accordion-desc">The payment list for the bank — grouped by heading, sorted by bank, with a grand total.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
             <div id="reportCardsLandingBox3" style="display:contents"></div>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecEmployeeDetail')">
-              <div class="gen-card-icon t4">🧾</div>
-              <h3>Employee Wise Detail Report</h3>
-              <p>One consolidated profile for a single employee — salary, PF/ESI/PT, loans, leave, bonus and documents.</p>
-              <p id="cardStat_employeeDetail" class="gen-card-stat"></p>
-              <span class="btn full">View</span>
+            <button type="button" class="gen-accordion-header" data-target="rptSecEmployeeDetail" onclick="openReportsCard('rptSecEmployeeDetail')" aria-expanded="false">
+              <span class="gen-accordion-num"></span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Employee Wise Detail Report</strong>
+                <span class="gen-accordion-desc">One consolidated profile for a single employee — salary, PF/ESI/PT, loans, leave, bonus and documents.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
             <div id="reportCardsLandingBox4" style="display:contents"></div>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecDiwaliBonus')">
-              <div class="gen-card-icon t3">🪔</div>
-              <h3>Diwali Bonus Payment Sheet</h3>
-              <p>The bonus payment list, in the same shape as the Final Salary Sheet.</p>
-              <p id="cardStat_diwaliBonusSheet" class="gen-card-stat"></p>
-              <span class="btn full">View</span>
+            <button type="button" class="gen-accordion-header" data-target="rptSecDiwaliBonus" onclick="openReportsCard('rptSecDiwaliBonus')" aria-expanded="false">
+              <span class="gen-accordion-num"></span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Diwali Bonus Payment Sheet</strong>
+                <span class="gen-accordion-desc">The bonus payment list, in the same shape as the Final Salary Sheet.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecYearlyLeaveDetail')">
-              <div class="gen-card-icon t1">📆</div>
-              <h3>Yearly Leave Detail Report</h3>
-              <p>The same breakdown, one table per category, month by month across the year.</p>
-              <p id="cardStat_yearlyLeaveDetail" class="gen-card-stat"></p>
-              <span class="btn full">View</span>
+            <button type="button" class="gen-accordion-header" data-target="rptSecYearlyLeaveDetail" onclick="openReportsCard('rptSecYearlyLeaveDetail')" aria-expanded="false">
+              <span class="gen-accordion-num"></span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Yearly Leave Detail Report</strong>
+                <span class="gen-accordion-desc">The same breakdown, one table per category, month by month across the year.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
-            <button type="button" class="gen-card" onclick="openReportsCard('rptSecLeaveRollover')">
-              <div class="gen-card-icon t3">🔄</div>
-              <h3>Leave Balance Next Year Report</h3>
-              <p>EL calculation and SL rollover together — one table, one place to open each employee's leave balances for the new year.</p>
-              <span class="btn full">View</span>
+            <button type="button" class="gen-accordion-header" data-target="rptSecLeaveRollover" onclick="openReportsCard('rptSecLeaveRollover')" aria-expanded="false">
+              <span class="gen-accordion-num"></span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Leave Balance Next Year Report</strong>
+                <span class="gen-accordion-desc">EL calculation and SL rollover together — one table, one place to open each employee's leave balances for the new year.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
             </button>
           </div>
         </div>
 
-        <div id="rptSecAttendance" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="rptSecAttendance" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">Attendance</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The same attendance the Attendance Sheet records for this employee — Present, Absent, EL/SL/LP and half-days — one employee's calendar at a time. Sundays and declared holidays are excluded from the Absent count automatically.</p>
+          <p id="cardStat_attendance" class="gen-card-stat"></p>
           <div class="row-inline">
             <div>
               <label class="field">Employee</label>
@@ -2411,10 +2391,10 @@
         </section>
         </div>
 
-        <div id="rptSecHolidays" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="rptSecHolidays" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">Holidays</h2>
+          <p id="cardStat_holidays" class="gen-card-stat"></p>
           <div class="row-inline">
             <div>
               <label class="field">Date</label>
@@ -2432,11 +2412,11 @@
         </section>
         </div>
 
-        <div id="rptSecMonthlyLeave" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="rptSecMonthlyLeave" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">Monthly Leave Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Every employee's leave days (EL + SL + LP, half-days counted as 0.5) broken down month by month across the financial year — April through March — so you can see each person's full-year leave pattern at a glance.</p>
+          <p id="cardStat_monthlyLeave" class="gen-card-stat"></p>
           <label class="field">Financial year starting April of</label>
           <input type="number" id="leaveReportStartYear" placeholder="e.g. 2026 for FY 2026-27" />
           <div style="height:14px"></div>
@@ -2446,11 +2426,11 @@
         </section>
         </div>
 
-        <div id="rptSecMonthlyLeaveDetail" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="rptSecMonthlyLeaveDetail" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">Monthly Leave Detail Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Every employee's late coming, EL/PL, SL, half days and short leaves for one month, side by side. Whoever has the highest count in a column is shown in red, so it's easy to see at a glance who to have a word with.</p>
+          <p id="cardStat_monthlyLeaveDetail" class="gen-card-stat"></p>
           <div class="row-inline">
             <div><label class="field">Month</label><select class="field-input" id="leaveDetailMonthSel"></select></div>
             <div><label class="field">Year</label><select class="field-input" id="leaveDetailYearSel"></select></div>
@@ -2461,11 +2441,11 @@
         </section>
         </div>
 
-        <div id="rptSecYearlyLeaveDetail" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="rptSecYearlyLeaveDetail" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">Yearly Leave Detail Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The same breakdown — late coming, EL/PL, SL, half days, short leaves — one table per category, month by month across the financial year with a Total column. The highest count in each column is shown in red.</p>
+          <p id="cardStat_yearlyLeaveDetail" class="gen-card-stat"></p>
           <label class="field">Financial year starting April of</label>
           <input type="number" id="leaveDetailYearlyStartYear" placeholder="e.g. 2026 for FY 2026-27" />
           <div style="height:14px"></div>
@@ -2475,11 +2455,11 @@
         </section>
         </div>
 
-        <div id="rptSecPF" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="rptSecPF" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">PF Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">PF deducted per employee for the month, pulled from the Salary Sheet. Apprentices, R.S.IT Solution and Contractors don't have PF, so they're excluded here.</p>
+          <p id="cardStat_pf" class="gen-card-stat"></p>
           <div class="row-inline">
             <div><label class="field">Month</label><select class="field-input" id="pfReportMonthSel"></select></div>
             <div><label class="field">Year</label><select class="field-input" id="pfReportYearSel"></select></div>
@@ -2490,11 +2470,11 @@
         </section>
         </div>
 
-        <div id="rptSecESI" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="rptSecESI" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">ESI Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">ESI deducted per employee for the month, pulled from the Salary Sheet. Apprentices, R.S.IT Solution and Contractors don't have ESI, so they're excluded here.</p>
+          <p id="cardStat_esi" class="gen-card-stat"></p>
           <div class="row-inline">
             <div><label class="field">Month</label><select class="field-input" id="esiReportMonthSel"></select></div>
             <div><label class="field">Year</label><select class="field-input" id="esiReportYearSel"></select></div>
@@ -2505,11 +2485,11 @@
         </section>
         </div>
 
-        <div id="rptSecPT" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="rptSecPT" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">PT Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Professional Tax deducted per employee for the month, pulled from the Salary Sheet. Apprentices and Contractors don't have PT — Managerial, Seniors, Junior Engineers, and R.S.IT Solution do, when Gross exceeds ₹12,000.</p>
+          <p id="cardStat_pt" class="gen-card-stat"></p>
           <div class="row-inline">
             <div><label class="field">Month</label><select class="field-input" id="ptReportMonthSel"></select></div>
             <div><label class="field">Year</label><select class="field-input" id="ptReportYearSel"></select></div>
@@ -2520,11 +2500,11 @@
         </section>
         </div>
 
-        <div id="rptSecApprenticeSalary" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="rptSecApprenticeSalary" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">Apprentice Salary Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Full salary breakdown for employees under the Apprentices heading only, for the month you pick — pulled from the Salary Sheet.</p>
+          <p id="cardStat_apprenticeSalary" class="gen-card-stat"></p>
           <div class="row-inline">
             <div><label class="field">Month</label><select class="field-input" id="apprenticeReportMonthSel"></select></div>
             <div><label class="field">Year</label><select class="field-input" id="apprenticeReportYearSel"></select></div>
@@ -2535,11 +2515,11 @@
         </section>
         </div>
 
-        <div id="rptSecFinalSalary" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="rptSecFinalSalary" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">Final Salary Sheet for Accountant</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The payment list: every employee grouped by salary heading, sorted by bank within each heading, with account number and the final amount payable after all deductions. Built for handing to the bank — one block per heading, subtotalled, with a grand total at the end.</p>
+          <p id="cardStat_finalSalary" class="gen-card-stat"></p>
           <div class="row-inline">
             <div><label class="field">Month</label><select class="field-input" id="finalSalMonthSel"></select></div>
             <div><label class="field">Year</label><select class="field-input" id="finalSalYearSel"></select></div>
@@ -2550,11 +2530,11 @@
         </section>
         </div>
 
-        <div id="rptSecDiwaliBonus" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="rptSecDiwaliBonus" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">Diwali Bonus Payment Sheet</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The payment list for the bonus, in the same shape as the Final Salary Sheet — grouped by salary heading, sorted by bank, with account number and the amount payable. An employee appears once they are marked eligible <em>and</em> have a Diwali bonus amount set on their record; anyone eligible without one is named above the table rather than left off quietly. No PF, ESI, Professional Tax, advance, loan or retention is deducted, and leave taken during the year does not reduce it.</p>
+          <p id="cardStat_diwaliBonusSheet" class="gen-card-stat"></p>
           <label class="field">Paid on</label>
           <input type="date" class="field-input" id="bonusPaidOn" />
           <div style="height:12px"></div>
@@ -2564,11 +2544,11 @@
         </section>
         </div>
 
-        <div id="rptSecConsultant" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="rptSecConsultant" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">Consultant Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">The monthly attendance sheet in the exact column format the consultant asks for — one row per employee, built automatically from Employee Master and the month's attendance. Pick any month; export the CSV and send it on.</p>
+          <p id="cardStat_consultant" class="gen-card-stat"></p>
           <div class="row-inline">
             <div><label class="field">Month</label><select class="field-input" id="consultantReportMonthSel"></select></div>
             <div><label class="field">Year</label><select class="field-input" id="consultantReportYearSel"></select></div>
@@ -2579,8 +2559,7 @@
         </section>
         </div>
 
-        <div id="rptSecConsultantSummary" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="rptSecConsultantSummary" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">Consultant Final Summary Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">PF Account No 1/2/10/21/22 and the ESI summary, totalled for the month across R.S. Infotech's own payroll headings — the same figures the consultant's filing sheet totals, pulled from Employee Master and this month's attendance.</p>
@@ -2597,11 +2576,11 @@
         </section>
         </div>
 
-        <div id="rptSecSalaryCompare" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="rptSecSalaryCompare" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">Month-wise Salary Comparison</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Last month's total salary against the month you pick, and exactly what explains the gap — each new joiner that added to it, each leaver that took away from it, and anyone whose own salary moved. The reasons add up to the difference.</p>
+          <p id="cardStat_salaryCompare" class="gen-card-stat"></p>
           <div class="row-inline">
             <div><label class="field">Month</label><select class="field-input" id="salCompareMonthSel"></select></div>
             <div><label class="field">Year</label><select class="field-input" id="salCompareYearSel"></select></div>
@@ -2612,11 +2591,11 @@
         </section>
         </div>
 
-        <div id="rptSecOvertime" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="rptSecOvertime" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">Overtime Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Applies to Field Engineers per the overtime policy. Log hours HR has been informed of (by the following day, per policy) — this is manual since overtime is reported over WhatsApp, not through this app.</p>
+          <p id="cardStat_overtime" class="gen-card-stat"></p>
           <div class="row-inline">
             <div>
               <label class="field">Field engineer</label>
@@ -2656,11 +2635,11 @@
         </section>
         </div>
 
-        <div id="rptSecEmployeeDetail" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="rptSecEmployeeDetail" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">Employee Wise Detail Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">One consolidated profile for a single employee — pick anyone, including those who have left.</p>
+          <p id="cardStat_employeeDetail" class="gen-card-stat"></p>
           <label class="field">Employee</label>
           <select class="field-input" id="empDetailSelect"></select>
           <div style="height:14px"></div>
@@ -2673,8 +2652,7 @@
 
         <div id="reportCardsBox"></div>
 
-        <div id="rptSecLeaveRollover" class="hidden">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+        <div id="rptSecLeaveRollover" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">Leave Balance Next Year Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">SL and EL together, for the financial year you pick — SL resets to the yearly allowance for each employee's type; EL is earned at 1 day per 25 days present (from the Attendance Sheet), unchanged from how the EL Calculation Sheet always worked. Resident Engineers are excluded from both; Work From Home and non-R.S. Infotech headings are excluded from SL only, shown as "—" in the SL columns. Run once, in April.</p>
@@ -12181,9 +12159,14 @@ function kmtActiveCard(){
 // reliable here.
 function hrContentHasOwnCloseControl(){
   // querySelector alone would only ever look at the first match in DOM
-  // order — with 26 report/generator cards each carrying their own (mostly
-  // hidden) ×, that first match is almost never the one card that's actually
-  // open. Every match has to be checked for the one that's actually visible.
+  // order — every screen under #hrContent that carries its own × (mostly
+  // hidden at any one time) is a candidate, so the first match is almost
+  // never the one that's actually open. Every match has to be checked for
+  // the one that's actually visible. The Generator and Reports accordions
+  // no longer carry a per-section × of their own at all (the header's own
+  // click-to-collapse replaced it) — this now only ever finds one on
+  // screens that still have a real reason for their own close control, like
+  // the Salary/Attendance Sheet's unsaved-changes-aware close.
   const els = document.querySelectorAll('#hrContent .rpt-close-btn, #hrContent .x-close');
   for(const el of els){ if(el.offsetParent !== null) return true; }
   return false;
@@ -16934,19 +16917,6 @@ function closeLeftEmployeesModal(){
 }
 
 // ---- reports tab ----
-// One employee-scoped report card per key, icon/tone purely cosmetic —
-// cycling t1-t4 the same way the Generator landing does.
-const REPORT_CARD_META = {
-  contact:   { icon:'📇', tone:'t1' },
-  birthday:  { icon:'🎂', tone:'t2' },
-  increment: { icon:'📈', tone:'t3' },
-  diwali:    { icon:'🎁', tone:'t4' },
-  salary:    { icon:'₹',  tone:'t1' },
-  ctc:       { icon:'💰', tone:'t2' },
-  loan:      { icon:'💳', tone:'t3' },
-  assets:    { icon:'🧰', tone:'t4' },
-  insurance: { icon:'🛡️', tone:'t1' }
-};
 async function renderReportsTab(){
   // Runs on every visit to the Reports tab, including a Back-navigation
   // restore that's about to reopen a specific card itself right after this —
@@ -16959,15 +16929,15 @@ async function renderReportsTab(){
   // function, and REPORT_CARD_LANDING_GROUPS below, for which slot each one
   // renders into.
   const reports = [
-    {key:'increment', label:'Increment Report'},
-    {key:'loan', label:'Loan & Advance Report'},
-    {key:'salary', label:'Salary Report'},
-    {key:'ctc', label:'Cost to Company Report'},
-    {key:'contact', label:'Employee Contact Report'},
-    {key:'birthday', label:'Birthday Report'},
-    {key:'assets', label:'Employee Assets'},
-    {key:'insurance', label:'Employee Insurance Details'},
-    {key:'diwali', label:'Diwali Bonus Report'}
+    {key:'increment', label:'Increment Report', desc:'Next increment due date and amount for each employee.'},
+    {key:'loan', label:'Loan & Advance Report', desc:'Outstanding loans and advances, with recovery amounts, for each employee.'},
+    {key:'salary', label:'Salary Report', desc:'Full salary breakdown for one month, for everyone on roll.'},
+    {key:'ctc', label:'Cost to Company Report', desc:'Full Cost to Company for each employee, employer contributions included.'},
+    {key:'contact', label:'Employee Contact Report', desc:'Phone number and email address for every employee.'},
+    {key:'birthday', label:'Birthday Report', desc:"Everyone's date of birth, so upcoming birthdays don't get missed."},
+    {key:'assets', label:'Employee Assets', desc:"Uniform, ID cards and other items issued, and what's still outstanding."},
+    {key:'insurance', label:'Employee Insurance Details', desc:'WC, GPA, Mediclaim and Ayushman Card coverage for each employee.'},
+    {key:'diwali', label:'Diwali Bonus Report', desc:'Who is marked eligible for the Diwali bonus, and their amount.'}
   ];
   // Birthday and Increment recur every year on the same month regardless of
   // which year it falls in, so the filter here is month-only — no year — and
@@ -17006,15 +16976,12 @@ async function renderReportsTab(){
     reportCardsLandingBox3: ['ctc'],
     reportCardsLandingBox4: ['contact', 'birthday', 'assets', 'insurance', 'diwali'],
   };
-  const cardButtonHtml = r => {
-    const meta = REPORT_CARD_META[r.key];
-    return `<button type="button" class="gen-card" onclick="openReportsCard('rptSecReport_${r.key}')">
-      <div class="gen-card-icon ${meta.tone}">${meta.icon}</div>
-      <h3>${r.label}</h3>
-      <p>${cardSubtitle(r)}</p>
-      <span class="btn full">View</span>
+  const cardButtonHtml = r => `<button type="button" class="gen-accordion-header" data-target="rptSecReport_${r.key}" onclick="openReportsCard('rptSecReport_${r.key}')" aria-expanded="false">
+      <span class="gen-accordion-num"></span>
+      <span class="gen-accordion-headtext"><strong class="gen-accordion-title">${r.label}</strong>
+        <span class="gen-accordion-desc">${r.desc}</span></span>
+      <span class="gen-accordion-chevron">▼</span>
     </button>`;
-  };
   Object.entries(REPORT_CARD_LANDING_GROUPS).forEach(([boxId, keys]) => {
     document.getElementById(boxId).innerHTML = keys.map(k => cardButtonHtml(reports.find(r => r.key === k))).join('');
   });
@@ -17031,17 +16998,28 @@ async function renderReportsTab(){
     const generateOnclick = MONTH_YEAR_REPORTS[r.key]
       ? `withBusy(this,'Loading…',()=>viewReport('${r.key}','${r.label}',getMonthYearValue('report${capKey}MonthSel','report${capKey}YearSel')))`
       : `withBusy(this,'Loading…',()=>viewReport('${r.key}','${r.label}',(document.getElementById('reportMonthSel_${r.key}')||{}).value||''))`;
-    return `<div id="rptSecReport_${r.key}" class="hidden">
-    <div class="rpt-actions-top" style="margin-bottom:6px;"><button type="button" class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
+    return `<div id="rptSecReport_${r.key}" class="hidden gen-accordion-body">
     <section class="block">
       <h2 style="margin:0 0 4px;">${r.label}</h2>
-      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">${cardSubtitle(r)}</p>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">${r.desc}</p>
+      <p id="cardStat_${r.key}" class="gen-card-stat">${cardSubtitle(r)}</p>
       ${monthPicker}${monthYearPicker}
       <button class="btn full" data-kmt-generate onclick="${generateOnclick}">View report</button>
       <div id="reportBox_${r.key}"></div>
     </section>
     </div>`;
   }).join('');
+  // The nine headers/bodies above are rebuilt from scratch on every visit —
+  // fresh DOM nodes each time, so the one-time page-load relocation that
+  // handles every static rptSecXxx section can't reach these; re-running it
+  // here puts each new body back under its own (also freshly built) header,
+  // and renumbers the whole list by its actual on-screen order so the
+  // interleaved static/dynamic sequence never drifts out of 1..N.
+  moveAccordionBodiesUnderTheirHeaders_();
+  Array.from(document.querySelectorAll('#reportsLanding .gen-accordion-header[data-target]')).forEach((btn, i) => {
+    const numEl = btn.querySelector('.gen-accordion-num');
+    if(numEl) numEl.textContent = i + 1;
+  });
   // The static report cards below (Attendance, PF, Consultant, ...) were
   // written directly as HTML rather than built from the `reports` array
   // above, so they never picked up the same "N employees with data" line —
@@ -19650,8 +19628,11 @@ const GENERATOR_SECTIONS = ['genSecRoleReports','genSecLetters','genSecChecklist
 // Syncs every header's .active class, chevron and aria-expanded to whichever
 // one section (if any) is actually open — called after every open/collapse
 // rather than toggled by hand at each call site, so it can never drift out
-// of sync with the real hidden-class state driving what's on screen.
-function updateGenAccordionHeaders_(){
+// of sync with the real hidden-class state driving what's on screen. Shared
+// by the Generator and Reports accordions — both header lists use the exact
+// same .gen-accordion-header[data-target] markup, so one generic sync
+// covers whichever tab just changed without knowing which tab it was.
+function updateAccordionHeaders_(){
   document.querySelectorAll('.gen-accordion-header[data-target]').forEach(btn => {
     const target = document.getElementById(btn.dataset.target);
     const open = !!target && !target.classList.contains('hidden');
@@ -19661,7 +19642,7 @@ function updateGenAccordionHeaders_(){
 }
 function showGeneratorLanding(){
   GENERATOR_SECTIONS.forEach(id => document.getElementById(id).classList.add('hidden'));
-  updateGenAccordionHeaders_();
+  updateAccordionHeaders_();
 }
 function openGeneratorCard(sectionId){
   kmtCaptureDeparture();
@@ -19675,44 +19656,55 @@ function openGeneratorCard(sectionId){
     document.getElementById(sectionId).classList.remove('hidden');
     autoDefaultMonthYearSelects_(document.getElementById(sectionId));
   }
-  updateGenAccordionHeaders_();
+  updateAccordionHeaders_();
   kmtCommitArrival();
 }
 
-// Each genSecXxx target div was authored in its own original spot further
-// down the page (unchanged from before this became an accordion, so none
-// of that markup had to be touched) while its header lives in the list
-// above — leaving them there meant the one open section always rendered
-// after the WHOLE header list, not under the specific header that opened
-// it: clicking section 7 of 14 dropped its content below section 14, not
-// between 7 and 8, which looked exactly like "opens at the bottom of the
-// page" no matter which tab was actually pressed. Moving each target to
-// sit right after its own header — once, here, using the real elements
-// already on the page rather than rebuilding anything — makes it a true
-// accordion: the open section expands directly under the tab that opened
-// it, and the page doesn't jump, because nothing above the click moved.
-(function moveGenAccordionBodiesUnderTheirHeaders_(){
+// Each genSecXxx/rptSecXxx target div was authored in its own original spot
+// further down the page (unchanged from before this became an accordion, so
+// none of that markup had to be touched) while its header lives in one of
+// the two landing lists above — leaving them there meant the one open
+// section always rendered after the WHOLE header list, not under the
+// specific header that opened it: clicking section 7 of 14 dropped its
+// content below section 14, not between 7 and 8, which looked exactly like
+// "opens at the bottom of the page" no matter which tab was actually
+// pressed. Moving each target to sit right after its own header — using the
+// real elements already on the page rather than rebuilding anything — makes
+// it a true accordion: the open section expands directly under the tab that
+// opened it, and the page doesn't jump, because nothing above the click
+// moved. Run once immediately below for every *static* section (both tabs'
+// — Generator has none built dynamically, Reports has seventeen); Reports'
+// nine employee-scoped report sections are rebuilt from scratch by
+// renderReportsTab() on every visit, so it calls this again itself once its
+// own fresh headers/bodies exist, same function either way.
+function moveAccordionBodiesUnderTheirHeaders_(){
   document.querySelectorAll('.gen-accordion-header[data-target]').forEach(btn => {
     const target = document.getElementById(btn.dataset.target);
     if(target) btn.insertAdjacentElement('afterend', target);
   });
-})();
+}
+moveAccordionBodiesUnderTheirHeaders_();
 
-// Same "click a card, see one thing at a time" shape as the Generator tab
-// above, for the Reports tab's own landing grid. Every report's wrapper div
-// is matched by its "rptSec" id prefix rather than a hardcoded list — the
-// nine employee-scoped report cards are built fresh by renderReportsTab()
-// on every visit, so a fixed array here would drift the moment one of them
-// was added, renamed or removed.
+// Same "click a header, see one thing at a time, only one open" accordion as
+// the Generator tab above, for the Reports tab's own landing list. Every
+// report's wrapper div is matched by its "rptSec" id prefix rather than a
+// hardcoded list — the nine employee-scoped report sections are built fresh
+// by renderReportsTab() on every visit, so a fixed array here would drift
+// the moment one of them was added, renamed or removed.
 function showReportsLanding(){
-  document.getElementById('reportsLanding').classList.remove('hidden');
   document.querySelectorAll('#hrSubReports [id^="rptSec"]').forEach(el => el.classList.add('hidden'));
+  updateAccordionHeaders_();
 }
 function openReportsCard(sectionId){
   kmtCaptureDeparture();
-  document.getElementById('reportsLanding').classList.add('hidden');
-  document.querySelectorAll('#hrSubReports [id^="rptSec"]').forEach(el => el.classList.toggle('hidden', el.id !== sectionId));
-  autoDefaultMonthYearSelects_(document.getElementById(sectionId));
+  // Same collapse-on-second-tap behaviour as openGeneratorCard.
+  const alreadyOpen = !document.getElementById(sectionId).classList.contains('hidden');
+  document.querySelectorAll('#hrSubReports [id^="rptSec"]').forEach(el => el.classList.add('hidden'));
+  if(!alreadyOpen){
+    document.getElementById(sectionId).classList.remove('hidden');
+    autoDefaultMonthYearSelects_(document.getElementById(sectionId));
+  }
+  updateAccordionHeaders_();
   kmtCommitArrival();
 }
 
