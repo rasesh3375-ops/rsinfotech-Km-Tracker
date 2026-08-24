@@ -4923,26 +4923,21 @@ async function selectRole(role){
       // enterHrMain()'s own first step navigates to 'dashboard', which goes
       // through hrNavigate -> kmtCaptureDeparture -> kmtPersistLastView_,
       // overwriting this exact key with a fresh 'dashboard' snapshot before
-      // there's ever a chance to read the real one back out.
+      // there's ever a chance to read the real one back out. Passed straight
+      // into enterHrMain(), which restores to it right after landing on the
+      // Dashboard rather than after its slower warm-up calls — see the
+      // comment there. fullscreen is deliberately dropped: reopening the
+      // document viewer here would show a permanently blank "Opening…" — the
+      // fetch that fills it only ever runs from an actual View/Download tap,
+      // never from a restore — so this only ever goes back as far as the
+      // route and, where there was one, the open accordion section/report
+      // card underneath it.
       let lastView = null;
       try{
         const raw = localStorage.getItem('kmt_last_view');
         lastView = raw ? JSON.parse(raw) : null;
       }catch(e){}
-      await enterHrMain();
-      // enterHrMain() itself always lands on the plain Dashboard — restoring
-      // to wherever HR actually was happens right after, as a second,
-      // corrective navigation, rather than trying to thread it through
-      // enterHrMain's own warm-up sequence. fullscreen is deliberately
-      // dropped from the restored descriptor: reopening the document viewer
-      // here would show a permanently blank "Opening…" — the fetch that
-      // fills it only ever runs from an actual View/Download tap, never
-      // from a restore — so this only ever goes back as far as the route
-      // and, where there was one, the open accordion section/report card
-      // underneath it.
-      try{
-        if(lastView && lastView.kmtView) await kmtRestoreView(Object.assign({}, lastView, { fullscreen: null }));
-      }catch(e){}
+      await enterHrMain(lastView && lastView.kmtView ? lastView : null);
       return;
     }
     const existsCheck = await checkHrAccountExists();
@@ -5104,7 +5099,7 @@ async function submitHrPasswordReset(){
   showHrLogin();
 }
 
-async function enterHrMain(){
+async function enterHrMain(restoreDescriptor){
   document.getElementById('hrMain').classList.remove('hidden');
   // Put the shell up and land on the Dashboard FIRST. These warm-up calls used
   // to run before navigating, so one failed backend request threw, enterHrMain
@@ -5130,6 +5125,27 @@ async function enterHrMain(){
   // pop the wrong one.
   armExitGuard();
   hrNavigate('dashboard');
+
+  // Restore to wherever HR actually was, right here — before the warm-up
+  // calls below, not after. Those are several sequential backend round
+  // trips (rate, user list, geofence zones, loadHR, loadCompanyReport) that
+  // can take a genuinely long few seconds on a slow connection, and this
+  // used to run only after all of them finished. HR was left staring at the
+  // plain Dashboard for that entire window on every reload — which is
+  // exactly what happens returning from viewing/downloading a document, the
+  // one path that reloads the app outright — and a slow or momentarily
+  // failed connection right at that point (also the likeliest moment for
+  // one) meant the restore below could silently fail and never arrive at
+  // all, leaving Dashboard looking like the permanent, intended landing
+  // spot rather than a passing loading state. Each route's own panel loads
+  // its own data when it navigates (renderGeneratorTab/renderReportsTab/
+  // renderEmployeeList etc. all call getEmployees() themselves) — none of
+  // it depends on loadHR() or the other warm-up steps below, which are
+  // Tracking-tab-only (live status, km totals), so restoring first costs
+  // nothing.
+  if(restoreDescriptor){
+    try{ await kmtRestoreView(Object.assign({}, restoreDescriptor, { fullscreen: null })); }catch(e){}
+  }
 
   // Warm-up, each guarded on its own: a flaky backend may degrade a panel but
   // must never take the whole app down with it.
