@@ -16,7 +16,26 @@
      added everywhere a bar now sits at a true physical edge because of this
      (see the safe-area comments at each one) so nothing new ends up
      rendering under the notch/status bar/home indicator instead. -->
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<!-- maximum-scale=1.0, user-scalable=no: pinch-zooming out on iPhone was
+     reported leaving the page's own scrolled content shifted and clipped,
+     plus stale content bleeding through from whatever was on screen before
+     (a native Quick Look PDF preview, in the reported case) — even outside
+     any modal, on a plain tab. Same root cause as the bleed-through above:
+     WebKit leaving position:fixed layers' painted geometry stale, this time
+     triggered by a visual-viewport scale change rather than a keyboard or
+     backgrounding event. kmtNudgeRepaint_ (see its own comment) already
+     found that toggling this exact directive on and off is the one lever
+     that reliably forces iOS to reprocess viewport metrics — but that is a
+     detect-and-repair fix, wired to modal open/app-foreground, and this
+     zoom-triggered case slips past both: it happens on ordinary page
+     content, not a .modal-overlay, and the trigger is a pinch gesture, not
+     one of the events already being listened for. Given the app has no
+     legitimate use for free pinch-zoom in the first place — every screen is
+     already laid out for its own fixed/mobile-responsive width — removing
+     the gesture entirely is more certain than adding another speculative
+     repair trigger for a WebKit staleness bug that has already taken
+     several rounds to chase on real hardware. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>R.S. Infotech — KM Tracker</title>
 <!-- A one-line summary of the latest deploy, shown in the "A newer version
      is available" banner (see checkForNewerVersion_ near PROD_API_URL) so
