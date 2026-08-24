@@ -13959,13 +13959,13 @@ function employeeModalHtml(emp){
         </div>
       </div>
         </div>
-        <button type="button" class="gen-accordion-header" data-target="empSecWc" onclick="openEmpAccordionSection('empSecWc')" aria-expanded="false">
+        <button type="button" class="gen-accordion-header" data-target="empSecInsurance" onclick="openEmpAccordionSection('empSecInsurance')" aria-expanded="false">
           <span class="gen-accordion-num">8</span>
-          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Workman Compensation (WC)</strong>
-            <span class="gen-accordion-desc">WC insurance cover, policy and expiry.</span></span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Insurance Detail</strong>
+            <span class="gen-accordion-desc">Workman Compensation, Group Personal Accident, Mediclaim and Ayushman Card coverage.</span></span>
           <span class="gen-accordion-chevron">▼</span>
         </button>
-        <div id="empSecWc" class="hidden gen-accordion-body">
+        <div id="empSecInsurance" class="hidden gen-accordion-body">
       <div class="field-group">
         <div class="sec-title">Workman Compensation (WC)</div>
         <label class="field">Covered under Workman Compensation insurance?</label>
@@ -13987,14 +13987,6 @@ function employeeModalHtml(emp){
           <input type="date" id="f_wcExpiryDate" value="${emp.wcExpiryDate||''}">
         </div>
       </div>
-        </div>
-        <button type="button" class="gen-accordion-header" data-target="empSecGpa" onclick="openEmpAccordionSection('empSecGpa')" aria-expanded="false">
-          <span class="gen-accordion-num">9</span>
-          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Group Personal Accident (GPA)</strong>
-            <span class="gen-accordion-desc">GPA insurance cover, policy and expiry.</span></span>
-          <span class="gen-accordion-chevron">▼</span>
-        </button>
-        <div id="empSecGpa" class="hidden gen-accordion-body">
       <div class="field-group">
         <div class="sec-title">Group Personal Accident (GPA)</div>
         <label class="field">Covered under Group Personal Accident insurance?</label>
@@ -14016,14 +14008,6 @@ function employeeModalHtml(emp){
           <input type="date" id="f_gpaExpiryDate" value="${emp.gpaExpiryDate||''}">
         </div>
       </div>
-        </div>
-        <button type="button" class="gen-accordion-header" data-target="empSecMediclaim" onclick="openEmpAccordionSection('empSecMediclaim')" aria-expanded="false">
-          <span class="gen-accordion-num">10</span>
-          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Mediclaim Insurance</strong>
-            <span class="gen-accordion-desc">Whether this employee is covered under Mediclaim.</span></span>
-          <span class="gen-accordion-chevron">▼</span>
-        </button>
-        <div id="empSecMediclaim" class="hidden gen-accordion-body">
       <div class="field-group">
         <div class="sec-title">Mediclaim Insurance</div>
         <label class="field">Covered under Mediclaim insurance?</label>
@@ -14032,14 +14016,6 @@ function employeeModalHtml(emp){
           <option value="yes" ${emp.mediclaimApplicable==='yes'?'selected':''}>Yes</option>
         </select>
       </div>
-        </div>
-        <button type="button" class="gen-accordion-header" data-target="empSecAyushman" onclick="openEmpAccordionSection('empSecAyushman')" aria-expanded="false">
-          <span class="gen-accordion-num">11</span>
-          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Ayushman Card</strong>
-            <span class="gen-accordion-desc">Whether this employee has an Ayushman Card.</span></span>
-          <span class="gen-accordion-chevron">▼</span>
-        </button>
-        <div id="empSecAyushman" class="hidden gen-accordion-body">
       <div class="field-group">
         <div class="sec-title">Ayushman Card</div>
         <label class="field">Has an Ayushman Card?</label>
@@ -14050,7 +14026,7 @@ function employeeModalHtml(emp){
       </div>
         </div>
         <button type="button" class="gen-accordion-header" data-target="empSecRatePay" onclick="openEmpAccordionSection('empSecRatePay')" aria-expanded="false">
-          <span class="gen-accordion-num">12</span>
+          <span class="gen-accordion-num">9</span>
           <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Rate of Pay &amp; Advances</strong>
             <span class="gen-accordion-desc">Monthly rate, the salary breakdown, and any advance balance brought forward.</span></span>
           <span class="gen-accordion-chevron">▼</span>
@@ -14082,7 +14058,7 @@ function employeeModalHtml(emp){
       </div>
         </div>
         <button type="button" class="gen-accordion-header" data-target="empSecAdvanceTemp" onclick="openEmpAccordionSection('empSecAdvanceTemp')" aria-expanded="false">
-          <span class="gen-accordion-num">13</span>
+          <span class="gen-accordion-num">10</span>
           <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Advance for Temporary</strong>
             <span class="gen-accordion-desc">A recurring monthly recovery, set once, unlike Salary Advance Payment above.</span></span>
           <span class="gen-accordion-chevron">▼</span>
@@ -14101,7 +14077,7 @@ function employeeModalHtml(emp){
       </div>
         </div>
         <button type="button" class="gen-accordion-header" data-target="empSecLoan" onclick="openEmpAccordionSection('empSecLoan')" aria-expanded="false">
-          <span class="gen-accordion-num">14</span>
+          <span class="gen-accordion-num">11</span>
           <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Employee Loan &amp; EMI</strong>
             <span class="gen-accordion-desc">Loans this employee is repaying, each on its own schedule.</span></span>
           <span class="gen-accordion-chevron">▼</span>
@@ -14120,7 +14096,7 @@ function employeeModalHtml(emp){
       </div>
         </div>
         <button type="button" class="gen-accordion-header" data-target="empSecHeading" onclick="openEmpAccordionSection('empSecHeading')" aria-expanded="false">
-          <span class="gen-accordion-num">15</span>
+          <span class="gen-accordion-num">12</span>
           <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Salary Sheet Heading</strong>
             <span class="gen-accordion-desc">Picks the Basic/HRA/LTA split and which of PF/ESI/PT apply — plus family details for apprentices.</span></span>
           <span class="gen-accordion-chevron">▼</span>
@@ -14185,7 +14161,7 @@ function employeeModalHtml(emp){
       </div>
         </div>
         <button type="button" class="gen-accordion-header" data-target="empSecStatutory" onclick="openEmpAccordionSection('empSecStatutory')" aria-expanded="false">
-          <span class="gen-accordion-num">16</span>
+          <span class="gen-accordion-num">13</span>
           <span class="gen-accordion-headtext"><strong class="gen-accordion-title">PF, ESI &amp; PT</strong>
             <span class="gen-accordion-desc">Statutory eligibility, contribution settings, and Record Increment.</span></span>
           <span class="gen-accordion-chevron">▼</span>
@@ -14274,7 +14250,7 @@ function employeeModalHtml(emp){
       </div>
         </div>
         <button type="button" class="gen-accordion-header" data-target="empSecLeaveOpening" onclick="openEmpAccordionSection('empSecLeaveOpening')" aria-expanded="false">
-          <span class="gen-accordion-num">17</span>
+          <span class="gen-accordion-num">14</span>
           <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Leave Opening Balances</strong>
             <span class="gen-accordion-desc">SL and EL balances for this financial year.</span></span>
           <span class="gen-accordion-chevron">▼</span>
@@ -14298,7 +14274,7 @@ function employeeModalHtml(emp){
       </div>
         </div>
         <button type="button" class="gen-accordion-header" data-target="empSecDiwali" onclick="openEmpAccordionSection('empSecDiwali')" aria-expanded="false">
-          <span class="gen-accordion-num">18</span>
+          <span class="gen-accordion-num">15</span>
           <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Diwali Bonus Eligibility</strong>
             <span class="gen-accordion-desc">Whether this employee gets a Diwali bonus this year, and the amount.</span></span>
           <span class="gen-accordion-chevron">▼</span>
@@ -14322,7 +14298,7 @@ function employeeModalHtml(emp){
       </div>
         </div>
         <button type="button" class="gen-accordion-header" data-target="empSecRemarks" onclick="openEmpAccordionSection('empSecRemarks')" aria-expanded="false">
-          <span class="gen-accordion-num">19</span>
+          <span class="gen-accordion-num">16</span>
           <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Special Remarks</strong>
             <span class="gen-accordion-desc">Anything else worth noting about this employee.</span></span>
           <span class="gen-accordion-chevron">▼</span>
@@ -14334,7 +14310,7 @@ function employeeModalHtml(emp){
       </div>
         </div>
         <button type="button" class="gen-accordion-header" data-target="empSecBankDetails" onclick="openEmpAccordionSection('empSecBankDetails')" aria-expanded="false">
-          <span class="gen-accordion-num">20</span>
+          <span class="gen-accordion-num">17</span>
           <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Statutory &amp; Bank Details</strong>
             <span class="gen-accordion-desc">PAN, Aadhaar, UAN, ESI number, and bank account for payment.</span></span>
           <span class="gen-accordion-chevron">▼</span>
@@ -14376,7 +14352,7 @@ function employeeModalHtml(emp){
       </div>
         </div>
         <button type="button" class="gen-accordion-header" data-target="empSecDocuments" onclick="openEmpAccordionSection('empSecDocuments')" aria-expanded="false">
-          <span class="gen-accordion-num">21</span>
+          <span class="gen-accordion-num">18</span>
           <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Documents</strong>
             <span class="gen-accordion-desc">ID proof and other certificates (optional).</span></span>
           <span class="gen-accordion-chevron">▼</span>
@@ -14441,7 +14417,7 @@ function employeeModalHtml(emp){
 // for the same reason it is in GENERATOR_SECTIONS: this list never varies
 // per employee, only which fields inside a section are shown or hidden do.
 const EMP_ACCORDION_SECTIONS = ['empSecBasic','empSecContact','empSecEmergency','empSecEmployee',
-  'empSecAssets','empSecAllowance','empSecBond','empSecWc','empSecGpa','empSecMediclaim','empSecAyushman',
+  'empSecAssets','empSecAllowance','empSecBond','empSecInsurance',
   'empSecRatePay','empSecAdvanceTemp','empSecLoan','empSecHeading','empSecStatutory','empSecLeaveOpening',
   'empSecDiwali','empSecRemarks','empSecBankDetails','empSecDocuments'];
 function openEmpAccordionSection(sectionId){
