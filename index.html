@@ -8129,6 +8129,19 @@ function reportLogoHeader(title){
 let fullscreenActiveId = null;
 let fullscreenOriginalParent = null;
 let fullscreenOriginalNextSibling = null;
+// fullscreenActiveId only ever holds one id — opening a document viewer
+// (docViewerRoot) from *inside* an already-fullscreen sub-app (currently
+// just Payroll Documents' payrollDocsRoot) silently replaces it, the same
+// as switching from one report to another does. That's correct for two
+// reports, but wrong here: Payroll Documents' own FY/month/category/doc-
+// type drill-down (payrollDocsState_) survives untouched underneath since
+// nothing ever re-renders it — closing the viewer just needs to bring that
+// same screen back, not exit full screen entirely and strand HR back on
+// the Generator tab having to re-drill down to the same month to look at
+// anything else. Set only for that specific transition (see
+// openFullscreenView), consumed once in closeFullscreenView, and left
+// untouched by every ordinary report-to-report switch.
+let fullscreenReturnTo_ = null;
 
 // Every .modal-overlay-based modal (Employee, Increment, Checklist/Left-
 // Employees/Day-Time-Editor, which share checklistModalRoot) plus this
@@ -8351,6 +8364,16 @@ function openFullscreenView(title, sourceId){
   // previous report's whole box (header, table, action bar) still sitting
   // inside #fullscreenBody underneath the new one — reports stacked on top
   // of each other instead of replacing one another.
+  // Viewing a document from inside Payroll Documents' own full screen is
+  // the one case that needs a way back — see fullscreenReturnTo_'s
+  // declaration above. Any other transition (a different report replacing
+  // this one, the viewer opened from a screen that was never full screen
+  // to begin with) has nothing to return to, so a stale value from an
+  // earlier trip is cleared here rather than carried into a close it has
+  // nothing to do with.
+  fullscreenReturnTo_ = (sourceId === 'docViewerRoot' && fullscreenActiveId === 'payrollDocsRoot')
+    ? { title: 'Payroll Documents', sourceId: 'payrollDocsRoot' }
+    : null;
   if(fullscreenActiveId && fullscreenActiveId !== sourceId) closeFullscreenView();
   // Only remember where this box truly lives the first time it's moved.
   // Calling this again for the SAME box while it is already inside
@@ -8468,11 +8491,47 @@ function closeFullscreenView(){
     // — which is exactly what looked like "there's no way to close this."
     if(el && (fullscreenActiveId === 'docViewerRoot' || fullscreenActiveId === 'payrollDocsRoot')) el.classList.add('hidden');
   }
+  // Closing the document viewer specifically (not payrollDocsRoot being
+  // displaced to make room for it — see openFullscreenView, where that
+  // transition never leaves fullscreenActiveId as 'docViewerRoot') is the
+  // one case fullscreenReturnTo_ exists for. payrollDocsState_ and the
+  // Browse drill-down's actual rendered content were never touched while
+  // the viewer was open, so reopening it is the whole fix — no re-render,
+  // no re-fetch, just putting the same screen back the way a real "go
+  // back" should.
+  // Only clear fullscreenReturnTo_ when THIS close is the one consuming it
+  // (fullscreenActiveId === 'docViewerRoot'). closeFullscreenView() also
+  // runs recursively from inside openFullscreenView('docViewerRoot') itself
+  // — to displace the payrollDocsRoot that was open before it — and that
+  // inner close (fullscreenActiveId still 'payrollDocsRoot' at that point)
+  // used to blindly null the value out one line after openFullscreenView
+  // had just set it moments earlier for this exact close to use later,
+  // leaving nothing left to return to and silently falling back to
+  // kmtRestoreView's own reopen path, which never removes payrollDocsRoot's
+  // own hidden class the way this one does.
+  let returnTo = null;
+  if(fullscreenActiveId === 'docViewerRoot'){
+    returnTo = fullscreenReturnTo_;
+    fullscreenReturnTo_ = null;
+  }
   document.getElementById('fullscreenSheetRoot').classList.add('hidden');
   kmtUnlockBodyScroll('fullscreen');
   fullscreenActiveId = null;
   updateSheetScrollNavVisibility();
   try{ if(document.fullscreenElement) document.exitFullscreen().catch(()=>{}); }catch(e){}
+  if(returnTo){
+    // The close just above (this same function, the first time it ran for
+    // this box) added .hidden to returnTo.sourceId as part of putting it
+    // away — the exact same reason openPayrollDocsModule() removes it
+    // before ever calling openFullscreenView() the first time a module is
+    // opened. Skipping this step here left fullscreenActiveId correctly
+    // pointing at payrollDocsRoot while the element itself stayed
+    // display:none — "restored" in name only, still an empty full-screen
+    // shell on screen.
+    const target = document.getElementById(returnTo.sourceId);
+    if(target) target.classList.remove('hidden');
+    openFullscreenView(returnTo.title, returnTo.sourceId);
+  }
 }
 // The full-screen header's own Close button, generic across every use of
 // full screen (reports, letters, the Salary Sheet). A report/letter already
