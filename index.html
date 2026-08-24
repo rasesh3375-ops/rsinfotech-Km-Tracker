@@ -8247,6 +8247,22 @@ function kmtNudgeRepaint_(){
     resettleFixedOverlays_();
   });
 }
+// Same retry-blind reasoning as kmtSettleAndReveal_ below (one nudge alone
+// isn't a reliable win against WebKit's own recompute timing), but for
+// repairing a screen that's already on-screen and already being looked at
+// -- a pinch-zoom just ended, say -- rather than one still being freshly
+// opened. Hiding it first, the way kmtSettleAndReveal_ does for a fresh
+// open, would itself be a visible flash here; there's nothing to reveal
+// afterward that wasn't already showing.
+function kmtRetryNudgeRepaint_(){
+  let attempts = 0;
+  const tick = () => {
+    kmtNudgeRepaint_();
+    attempts++;
+    if(attempts < 5) setTimeout(tick, 40);
+  };
+  tick();
+}
 // Hides el, retries kmtNudgeRepaint_ a handful of times over ~200ms, then
 // reveals it. A single nudge (kmtNudgeRepaint_ alone) was confirmed still
 // unreliable on a real device -- two screenshots taken a minute apart on a
@@ -8280,7 +8296,7 @@ if(!window.KMT_NUDGE_LISTENERS_ARMED_){
   window.addEventListener('pageshow', () => {
     if(kmtBodyLockOwners.size) kmtNudgeRepaint_();
   });
-  // visualViewport.resize is the one direct signal for "the user just
+  // visualViewport.resize is the direct signal for "the user just
   // pinch-zoomed" -- unlike the two listeners above, which only ever catch
   // an app-switch. A real recording confirmed the exact same stale-paint
   // bleed-through happening on pinch-zoom, both on a plain tab with
@@ -8291,14 +8307,41 @@ if(!window.KMT_NUDGE_LISTENERS_ARMED_){
   // event: resize fires continuously while the gesture is still live, and
   // nudging mid-gesture would just fight the browser's own zoom animation
   // -- this waits for the events to stop arriving (the gesture has ended)
-  // before running once.
+  // before running once. kmtRetryNudgeRepaint_ (below), not a single call
+  // -- kmtSettleAndReveal_'s own comment already found one nudge alone
+  // "confirmed still unreliable on a real device", needing several
+  // attempts over the settle window to actually land.
   if(window.visualViewport){
     let kmtZoomSettleTimer_ = null;
     window.visualViewport.addEventListener('resize', () => {
       clearTimeout(kmtZoomSettleTimer_);
-      kmtZoomSettleTimer_ = setTimeout(kmtNudgeRepaint_, 150);
+      kmtZoomSettleTimer_ = setTimeout(kmtRetryNudgeRepaint_, 150);
     });
   }
+  // A second recording, taken after the visualViewport.resize listener
+  // above was already live, showed the exact same unrepaired bleed-through
+  // -- meaning that listener isn't firing reliably enough here to matter.
+  // resettleFixedOverlays_'s own comment already found visualViewport
+  // "unreliable full stop" specifically in standalone/home-screen mode
+  // (this app's normal installed mode on iPhone, per the manifest), as
+  // opposed to a plain Safari tab, where it was confirmed working -- so
+  // this isn't a surprise in hindsight. touchend/touchcancel are plain DOM
+  // touch events with no such caveat; they fire identically in every mode.
+  // Tracking whether a multi-touch (pinch) gesture was ever in progress
+  // and nudging the moment every finger lifts is a second path to the same
+  // repair that doesn't depend on visualViewport working at all -- kept
+  // alongside that listener, not instead of it, since there's no certainty
+  // yet which (if either) is what actually fires reliably on this device.
+  let kmtPinchInProgress_ = false;
+  document.addEventListener('touchstart', e => { if(e.touches.length > 1) kmtPinchInProgress_ = true; }, { passive:true });
+  document.addEventListener('touchmove', e => { if(e.touches.length > 1) kmtPinchInProgress_ = true; }, { passive:true });
+  document.addEventListener('touchend', e => {
+    if(kmtPinchInProgress_ && e.touches.length === 0){
+      kmtPinchInProgress_ = false;
+      kmtRetryNudgeRepaint_();
+    }
+  }, { passive:true });
+  document.addEventListener('touchcancel', () => { kmtPinchInProgress_ = false; }, { passive:true });
 }
 function kmtLockBodyScroll(owner){
   const wasEmpty = !kmtBodyLockOwners.size;
