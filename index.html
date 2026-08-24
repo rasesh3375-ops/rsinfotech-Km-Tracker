@@ -21657,7 +21657,7 @@ async function renderPendingLeaveRequests(){
           ${escapeHtml(r.typeLabel)} · ${fmtDateIN(r.from)}${r.to && r.to !== r.from ? ' to ' + fmtDateIN(r.to) : ''}${r.lateTime ? ' at ' + escapeHtml(r.lateTime) : ''}
           ${r.reason ? ' · ' + escapeHtml(r.reason) : ''}
           <br>Applied ${fmtDateIN(String(r.requestedOn || '').slice(0, 10))}${r.source === 'employee' ? ' by the employee' : ''}
-          ${r.certificateUrl ? '<br><button type="button" style="background:none;border:none;padding:0;font:inherit;cursor:pointer;color:var(--amber-dark);font-weight:600;" onclick="viewEmployeeDocument(\'' + r.certificateUrl.replace(/'/g,"\\'") + '\',\'Medical certificate — ' + (r.employeeName || '').replace(/'/g,"\\'") + '\')">View medical certificate</button>' : ''}
+          ${r.certificateUrl ? '<br><button type="button" style="background:none;border:none;padding:0;font:inherit;cursor:pointer;color:var(--amber-dark);font-weight:600;" onclick="viewEmployeeDocument(\'' + r.certificateUrl.replace(/"/g,'&quot;').replace(/'/g,"\\'") + '\',\'Medical certificate — ' + (r.employeeName || '').replace(/"/g,'&quot;').replace(/'/g,"\\'") + '\')">View medical certificate</button>' : ''}
         </p>
         <div class="row-inline" style="margin:10px 0 0;">
           <button class="btn" style="flex:1;" onclick="approveLeaveRequest('${escapeHtml(r.id)}')">Approve</button>
@@ -22183,7 +22183,13 @@ function escapeHtml(str){
   if(str === null || str === undefined) return '';
   const div = document.createElement('div');
   div.textContent = String(str);
-  return div.innerHTML;
+  // textContent->innerHTML escapes &, < and > but not quote characters —
+  // safe for text between tags, but a value placed inside a double-quoted
+  // HTML attribute (title="...", value="...", data-x="...") could still
+  // break out of it on a literal ". Escaping both quote characters as
+  // entities costs nothing where escapeHtml is already used for plain text,
+  // and closes that attribute-context gap everywhere else it's used.
+  return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 
