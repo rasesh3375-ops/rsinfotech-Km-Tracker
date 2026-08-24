@@ -12415,13 +12415,31 @@ async function hrNavigate(route, opts){
   // No-ops mid-restore (kmtRestoring), and no-ops if there's nothing of ours
   // to update yet (the exit-guard placeholder, or a fresh page load).
   kmtCaptureDeparture();
-  // Navigating away must never leave a full-screen report stuck on top of
-  // the screen it's navigating to — a stale overlay showing the report you
-  // just left behind, on a tab that no longer has anything to do with it.
-  // Covers every way of leaving a report full screen that isn't its own
-  // Close button: the sidebar, a breadcrumb, or a close handler (like a
-  // Letter's) that navigates elsewhere instead of just clearing a box.
+  // Navigating away must never leave a full-screen report, or any of the
+  // app's other body-scroll-locking modals (Add/Edit Employee, Record
+  // Increment, a Joining/Exit checklist, a Payroll Documents form, global
+  // search), stuck open behind — or worse, floating on top of — the screen
+  // being navigated to. Every one of these is normally closed by its own
+  // ✕/backdrop/Escape, none of which fire when the sidebar (or any other
+  // in-app link) is what actually navigates away — so kmtLockBodyScroll's
+  // owner for it never gets released, document.body stays permanently
+  // overflow:hidden, and mouse-wheel scrolling silently stops working for
+  // the rest of the session, on every screen, not just the one the modal
+  // was opened from. force:true on closeEmployeeModal skips its "unsaved
+  // changes?" confirm — that guard is for someone clicking the form's own
+  // ✕, not for a deliberate navigation elsewhere, and nothing typed is
+  // actually lost since the draft is autosaved regardless (see
+  // scheduleEmployeeDraftSave). Every other close function here has no such
+  // guard and is already safe to call unconditionally even when its own
+  // modal isn't open — innerHTML = '' twice is a no-op, and
+  // kmtUnlockBodyScroll on an owner that was never locked is a no-op too
+  // (kmtBodyLockOwners is a Set).
   if(fullscreenActiveId) closeFullscreenView();
+  closeEmployeeModal(true);
+  closeIncrementModal();
+  closeChecklistModal();
+  closePayrollDocModal();
+  closeGlobalSearch();
   hrRoute = route;
   HR_PANELS.forEach(id => {
     const el = document.getElementById(id);
