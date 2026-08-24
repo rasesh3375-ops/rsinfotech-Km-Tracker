@@ -8942,7 +8942,7 @@ async function withBusy(btn, label, fn){
 // rather than a stack of app buttons.
 function reportActionBar(title, sourceId, closeAttr, opts){
   opts = opts || {};
-  const safeTitle = String(title).replace(/'/g, "\\'");
+  const safeTitle = escapeJsAttr_(title);
   const close = closeAttr || `closeReportView('${sourceId}')`;
   // topClose:false hides (not removes) the small standalone ✕ here — kept in
   // the DOM, just out of sight, for content that always opens straight into
@@ -15365,9 +15365,9 @@ function dropOversizedInlineDocuments(draft){
 // need for something the app already uploaded on her behalf.
 function docCardHtml(v, label){
   if(!v) return '';
-  const safeLabel = (label || 'Document').replace(/'/g, "\\'");
+  const safeLabel = escapeJsAttr_(label || 'Document');
   return /^https?:/.test(v)
-    ? '<button type="button" class="doc-card" onclick="viewEmployeeDocument(\'' + v.replace(/'/g, "\\'") + '\',\'' + safeLabel + '\')">✓ Saved — view</button>'
+    ? '<button type="button" class="doc-card" onclick="viewEmployeeDocument(\'' + escapeJsAttr_(v) + '\',\'' + safeLabel + '\')">✓ Saved — view</button>'
     : '<div class="doc-card">✓ Saved (stored in the record)</div>';
 }
 
@@ -19669,7 +19669,7 @@ async function openChecklistFor(empId){
     <div class="modal-box">
       <div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="closeChecklistModal()" title="Close" aria-label="Close">✕</button></div>
       <h2>${escapeHtml(emp.name)} — ${currentChecklistType === 'joining' ? 'Joining' : 'Exit'} checklist</h2>
-      ${items.map((label,i) => `<div class="checklist-row"><input type="checkbox" id="chk_${i}" ${state[label] ? 'checked' : ''} onchange="toggleChecklistItem('${empId}','${label.replace(/'/g,"\\'")}',this.checked)"><label for="chk_${i}">${label}</label></div>`).join('')}
+      ${items.map((label,i) => `<div class="checklist-row"><input type="checkbox" id="chk_${i}" ${state[label] ? 'checked' : ''} onchange="toggleChecklistItem('${empId}','${escapeJsAttr_(label)}',this.checked)"><label for="chk_${i}">${label}</label></div>`).join('')}
     </div>
   </div>`;
 }
@@ -20012,7 +20012,7 @@ async function renderHandbookSection(){
   const handbook = await getEmployeeHandbook();
   const info = document.getElementById('handbookCurrentInfo');
   if(handbook && handbook.fileUrl){
-    info.innerHTML = `<button type="button" class="doc-card" onclick="viewEmployeeHandbook('${(handbook.fileName || 'Employee Handbook').replace(/'/g,"\\'")}')">✓ Current: ${escapeHtml(handbook.fileName)}${handbook.year ? ' (' + escapeHtml(String(handbook.year)) + ')' : ''}</button>`;
+    info.innerHTML = `<button type="button" class="doc-card" onclick="viewEmployeeHandbook('${escapeJsAttr_(handbook.fileName || 'Employee Handbook')}')">✓ Current: ${escapeHtml(handbook.fileName)}${handbook.year ? ' (' + escapeHtml(String(handbook.year)) + ')' : ''}</button>`;
   } else {
     info.innerHTML = '<div class="empty">No handbook uploaded yet.</div>';
   }
@@ -20513,8 +20513,8 @@ async function renderPayrollDocsBrowse_(body){
     `<div class="payroll-docs-list">` + matchingRecs.map(payrollDocRecordCardHtml_).join('') + `</div>`;
 }
 function payrollDocRecordCardHtml_(rec){
-  const safeUrl = (rec.url||'').replace(/'/g,"\\'");
-  const safeFileName = (rec.fileName||rec.docTypeLabel||'Document').replace(/'/g,"\\'");
+  const safeUrl = escapeJsAttr_(rec.url||'');
+  const safeFileName = escapeJsAttr_(rec.fileName||rec.docTypeLabel||'Document');
   return `<div class="emp-row">
     <div class="head"><strong>${escapeHtml(rec.docName || rec.docTypeLabel)}</strong><span class="id">${escapeHtml(rec.fy)} · ${escapeHtml(rec.monthLabel)}</span></div>
     <div class="sub">${escapeHtml(rec.docTypeLabel)} — ${escapeHtml(rec.fileName)}</div>
@@ -20605,7 +20605,7 @@ async function renderPayrollDocsUnclassified_(body){
       <div class="sub">${escapeHtml(d.fileName || '')}</div>
       ${d.note ? `<div class="sub">${escapeHtml(d.note)}</div>` : ''}
       <div class="actions">
-        <button type="button" class="btn ghost" onclick="viewEmployeeDocument('${(d.url||'').replace(/'/g,"\\'")}','${(d.fileName||'Document').replace(/'/g,"\\'")}')">View</button>
+        <button type="button" class="btn ghost" onclick="viewEmployeeDocument('${escapeJsAttr_(d.url||'')}','${escapeJsAttr_(d.fileName||'Document')}')">View</button>
         <button type="button" class="btn ghost" onclick="openPayrollDocClassifyModal('${d.id}')">Classify</button>
       </div>
     </div>`).join('') + `</div>`;
@@ -20798,8 +20798,8 @@ function payrollDocHistoryEntryHtml_(h){
       `${escapeHtml(k)}: ${escapeHtml(String((v&&v.from) ?? ''))} → ${escapeHtml(String((v&&v.to) ?? ''))}`).join('<br>');
   }
   if(h.oldFileName){
-    const safeOldUrl = (h.oldUrl||'').replace(/'/g,"\\'");
-    const safeOldName = (h.oldFileName||'').replace(/'/g,"\\'");
+    const safeOldUrl = escapeJsAttr_(h.oldUrl||'');
+    const safeOldName = escapeJsAttr_(h.oldFileName||'');
     detail += (detail?'<br>':'') + `Previous file: <a href="#" onclick="viewEmployeeDocument('${safeOldUrl}','${safeOldName}');return false;">${escapeHtml(h.oldFileName)}</a>`;
   }
   if(h.note) detail += (detail?'<br>':'') + escapeHtml(h.note);
@@ -21167,7 +21167,7 @@ async function renderApprenticeDocList(){
       <div class="head"><strong>${d.category}</strong>${d.employeeName ? `<span class="id">${d.employeeName}</span>` : ''}</div>
       <div class="sub">${d.fileName}${d.note ? ' · ' + d.note : ''}</div>
       <div class="actions">
-        <button type="button" class="btn ghost" onclick="viewEmployeeDocument('${(d.url||'').replace(/'/g,"\\'")}','${(d.fileName||d.category||'Document').replace(/'/g,"\\'")}')">Open</button>
+        <button type="button" class="btn ghost" onclick="viewEmployeeDocument('${escapeJsAttr_(d.url||'')}','${escapeJsAttr_(d.fileName||d.category||'Document')}')">Open</button>
         <button class="btn ghost" onclick="deleteApprenticeDoc('${d.id}')">Remove</button>
       </div>
     </div>`).join('');
@@ -21239,7 +21239,7 @@ async function renderCompanyDocList(category){
       <div class="head"><strong>${escapeHtml(d.name)}</strong></div>
       <div class="sub">${d.fileName}</div>
       <div class="actions">
-        <button type="button" class="btn ghost" onclick="viewEmployeeDocument('${(d.url||'').replace(/'/g,"\\'")}','${(d.fileName||d.name||'Document').replace(/'/g,"\\'")}')">Open</button>
+        <button type="button" class="btn ghost" onclick="viewEmployeeDocument('${escapeJsAttr_(d.url||'')}','${escapeJsAttr_(d.fileName||d.name||'Document')}')">Open</button>
         <button class="btn ghost" onclick="deleteCompanyDoc('${category}','${d.id}')">Remove</button>
       </div>
     </div>`).join('');
@@ -21287,23 +21287,23 @@ async function renderUniformIdForm(employeeId){
   box.innerHTML = `<div class="emp-row">
       <div class="head"><strong>${escapeHtml(e.name)}</strong></div>
       <div style="height:10px"></div>
-      <label class="checklist-row"><input type="checkbox" ${u.uniformIssued?'checked':''} onchange="updateUniformField('${e.id}','${e.name.replace(/'/g,"\\'")}','uniformIssued',this.checked)"> Uniform issued</label>
+      <label class="checklist-row"><input type="checkbox" ${u.uniformIssued?'checked':''} onchange="updateUniformField('${e.id}','${escapeJsAttr_(e.name)}','uniformIssued',this.checked)"> Uniform issued</label>
       <label class="field">Uniform size</label>
-      <input type="text" value="${u.uniformSize||''}" placeholder="e.g. L" onchange="updateUniformField('${e.id}','${e.name.replace(/'/g,"\\'")}','uniformSize',this.value)">
+      <input type="text" value="${u.uniformSize||''}" placeholder="e.g. L" onchange="updateUniformField('${e.id}','${escapeJsAttr_(e.name)}','uniformSize',this.value)">
       <div style="height:10px"></div>
       <label class="field">Uniform issue date</label>
-      <input type="date" value="${u.uniformDate||''}" onchange="updateUniformField('${e.id}','${e.name.replace(/'/g,"\\'")}','uniformDate',this.value)">
+      <input type="date" value="${u.uniformDate||''}" onchange="updateUniformField('${e.id}','${escapeJsAttr_(e.name)}','uniformDate',this.value)">
       <div style="height:14px"></div>
-      <label class="checklist-row"><input type="checkbox" ${u.idIssued?'checked':''} onchange="updateUniformField('${e.id}','${e.name.replace(/'/g,"\\'")}','idIssued',this.checked)"> ID card issued</label>
+      <label class="checklist-row"><input type="checkbox" ${u.idIssued?'checked':''} onchange="updateUniformField('${e.id}','${escapeJsAttr_(e.name)}','idIssued',this.checked)"> ID card issued</label>
       <label class="field">ID card number</label>
-      <input type="text" value="${u.idNumber||''}" onchange="updateUniformField('${e.id}','${e.name.replace(/'/g,"\\'")}','idNumber',this.value)">
+      <input type="text" value="${u.idNumber||''}" onchange="updateUniformField('${e.id}','${escapeJsAttr_(e.name)}','idNumber',this.value)">
       <div style="height:10px"></div>
       <label class="field">ID issue date</label>
-      <input type="date" value="${u.idDate||''}" onchange="updateUniformField('${e.id}','${e.name.replace(/'/g,"\\'")}','idDate',this.value)">
+      <input type="date" value="${u.idDate||''}" onchange="updateUniformField('${e.id}','${escapeJsAttr_(e.name)}','idDate',this.value)">
       <div style="height:10px"></div>
       <label class="field">Supporting document (ID photo, receipt, etc.)</label>
-      <input type="file" accept=".pdf,.jpg,.jpeg,.png" onchange="uploadUniformDoc('${e.id}','${e.name.replace(/'/g,"\\'")}', event)">
-      ${u.docUrl ? `<button type="button" class="doc-card" onclick="viewEmployeeDocument('${u.docUrl.replace(/'/g,"\\'")}','${(u.docName||'Document').replace(/'/g,"\\'")}')">✓ ${escapeHtml(u.docName)}</button>` : ''}
+      <input type="file" accept=".pdf,.jpg,.jpeg,.png" onchange="uploadUniformDoc('${e.id}','${escapeJsAttr_(e.name)}', event)">
+      ${u.docUrl ? `<button type="button" class="doc-card" onclick="viewEmployeeDocument('${escapeJsAttr_(u.docUrl)}','${escapeJsAttr_(u.docName||'Document')}')">✓ ${escapeHtml(u.docName)}</button>` : ''}
     </div>`;
 }
 async function updateUniformField(employeeId, employeeName, field, value){
@@ -21657,7 +21657,7 @@ async function renderPendingLeaveRequests(){
           ${escapeHtml(r.typeLabel)} · ${fmtDateIN(r.from)}${r.to && r.to !== r.from ? ' to ' + fmtDateIN(r.to) : ''}${r.lateTime ? ' at ' + escapeHtml(r.lateTime) : ''}
           ${r.reason ? ' · ' + escapeHtml(r.reason) : ''}
           <br>Applied ${fmtDateIN(String(r.requestedOn || '').slice(0, 10))}${r.source === 'employee' ? ' by the employee' : ''}
-          ${r.certificateUrl ? '<br><button type="button" style="background:none;border:none;padding:0;font:inherit;cursor:pointer;color:var(--amber-dark);font-weight:600;" onclick="viewEmployeeDocument(\'' + r.certificateUrl.replace(/"/g,'&quot;').replace(/'/g,"\\'") + '\',\'Medical certificate — ' + (r.employeeName || '').replace(/"/g,'&quot;').replace(/'/g,"\\'") + '\')">View medical certificate</button>' : ''}
+          ${r.certificateUrl ? '<br><button type="button" style="background:none;border:none;padding:0;font:inherit;cursor:pointer;color:var(--amber-dark);font-weight:600;" onclick="viewEmployeeDocument(\'' + escapeJsAttr_(r.certificateUrl) + '\',\'Medical certificate — ' + escapeJsAttr_(r.employeeName) + '\')">View medical certificate</button>' : ''}
         </p>
         <div class="row-inline" style="margin:10px 0 0;">
           <button class="btn" style="flex:1;" onclick="approveLeaveRequest('${escapeHtml(r.id)}')">Approve</button>
@@ -22190,6 +22190,24 @@ function escapeHtml(str){
   // entities costs nothing where escapeHtml is already used for plain text,
   // and closes that attribute-context gap everywhere else it's used.
   return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// Safe to embed as a single-quoted JS string literal inside a double-quoted
+// onclick/onchange attribute — onclick="fn('${escapeJsAttr_(x)}')". Two
+// different things can break that, and each needs a different fix: a
+// literal " ends the HTML attribute itself, before the browser ever treats
+// the value as JavaScript, which is why this entity-escapes it — plain
+// backslash-escaping doesn't help there, since HTML attribute parsing
+// knows nothing about backslashes. A literal ' ends the JS string once the
+// attribute's entities are decoded and the value is parsed as script —
+// which is why entity-escaping does NOT protect it: the decode step undoes
+// &#39; right back into a raw ' before the JS engine ever sees it, so only
+// backslash-escaping survives to that point. Every call site that used to
+// hand-roll .replace(/'/g,"\\'") alone (fixing the ' half only) had this
+// same " gap; this is the one place that combination is written now.
+function escapeJsAttr_(str){
+  if(str === null || str === undefined) return '';
+  return String(str).replace(/"/g, '&quot;').replace(/'/g, "\\'");
 }
 
 
