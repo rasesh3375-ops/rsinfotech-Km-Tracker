@@ -8292,6 +8292,7 @@ const KMT_BODY_LOCK_STILL_OPEN_ = {
   payrollDocModal: () => !!(document.getElementById('payrollDocModalRoot') || {}).innerHTML,
   globalSearch: () => !(document.getElementById('gsOverlay') || { classList:{ contains:() => true } }).classList.contains('hidden'),
   fullscreen: () => !!fullscreenActiveId,
+  hrNavDrawer: () => document.body.classList.contains('hr-nav-open'),
 };
 function kmtReconcileBodyLocks_(){
   if(!kmtBodyLockOwners.size) return;
@@ -12436,6 +12437,16 @@ function toggleHrNav(force){
   // ancestor's class being re-evaluated.
   const sb = document.getElementById('hrSidebar');
   if(sb) sb.classList.toggle('open', open);
+  // The mobile drawer used to lock scroll with its own plain CSS rule
+  // (body.hr-nav-open{overflow:hidden}) instead of kmtLockBodyScroll — which
+  // meant a drawer left open by any path that skips toggleHrNav(false) (the
+  // one found so far: hrNavigate's own unsaved-attendance confirm, declined,
+  // returns before ever reaching it) locked scroll on every screen with
+  // nothing kmtReconcileBodyLocks_ could see or self-heal, since it only
+  // ever looks at kmtBodyLockOwners, never at body's classList directly.
+  // Routing the lock through the same owner the rest of the app already
+  // self-heals on wheel/keydown/focus/visibilitychange closes that gap.
+  if(open) kmtLockBodyScroll('hrNavDrawer'); else kmtUnlockBodyScroll('hrNavDrawer');
 }
 
 async function hrNavigate(route, opts){
