@@ -8274,6 +8274,34 @@ if(!window.KMT_NUDGE_LISTENERS_ARMED_){
     if(kmtBodyLockOwners.size) kmtNudgeRepaint_();
   });
 }
+// maximum-scale=1.0/user-scalable=no on the viewport meta tag above states
+// intent, but iOS Safari has deliberately ignored both — an Apple
+// accessibility override, not a bug — since iOS 10, so a page can never
+// fully lock out pinch-zoom through the meta tag alone. Confirmed still
+// zooming on a real iPhone even with that directive in place, with the
+// exact same stale-paint bleed-through (see kmtNudgeRepaint_'s own
+// comment) it was meant to prevent — content from whatever was behind the
+// zoomed element showing through underneath it once the gesture ended.
+// Intercepting the gesture itself, rather than only declaring intent to
+// the browser, is what actually stops it: touchmove with two or more
+// touches IS the pinch gesture in progress, and gesturestart/change/end
+// are the WebKit-specific events fired alongside it — preventDefault on
+// either keeps the native zoom from ever taking effect, instead of
+// detecting and repairing its aftermath. Skips anything inside a Leaflet
+// map (.leaflet-container, see ensureLiveMap/L.map) — pinch-to-zoom the
+// Live Tracking map is a real, wanted gesture, not this bug, and Leaflet
+// needs the untouched event to handle it itself.
+if(!window.KMT_PINCH_ZOOM_BLOCKED_){
+  window.KMT_PINCH_ZOOM_BLOCKED_ = true;
+  document.addEventListener('touchmove', e => {
+    if(e.touches.length > 1 && !e.target.closest('.leaflet-container')) e.preventDefault();
+  }, { passive:false });
+  ['gesturestart','gesturechange','gestureend'].forEach(evt => {
+    document.addEventListener(evt, e => {
+      if(!e.target.closest('.leaflet-container')) e.preventDefault();
+    });
+  });
+}
 function kmtLockBodyScroll(owner){
   const wasEmpty = !kmtBodyLockOwners.size;
   kmtBodyLockOwners.add(owner);
