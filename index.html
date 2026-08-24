@@ -4919,7 +4919,30 @@ async function selectRole(role){
     // already handles that cleanly — this doesn't need to duplicate it.
     if(hrSession === 'yes' && sessionToken && sessionRole === 'hr'){
       document.getElementById('hrGate').classList.add('hidden');
+      // Read the persisted snapshot BEFORE enterHrMain() runs, not after —
+      // enterHrMain()'s own first step navigates to 'dashboard', which goes
+      // through hrNavigate -> kmtCaptureDeparture -> kmtPersistLastView_,
+      // overwriting this exact key with a fresh 'dashboard' snapshot before
+      // there's ever a chance to read the real one back out.
+      let lastView = null;
+      try{
+        const raw = localStorage.getItem('kmt_last_view');
+        lastView = raw ? JSON.parse(raw) : null;
+      }catch(e){}
       await enterHrMain();
+      // enterHrMain() itself always lands on the plain Dashboard — restoring
+      // to wherever HR actually was happens right after, as a second,
+      // corrective navigation, rather than trying to thread it through
+      // enterHrMain's own warm-up sequence. fullscreen is deliberately
+      // dropped from the restored descriptor: reopening the document viewer
+      // here would show a permanently blank "Opening…" — the fetch that
+      // fills it only ever runs from an actual View/Download tap, never
+      // from a restore — so this only ever goes back as far as the route
+      // and, where there was one, the open accordion section/report card
+      // underneath it.
+      try{
+        if(lastView && lastView.kmtView) await kmtRestoreView(Object.assign({}, lastView, { fullscreen: null }));
+      }catch(e){}
       return;
     }
     const existsCheck = await checkHrAccountExists();
@@ -5143,6 +5166,11 @@ async function logoutHr(){
   // lastGoodEmployeesJson comment in remoteGetAllEmployees_ for the bug this
   // avoided (a stale headcount surviving a logout/login on the same device).
   invalidateSharedRead();
+  // Same reasoning for kmtPersistLastView_'s snapshot (see selectRole's
+  // restore of it) — a deliberate logout should land the next sign-in on
+  // the plain Dashboard, not silently resume whatever screen this
+  // logged-out session happened to be on days ago.
+  try{ localStorage.removeItem('kmt_last_view'); }catch(e){}
   goHome();
   apiFetch(API_URL, {
     method: 'POST',
@@ -12425,6 +12453,20 @@ function kmtSnapshotView(){
   };
 }
 
+// Also mirrored to localStorage (see kmtCaptureDeparture/kmtCommitArrival)
+// so the same "what was on screen" snapshot survives a full app reload, not
+// just an in-app Back — history.state doesn't reliably outlive one. Opening
+// a document (View/Download) triggers exactly this: iOS hands the file to
+// its own PDF viewer rather than actually downloading it, and returning to
+// the app was reported landing back on the plain Dashboard instead of
+// wherever HR actually was — Payroll Documents' Browse drill-down, a
+// generated report, an open accordion section — because a reload as jarring
+// as rendering a full PDF can evict the WKWebView process entirely, taking
+// every bit of in-memory JS state (including history.state, in practice)
+// down with it. localStorage is the one thing guaranteed to survive that.
+function kmtPersistLastView_(){
+  try{ localStorage.setItem('kmt_last_view', JSON.stringify(kmtSnapshotView())); }catch(e){}
+}
 // Snapshots the view being LEFT and writes it back onto the history entry
 // already sitting there for it (replaceState, not push — that entry exists
 // already, this just brings it up to date before we navigate away from it).
@@ -12434,6 +12476,7 @@ function kmtSnapshotView(){
 function kmtCaptureDeparture(){
   if(kmtRestoring) return;
   if(history.state && history.state.kmtView) history.replaceState(kmtSnapshotView(), '');
+  kmtPersistLastView_();
 }
 // Pushes a fresh snapshot of the view just ARRIVED at. No-ops mid-restore
 // for the same reason as above — a restore is replaying an existing entry,
@@ -12441,6 +12484,7 @@ function kmtCaptureDeparture(){
 function kmtCommitArrival(){
   if(kmtRestoring) return;
   history.pushState(kmtSnapshotView(), '');
+  kmtPersistLastView_();
 }
 
 // The shared "go back one view" used by every in-app Back control (not just
