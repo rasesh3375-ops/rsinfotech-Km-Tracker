@@ -8202,6 +8202,31 @@ function kmtNudgeRepaint_(){
     el.scrollTop = y;
   });
   els.forEach(el => { el.style.transform = 'translateZ(0.001px)'; });
+  // #fullscreenSheetRoot (every report, letter and the document viewer) is
+  // the same position:fixed;inset:0 shape as .modal-overlay but was never
+  // in the querySelectorAll above, so nudging it needed its own lines --
+  // confirmed via a real recording that pinch-zooming while a document was
+  // open left it exactly this stale: content from the tab underneath
+  // bleeding through, cut off and shifted. The root itself doesn't scroll
+  // (#fullscreenBody, its child, does), so the scroll nudge and the
+  // transform nudge target different elements here.
+  const fsRoot = document.getElementById('fullscreenSheetRoot');
+  const fsBody = document.getElementById('fullscreenBody');
+  const fsOpen = !!(fsRoot && !fsRoot.classList.contains('hidden'));
+  if(fsBody){
+    const fy = fsBody.scrollTop;
+    fsBody.scrollTop = fy + 1;
+    fsBody.scrollTop = fy;
+  }
+  if(fsOpen) fsRoot.style.transform = 'translateZ(0.001px)';
+  // Ordinary page scroll -- the same bleed-through was also reported on a
+  // plain tab with no modal or fullscreen view open at all (just Settings,
+  // mid pinch-zoom), so the nudge needs a target even when neither of the
+  // above exists. window is what actually scrolls the page here (see the
+  // hrContent/window.scrollTo split throughout hrNavigate), not body.
+  const py = window.scrollY;
+  window.scrollTo(window.scrollX, py + 1);
+  window.scrollTo(window.scrollX, py);
   // Retrying the scroll+transform combination five times over the settle
   // window (see kmtSettleAndReveal_) STILL didn't reliably fix it --
   // confirmed on a real device, cut-off diagnostic line and bleed-through
@@ -8217,6 +8242,7 @@ function kmtNudgeRepaint_(){
   if(meta) meta.setAttribute('content', metaOriginal + ', maximum-scale=1');
   window.requestAnimationFrame(() => {
     els.forEach(el => { el.style.transform = 'translateZ(0)'; });
+    if(fsOpen) fsRoot.style.transform = 'translateZ(0)';
     if(meta) meta.setAttribute('content', metaOriginal);
     resettleFixedOverlays_();
   });
@@ -8254,6 +8280,25 @@ if(!window.KMT_NUDGE_LISTENERS_ARMED_){
   window.addEventListener('pageshow', () => {
     if(kmtBodyLockOwners.size) kmtNudgeRepaint_();
   });
+  // visualViewport.resize is the one direct signal for "the user just
+  // pinch-zoomed" -- unlike the two listeners above, which only ever catch
+  // an app-switch. A real recording confirmed the exact same stale-paint
+  // bleed-through happening on pinch-zoom, both on a plain tab with
+  // nothing open and inside the fullscreen document viewer, so this fires
+  // unconditionally rather than only while kmtBodyLockOwners holds
+  // something -- kmtNudgeRepaint_ is cheap and a harmless no-op wherever
+  // there is nothing open to nudge. Debounced rather than fired on every
+  // event: resize fires continuously while the gesture is still live, and
+  // nudging mid-gesture would just fight the browser's own zoom animation
+  // -- this waits for the events to stop arriving (the gesture has ended)
+  // before running once.
+  if(window.visualViewport){
+    let kmtZoomSettleTimer_ = null;
+    window.visualViewport.addEventListener('resize', () => {
+      clearTimeout(kmtZoomSettleTimer_);
+      kmtZoomSettleTimer_ = setTimeout(kmtNudgeRepaint_, 150);
+    });
+  }
 }
 function kmtLockBodyScroll(owner){
   const wasEmpty = !kmtBodyLockOwners.size;
