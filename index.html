@@ -4900,17 +4900,31 @@ async function selectRole(role){
     }
   } else {
     document.getElementById('hrScreen').classList.remove('hidden');
-    const existsCheck = await checkHrAccountExists();
-    const reachedServer = !(existsCheck && existsCheck.error);
-    const hasHrPassword = !!(existsCheck && existsCheck.exists);
     const hrSession = await safeGet('hr_session', false);
     document.getElementById('hrGate').classList.remove('hidden');
     document.getElementById('hrMain').classList.add('hidden');
-    if(hrSession === 'yes' && hasHrPassword && sessionToken && sessionRole === 'hr'){
+    // A valid-looking local session (all three of these are plain
+    // localStorage reads — see safeGet/setSession — no network involved)
+    // is trusted on its own, without first waiting on checkHrAccountExists()
+    // below. That call exists only to choose between the setup screen and
+    // the login screen for someone who ISN'T already signed in; it was
+    // never actually needed to confirm an existing token is still good, but
+    // used to gate the restore anyway — so a slow or momentarily failed
+    // network check (returning to the app right after viewing a large
+    // document was one observed trigger, likely under network/memory
+    // pressure at that exact moment) dropped HR back to a blank login
+    // screen despite a perfectly valid session already sitting in
+    // localStorage. If the token really has expired, the first real API
+    // call inside enterHrMain() answers 'unauthorized' and onSessionExpired()
+    // already handles that cleanly — this doesn't need to duplicate it.
+    if(hrSession === 'yes' && sessionToken && sessionRole === 'hr'){
       document.getElementById('hrGate').classList.add('hidden');
       await enterHrMain();
       return;
     }
+    const existsCheck = await checkHrAccountExists();
+    const reachedServer = !(existsCheck && existsCheck.error);
+    const hasHrPassword = !!(existsCheck && existsCheck.exists);
     if(!reachedServer){
       // Couldn't ask the server. Show the login form, never the setup form —
       // offering to create an HR account here would hide the real login and
