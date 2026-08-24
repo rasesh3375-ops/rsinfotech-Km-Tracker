@@ -8258,6 +8258,50 @@ function kmtUnlockBodyScroll(owner){
     if(kmtResettleRafId){ window.cancelAnimationFrame(kmtResettleRafId); kmtResettleRafId = null; }
   }
 }
+// Every owner above is closed by its own function, and hrNavigate already
+// force-closes all of them on every route change — but that still relies on
+// each one being remembered there by name. One left open by a path nobody
+// thought to wire up (a future modal, or an existing one closed some way
+// that skips its own close function) leaves body permanently
+// overflow:hidden with nothing on screen to explain why: mouse-wheel,
+// trackpad and touch scroll all silently stop working, on every screen, for
+// the rest of the session — reported before as "mouse scroll not working"
+// with no modal visibly open, exactly this failure mode. Rather than
+// trusting every call site to remember, this checks each currently-locked
+// owner against what "still genuinely open" means for it (its root actually
+// has content, or — for fullscreen/search — its own state flag says so) and
+// force-releases any that don't, whatever caused the mismatch. Cheap (a
+// handful of getElementById/classList reads) and safe to call often.
+const KMT_BODY_LOCK_STILL_OPEN_ = {
+  checklistModalRoot: () => !!(document.getElementById('checklistModalRoot') || {}).innerHTML,
+  employeeModalRoot: () => !!(document.getElementById('employeeModalRoot') || {}).innerHTML,
+  incrementModalRoot: () => !!(document.getElementById('incrementModalRoot') || {}).innerHTML,
+  payrollDocModal: () => !!(document.getElementById('payrollDocModalRoot') || {}).innerHTML,
+  globalSearch: () => !(document.getElementById('gsOverlay') || { classList:{ contains:() => true } }).classList.contains('hidden'),
+  fullscreen: () => !!fullscreenActiveId,
+};
+function kmtReconcileBodyLocks_(){
+  if(!kmtBodyLockOwners.size) return;
+  Array.from(kmtBodyLockOwners).forEach(owner => {
+    const stillOpen = KMT_BODY_LOCK_STILL_OPEN_[owner];
+    // An owner this map doesn't recognise is a modal added since this was
+    // written — left alone rather than guessed at, so this never releases a
+    // lock it doesn't actually understand.
+    if(stillOpen && !stillOpen()) kmtUnlockBodyScroll(owner);
+  });
+}
+if(!window.KMT_RECONCILE_LISTENERS_ARMED_){
+  window.KMT_RECONCILE_LISTENERS_ARMED_ = true;
+  // Covers the desktop-app case specifically — switching away and back
+  // (visibilitychange already triggers kmtNudgeRepaint_ above for the iOS
+  // bleed-through bug; 'focus' is the equivalent signal for a windowed
+  // desktop app regaining focus) is a natural moment to self-heal even
+  // without a navigation happening in between.
+  window.addEventListener('focus', kmtReconcileBodyLocks_);
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState === 'visible') kmtReconcileBodyLocks_();
+  });
+}
 
 function openFullscreenView(title, sourceId){
   const el = document.getElementById(sourceId);
@@ -12362,6 +12406,11 @@ async function hrNavigate(route, opts){
   closeChecklistModal();
   closePayrollDocModal();
   closeGlobalSearch();
+  // Belt and braces on top of the explicit closes just above: if any owner
+  // is still locked despite all of that (its root was already empty some
+  // other way, or a future modal forgot to wire itself in above), this
+  // catches it too rather than leaving scroll broken until reload.
+  kmtReconcileBodyLocks_();
   hrRoute = route;
   HR_PANELS.forEach(id => {
     const el = document.getElementById(id);
