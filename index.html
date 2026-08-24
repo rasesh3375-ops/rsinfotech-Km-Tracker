@@ -8301,6 +8301,18 @@ if(!window.KMT_RECONCILE_LISTENERS_ARMED_){
   document.addEventListener('visibilitychange', () => {
     if(document.visibilityState === 'visible') kmtReconcileBodyLocks_();
   });
+  // The most direct trigger of all: the exact moment someone tries to
+  // scroll is the exact moment a stuck lock actually matters. Reconciling
+  // on navigate/focus/visibilitychange only helps if one of those happens
+  // to fire first — this makes a mouse wheel (or trackpad, or arrow/Page
+  // key) attempt self-heal on its own next tick even if none of them ever
+  // do, rather than leaving scroll dead until the next navigation.
+  // kmtReconcileBodyLocks_ already no-ops in a tick when nothing is locked,
+  // so this costs nothing on the overwhelming majority of scroll attempts.
+  document.addEventListener('wheel', kmtReconcileBodyLocks_, { passive:true });
+  document.addEventListener('keydown', e => {
+    if(['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(e.key)) kmtReconcileBodyLocks_();
+  }, { passive:true });
 }
 
 function openFullscreenView(title, sourceId){
