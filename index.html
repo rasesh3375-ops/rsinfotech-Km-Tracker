@@ -818,7 +818,7 @@
      override the way #employeeModalOverlay first did. Scoped to the
      overlay, never .modal-box — giving .modal-box any non-visible overflow
      value makes it a scroll container of its own, which breaks
-     position:sticky for .modal-head/.modal-actions/#empStepper by anchoring
+     position:sticky for .modal-head/.modal-actions by anchoring
      them to the wrong ancestor (the overlay is the one that actually
      scrolls; see the .modal-head comment below). */
   /* transform:translateZ(0) — own GPU compositing layer. A fixed-position
@@ -918,94 +918,16 @@
      modal to show through. */
   #employeeModalOverlay .modal-box{border-radius:0;margin:0;min-height:100vh;min-height:100dvh;}
 
-  /* Add Employee: on a screen wide enough to make use of it, related sections
-     sit two to a row instead of one long single-column scroll — the same 22
-     sections, same fields, same order, just using the width a tablet or
-     desktop actually has. Below 761px this rule never applies at all, so
-     mobile is byte-for-byte the single-column layout it always was. Sections
-     with a table or an image gallery inside (Assets, Loans, PF/ESI/PT, Rate
-     of pay, Identity documents) span both columns — halving those would have
-     squeezed their rows rather than helped anyone. */
+  /* Add Employee: the modal itself gets wider on a screen that can spare it —
+     the accordion list and each section's fields still lay out in one
+     column regardless of width (matching Generator/Reports/Settings), this
+     just gives that single column more breathing room than a phone's. */
   #employeeModalOverlay .modal-box{transition:max-width .15s ease;}
   @media (min-width: 761px){
     #employeeModalOverlay .modal-box{max-width:760px;}
-    /* Each named step group is its own 2-column grid now, not the form as a
-       whole — a step banner spans both columns of its own group
-       (.emp-step-banner sets that itself) and forces a new row there, same
-       as any field-group-wide section does. When the whole form was one
-       flat grid, that meant every group boundary orphaned whatever half of
-       the row came before it: the single column immediately after a banner
-       could never be backfilled, so the entire form silently collapsed to
-       one column below whichever few sections came before the first
-       banner. Scoping the grid to each group keeps that same 2-up packing
-       working section by section, banner or not. */
-    .emp-step-group{display:grid;grid-template-columns:1fr 1fr;column-gap:24px;align-items:start;}
-    .field-group-wide{grid-column:1 / -1;}
-    /* A section with nothing to pair with in its own group — computed by
-       updateEmpStepGroupSpans() — spans the full row instead of leaving an
-       empty box beside it, the way Rate of Pay/Loans/PF-ESI-PT already do. */
-    .emp-step-group .field-group.emp-solo{grid-column:1 / -1;}
   }
   @media (min-width: 1024px){
     #employeeModalOverlay .modal-box{max-width:920px;}
-  }
-
-  /* Add Employee: a stepper strip + colour-coded section banners over the
-     same 23 field-groups above, in the same order — nothing moved, nothing
-     renamed, no new required fields. Purely a way to see where you are in a
-     long form and jump to a part of it, on a form that stays one continuous
-     scroll underneath. Sticks to the top of the modal's own scroll — the
-     overlay, not the box, is what scrolls (see .modal-box's sticky note
-     elsewhere in this file) — so it stays in view the whole time the form is
-     open, on every screen size down to a phone. */
-  /* padding-top: env(safe-area-inset-top) — same reasoning as .modal-head:
-     Add Employee opens truly edge-to-edge, and this is the other sticky
-     top:0 element in the same scroll container, so it also needs clearing
-     from the notch/status bar after viewport-fit=cover, or the stepper
-     labels and the status bar's own time/battery icons overlap. */
-  .emp-stepper{
-    position:sticky;top:0;z-index:5;background:var(--paper);
-    display:flex;align-items:flex-start;gap:2px;
-    padding:calc(8px + env(safe-area-inset-top, 0px)) 0 14px;margin:0 0 14px;border-bottom:1px solid var(--line);
-    overflow-x:auto;-webkit-overflow-scrolling:touch;
-    /* Own GPU compositing layer — same reasoning as .modal-head/.modal-
-       actions/.modal-overlay: the other sticky top:0 element sharing this
-       scroll container, so it gets the same protection against a sticky
-       element lagging a frame behind its true position during scroll. */
-    transform:translateZ(0);backface-visibility:hidden;
-  }
-  .emp-stepper .step{
-    display:flex;flex-direction:column;align-items:center;gap:5px;flex:1;min-width:50px;
-    cursor:pointer;border:none;background:none;font-family:inherit;position:relative;padding:0;
-  }
-  .emp-stepper .step .dot{
-    width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;
-    font-size:11.5px;font-weight:700;border:2px solid var(--line);color:var(--muted);background:var(--paper);
-    transition:background .15s ease,border-color .15s ease,color .15s ease;position:relative;z-index:1;
-  }
-  .emp-stepper .step .lbl{font-size:9.5px;font-weight:600;color:var(--muted);text-align:center;white-space:nowrap;}
-  .emp-stepper .step.active .dot{border-color:var(--navy);background:var(--navy);color:#fff;}
-  .emp-stepper .step.active .lbl{color:var(--navy);}
-  .emp-stepper .step.optional .dot{border-style:dashed;font-size:13px;}
-  .emp-stepper .step:not(:last-child)::after{
-    content:'';position:absolute;top:13px;left:50%;width:100%;height:2px;background:var(--line);z-index:0;
-  }
-  /* Below 761px .emp-step-group is never a grid (see the media query above),
-     so this is just a plain block — the mobile layout stays exactly the
-     single-column stack it always was, byte-for-byte. */
-  .emp-step-group{margin-bottom:4px;}
-  .emp-step-banner{
-    grid-column:1 / -1;display:flex;align-items:center;gap:12px;padding:14px 16px;margin:6px 0 4px;
-    border-radius:12px;background:var(--cream);
-  }
-  .emp-step-banner .emp-step-icon{
-    width:38px;height:38px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:18px;
-  }
-  .emp-step-banner .emp-step-title{font-weight:700;font-size:15px;color:var(--navy);}
-  .emp-step-banner .emp-step-sub{font-size:12px;color:var(--muted);margin-top:2px;}
-  @media (max-width:480px){
-    .emp-stepper .step .lbl{font-size:8px;}
-    .emp-stepper .step .dot{width:22px;height:22px;font-size:10.5px;}
   }
 
   /* Calculation card under the Heading dropdown — guidance only, so it reads
@@ -13680,21 +13602,15 @@ function employeeModalHtml(emp){
       </div>
       <p class="hint">This information is stored once and auto-fills letters and payslips for this employee — no need to retype it each time. Close it at any point with the × above — anything typed is kept on this device and offered back next time.</p>
 
-      <div class="emp-stepper" id="empStepper">
-        <button type="button" class="step" data-target="empStep_basic"><span class="dot">1</span><span class="lbl">Basic</span></button>
-        <button type="button" class="step" data-target="empStep_contact"><span class="dot">2</span><span class="lbl">Contact</span></button>
-        <button type="button" class="step" data-target="empStep_emergency"><span class="dot">3</span><span class="lbl">Emergency</span></button>
-        <button type="button" class="step" data-target="empStep_employment"><span class="dot">4</span><span class="lbl">Employment</span></button>
-        <button type="button" class="step" data-target="empStep_payroll"><span class="dot">5</span><span class="lbl">Payroll</span></button>
-        <button type="button" class="step optional" data-target="empStep_documents" title="Documents (optional)"><span class="dot">📄</span><span class="lbl">Docs</span></button>
-      </div>
-
       <div class="emp-form-grid">
-      <div class="emp-step-group">
-            <div class="field-group-wide emp-step-banner" id="empStep_basic">
-              <div class="emp-step-icon" style="background:#E3EEFE;color:#2563EB;">🧍</div>
-              <div><div class="emp-step-title">Basic Details</div><div class="emp-step-sub">Personal and job related basic information</div></div>
-            </div>
+      <div class="gen-accordion-list">
+        <button type="button" class="gen-accordion-header" data-target="empSecBasic" onclick="openEmpAccordionSection('empSecBasic')" aria-expanded="false">
+          <span class="gen-accordion-num">1</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Basic Details</strong>
+            <span class="gen-accordion-desc">Personal and job related basic information</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <div id="empSecBasic" class="hidden gen-accordion-body">
             <div class="field-group">
         <div class="sec-title">Basic details</div>
         <label class="field">Employee ID</label>
@@ -13725,13 +13641,14 @@ function employeeModalHtml(emp){
         <textarea class="field-input" id="f_responsibilities" rows="4" placeholder="One per line — e.g.&#10;Preventive maintenance of client UPS systems&#10;Closing service tickets within SLA&#10;Monthly site reports to the client">${emp.responsibilities || ''}</textarea>
         <p style="font-size:11.5px;color:var(--muted);margin:8px 0 0;">Used to build this employee's role reports. The more specific these are, the more specific the report is — leave them blank and the report falls back to designation and department only, and says so.</p>
       </div>
-      </div>
-
-      <div class="emp-step-group">
-      <div class="field-group-wide emp-step-banner" id="empStep_contact">
-        <div class="emp-step-icon" style="background:#DCF6E6;color:#16A34A;">📞</div>
-        <div><div class="emp-step-title">Contact Details</div><div class="emp-step-sub">How to reach the employee</div></div>
-      </div>
+        </div>
+        <button type="button" class="gen-accordion-header" data-target="empSecContact" onclick="openEmpAccordionSection('empSecContact')" aria-expanded="false">
+          <span class="gen-accordion-num">2</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Contact Detail</strong>
+            <span class="gen-accordion-desc">How to reach the employee</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <div id="empSecContact" class="hidden gen-accordion-body">
       <div class="field-group">
         <div class="sec-title">Contact</div>
         <label class="field">Phone</label>
@@ -13743,13 +13660,14 @@ function employeeModalHtml(emp){
         <label class="field">Address</label>
         <input type="text" id="f_address" placeholder="Residential address" value="${escapeHtml(emp.address)}">
       </div>
-      </div>
-
-      <div class="emp-step-group">
-      <div class="field-group-wide emp-step-banner" id="empStep_emergency">
-        <div class="emp-step-icon" style="background:#FDE3E7;color:#DC2626;">🩹</div>
-        <div><div class="emp-step-title">Emergency &amp; Medical</div><div class="emp-step-sub">For emergency contact and medical info</div></div>
-      </div>
+        </div>
+        <button type="button" class="gen-accordion-header" data-target="empSecEmergency" onclick="openEmpAccordionSection('empSecEmergency')" aria-expanded="false">
+          <span class="gen-accordion-num">3</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Emergency &amp; Medical</strong>
+            <span class="gen-accordion-desc">For emergency contact and medical info</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <div id="empSecEmergency" class="hidden gen-accordion-body">
       <div class="field-group">
         <div class="sec-title">Emergency &amp; medical</div>
         <label class="field">Contact name</label>
@@ -13768,13 +13686,14 @@ function employeeModalHtml(emp){
         <textarea class="field-input" id="f_insuranceDetails" rows="3" placeholder="Insurer, policy number, sum insured, validity — e.g.&#10;Star Health, policy P/123456789, ₹3,00,000, valid to 31-03-2027">${escapeHtml(emp.insuranceDetails || '')}</textarea>
         <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Blood group and policy details are the two things needed fastest in an emergency — kept here so they are with the contact who would be called.</p>
       </div>
-      </div>
-
-      <div class="emp-step-group">
-      <div class="field-group-wide emp-step-banner" id="empStep_employment">
-        <div class="emp-step-icon" style="background:#EDE4FB;color:#7C3AED;">💼</div>
-        <div><div class="emp-step-title">Employment Details</div><div class="emp-step-sub">Joining, role and work information</div></div>
-      </div>
+        </div>
+        <button type="button" class="gen-accordion-header" data-target="empSecEmployee" onclick="openEmpAccordionSection('empSecEmployee')" aria-expanded="false">
+          <span class="gen-accordion-num">4</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Employee Detail</strong>
+            <span class="gen-accordion-desc">Joining, role and work information</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <div id="empSecEmployee" class="hidden gen-accordion-body">
       <div class="field-group">
         <div class="sec-title">Employment dates</div>
         <label class="field">Date of joining</label>
@@ -13836,20 +13755,28 @@ function employeeModalHtml(emp){
           `}
         </div>
       </div>
-
+        </div>
+        <button type="button" class="gen-accordion-header" data-target="empSecAssets" onclick="openEmpAccordionSection('empSecAssets')" aria-expanded="false">
+          <span class="gen-accordion-num">5</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Assets Issued</strong>
+            <span class="gen-accordion-desc">What was handed over when this employee joined — uniform, ID card, SIM, tools.</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <div id="empSecAssets" class="hidden gen-accordion-body">
       <div class="field-group field-group-wide">
         <div class="sec-title">Assets issued (at joining)</div>
         <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">What was handed over when this employee joined — uniform, laptop, phone, tools. Shows on the Employee Assets report and has to be returned before an Experience Letter can be issued.</p>
         <div id="assetRowsBox"></div>
         <a href="#" onclick="addAssetRow();return false;" style="font-size:13px;color:var(--amber-dark);font-weight:600;">+ Add an item</a>
       </div>
-      </div>
-
-      <div class="emp-step-group">
-      <div class="field-group-wide emp-step-banner" id="empStep_payroll">
-        <div class="emp-step-icon" style="background:#FBE9CE;color:#B45309;">💰</div>
-        <div><div class="emp-step-title">Payroll &amp; Benefits</div><div class="emp-step-sub">Salary, PF, ESI and other statutory details</div></div>
-      </div>
+        </div>
+        <button type="button" class="gen-accordion-header" data-target="empSecAllowance" onclick="openEmpAccordionSection('empSecAllowance')" aria-expanded="false">
+          <span class="gen-accordion-num">6</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Allowance</strong>
+            <span class="gen-accordion-desc">Other, dress, mobile and conveyance allowances on top of the Rate of Pay.</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <div id="empSecAllowance" class="hidden gen-accordion-body">
       <div class="field-group">
         <div class="sec-title">Allowances</div>
         <label class="field">Other allowances</label>
@@ -13867,7 +13794,14 @@ function employeeModalHtml(emp){
         <details style="margin:8px 0 0;"><summary style="font-size:12px;color:var(--muted);cursor:pointer;">Why Basic and HRA aren't typed here</summary>
         <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Basic and HRA are worked out from Rate of Pay and the salary heading — they are shown in the breakdown further down and are no longer typed here, because the Salary Sheet has always derived them and ignored anything entered by hand.</p></details>
       </div>
-
+        </div>
+        <button type="button" class="gen-accordion-header" data-target="empSecBond" onclick="openEmpAccordionSection('empSecBond')" aria-expanded="false">
+          <span class="gen-accordion-num">7</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Bond and Retention Policy</strong>
+            <span class="gen-accordion-desc">Retention bond dates and the monthly amount deducted on the Salary Sheet.</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <div id="empSecBond" class="hidden gen-accordion-body">
       <div class="field-group">
         <div class="sec-title">Bond &amp; retention money</div>
         <label class="field">Is a retention bond applicable?</label>
@@ -13893,7 +13827,14 @@ function employeeModalHtml(emp){
         <p id="bondRetentionWarn" class="hidden" style="font-size:12px;color:var(--amber-dark);font-weight:600;margin:6px 0 0;"></p>
         </div>
       </div>
-
+        </div>
+        <button type="button" class="gen-accordion-header" data-target="empSecWc" onclick="openEmpAccordionSection('empSecWc')" aria-expanded="false">
+          <span class="gen-accordion-num">8</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Workman Compensation (WC)</strong>
+            <span class="gen-accordion-desc">WC insurance cover, policy and expiry.</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <div id="empSecWc" class="hidden gen-accordion-body">
       <div class="field-group">
         <div class="sec-title">Workman Compensation (WC)</div>
         <label class="field">Covered under Workman Compensation insurance?</label>
@@ -13915,7 +13856,14 @@ function employeeModalHtml(emp){
           <input type="date" id="f_wcExpiryDate" value="${emp.wcExpiryDate||''}">
         </div>
       </div>
-
+        </div>
+        <button type="button" class="gen-accordion-header" data-target="empSecGpa" onclick="openEmpAccordionSection('empSecGpa')" aria-expanded="false">
+          <span class="gen-accordion-num">9</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Group Personal Accident (GPA)</strong>
+            <span class="gen-accordion-desc">GPA insurance cover, policy and expiry.</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <div id="empSecGpa" class="hidden gen-accordion-body">
       <div class="field-group">
         <div class="sec-title">Group Personal Accident (GPA)</div>
         <label class="field">Covered under Group Personal Accident insurance?</label>
@@ -13937,7 +13885,14 @@ function employeeModalHtml(emp){
           <input type="date" id="f_gpaExpiryDate" value="${emp.gpaExpiryDate||''}">
         </div>
       </div>
-
+        </div>
+        <button type="button" class="gen-accordion-header" data-target="empSecMediclaim" onclick="openEmpAccordionSection('empSecMediclaim')" aria-expanded="false">
+          <span class="gen-accordion-num">10</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Mediclaim Insurance</strong>
+            <span class="gen-accordion-desc">Whether this employee is covered under Mediclaim.</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <div id="empSecMediclaim" class="hidden gen-accordion-body">
       <div class="field-group">
         <div class="sec-title">Mediclaim Insurance</div>
         <label class="field">Covered under Mediclaim insurance?</label>
@@ -13946,7 +13901,14 @@ function employeeModalHtml(emp){
           <option value="yes" ${emp.mediclaimApplicable==='yes'?'selected':''}>Yes</option>
         </select>
       </div>
-
+        </div>
+        <button type="button" class="gen-accordion-header" data-target="empSecAyushman" onclick="openEmpAccordionSection('empSecAyushman')" aria-expanded="false">
+          <span class="gen-accordion-num">11</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Ayushman Card</strong>
+            <span class="gen-accordion-desc">Whether this employee has an Ayushman Card.</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <div id="empSecAyushman" class="hidden gen-accordion-body">
       <div class="field-group">
         <div class="sec-title">Ayushman Card</div>
         <label class="field">Has an Ayushman Card?</label>
@@ -13955,7 +13917,14 @@ function employeeModalHtml(emp){
           <option value="yes" ${emp.ayushmanCardApplicable==='yes'?'selected':''}>Yes</option>
         </select>
       </div>
-
+        </div>
+        <button type="button" class="gen-accordion-header" data-target="empSecRatePay" onclick="openEmpAccordionSection('empSecRatePay')" aria-expanded="false">
+          <span class="gen-accordion-num">12</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Rate of Pay &amp; Advances</strong>
+            <span class="gen-accordion-desc">Monthly rate, the salary breakdown, and any advance balance brought forward.</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <div id="empSecRatePay" class="hidden gen-accordion-body">
       <div class="field-group field-group-wide">
         <div class="sec-title">Rate of pay &amp; advances</div>
         <label class="field">Rate of pay (monthly)</label>
@@ -13980,7 +13949,14 @@ function employeeModalHtml(emp){
         <div id="advanceRowsBox"></div>
         <a href="#" onclick="addAdvanceRow();return false;" style="font-size:13px;color:var(--amber-dark);font-weight:600;">+ Add advance entry</a>
       </div>
-
+        </div>
+        <button type="button" class="gen-accordion-header" data-target="empSecAdvanceTemp" onclick="openEmpAccordionSection('empSecAdvanceTemp')" aria-expanded="false">
+          <span class="gen-accordion-num">13</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Advance for Temporary</strong>
+            <span class="gen-accordion-desc">A recurring monthly recovery, set once, unlike Salary Advance Payment above.</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <div id="empSecAdvanceTemp" class="hidden gen-accordion-body">
       <div class="field-group field-group-wide">
         <div class="sec-title">Advance for Temporary</div>
         <p style="font-size:12px;color:var(--muted);margin:0 0 12px;line-height:1.55;">
@@ -13992,7 +13968,14 @@ function employeeModalHtml(emp){
         </p>
         <div id="advanceTempScheduleBox"></div>
       </div>
-
+        </div>
+        <button type="button" class="gen-accordion-header" data-target="empSecLoan" onclick="openEmpAccordionSection('empSecLoan')" aria-expanded="false">
+          <span class="gen-accordion-num">14</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Employee Loan &amp; EMI</strong>
+            <span class="gen-accordion-desc">Loans this employee is repaying, each on its own schedule.</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <div id="empSecLoan" class="hidden gen-accordion-body">
       <div class="field-group field-group-wide">
         <div class="sec-title">Employee Loan &amp; EMI</div>
         <p style="font-size:12px;color:var(--muted);margin:0 0 12px;line-height:1.55;">
@@ -14004,7 +13987,14 @@ function employeeModalHtml(emp){
         <div id="loanRowsBox"></div>
         <a href="#" onclick="addLoanRow();return false;" style="font-size:13px;color:var(--amber-dark);font-weight:600;">+ Add a loan / EMI</a>
       </div>
-
+        </div>
+        <button type="button" class="gen-accordion-header" data-target="empSecHeading" onclick="openEmpAccordionSection('empSecHeading')" aria-expanded="false">
+          <span class="gen-accordion-num">15</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Salary Sheet Heading</strong>
+            <span class="gen-accordion-desc">Picks the Basic/HRA/LTA split and which of PF/ESI/PT apply — plus family details for apprentices.</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <div id="empSecHeading" class="hidden gen-accordion-body">
       <div class="field-group">
         <div class="sec-title">Salary sheet heading</div>
         <label class="field">Heading</label>
@@ -14062,7 +14052,14 @@ function employeeModalHtml(emp){
           </div>
         </div>
       </div>
-
+        </div>
+        <button type="button" class="gen-accordion-header" data-target="empSecStatutory" onclick="openEmpAccordionSection('empSecStatutory')" aria-expanded="false">
+          <span class="gen-accordion-num">16</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">PF, ESI &amp; PT</strong>
+            <span class="gen-accordion-desc">Statutory eligibility, contribution settings, and Record Increment.</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <div id="empSecStatutory" class="hidden gen-accordion-body">
       <div class="field-group field-group-wide">
         <div class="sec-title">PF, ESI &amp; PT</div>
         <div id="pfQuestionsWrap">
@@ -14144,7 +14141,14 @@ function employeeModalHtml(emp){
         <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Adds a new Rate of Pay effective from a chosen date — this is the only way Rate of Pay and salary heading change once the first increment has been recorded, so a raise is never confused with an ordinary edit to the rest of this record.</p>
         <div id="salaryHistoryBox"></div>
       </div>
-
+        </div>
+        <button type="button" class="gen-accordion-header" data-target="empSecLeaveOpening" onclick="openEmpAccordionSection('empSecLeaveOpening')" aria-expanded="false">
+          <span class="gen-accordion-num">17</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Leave Opening Balances</strong>
+            <span class="gen-accordion-desc">SL and EL balances for this financial year.</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <div id="empSecLeaveOpening" class="hidden gen-accordion-body">
       <div class="field-group">
         <div class="sec-title">Leave opening balances</div>
         <div id="leaveOpeningFields" class="${emp.employeeType==='resident'?'hidden':''}">
@@ -14161,7 +14165,14 @@ function employeeModalHtml(emp){
         </div>
         <p class="${emp.employeeType==='resident'?'':'hidden'}" id="residentLeaveNote" style="font-size:12px;color:var(--muted);margin:0;">Resident Engineers are outside the SL/EL leave scheme, so there is no opening balance to enter.</p>
       </div>
-
+        </div>
+        <button type="button" class="gen-accordion-header" data-target="empSecDiwali" onclick="openEmpAccordionSection('empSecDiwali')" aria-expanded="false">
+          <span class="gen-accordion-num">18</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Diwali Bonus Eligibility</strong>
+            <span class="gen-accordion-desc">Whether this employee gets a Diwali bonus this year, and the amount.</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <div id="empSecDiwali" class="hidden gen-accordion-body">
       <div class="field-group">
         <div class="sec-title">Diwali bonus eligibility</div>
         <label class="field">Eligible this year?</label>
@@ -14178,12 +14189,26 @@ function employeeModalHtml(emp){
         <details style="margin:8px 0 0;"><summary style="font-size:12px;color:var(--muted);cursor:pointer;">What this figure is used for</summary>
         <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;">The figure this employee is actually paid at Diwali, used exactly as entered — the Diwali Bonus Report, the payment sheet and the CTC all take it from here, and nothing is ever deducted from it. <strong style="color:var(--amber-dark);">Left blank, no bonus is paid</strong> and they will not appear on the payment sheet; the box above offers one month's pay if that is the figure you want. It is only paid at all if the eligibility above says Yes.</p></details>
       </div>
-
+        </div>
+        <button type="button" class="gen-accordion-header" data-target="empSecRemarks" onclick="openEmpAccordionSection('empSecRemarks')" aria-expanded="false">
+          <span class="gen-accordion-num">19</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Special Remarks</strong>
+            <span class="gen-accordion-desc">Anything else worth noting about this employee.</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <div id="empSecRemarks" class="hidden gen-accordion-body">
       <div class="field-group">
         <div class="sec-title">Special remarks</div>
         <textarea class="field-input" id="f_specialRemarks" rows="4" placeholder="Anything else worth noting about this employee">${escapeHtml(emp.specialRemarks||'')}</textarea>
       </div>
-
+        </div>
+        <button type="button" class="gen-accordion-header" data-target="empSecBankDetails" onclick="openEmpAccordionSection('empSecBankDetails')" aria-expanded="false">
+          <span class="gen-accordion-num">20</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Statutory &amp; Bank Details</strong>
+            <span class="gen-accordion-desc">PAN, Aadhaar, UAN, ESI number, and bank account for payment.</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <div id="empSecBankDetails" class="hidden gen-accordion-body">
       <div class="field-group">
         <div class="sec-title">Statutory &amp; bank details</div>
         <label class="field">Cancelled cheque</label>
@@ -14218,13 +14243,14 @@ function employeeModalHtml(emp){
         <label class="field">Bank account number</label>
         <input type="text" id="f_accountNumber" placeholder="Account number" value="${escapeHtml(emp.accountNumber)}">
       </div>
-      </div>
-
-      <div class="emp-step-group">
-      <div class="field-group-wide emp-step-banner" id="empStep_documents">
-        <div class="emp-step-icon" style="background:#D6F3F6;color:#0891B2;">📄</div>
-        <div><div class="emp-step-title">Documents</div><div class="emp-step-sub">ID proof and other certificates (optional)</div></div>
-      </div>
+        </div>
+        <button type="button" class="gen-accordion-header" data-target="empSecDocuments" onclick="openEmpAccordionSection('empSecDocuments')" aria-expanded="false">
+          <span class="gen-accordion-num">21</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Documents</strong>
+            <span class="gen-accordion-desc">ID proof and other certificates (optional).</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
+        <div id="empSecDocuments" class="hidden gen-accordion-body">
       <div class="field-group field-group-wide">
         <div class="sec-title">Identity documents</div>
         <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Tap to scan with your camera, choose a photo from your gallery, or pick a PDF for an already-scanned document. Documents are saved as soon as you upload them.</p>
@@ -14261,6 +14287,7 @@ function employeeModalHtml(emp){
         <a href="#" onclick="addOtherDocSlot();return false;" style="font-size:13px;color:var(--amber-dark);font-weight:600;">+ Add another document</a>
         <div id="otherDocsBox"></div>
       </div>
+        </div>
       </div>
       </div>
 
@@ -14273,87 +14300,24 @@ function employeeModalHtml(emp){
   </div>`;
 }
 
-// Wires up the stepper strip's click-to-jump and its highlight-as-you-scroll —
-// called once right after employeeModalHtml() is poured into the DOM, since
-// the strip and the section banners it targets only exist from that point.
-// #employeeModalOverlay is the actual scrolling element (see the CSS note by
-// .emp-stepper), so scroll position and jump targets are both measured
-// against it, not the modal box itself.
-function initEmpStepper(){
-  const overlay = document.getElementById('employeeModalOverlay');
-  const stepper = document.getElementById('empStepper');
-  if(!overlay || !stepper) return;
-  const steps = Array.from(stepper.querySelectorAll('.step'));
-  const banners = steps.map(btn => document.getElementById(btn.dataset.target)).filter(Boolean);
-  steps.forEach((btn, i) => {
-    btn.onclick = () => {
-      const target = banners[i];
-      if(!target) return;
-      const stepperH = stepper.offsetHeight;
-      const overlayTop = overlay.getBoundingClientRect().top;
-      const y = overlay.scrollTop + (target.getBoundingClientRect().top - overlayTop) - stepperH - 6;
-      // behavior:'auto' (instant), not 'smooth' -- an animated scrollTo
-      // landing on a position:sticky element that is also its own GPU
-      // compositing layer (.emp-stepper picked up transform:translateZ(0)
-      // for an unrelated reason, see its CSS comment) is a known class of
-      // WebKit bug where the sticky element freezes at a stale, pre-repaint
-      // position once the animation ends and never corrects itself --
-      // reported exactly that way: tapping a step number left the stepper's
-      // own safe-area padding not applied, staying wrong indefinitely, only
-      // after a tap-jump specifically, never after a manual scroll. An
-      // instant jump sidesteps the animation entirely rather than fighting
-      // whatever WebKit does mid-transition.
-      overlay.scrollTo({ top: Math.max(0, y), behavior: 'auto' });
-    };
-  });
-  // Whichever banner is the last one to have scrolled past the strip is the
-  // section currently in view — the same idea a table of contents uses to
-  // highlight the chapter you're reading.
-  const highlight = () => {
-    const stepperH = stepper.offsetHeight;
-    const overlayTop = overlay.getBoundingClientRect().top;
-    let activeIdx = 0;
-    banners.forEach((b, i) => {
-      if(b.getBoundingClientRect().top - overlayTop <= stepperH + 20) activeIdx = i;
-    });
-    // Scrolled to the very bottom: the last step is unambiguously the one in
-    // view even if its banner never quite clears the sticky strip's
-    // threshold — a short final section (or no trailing whitespace, now that
-    // the modal fills the screen edge to edge) can leave a few px of gap.
-    if(overlay.scrollTop + overlay.clientHeight >= overlay.scrollHeight - 2){
-      activeIdx = banners.length - 1;
-    }
-    steps.forEach((s, i) => s.classList.toggle('active', i === activeIdx));
-  };
-  overlay.addEventListener('scroll', () => window.requestAnimationFrame(highlight), { passive:true });
-  highlight();
-}
-
-// Each step group lays out its own field-groups two to a row, but CSS Grid
-// never backfills a gap — a regular (non-wide) field-group ends up alone,
-// with an empty box's worth of space beside it, whenever it is the last one
-// in its group, or whenever a field-group-wide section immediately follows
-// it and forces a new row before a second regular section can share this
-// one. .emp-solo (added here) stretches that lone section to the full row
-// width instead, the same as PF/ESI/PT and the other field-group-wide
-// sections already look. Family Information is the one section whose own
-// hidden state can flip without the whole form re-rendering (see
-// toggleFamilyFields()), which shifts who ends up alone after it — so this
-// runs again from there, not just once at render time.
-function updateEmpStepGroupSpans(){
-  document.querySelectorAll('.emp-step-group').forEach(group => {
-    const items = Array.from(group.children).filter(el =>
-      el.classList.contains('field-group') && !el.classList.contains('hidden'));
-    let pairedWithPrevious = false;
-    items.forEach((item, i) => {
-      item.classList.remove('emp-solo');
-      if(item.classList.contains('field-group-wide')){ pairedWithPrevious = false; return; }
-      if(pairedWithPrevious){ pairedWithPrevious = false; return; }
-      const next = items[i + 1];
-      if(next && !next.classList.contains('field-group-wide')){ pairedWithPrevious = true; }
-      else { item.classList.add('emp-solo'); }
-    });
-  });
+// Every section of the Add/Edit Employee form, collapsed by default —
+// same flattened accordion as Generator/Reports/Settings, this time inside
+// a modal whose whole innerHTML is rebuilt fresh from employeeModalHtml()
+// on every open (and every re-render mid-edit, e.g. after Record
+// Increment), so — unlike those three — there is no stale state to reset
+// on open and no separate relocation step: each header and its body are
+// already adjacent in the template as written. A fixed array is safe here
+// for the same reason it is in GENERATOR_SECTIONS: this list never varies
+// per employee, only which fields inside a section are shown or hidden do.
+const EMP_ACCORDION_SECTIONS = ['empSecBasic','empSecContact','empSecEmergency','empSecEmployee',
+  'empSecAssets','empSecAllowance','empSecBond','empSecWc','empSecGpa','empSecMediclaim','empSecAyushman',
+  'empSecRatePay','empSecAdvanceTemp','empSecLoan','empSecHeading','empSecStatutory','empSecLeaveOpening',
+  'empSecDiwali','empSecRemarks','empSecBankDetails','empSecDocuments'];
+function openEmpAccordionSection(sectionId){
+  const alreadyOpen = !document.getElementById(sectionId).classList.contains('hidden');
+  EMP_ACCORDION_SECTIONS.forEach(id => document.getElementById(id).classList.add('hidden'));
+  if(!alreadyOpen) document.getElementById(sectionId).classList.remove('hidden');
+  updateAccordionHeaders_();
 }
 
 function toggleTrackingFields(){
@@ -14527,9 +14491,6 @@ function toggleFamilyFields(){
       if(el) el.value = '';
     });
   }
-  // Family Information joining or leaving the grid shifts which section
-  // after it ends up alone in its row.
-  updateEmpStepGroupSpans();
 }
 
 function toggleStatutoryFieldsForHeading(){
@@ -15906,7 +15867,13 @@ function collectAdvanceTempSchedule(){
 
 // Same shape as the Joining Kit's assets (item, qty, issuedOn, returnedOn), so
 // an item added here shows up there too and vice versa — one list, followed by
-// the employee, not two that can disagree.
+// the employee, not two that can disagree. A free-text Item field let two
+// people call the same thing two different names (Laptop vs. Notebook,
+// SIM vs. Sim Card) with nothing to reconcile them by later — this is a
+// fixed list of what a field engineer is actually issued at joining, with
+// Tools kept as one option but able to say which, rather than five more
+// rows nobody would bother filling in for a screwdriver set.
+const ASSET_ITEM_OPTIONS = ['Uniform', 'ID Card', 'SIM Card', 'Tools', 'Others'];
 function renderAssetRows(){
   const box = document.getElementById('assetRowsBox');
   if(!box) return;
@@ -15915,15 +15882,24 @@ function renderAssetRows(){
     box.innerHTML = '<p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;">Nothing issued yet.</p>';
     return;
   }
-  box.innerHTML = assets.map((a, i) => `
+  box.innerHTML = assets.map((a, i) => {
+    const headerLabel = a.item === 'Tools' && a.toolsDetail ? a.item + ' — ' + a.toolsDetail : (a.item || 'Item ' + (i + 1));
+    return `
     <div class="emp-row" style="margin-bottom:12px;">
       <div class="head">
-        <strong>${escapeHtml(a.item || 'Item ' + (i + 1))}</strong>
+        <strong>${escapeHtml(headerLabel)}</strong>
         <a href="#" onclick="removeAssetRow(${i});return false;" style="font-size:12px;color:var(--muted);">Remove</a>
       </div>
       <div style="height:8px"></div>
       <label class="field">Item</label>
-      <input type="text" id="asset_item_${i}" placeholder="e.g. Uniform, Laptop" value="${escapeHtml(a.item || '')}">
+      <select class="field-input" id="asset_item_${i}" onchange="toggleAssetToolsDetail(${i})">
+        <option value="" ${!a.item?'selected':''}>— Select item —</option>
+        ${ASSET_ITEM_OPTIONS.map(opt => `<option value="${opt}" ${a.item===opt?'selected':''}>${opt}</option>`).join('')}
+      </select>
+      <div id="asset_toolsDetailWrap_${i}" class="${a.item==='Tools'?'':'hidden'}" style="margin-top:10px;">
+        <label class="field">Which tools</label>
+        <input type="text" id="asset_toolsDetail_${i}" placeholder="e.g. Screwdriver set, multimeter" value="${escapeHtml(a.toolsDetail || '')}">
+      </div>
       <div style="height:10px"></div>
       <label class="field">Quantity</label>
       <input type="number" id="asset_qty_${i}" placeholder="1" value="${a.qty || ''}">
@@ -15933,7 +15909,13 @@ function renderAssetRows(){
       <div style="height:10px"></div>
       <label class="field">Returned on (if applicable)</label>
       <input type="date" id="asset_returned_${i}" value="${a.returnedOn || ''}">
-    </div>`).join('');
+    </div>`;
+  }).join('');
+}
+function toggleAssetToolsDetail(i){
+  const sel = document.getElementById('asset_item_' + i);
+  const wrap = document.getElementById('asset_toolsDetailWrap_' + i);
+  if(wrap) wrap.classList.toggle('hidden', !sel || sel.value !== 'Tools');
 }
 
 function addAssetRow(){
@@ -15961,6 +15943,7 @@ function collectAssetRows(){
     if(!item) return;
     out.push({
       item,
+      toolsDetail: item === 'Tools' ? ((document.getElementById('asset_toolsDetail_' + i) || {}).value || '').trim() : '',
       qty: Number((document.getElementById('asset_qty_' + i) || {}).value) || 0,
       issuedOn: (document.getElementById('asset_issued_' + i) || {}).value || a.issuedOn || todayStr(),
       returnedOn: (document.getElementById('asset_returned_' + i) || {}).value || ''
@@ -16254,8 +16237,6 @@ async function openAddEmployeeModal(id){
   renderAdvanceTempSchedule();
   renderSalaryHistoryBox();
   renderAssetRows();
-  initEmpStepper();
-  updateEmpStepGroupSpans();
   resettleFixedOverlays_();
   // kmtLockBodyScroll (called at the very top of this function, before the
   // awaits above) already schedules a kmtNudgeRepaint_ of its own -- but at
@@ -16414,8 +16395,6 @@ function removeSalaryHistoryEntry(hi){
   renderAdvanceRows();
   renderAdvanceTempSchedule();
   renderSalaryHistoryBox();
-  initEmpStepper();
-  updateEmpStepGroupSpans();
   renderPayrollBreakdown();
 }
 
@@ -16469,8 +16448,6 @@ async function saveIncrement(id){
     renderAdvanceRows();
     renderAdvanceTempSchedule();
     renderSalaryHistoryBox();
-    initEmpStepper();
-    updateEmpStepGroupSpans();
   }
   await renderEmployeeList();
 }
