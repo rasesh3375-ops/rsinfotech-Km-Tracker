@@ -120,7 +120,7 @@ deductions apply at all:
 |---|---|---|---|---|---|---|
 | Managerial Staff | 65% | 35% | — | ✓ | ✓ | ✓ |
 | Seniors Staff | 50% | 40% | 10% | ✓ | ✓ | ✓ |
-| Junior Engineers | 100% (flat) | — | — | ✓ | ✓ | ✓ |
+| Junior Staff | 100% (flat) | — | — | ✓ | ✓ | ✓ |
 | Apprentices | 50% | 40% | 10% | — | — | — |
 | R.S.IT Solution | 50% | 40% | 10% | — | — | ✓ |
 | Contractors | 50% | 40% | 10% | — | — | — |

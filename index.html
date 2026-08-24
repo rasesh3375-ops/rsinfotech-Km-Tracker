@@ -2466,7 +2466,7 @@
         <div id="rptSecPT" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">PT Report</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Professional Tax deducted per employee for the month, pulled from the Salary Sheet. Apprentices and Contractors don't have PT — Managerial, Seniors, Junior Engineers, and R.S.IT Solution do, when Gross exceeds ₹12,000.</p>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Professional Tax deducted per employee for the month, pulled from the Salary Sheet. Apprentices and Contractors don't have PT — Managerial, Seniors, Junior Staff, and R.S.IT Solution do, when Gross exceeds ₹12,000.</p>
           <p id="cardStat_pt" class="gen-card-stat"></p>
           <div class="row-inline">
             <div><label class="field">Month</label><select class="field-input" id="ptReportMonthSel"></select></div>
@@ -6805,12 +6805,12 @@ const ATT_CODE_LABELS = { P:'Present', A:'Absent', H:'Holiday', EL:'EL', SL:'SL'
 // ---- salary sheet headings ----
 // Each heading defines how Rate of Pay splits into Basic/HRA/LTA. 'flat' means
 // the whole rate (minus leave deduction) is just Basic, with no HRA/LTA split —
-// that's how Junior Engineers are set up in the source sheet. pf/esi/pt flags
+// that's how Junior Staff are set up in the source sheet. pf/esi/pt flags
 // control which statutory deductions apply to that heading at all.
 const SALARY_HEADINGS = {
   managerial:  { label: 'Managerial Staff',  basicPct: 0.65, hraPct: 0.35, ltaPct: 0,    flat: false, pf: true,  esi: true,  pt: true  },
   senior:      { label: 'Seniors Staff',     basicPct: 0.50, hraPct: 0.40, ltaPct: 0.10, flat: false, pf: true,  esi: true,  pt: true  },
-  junior:      { label: 'Junior Engineers',  basicPct: 1.00, hraPct: 0,    ltaPct: 0,    flat: true,  pf: true,  esi: true,  pt: true  },
+  junior:      { label: 'Junior Staff',      basicPct: 1.00, hraPct: 0,    ltaPct: 0,    flat: true,  pf: true,  esi: true,  pt: true  },
   apprentice:  { label: 'Apprentices',       basicPct: 0.50, hraPct: 0.40, ltaPct: 0.10, flat: false, pf: false, esi: false, pt: false },
   rsit:        { label: 'R.S.IT Solution',   basicPct: 0.50, hraPct: 0.40, ltaPct: 0.10, flat: false, pf: false, esi: false, pt: true  },
   contractor:  { label: 'Contractors',       basicPct: 0.50, hraPct: 0.40, ltaPct: 0.10, flat: false, pf: false, esi: false, pt: false }
