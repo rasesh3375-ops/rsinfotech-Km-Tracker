@@ -21164,8 +21164,8 @@ async function renderApprenticeDocList(){
   }
   box.innerHTML = list.map(d => `
     <div class="emp-row">
-      <div class="head"><strong>${d.category}</strong>${d.employeeName ? `<span class="id">${d.employeeName}</span>` : ''}</div>
-      <div class="sub">${d.fileName}${d.note ? ' · ' + d.note : ''}</div>
+      <div class="head"><strong>${escapeHtml(d.category)}</strong>${d.employeeName ? `<span class="id">${escapeHtml(d.employeeName)}</span>` : ''}</div>
+      <div class="sub">${escapeHtml(d.fileName)}${d.note ? ' · ' + escapeHtml(d.note) : ''}</div>
       <div class="actions">
         <button type="button" class="btn ghost" onclick="viewEmployeeDocument('${escapeJsAttr_(d.url||'')}','${escapeJsAttr_(d.fileName||d.category||'Document')}')">Open</button>
         <button class="btn ghost" onclick="deleteApprenticeDoc('${d.id}')">Remove</button>
@@ -21237,7 +21237,7 @@ async function renderCompanyDocList(category){
   box.innerHTML = list.map(d => `
     <div class="emp-row">
       <div class="head"><strong>${escapeHtml(d.name)}</strong></div>
-      <div class="sub">${d.fileName}</div>
+      <div class="sub">${escapeHtml(d.fileName)}</div>
       <div class="actions">
         <button type="button" class="btn ghost" onclick="viewEmployeeDocument('${escapeJsAttr_(d.url||'')}','${escapeJsAttr_(d.fileName||d.name||'Document')}')">Open</button>
         <button class="btn ghost" onclick="deleteCompanyDoc('${category}','${d.id}')">Remove</button>
@@ -21289,14 +21289,14 @@ async function renderUniformIdForm(employeeId){
       <div style="height:10px"></div>
       <label class="checklist-row"><input type="checkbox" ${u.uniformIssued?'checked':''} onchange="updateUniformField('${e.id}','${escapeJsAttr_(e.name)}','uniformIssued',this.checked)"> Uniform issued</label>
       <label class="field">Uniform size</label>
-      <input type="text" value="${u.uniformSize||''}" placeholder="e.g. L" onchange="updateUniformField('${e.id}','${escapeJsAttr_(e.name)}','uniformSize',this.value)">
+      <input type="text" value="${escapeHtml(u.uniformSize||'')}" placeholder="e.g. L" onchange="updateUniformField('${e.id}','${escapeJsAttr_(e.name)}','uniformSize',this.value)">
       <div style="height:10px"></div>
       <label class="field">Uniform issue date</label>
       <input type="date" value="${u.uniformDate||''}" onchange="updateUniformField('${e.id}','${escapeJsAttr_(e.name)}','uniformDate',this.value)">
       <div style="height:14px"></div>
       <label class="checklist-row"><input type="checkbox" ${u.idIssued?'checked':''} onchange="updateUniformField('${e.id}','${escapeJsAttr_(e.name)}','idIssued',this.checked)"> ID card issued</label>
       <label class="field">ID card number</label>
-      <input type="text" value="${u.idNumber||''}" onchange="updateUniformField('${e.id}','${escapeJsAttr_(e.name)}','idNumber',this.value)">
+      <input type="text" value="${escapeHtml(u.idNumber||'')}" onchange="updateUniformField('${e.id}','${escapeJsAttr_(e.name)}','idNumber',this.value)">
       <div style="height:10px"></div>
       <label class="field">ID issue date</label>
       <input type="date" value="${u.idDate||''}" onchange="updateUniformField('${e.id}','${escapeJsAttr_(e.name)}','idDate',this.value)">
