@@ -3505,14 +3505,33 @@ if(IS_STAGING_BACKEND){
 // the backend for every action except login/setupHr/recoverHr/logout.
 let sessionToken = localStorage.getItem('kmt_session_token') || null;
 let sessionRole = localStorage.getItem('kmt_session_role') || null;
+// HR carries payroll, salary and every employee's personal record — a saved
+// login staying open indefinitely on a shared or lost device was reported as
+// a real concern. Stamped only here, at a genuine fresh login (submitHrLogin/
+// submitHrSetup both go through this — a session RESTORE never calls
+// setSession at all, it reads sessionToken/sessionRole from localStorage
+// directly at script load, see their declaration above), so restoring an
+// existing session never resets this clock. The backend enforces the same
+// 24-hour limit on the token itself (HR_SESSION_LIFETIME_MS in Code 2.js) —
+// this is a second, client-side check on top of that, so an expired session
+// is caught instantly on reopening rather than only after the first backend
+// call comes back unauthorized. Engineers' tracking login is deliberately
+// left alone — see the matching comment on HR_SESSION_LIFETIME_MS.
+const HR_SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+function hrSessionExpired_(){
+  const startedAt = Number(localStorage.getItem('kmt_hr_session_started_at') || 0);
+  return !startedAt || (Date.now() - startedAt) > HR_SESSION_MAX_AGE_MS;
+}
 function setSession(token, role){
   sessionToken = token; sessionRole = role;
   if(token){
     localStorage.setItem('kmt_session_token', token);
     localStorage.setItem('kmt_session_role', role);
+    if(role === 'hr') localStorage.setItem('kmt_hr_session_started_at', String(Date.now()));
   } else {
     localStorage.removeItem('kmt_session_token');
     localStorage.removeItem('kmt_session_role');
+    localStorage.removeItem('kmt_hr_session_started_at');
   }
 }
 // Called when the backend rejects a call as unauthorized. Only acts if we
@@ -4934,7 +4953,24 @@ async function selectRole(role){
     // localStorage. If the token really has expired, the first real API
     // call inside enterHrMain() answers 'unauthorized' and onSessionExpired()
     // already handles that cleanly — this doesn't need to duplicate it.
-    if(hrSession === 'yes' && sessionToken && sessionRole === 'hr'){
+    //
+    // hrSessionExpired_() is the one exception: a session past
+    // HR_SESSION_MAX_AGE_MS is never trusted here, even though the token
+    // might still work for another moment before the backend's own,
+    // slightly longer HR_SESSION_LIFETIME_MS catches up — a saved HR login
+    // is not meant to stay open on a device indefinitely, and this check
+    // needs no network round trip to enforce that, unlike waiting on the
+    // backend to say the same thing. Cleared here, the same way logoutHr
+    // clears it, so this falls straight through to the normal
+    // checkHrAccountExists()/login-form path below rather than needing its
+    // own separate branch.
+    let hasValidHrSession = hrSession === 'yes' && sessionToken && sessionRole === 'hr';
+    if(hasValidHrSession && hrSessionExpired_()){
+      setSession(null, null);
+      await safeSet('hr_session', '', false);
+      hasValidHrSession = false;
+    }
+    if(hasValidHrSession){
       document.getElementById('hrGate').classList.add('hidden');
       // Read the persisted snapshot BEFORE enterHrMain() runs, not after —
       // enterHrMain()'s own first step navigates to 'dashboard', which goes
