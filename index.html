@@ -21459,14 +21459,45 @@ async function uploadApprenticeDoc(){
   msgNow.classList.remove('error');
   await renderApprenticeDocList();
 }
+// Three tabs over the one flat apprentice-documents list, matching the
+// upload form's own Category dropdown one-for-one — this only changes what's
+// shown, never what's stored, so every document already on file stays on
+// file exactly as it was, just grouped for easier browsing.
+const APPRENTICE_DOC_TABS_ = [
+  { key:'Apprentice Claim Document', label:'Apprentice Claim Documents' },
+  { key:'Apprentice Contract', label:'Contracts' },
+  { key:'Other Apprentice Document', label:'Important Apprentice Documents' },
+];
+let apprenticeDocTab_ = APPRENTICE_DOC_TABS_[0].key;
+function switchApprenticeDocTab_(key){
+  apprenticeDocTab_ = key;
+  renderApprenticeDocList();
+}
 async function renderApprenticeDocList(){
   const box = document.getElementById('apprenticeDocList');
   const list = await getApprenticeDocs();
-  if(!list.length){
-    box.innerHTML = '<div class="empty">No apprentice documents uploaded yet.</div>';
+  const knownKeys = APPRENTICE_DOC_TABS_.map(t => t.key);
+  // The upload form's Category dropdown only ever writes one of the three
+  // keys above, so this is normally exact — but a record from before this
+  // dropdown existed, or with a category string that no longer matches
+  // could otherwise fall through and become invisible on every tab. Folded
+  // into "Important Apprentice Documents", the catch-all of the three,
+  // rather than silently dropped, so nothing already on file goes missing.
+  const tabOf = d => knownKeys.includes(d.category) ? d.category : 'Other Apprentice Document';
+  const tabCounts = {};
+  APPRENTICE_DOC_TABS_.forEach(t => { tabCounts[t.key] = 0; });
+  list.forEach(d => { tabCounts[tabOf(d)]++; });
+
+  const tabsHtml = '<div class="payroll-docs-tabs" style="margin-bottom:12px;">' +
+    APPRENTICE_DOC_TABS_.map(t => `<button type="button" class="payroll-docs-tab ${apprenticeDocTab_===t.key?'active':''}" onclick="switchApprenticeDocTab_('${t.key}')">${escapeHtml(t.label)} (${tabCounts[t.key]})</button>`).join('') +
+    '</div>';
+
+  const filtered = list.filter(d => tabOf(d) === apprenticeDocTab_);
+  if(!filtered.length){
+    box.innerHTML = tabsHtml + '<div class="empty">No documents in this category yet.</div>';
     return;
   }
-  box.innerHTML = list.map(d => `
+  box.innerHTML = tabsHtml + filtered.map(d => `
     <div class="emp-row">
       <div class="head"><strong>${escapeHtml(d.category)}</strong>${d.employeeName ? `<span class="id">${escapeHtml(d.employeeName)}</span>` : ''}</div>
       <div class="sub">${escapeHtml(d.fileName)}${d.note ? ' · ' + escapeHtml(d.note) : ''}</div>
