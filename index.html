@@ -3755,18 +3755,35 @@ document.addEventListener('visibilitychange', () => {
 // Uploads an actual file (PDF, scanned document, photo) to Drive — unlike
 // saveFileToDrive above, which only handles plain text/CSV report content.
 // Returns the Drive file URL on success, or null on failure.
+//
+// Goes through readDocForDrive (see its own comment, further down) the same
+// way the employee record's own inline documents already do, rather than
+// reading the raw file straight off disk: an unprocessed phone photo can be
+// several megabytes, a third bigger again once base64-encoded, and every
+// caller here — Payroll Documents, Apprentice Documents, Office Documents,
+// Uniform & ID — used to send that in full in one POST. That, on top of
+// Apps Script's own per-request overhead, is what made "uploading a
+// document" feel slow. Compression only kicks in above LARGE_ORIGINAL_LIMIT
+// and only for images; a PDF, or an already-small image, passes through
+// untouched. A compressed image always comes back as JPEG regardless of
+// what format it started as, so the file's extension is corrected to match
+// what's actually being uploaded — otherwise a file uploaded as "scan.png"
+// could end up holding JPEG bytes.
 async function uploadDocumentToDrive(folderPath, fileName, file){
   try{
-    const base64Data = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result.split(',')[1]);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
+    const dataUrl = await readDocForDrive(file);
+    const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl || '');
+    if(!m) return null;
+    const mimeType = m[1];
+    const base64Data = m[2];
+    const properExt = extForDocMime_(mimeType);
+    const outName = properExt && !new RegExp('\\.' + properExt + '$', 'i').test(fileName)
+      ? fileName.replace(/\.[^.]+$/, '') + '.' + properExt
+      : fileName;
     const res = await apiFetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'uploadDocument', folderPath, fileName, base64Data, mimeType: file.type || 'application/octet-stream', token: sessionToken })
+      body: JSON.stringify({ action: 'uploadDocument', folderPath, fileName: outName, base64Data, mimeType, token: sessionToken })
     });
     const data = await res.json();
     return data && data.fileUrl ? data.fileUrl : null;
