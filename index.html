@@ -20266,31 +20266,110 @@ async function notePayrollDocsFy_(fy){
     await safeSet('payroll_docs_fy_index', JSON.stringify(idx), true);
   }
 }
-async function getPayrollDocsForFY(fy){
-  const v = await safeGet('payroll_docs:' + fy, true);
-  return v ? JSON.parse(v) : [];
+// Records used to be one key per financial year (payroll_docs:<fy>) holding
+// every month and category together — the sharding the comment above
+// describes, one level too coarse. A year of real use approached, and for
+// FY 2025-26 crossed, the 50,000-character Sheets cell limit partway
+// through the year: uploadDocumentToDrive kept succeeding (the file really
+// did reach Drive), but the metadata record write's setValue() started
+// throwing on the backend once that one cell was full, and
+// savePayrollDocsForFY's use of safeSet swallowed that silently — the modal
+// closed as if the upload had worked, and every upload from that point in
+// the year on (HR reported it starting in October) simply never appeared.
+// Sharded one key per month instead — payroll_docs:<fy>:<month> — so a
+// single month's worth of records (at most a handful of challans/receipts
+// per category) can never realistically approach the limit again, the same
+// reasoning attendance already went through for the identical reason.
+const payrollDocsMonthShardMigrated_ = new Set();
+// Takes whatever a getBatch call already returned for these keys and merges
+// it into one list, migrating a not-yet-split FY onto the new per-month
+// keys the first time it's touched. Shared by getPayrollDocsForFY (one FY)
+// and getPayrollDocsBatch_ (many FYs in one request) so the migration only
+// has to be written once.
+async function payrollDocsMergeFromValues_(fy, values){
+  const monthKeys = FY_MONTH_ORDER.map(m => 'payroll_docs:' + fy + ':' + m);
+  const legacyKey = 'payroll_docs:' + fy;
+  const hasAnyMonthData = monthKeys.some(k => values[k]);
+  if(!hasAnyMonthData && values[legacyKey] && !payrollDocsMonthShardMigrated_.has(fy)){
+    payrollDocsMonthShardMigrated_.add(fy);
+    let legacyList = [];
+    try{ legacyList = JSON.parse(values[legacyKey]) || []; }catch(e){ legacyList = []; }
+    if(Array.isArray(legacyList) && legacyList.length){
+      // Reuses savePayrollDocsForFY itself to do the actual split-and-write —
+      // only clear the old key once the new one is confirmed saved, so a
+      // failed migration leaves the old data in place rather than losing it.
+      const ok = await savePayrollDocsForFY(fy, legacyList);
+      if(ok){ await remoteDelete(legacyKey); return legacyList; }
+    }
+  }
+  const out = [];
+  monthKeys.forEach(k => {
+    try{ if(values[k]) out.push(...JSON.parse(values[k])); }catch(e){}
+  });
+  return out;
 }
+async function getPayrollDocsForFY(fy){
+  const monthKeys = FY_MONTH_ORDER.map(m => 'payroll_docs:' + fy + ':' + m);
+  const allKeys = monthKeys.concat(['payroll_docs:' + fy]);
+  let values = null;
+  try{
+    const data = await backendAction({ action:'getBatch', keys: allKeys });
+    if(data && data.batch && data.values) values = data.values;
+  }catch(e){}
+  if(!values){
+    values = {};
+    await Promise.all(allKeys.map(async k => { values[k] = await safeGet(k, true); }));
+  }
+  return payrollDocsMergeFromValues_(fy, values);
+}
+// Shards the whole-FY list back out across its 12 month keys and writes all
+// of them in one setMany request — one round trip either way, same as the
+// single oversized key this replaced, but now the record that moved out of
+// a month (a reclassify, most often) is properly cleared from that month's
+// key rather than only ever appended elsewhere. Returns whether every key
+// actually got written, so a caller can tell a real failure (the whole
+// point of this change) apart from a silent no-op.
 async function savePayrollDocsForFY(fy, list){
-  await safeSet('payroll_docs:' + fy, JSON.stringify(list), true);
-  await notePayrollDocsFy_(fy);
+  const byMonth = {};
+  FY_MONTH_ORDER.forEach(m => { byMonth[m] = []; });
+  list.forEach(r => { (byMonth[r.month] || (byMonth[r.month] = [])).push(r); });
+  const entries = {};
+  FY_MONTH_ORDER.forEach(m => { entries['payroll_docs:' + fy + ':' + m] = JSON.stringify(byMonth[m]); });
+  const keys = Object.keys(entries);
+  const saved = await remoteSetMany(entries);
+  let ok;
+  if(saved){
+    ok = keys.every(k => saved.has(k));
+  } else {
+    // Older backend without setMany, or the batched write itself failed —
+    // one key at a time, as every other write in this file falls back to.
+    const results = await Promise.all(keys.map(k => remoteSet(k, entries[k])));
+    ok = results.every(Boolean);
+  }
+  if(ok) await notePayrollDocsFy_(fy);
+  return ok;
 }
 // One request for many financial years at once (getBatch, the same primitive
-// getAttendanceBuckets already uses), not one request per year.
+// getAttendanceBuckets already uses), not one request per year — now every
+// month key across every year asked for, still in the one request.
 async function getPayrollDocsBatch_(fyLabels){
   const out = {};
   if(!fyLabels.length) return out;
-  const keys = fyLabels.map(fy => 'payroll_docs:' + fy);
+  const allKeys = [];
+  fyLabels.forEach(fy => {
+    FY_MONTH_ORDER.forEach(m => allKeys.push('payroll_docs:' + fy + ':' + m));
+    allKeys.push('payroll_docs:' + fy);
+  });
+  let values = null;
   try{
-    const data = await backendAction({ action:'getBatch', keys });
-    if(data && data.batch && data.values){
-      fyLabels.forEach(fy => {
-        const raw = data.values['payroll_docs:' + fy];
-        try{ out[fy] = raw ? JSON.parse(raw) : []; }catch(e){ out[fy] = []; }
-      });
-      return out;
-    }
+    const data = await backendAction({ action:'getBatch', keys: allKeys });
+    if(data && data.batch && data.values) values = data.values;
   }catch(e){}
-  await Promise.all(fyLabels.map(async fy => { out[fy] = await getPayrollDocsForFY(fy); }));
+  if(!values){
+    await Promise.all(fyLabels.map(async fy => { out[fy] = await getPayrollDocsForFY(fy); }));
+    return out;
+  }
+  await Promise.all(fyLabels.map(async fy => { out[fy] = await payrollDocsMergeFromValues_(fy, values); }));
   return out;
 }
 async function getPayrollDocsUnclassified_(){
@@ -20679,7 +20758,10 @@ async function deletePayrollDocRecord_(fy, id){
   rec.status = 'deleted';
   rec.history = rec.history || [];
   rec.history.push({ action:'delete', at: new Date().toISOString(), by });
-  await savePayrollDocsForFY(fy, list);
+  if(!(await savePayrollDocsForFY(fy, list))){
+    alert('Could not save that change — check your connection and try again.');
+    return;
+  }
   await addActivityLog(`Deleted ${rec.docTypeLabel} for ${rec.monthLabel} ${rec.fy}`);
   await renderPayrollDocsModule_();
 }
@@ -20993,7 +21075,11 @@ async function savePayrollDocForm_(){
       fileName: cleanName, url, uploadedBy, uploadedAt: now, status:'active',
       history: [{ action:'upload', at: now, by: uploadedBy }],
     });
-    await savePayrollDocsForFY(fy, list);
+    if(!(await savePayrollDocsForFY(fy, list))){
+      msg.textContent = 'The file uploaded, but saving its record failed — check your connection and try again.';
+      msg.classList.add('error');
+      return;
+    }
     await addActivityLog(`Uploaded ${typeInfo.label} for ${payrollDocMonthLabel_(month)} ${fy}`);
     closePayrollDocModal();
     await refreshPayrollDocCardStat_();
@@ -21022,7 +21108,11 @@ async function savePayrollDocForm_(){
       rec.history = rec.history || [];
       rec.history.push({ action: (changes.status && newStatus==='deleted') ? 'delete' : 'edit', at: now, by: newUploadedBy, changes });
     }
-    await savePayrollDocsForFY(ctx.fy, list);
+    if(!(await savePayrollDocsForFY(ctx.fy, list))){
+      msg.textContent = 'Could not save that change — check your connection and try again.';
+      msg.classList.add('error');
+      return;
+    }
     await addActivityLog(`Edited ${rec.docTypeLabel} for ${rec.monthLabel} ${rec.fy}`);
     closePayrollDocModal();
     await renderPayrollDocsModule_();
@@ -21051,14 +21141,22 @@ async function savePayrollDocForm_(){
     rec.fy = newFy; rec.month = newMonth; rec.monthLabel = payrollDocMonthLabel_(newMonth);
     rec.category = newCategory; rec.docType = newDocType; rec.docTypeLabel = newTypeInfo.label;
     rec.uploadedBy = uploadedBy;
+    let reclassifyOk;
     if(newFy === ctx.fy){
-      await savePayrollDocsForFY(ctx.fy, list);
+      reclassifyOk = await savePayrollDocsForFY(ctx.fy, list);
     } else {
       list.splice(idx, 1);
-      await savePayrollDocsForFY(ctx.fy, list);
-      const destList = await getPayrollDocsForFY(newFy);
-      destList.unshift(rec);
-      await savePayrollDocsForFY(newFy, destList);
+      reclassifyOk = await savePayrollDocsForFY(ctx.fy, list);
+      if(reclassifyOk){
+        const destList = await getPayrollDocsForFY(newFy);
+        destList.unshift(rec);
+        reclassifyOk = await savePayrollDocsForFY(newFy, destList);
+      }
+    }
+    if(!reclassifyOk){
+      msg.textContent = 'Could not save that change — check your connection and try again.';
+      msg.classList.add('error');
+      return;
     }
     await addActivityLog(`Reclassified a document to ${newTypeInfo.label} for ${payrollDocMonthLabel_(newMonth)} ${newFy}`);
     closePayrollDocModal();
@@ -21086,7 +21184,11 @@ async function savePayrollDocForm_(){
     rec.history = rec.history || [];
     rec.history.push({ action:'replace', at: now, by: uploadedBy, oldUrl: rec.url, oldFileName: rec.fileName });
     rec.fileName = cleanName; rec.url = url; rec.uploadedBy = uploadedBy; rec.uploadedAt = now;
-    await savePayrollDocsForFY(ctx.fy, list);
+    if(!(await savePayrollDocsForFY(ctx.fy, list))){
+      msg.textContent = 'The replacement file uploaded, but saving its record failed — check your connection and try again.';
+      msg.classList.add('error');
+      return;
+    }
     await addActivityLog(`Replaced ${rec.docTypeLabel} for ${rec.monthLabel} ${rec.fy}`);
     closePayrollDocModal();
     await renderPayrollDocsModule_();
@@ -21119,11 +21221,18 @@ async function savePayrollDocForm_(){
         { action:'reclassify', at: now, by: uploadedBy, note:'Classified out of Unclassified' },
       ],
     };
-    unclassified.splice(idx, 1);
-    await savePayrollDocsUnclassified_(unclassified);
     const destList = await getPayrollDocsForFY(fy);
     destList.unshift(rec);
-    await savePayrollDocsForFY(fy, destList);
+    // Written to its new home BEFORE it's removed from Unclassified — on a
+    // failure that leaves it counted twice rather than dropped altogether,
+    // and dropped is the one of those two a document can't recover from.
+    if(!(await savePayrollDocsForFY(fy, destList))){
+      msg.textContent = 'Could not save that change — check your connection and try again.';
+      msg.classList.add('error');
+      return;
+    }
+    unclassified.splice(idx, 1);
+    await savePayrollDocsUnclassified_(unclassified);
     await addActivityLog(`Classified a document as ${typeInfo.label} for ${payrollDocMonthLabel_(month)} ${fy}`);
     closePayrollDocModal();
     await renderPayrollDocsModule_();
