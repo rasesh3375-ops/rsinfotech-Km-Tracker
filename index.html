@@ -12758,9 +12758,21 @@ async function renderDashLoanExisting(empId){
   const emp = (await getEmployees()).find(e => e.id === empId);
   if(!emp){ box.innerHTML = ''; return; }
   const loans = loansOf(emp);
+  const nowD = new Date(), nowYm = nowD.getFullYear() + '-' + String(nowD.getMonth() + 1).padStart(2, '0');
   box.innerHTML = '<label class="field">Existing loans on file for ' + escapeHtml(emp.name) + '</label>' +
-    (loans.length ? loans.map(l => `<div class="emp-row"><div class="head"><strong>${rupees(l.amount)}</strong><span class="id">${l.status === 'closed' ? 'Closed' : 'Active'}</span></div>` +
-      `<div class="sub">EMI ${rupees(l.instalment)} · from ${l.startMonth ? fmtDateIN(l.startMonth + '-01') : '—'}${l.reason ? ' · ' + escapeHtml(l.reason) : ''}</div></div>`).join('')
+    (loans.length ? loans.map(l => {
+      const active = l.status !== 'closed';
+      const currentEmi = active ? loanEmiRateAsOf(l, nowYm) : l.instalment;
+      const balance = active ? loanBalanceAfter(l, nowD.getFullYear(), nowD.getMonth() + 1) : 0;
+      return `<div class="emp-row"><div class="head"><strong>${rupees(l.amount)}</strong><span class="id">${active ? 'Active' : 'Closed'}</span></div>` +
+        `<div class="sub">EMI ${rupees(currentEmi)} · from ${l.startMonth ? fmtDateIN(l.startMonth + '-01') : '—'}${l.reason ? ' · ' + escapeHtml(l.reason) : ''}${active ? ' · Balance ' + rupees(balance) : ''}</div>` +
+        (active ? `<div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap;align-items:flex-end;">
+            <div><label class="field" style="font-size:11px;">New EMI from</label><input type="month" class="field-input" id="dashLoanEmiFrom_${l.id}" min="${nowYm}" style="width:150px;"></div>
+            <div><label class="field" style="font-size:11px;">New EMI amount</label><input type="number" class="field-input" id="dashLoanEmiNew_${l.id}" placeholder="0" style="width:120px;"></div>
+            <button class="btn ghost" onclick="withBusy(this,'Saving…',()=>changeLoanEmiFromDashboard('${empId}','${l.id}'))">Update EMI</button>
+          </div>` : '') +
+        `</div>`;
+    }).join('')
       : '<p class="hint">No loans on file yet.</p>');
 }
 async function renderDashAdvExisting(empId){
@@ -12801,6 +12813,51 @@ async function addLoanFromDashboard(){
   document.getElementById('dashLoanEmi').value = '';
   document.getElementById('dashLoanStart').value = '';
   document.getElementById('dashLoanReason').value = '';
+  renderDashLoanExisting(empId);
+}
+// Changes the EMI on an EXISTING loan from this same Dashboard shortcut,
+// rather than sending HR into Employee Master for it — the one thing the
+// "Add loan" form above can't do. Reuses the exact append/de-dupe-by-`from`
+// mechanism Employee Master's own loan editor already uses (addLoanEmiChange,
+// see the loan ledger block further down) so both entry points write the
+// same emiHistory shape. Nothing else about the loan is touched: not its id,
+// amount or start month, so this is a change to the same loan, never a
+// delete-and-recreate. Every past month still resolves to the old rate
+// through loanEmiRateAsOf's own date-scoped lookup — there is no separate
+// "don't touch old payroll" step to write here, and the past-month guard
+// below only exists to stop HR from backdating a change that would otherwise
+// alter how a not-yet-generated report renders that month, not because the
+// underlying math would get it wrong.
+async function changeLoanEmiFromDashboard(empId, loanId){
+  const msg = document.getElementById('dashLoanMsg');
+  msg.textContent = ''; msg.classList.remove('error');
+  const from = (document.getElementById('dashLoanEmiFrom_' + loanId) || {}).value || '';
+  const instalment = Number((document.getElementById('dashLoanEmiNew_' + loanId) || {}).value) || 0;
+  const nowD = new Date(), nowYm = nowD.getFullYear() + '-' + String(nowD.getMonth() + 1).padStart(2, '0');
+  if(!from){ msg.textContent = 'Choose the month the new EMI starts from.'; msg.classList.add('error'); return; }
+  if(from < nowYm){ msg.textContent = 'The new EMI can only start this month or later — past payroll must stay as it was.'; msg.classList.add('error'); return; }
+  if(instalment <= 0){ msg.textContent = 'Enter a new EMI amount greater than 0.'; msg.classList.add('error'); return; }
+
+  const employees = await getEmployees();
+  const emp = employees.find(e => e.id === empId);
+  if(!emp){ msg.textContent = 'Employee not found — try reopening this tab.'; msg.classList.add('error'); return; }
+  emp.loans = loansOf(emp);
+  const loan = emp.loans.find(l => l.id === loanId);
+  if(!loan){ msg.textContent = 'Loan not found — try reopening this tab.'; msg.classList.add('error'); return; }
+
+  const oldRate = loanEmiRateAsOf(loan, from);
+  if(!Array.isArray(loan.emiHistory) || !loan.emiHistory.length){
+    loan.emiHistory = [{ from: loan.startMonth || null, instalment: Number(loan.instalment) || 0 }];
+  }
+  loan.emiHistory = loan.emiHistory.filter(h => h.from !== from);
+  loan.emiHistory.push({ from, instalment });
+
+  await saveOneEmployee_(emp);
+  invalidateDashboardSnapshot();
+  await addActivityLog('Changed EMI for ' + emp.name + '’s loan of ' + rupees(loan.amount) +
+    ' from ' + rupees(oldRate) + ' to ' + rupees(instalment) + ', effective ' + from);
+
+  msg.textContent = 'EMI updated — future payroll uses ' + rupees(instalment) + ' from ' + from + ' on.';
   renderDashLoanExisting(empId);
 }
 async function addAdvanceFromDashboard(){
