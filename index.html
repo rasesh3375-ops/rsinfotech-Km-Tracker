@@ -7508,10 +7508,10 @@ function hrHeadingCard(label){
 // phone sideways to scroll through them all first.
 function attendanceMobileCard(idx, emp, isResident, summary, dayCellsHtml){
   const chips = [
-    ['P', summary.present], ['A', summary.absent], ['EL', summary.elUsed], ['SL', summary.slUsed],
-    ['LP', summary.lpDays], ['Half', summary.halfDays], ['Short', summary.shortCount], ['Late', summary.lateCount]
-  ].map(([k, v]) => `<span class="hr-sheet-chip"><span class="k">${k}</span>${v}</span>`).join('');
-  return `<div class="hr-sheet-card">
+    ['P', 'present'], ['A', 'absent'], ['EL', 'elUsed'], ['SL', 'slUsed'],
+    ['LP', 'lpDays'], ['Half', 'halfDays'], ['Short', 'shortCount'], ['Late', 'lateCount']
+  ].map(([k, key]) => `<span class="hr-sheet-chip"><span class="k">${k}</span><span data-att-summary="${key}">${summary[key]}</span></span>`).join('');
+  return `<div class="hr-sheet-card" data-att-row="${emp.id}">
     <div class="head">
       <strong>${escapeHtml(emp.name)}${isResident ? ' <span style="color:var(--muted);font-size:10px;font-weight:600;">(Resident)</span>' : ''}</strong>
       <span class="id">#${idx + 1}</span>
@@ -7523,6 +7523,73 @@ function attendanceMobileCard(idx, emp, isResident, summary, dayCellsHtml){
   </div>`;
 }
 
+// Merges pendingAttendance (unsaved on-screen edits) into a stored attByEmp
+// map, once for the whole sheet, so the day grid, the row totals, the
+// policy panel and the exported CSV's statutory columns all read from the
+// SAME merged picture instead of three of them reading the raw stored data
+// and only the day grid accounting for what hasn't been saved yet. Before
+// this, an edit not yet saved showed correctly in its own cell and in that
+// row's totals, but the policy panel below (late/short/half/sick/PL/LWP/
+// sandwich warnings) and the Drive-saved CSV still reflected whatever was
+// last actually saved — only a genuine Save (which rewrites attByEmp) ever
+// caught them up. That is what "fill in attendance, nothing shows until you
+// leave and come back" actually was: leaving and reopening only looked like
+// a fix on days HR had also pressed Save first.
+function mergedAttByEmpWithPending_(employees, attByEmp){
+  const out = {};
+  employees.forEach(emp => {
+    const merged = Object.assign({}, attByEmp[emp.id] || {});
+    Object.values(pendingAttendance).forEach(it => {
+      if(it.employeeId !== emp.id) return;
+      merged[it.dateStr] = Object.assign({}, merged[it.dateStr] || {}, { code: it.code }, it.extra || {});
+    });
+    out[emp.id] = merged;
+  });
+  return out;
+}
+// What the last renderAttendanceSheet() call fetched, kept around so a
+// single cell edit can update its own row instantly — and the policy panel
+// shortly after — without re-fetching or re-rendering the whole sheet (which
+// would also reset horizontal scroll back to today's column on every single
+// keystroke; see scrollAttendanceSheetToToday at the end of this function).
+let attSheetRenderCtx_ = null;
+// Recomputes and repaints just one employee's summary columns (Present,
+// Absent, EL, SL, LP, Half, Short, Late) right after a cell edit, and queues
+// a debounced refresh of the policy panel below — see
+// scheduleAttPolicyPanelRefresh_. A no-op if the sheet isn't open or a
+// different month has been drawn since (attSheetRenderCtx_ stale/missing) —
+// the edit is already in pendingAttendance either way, so the next real
+// render still picks it up correctly.
+function refreshAttendanceRowSummary_(employeeId){
+  const ctx = attSheetRenderCtx_;
+  if(!ctx) return;
+  const emp = ctx.employees.find(e => e.id === employeeId);
+  if(!emp) return;
+  const row = document.querySelector('#attendanceSheetBox [data-att-row="' + employeeId + '"]');
+  if(!row) return;
+  const att = mergedAttByEmpWithPending_([emp], ctx.attByEmp)[emp.id];
+  const summary = computeAttendanceSummary(att, emp, ctx.dateList, ctx.holidayMap);
+  row.querySelectorAll('[data-att-summary]').forEach(cell => {
+    const key = cell.getAttribute('data-att-summary');
+    if(summary[key] !== undefined) cell.textContent = summary[key];
+  });
+  scheduleAttPolicyPanelRefresh_();
+}
+// Debounced rather than recomputed on every keystroke — policyRowsFor walks
+// every day of every employee, and filling in a month by hand is a burst of
+// many edits in quick succession, not one at a time.
+let attPolicyRefreshTimer_ = null;
+function scheduleAttPolicyPanelRefresh_(){
+  clearTimeout(attPolicyRefreshTimer_);
+  attPolicyRefreshTimer_ = setTimeout(refreshAttendancePolicyPanel_, 500);
+}
+function refreshAttendancePolicyPanel_(){
+  const ctx = attSheetRenderCtx_;
+  const box = document.getElementById('attPolicySummaryBox');
+  if(!ctx || !box) return;
+  const merged = mergedAttByEmpWithPending_(ctx.employees, ctx.attByEmp);
+  box.innerHTML = buildPolicySummary(ctx.employees, merged, ctx.dateList, null, ctx.holidayMap);
+}
 async function renderAttendanceSheet(){
   const box = document.getElementById('attendanceSheetBox');
   populateMonthYearSelects('attSheetMonthSel', 'attSheetYearSel');
@@ -7578,6 +7645,8 @@ async function renderAttendanceSheet(){
   const attFetchFrom = shiftDateStr(dateList[0], -1);
   const attFetchTo = shiftDateStr(dateList[dateList.length - 1], 1);
   const attByEmp = await getAttendanceRange(employees.map(e => e.id), attFetchFrom, attFetchTo);
+  const mergedAttByEmp = mergedAttByEmpWithPending_(employees, attByEmp);
+  attSheetRenderCtx_ = { employees, dateList, holidayMap, attByEmp };
   // Everything about a day that does not depend on who is being drawn — the
   // weekday, whether it is a holiday, whether it has happened yet. Worked out
   // once instead of once per employee per day, which for a dozen staff was
@@ -7592,20 +7661,16 @@ async function renderAttendanceSheet(){
   }));
   for(let i=0; i<employees.length; i++){
     const emp = employees[i];
-    // Straight from the batch above. This used to call getAttendance again,
-    // which re-parsed the employee's whole attendance history — every day they
-    // have ever worked, not just this month — a second time per render.
-    const stored = attByEmp[emp.id] || {};
+    // Straight from the batch above, already merged with any unsaved
+    // pendingAttendance edits (mergedAttByEmpWithPending_) — this used to
+    // rebuild that merge separately per employee right here; now it's the
+    // same picture the policy panel and the CSV export below also read from.
     // The grid shows what is on screen, saved or not. Redrawing from the stored
     // record alone used to make unsaved edits vanish while the bar still
     // counted them — and after a part-failed save there was no way to see which
     // cells had not gone in. The totals are computed from the same picture, so
     // they cannot contradict the codes above them.
-    const att = Object.assign({}, stored);
-    Object.values(pendingAttendance).forEach(it => {
-      if(it.employeeId !== emp.id) return;
-      att[it.dateStr] = Object.assign({}, stored[it.dateStr] || {}, { code: it.code }, it.extra || {});
-    });
+    const att = mergedAttByEmp[emp.id] || {};
     const isResident = emp.employeeType === 'resident';
     const summary = computeAttendanceSummary(att, emp, dateList, holidayMap);
     const dayCodes = [];
@@ -7638,16 +7703,19 @@ async function renderAttendanceSheet(){
     if(isCompact){
       bodyRows += attendanceMobileCard(i, emp, isResident, summary, dayCells);
     } else {
-      bodyRows += `<tr><td>${i+1}</td><td class="att-name">${escapeHtml(emp.name)}${isResident?' <span style="color:var(--muted);font-size:10px;">(Resident)</span>':''}</td>${dayCells}` +
-        `<td>${summary.present}</td><td>${summary.absent}</td><td>${summary.elUsed}</td><td>${summary.slUsed}</td><td>${summary.lpDays}</td><td>${summary.halfDays}</td><td>${summary.shortCount}</td><td>${summary.lateCount}</td></tr>`;
+      bodyRows += `<tr data-att-row="${emp.id}"><td>${i+1}</td><td class="att-name">${escapeHtml(emp.name)}${isResident?' <span style="color:var(--muted);font-size:10px;">(Resident)</span>':''}</td>${dayCells}` +
+        `<td data-att-summary="present">${summary.present}</td><td data-att-summary="absent">${summary.absent}</td><td data-att-summary="elUsed">${summary.elUsed}</td><td data-att-summary="slUsed">${summary.slUsed}</td><td data-att-summary="lpDays">${summary.lpDays}</td><td data-att-summary="halfDays">${summary.halfDays}</td><td data-att-summary="shortCount">${summary.shortCount}</td><td data-att-summary="lateCount">${summary.lateCount}</td></tr>`;
     }
     csvRows.push([i+1, emp.name, ...dayCodes, summary.present, summary.absent, summary.elUsed, summary.slUsed, summary.lpDays, summary.halfDays, summary.shortCount, summary.lateCount]);
   }
 
   // Policy position for the month, computed once. It used to run twice — once
   // inside buildPolicySummary for the panel and again below for the export —
-  // over every employee and every day of the month.
-  const policyRows = policyRowsFor(employees, attByEmp, dateList, holidayMap);
+  // over every employee and every day of the month. Reads mergedAttByEmp, not
+  // the raw attByEmp — see mergedAttByEmpWithPending_'s comment for why:
+  // otherwise an unsaved edit could show correctly in the grid above and
+  // still be missing from both the policy warnings and this CSV.
+  const policyRows = policyRowsFor(employees, mergedAttByEmp, dateList, holidayMap);
 
   // The policy columns are appended before the file is written, not after.
   // csvHeader has always declared them, but the Drive copy was written first,
@@ -7685,8 +7753,10 @@ async function renderAttendanceSheet(){
     </div>`
     // Policy position for the same month, from the rows already computed — so
     // the panel and the exported columns cannot disagree about who breached
-    // what, and neither pays for the calculation twice.
-    + buildPolicySummary(employees, attByEmp, dateList, policyRows, holidayMap);
+    // what, and neither pays for the calculation twice. Wrapped in its own
+    // id so a single cell edit can refresh just this panel afterward
+    // (refreshAttendancePolicyPanel_) instead of re-rendering the whole sheet.
+    + '<div id="attPolicySummaryBox">' + buildPolicySummary(employees, mergedAttByEmp, dateList, policyRows, holidayMap) + '</div>';
   renderPolicyOverrideLog();
   // Now the sheet is on screen, fill in the dropdowns nobody has touched.
   hydrateAttCodeSelects();
@@ -7954,6 +8024,13 @@ function handleAttendanceCellChange(employeeId, dateStr, selectEl){
   selectEl.className = 'att-code code-' + code + ' att-dirty';
   updateAttendanceSaveBar();
   persistPendingAttendance();
+  // This used to only take effect on the next full render — leave the sheet
+  // and reopen it, or change month and change back — because nothing here
+  // touched the row's own Present/Absent/EL/... totals or the policy panel
+  // below. Patched in place instead of re-rendering the whole sheet, which
+  // would also reset horizontal scroll back to today's column on every
+  // single cell picked.
+  refreshAttendanceRowSummary_(employeeId);
 }
 
 async function saveAttendanceChanges(){
