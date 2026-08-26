@@ -20694,6 +20694,23 @@ async function savePayrollDocsForFY(fy, list){
   if(ok) await notePayrollDocsFy_(fy);
   return ok;
 }
+// Writes exactly one month's key, not the whole financial year. Every
+// mutation (upload/edit/reclassify/replace/delete) used to read the whole
+// FY, change one record, and hand all 12 months back to savePayrollDocsForFY
+// above — which rewrites every one of those 12 keys from that single
+// in-memory snapshot every time. Two such actions close together (HR
+// uploading several months' documents in one session is exactly this) race:
+// whichever write's read was taken first loses everything the other one had
+// already saved, across every month and category, not just the one record
+// being changed — that is what "uploaded everything and it was showing
+// nothing" was. Scoping the write to only the month(s) actually touched
+// shrinks that race to, at worst, two edits to the very same month landing
+// out of order — instead of one save silently erasing the whole year.
+async function savePayrollDocsMonth_(fy, month, monthList){
+  const ok = await remoteSet('payroll_docs:' + fy + ':' + month, JSON.stringify(monthList));
+  if(ok) await notePayrollDocsFy_(fy);
+  return ok;
+}
 // One request for many financial years at once (getBatch, the same primitive
 // getAttendanceBuckets already uses), not one request per year — now every
 // month key across every year asked for, still in the one request.
@@ -21103,7 +21120,9 @@ async function deletePayrollDocRecord_(fy, id){
   rec.status = 'deleted';
   rec.history = rec.history || [];
   rec.history.push({ action:'delete', at: new Date().toISOString(), by });
-  if(!(await savePayrollDocsForFY(fy, list))){
+  // Only this record's own month key — see savePayrollDocsMonth_'s comment.
+  const monthList = list.filter(r => r.month === rec.month);
+  if(!(await savePayrollDocsMonth_(fy, rec.month, monthList))){
     alert('Could not save that change — check your connection and try again.');
     return;
   }
@@ -21412,15 +21431,17 @@ async function savePayrollDocForm_(){
     const folderPath = hrYearPath(docDate, 'Office Documents', 'Payroll Documents', payrollDocMonthLabel_(month), payrollDocCategoryByKey_(category).label);
     const url = await uploadDocumentToDrive(folderPath, driveFileName, file);
     if(!url){ msg.textContent = 'Upload failed — check your connection and try again.'; msg.classList.add('error'); return; }
-    const list = await getPayrollDocsForFY(fy);
-    list.unshift({
+    // Only this one month's key is read and written back — see
+    // savePayrollDocsMonth_'s comment for why that matters here.
+    const monthList = (await getPayrollDocsForFY(fy)).filter(r => r.month === month);
+    monthList.unshift({
       id: randomHex(6), fy, month, monthLabel: payrollDocMonthLabel_(month),
       category, docType, docTypeLabel: typeInfo.label,
       docName: docName || typeInfo.label, docDate, remarks,
       fileName: cleanName, url, uploadedBy, uploadedAt: now, status:'active',
       history: [{ action:'upload', at: now, by: uploadedBy }],
     });
-    if(!(await savePayrollDocsForFY(fy, list))){
+    if(!(await savePayrollDocsMonth_(fy, month, monthList))){
       msg.textContent = 'The file uploaded, but saving its record failed — check your connection and try again.';
       msg.classList.add('error');
       return;
@@ -21453,7 +21474,10 @@ async function savePayrollDocForm_(){
       rec.history = rec.history || [];
       rec.history.push({ action: (changes.status && newStatus==='deleted') ? 'delete' : 'edit', at: now, by: newUploadedBy, changes });
     }
-    if(!(await savePayrollDocsForFY(ctx.fy, list))){
+    // Edit never moves a record between months, so writing back just its own
+    // month's key is always correct — see savePayrollDocsMonth_'s comment.
+    const monthList = list.filter(r => r.month === rec.month);
+    if(!(await savePayrollDocsMonth_(ctx.fy, rec.month, monthList))){
       msg.textContent = 'Could not save that change — check your connection and try again.';
       msg.classList.add('error');
       return;
@@ -21477,6 +21501,7 @@ async function savePayrollDocForm_(){
     if(!newTypeInfo) return;
     const uploadedBy = uploadedByField.value.trim() || rec.uploadedBy || 'HR';
     payrollDocRememberUploader_(uploadedBy);
+    const oldFy = rec.fy, oldMonth = rec.month;
     rec.history = rec.history || [];
     rec.history.push({ action:'reclassify', at: now, by: uploadedBy, changes: {
       fy: { from: rec.fy, to: newFy }, month: { from: rec.monthLabel, to: payrollDocMonthLabel_(newMonth) },
@@ -21486,16 +21511,27 @@ async function savePayrollDocForm_(){
     rec.fy = newFy; rec.month = newMonth; rec.monthLabel = payrollDocMonthLabel_(newMonth);
     rec.category = newCategory; rec.docType = newDocType; rec.docTypeLabel = newTypeInfo.label;
     rec.uploadedBy = uploadedBy;
+    // Only the month key(s) actually affected are written — never the whole
+    // FY's 12 keys from one snapshot. See savePayrollDocsMonth_'s comment.
     let reclassifyOk;
     if(newFy === ctx.fy){
-      reclassifyOk = await savePayrollDocsForFY(ctx.fy, list);
+      if(newMonth === oldMonth){
+        const monthList = list.filter(r => r.month === oldMonth);
+        reclassifyOk = await savePayrollDocsMonth_(ctx.fy, oldMonth, monthList);
+      } else {
+        const oldMonthList = list.filter(r => r.month === oldMonth);
+        const newMonthList = list.filter(r => r.month === newMonth);
+        reclassifyOk = (await savePayrollDocsMonth_(ctx.fy, oldMonth, oldMonthList))
+          && (await savePayrollDocsMonth_(ctx.fy, newMonth, newMonthList));
+      }
     } else {
       list.splice(idx, 1);
-      reclassifyOk = await savePayrollDocsForFY(ctx.fy, list);
+      const oldMonthList = list.filter(r => r.month === oldMonth);
+      reclassifyOk = await savePayrollDocsMonth_(oldFy, oldMonth, oldMonthList);
       if(reclassifyOk){
-        const destList = await getPayrollDocsForFY(newFy);
-        destList.unshift(rec);
-        reclassifyOk = await savePayrollDocsForFY(newFy, destList);
+        const destMonthList = (await getPayrollDocsForFY(newFy)).filter(r => r.month === newMonth);
+        destMonthList.unshift(rec);
+        reclassifyOk = await savePayrollDocsMonth_(newFy, newMonth, destMonthList);
       }
     }
     if(!reclassifyOk){
@@ -21526,15 +21562,21 @@ async function savePayrollDocForm_(){
     const folderPath = hrYearPath(rec.docDate, 'Office Documents', 'Payroll Documents', rec.monthLabel, payrollDocCategoryByKey_(rec.category).label);
     const url = await uploadDocumentToDrive(folderPath, driveFileName, file);
     if(!url){ msg.textContent = 'Upload failed — check your connection and try again.'; msg.classList.add('error'); return; }
-    rec.history = rec.history || [];
-    rec.history.push({ action:'replace', at: now, by: uploadedBy, oldUrl: rec.url, oldFileName: rec.fileName });
-    rec.fileName = cleanName; rec.url = url; rec.uploadedBy = uploadedBy; rec.uploadedAt = now;
-    if(!(await savePayrollDocsForFY(ctx.fy, list))){
+    // Re-read this one month fresh rather than reusing the snapshot taken
+    // before the (potentially slow) Drive upload above — narrows the race
+    // window to just this save, the same reason 'upload' re-reads after its
+    // own upload. Only this month's key is written back either way.
+    const monthList = (await getPayrollDocsForFY(ctx.fy)).filter(r => r.month === rec.month);
+    const freshRec = monthList.find(r => r.id === ctx.id) || rec;
+    freshRec.history = freshRec.history || [];
+    freshRec.history.push({ action:'replace', at: now, by: uploadedBy, oldUrl: freshRec.url, oldFileName: freshRec.fileName });
+    freshRec.fileName = cleanName; freshRec.url = url; freshRec.uploadedBy = uploadedBy; freshRec.uploadedAt = now;
+    if(!(await savePayrollDocsMonth_(ctx.fy, rec.month, monthList))){
       msg.textContent = 'The replacement file uploaded, but saving its record failed — check your connection and try again.';
       msg.classList.add('error');
       return;
     }
-    await addActivityLog(`Replaced ${rec.docTypeLabel} for ${rec.monthLabel} ${rec.fy}`);
+    await addActivityLog(`Replaced ${freshRec.docTypeLabel} for ${freshRec.monthLabel} ${freshRec.fy}`);
     closePayrollDocModal();
     await renderPayrollDocsModule_();
     return;
@@ -21566,12 +21608,13 @@ async function savePayrollDocForm_(){
         { action:'reclassify', at: now, by: uploadedBy, note:'Classified out of Unclassified' },
       ],
     };
-    const destList = await getPayrollDocsForFY(fy);
-    destList.unshift(rec);
+    // Only this one month's key — see savePayrollDocsMonth_'s comment.
+    const destMonthList = (await getPayrollDocsForFY(fy)).filter(r => r.month === month);
+    destMonthList.unshift(rec);
     // Written to its new home BEFORE it's removed from Unclassified — on a
     // failure that leaves it counted twice rather than dropped altogether,
     // and dropped is the one of those two a document can't recover from.
-    if(!(await savePayrollDocsForFY(fy, destList))){
+    if(!(await savePayrollDocsMonth_(fy, month, destMonthList))){
       msg.textContent = 'Could not save that change — check your connection and try again.';
       msg.classList.add('error');
       return;
