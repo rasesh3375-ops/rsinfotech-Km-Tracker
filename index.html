@@ -20728,6 +20728,31 @@ async function getPayrollDocsForFY(fy){
   }
   return payrollDocsMergeFromValues_(fy, values);
 }
+// Same read as getPayrollDocsForFY, but for the one place a failed read must
+// not be mistaken for a genuinely empty year: the Dashboard. getBatch/safeGet
+// both collapse "the backend genuinely has nothing under these keys" and "we
+// could not reach the backend at all" into the exact same empty result — the
+// same "0 employees" bug getEmployeesOrThrow_ exists for, just recurring
+// here. A network blip mid-session made every month show "Not Uploaded"
+// indistinguishable from an actually-empty year, and nearly caused already-
+// recovered documents to be linked a second time. THROWS on a genuine
+// network failure instead of silently answering []; every other call site
+// in this module (mutations, Browse, Search) keeps using the plain version
+// above, which is the right behaviour for them — they need *some* answer to
+// proceed, not a hard stop.
+async function getPayrollDocsForFYOrThrow_(fy){
+  const monthKeys = FY_MONTH_ORDER.map(m => 'payroll_docs:' + fy + ':' + m);
+  const allKeys = monthKeys.concat(['payroll_docs:' + fy]);
+  const res = await apiFetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action: 'getBatch', keys: allKeys, token: sessionToken })
+  });
+  const data = JSON.parse(await res.text());
+  if(data && data.error === 'unauthorized'){ onSessionExpired(); throw new Error('Session expired'); }
+  if(!data || !data.batch || !data.values) throw new Error('Backend did not answer — could not load this year\'s documents.');
+  return payrollDocsMergeFromValues_(fy, data.values);
+}
 // Shards the whole-FY list back out across its 12 month keys and writes all
 // of them in one setMany request — one round trip either way, same as the
 // single oversized key this replaced, but now the record that moved out of
@@ -20994,7 +21019,25 @@ async function renderPayrollDocsViewBody_(){
 // without scrolling it sideways one column at a time.
 async function renderPayrollDocsDashboard_(body){
   const fy = payrollDocsState_.fy;
-  const records = (await getPayrollDocsForFY(fy)).filter(r => r.status === 'active');
+  let records;
+  try{
+    records = (await getPayrollDocsForFYOrThrow_(fy)).filter(r => r.status === 'active');
+  }catch(e){
+    // A failed read shows as a clear "couldn't load", never as silent
+    // "Not Uploaded" everywhere — see getPayrollDocsForFYOrThrow_'s comment.
+    body.innerHTML = `<div class="payroll-docs-fy-picker">
+      <label class="field">Financial Year</label>
+      <select class="field-input" onchange="payrollDocsState_.fy=this.value;renderPayrollDocsViewBody_();">
+        ${payrollDocsFyOptions_().map(l => `<option value="${l}" ${l===fy?'selected':''}>${l}</option>`).join('')}
+      </select>
+    </div>
+    <div class="dash-card" style="background:#FFF6F5;border-color:#F1D7D4;">
+      <h3 style="color:var(--red);margin:0 0 6px;">Couldn't load ${escapeHtml(fy)}'s documents</h3>
+      <p class="card-sub" style="margin:0 0 12px;">The backend didn't answer — this does not mean the documents are gone, only that this page couldn't read them just now. Do not re-link anything until this loads correctly.</p>
+      <button class="btn ghost" onclick="renderPayrollDocsViewBody_()">Try again</button>
+    </div>`;
+    return;
+  }
   const rows = FY_MONTH_ORDER.map(monthNum => ({ monthNum, status: payrollDocsMonthStatus_(records, fy, monthNum) }));
   const fyPicker = `
     <div class="payroll-docs-fy-picker">
