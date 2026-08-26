@@ -52,6 +52,34 @@ function isStaleEmployeeWrite_(key, incomingValue, existingValue) {
   }
 }
 
+// Same guard as isStaleEmployeeWrite_ above, for payroll_docs:<fy>:<month>
+// keys. HR relinking several documents for one month in quick succession —
+// exactly what recovering April's lost PF records needed — hits the
+// identical out-of-order-write risk an employee save does: an earlier write
+// that looked like it failed client-side ("Could not save — try again") can
+// still be running here, and land AFTER a later write that already
+// succeeded, silently erasing everything the later one added. That is
+// exactly what happened to April: PF went from Complete back to Not
+// Uploaded with no error shown, because the stale write that erased it
+// still reported success. savePayrollDocsMonth_ (index.html) now stamps
+// every month's write with savedAt inside {savedAt, records}, the same
+// object shape employee: records already use; this refuses to let an older
+// one replace one that's already newer. Fails open — writing through as
+// before — for a bare pre-existing array (the shape every month key used
+// before this guard existed) or malformed JSON, exactly like the employee
+// guard's own fallback.
+function isStalePayrollDocsWrite_(key, incomingValue, existingValue) {
+  if (typeof key !== 'string' || key.indexOf('payroll_docs:') !== 0) return false;
+  try {
+    const existing = JSON.parse(existingValue);
+    const incoming = JSON.parse(incomingValue);
+    if (!existing || !incoming || existing.savedAt === undefined || incoming.savedAt === undefined) return false;
+    return Number(existing.savedAt) > Number(incoming.savedAt);
+  } catch (e) {
+    return false;
+  }
+}
+
 function getOrCreateFolderPath_(pathParts) {
   let folder = DriveApp.getFolderById(ROOT_FOLDER_ID);
   for (const name of pathParts) {
@@ -1049,7 +1077,8 @@ function doPost(e) {
       const sheet = getSheet_();
       const row = findRow_(sheet, body.key);
       if (row === -1) sheet.appendRow([body.key, body.value]);
-      else if (!isStaleEmployeeWrite_(body.key, body.value, sheet.getRange(row, 2).getValue())) {
+      else if (!isStaleEmployeeWrite_(body.key, body.value, sheet.getRange(row, 2).getValue()) &&
+               !isStalePayrollDocsWrite_(body.key, body.value, sheet.getRange(row, 2).getValue())) {
         sheet.getRange(row, 2).setValue(body.value);
       }
     } else if (body.action === 'delete') {
@@ -1098,7 +1127,8 @@ function doPost(e) {
       for (var k in entries) {
         if (!indexM[k]) {
           sheetM.appendRow([k, entries[k]]);
-        } else if (!isStaleEmployeeWrite_(k, entries[k], dataM[indexM[k] - 1][1])) {
+        } else if (!isStaleEmployeeWrite_(k, entries[k], dataM[indexM[k] - 1][1]) &&
+                   !isStalePayrollDocsWrite_(k, entries[k], dataM[indexM[k] - 1][1])) {
           sheetM.getRange(indexM[k], 2).setValue(entries[k]);
         }
         savedKeys.push(k);
