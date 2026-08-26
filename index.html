@@ -20687,6 +20687,20 @@ async function notePayrollDocsFy_(fy){
 // per category) can never realistically approach the limit again, the same
 // reasoning attendance already went through for the identical reason.
 const payrollDocsMonthShardMigrated_ = new Set();
+// A month key's stored value is either the original bare array, or (since
+// the isStalePayrollDocsWrite_ backend guard) {savedAt, records} — the same
+// shape employee: records already use their own savedAt in, wrapping around
+// the array instead of a single object. Reading has to accept both: every
+// month key already on the sheet before that guard shipped is still a bare
+// array, and stays that way until the next time something writes to it.
+function payrollDocsRecordsFromValue_(raw){
+  if(!raw) return [];
+  let parsed;
+  try{ parsed = JSON.parse(raw); }catch(e){ return []; }
+  if(Array.isArray(parsed)) return parsed;
+  if(parsed && Array.isArray(parsed.records)) return parsed.records;
+  return [];
+}
 // Takes whatever a getBatch call already returned for these keys and merges
 // it into one list, migrating a not-yet-split FY onto the new per-month
 // keys the first time it's touched. Shared by getPayrollDocsForFY (one FY)
@@ -20709,9 +20723,7 @@ async function payrollDocsMergeFromValues_(fy, values){
     }
   }
   const out = [];
-  monthKeys.forEach(k => {
-    try{ if(values[k]) out.push(...JSON.parse(values[k])); }catch(e){}
-  });
+  monthKeys.forEach(k => { out.push(...payrollDocsRecordsFromValue_(values[k])); });
   return out;
 }
 async function getPayrollDocsForFY(fy){
@@ -20769,8 +20781,13 @@ async function savePayrollDocsForFY(fy, list){
   const byMonth = {};
   FY_MONTH_ORDER.forEach(m => { byMonth[m] = []; });
   list.forEach(r => { (byMonth[r.month] || (byMonth[r.month] = [])).push(r); });
+  // Same {savedAt, records} envelope savePayrollDocsMonth_ writes — see its
+  // comment. One savedAt shared by all 12 months is fine here: this function
+  // is only ever a single one-time migration write, never in the kind of
+  // rapid back-to-back succession that made the per-month guard necessary.
+  const savedAt = Date.now();
   const entries = {};
-  FY_MONTH_ORDER.forEach(m => { entries['payroll_docs:' + fy + ':' + m] = JSON.stringify(byMonth[m]); });
+  FY_MONTH_ORDER.forEach(m => { entries['payroll_docs:' + fy + ':' + m] = JSON.stringify({ savedAt, records: byMonth[m] }); });
   const keys = Object.keys(entries);
   const saved = await remoteSetMany(entries);
   let ok;
@@ -20798,7 +20815,15 @@ async function savePayrollDocsForFY(fy, list){
 // shrinks that race to, at worst, two edits to the very same month landing
 // out of order — instead of one save silently erasing the whole year.
 async function savePayrollDocsMonth_(fy, month, monthList){
-  const ok = await remoteSet('payroll_docs:' + fy + ':' + month, JSON.stringify(monthList));
+  // Stamped the same way saveOneEmployee_ stamps every employee record, and
+  // for the identical reason: HR working through several documents for the
+  // same month in quick succession (exactly what recovering April's PF
+  // records needed) can have an earlier save that looked like it failed
+  // client-side ("Could not save — try again") still running server-side,
+  // landing AFTER a later save that already succeeded and silently wiping
+  // out everything added since. isStalePayrollDocsWrite_ (Code 2.js) refuses
+  // to let an older savedAt overwrite a newer one for this exact key shape.
+  const ok = await remoteSet('payroll_docs:' + fy + ':' + month, JSON.stringify({ savedAt: Date.now(), records: monthList }));
   if(ok) await notePayrollDocsFy_(fy);
   return ok;
 }
