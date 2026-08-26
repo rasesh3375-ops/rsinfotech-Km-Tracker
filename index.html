@@ -12288,6 +12288,26 @@ async function getEmployees(){
   const v = await safeGet('employees', true);
   return v ? JSON.parse(v) : [];
 }
+// Same data as getEmployees(), but throws when the underlying fetch
+// genuinely failed instead of quietly resolving to an empty list.
+// getEmployees() itself has to stay exactly as it is — dozens of callers
+// throughout the app expect a plain array back unconditionally and would
+// break if it started throwing — but that same swallowed-error behaviour is
+// what let a real backend failure show up as "Employee Master: 0" on the
+// Dashboard with no indication anything had gone wrong: buildHrDashboardHome
+// wraps every read in softly(), which only flags a card as degraded when
+// the promise it's given actually rejects or times out, and getEmployees()
+// never rejects, so the one read that matters most for that screen was
+// invisible to the exact mechanism meant to catch this. safeGet('employees',
+// true) returning null here is specifically the "could not load at all"
+// case — a genuinely empty roster still comes back as the string "[]" from
+// a successful fetch, never null — so this never misreports a real zero as
+// a failure.
+async function getEmployeesOrThrow_(){
+  const v = await safeGet('employees', true);
+  if(v === null) throw new Error(lastBackendError || 'Could not load employees');
+  return JSON.parse(v);
+}
 // Asks the backend to merge one record into a shared array itself. Still
 // used for 'leave_requests' (one shared list an engineer can add their own
 // application to without overwriting anyone else's) — kept fully generic.
@@ -13200,7 +13220,7 @@ async function buildHrDashboardHome(box){
   // reached from the clock icon in the header now, and that screen loads its
   // own copy, so fetching it here was a backend call for nothing.
   const [employees, users] = await Promise.all([
-    softly(getEmployees(), left(), [], 'employee list'),
+    softly(getEmployeesOrThrow_(), left(), [], 'employee list'),
     softly(getUsers(), left(), [], 'tracking logins')
   ]);
   const onRoll = employees.filter(e => e.employmentStatus !== 'left');
@@ -17447,7 +17467,20 @@ async function renderEmployeeList(){
   const box = document.getElementById('employeeListBox');
   if(!box) return;
   const q = (document.getElementById('empSearchInput')?.value || '').trim().toLowerCase();
-  let employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
+  // getEmployeesOrThrow_ rather than the plain getEmployees() every other
+  // caller uses — this is the one screen most likely to be mistaken for
+  // "the company's whole roster just vanished" rather than "the backend
+  // didn't answer this time": a real fetch failure used to render exactly
+  // the same "No employees added yet" empty state as a genuinely blank
+  // Employee Master, with nothing to tell the two apart.
+  let employees;
+  try{
+    employees = (await getEmployeesOrThrow_()).filter(e => e.employmentStatus !== 'left');
+  }catch(e){
+    box.innerHTML = '<div class="empty pol-warn">Couldn\'t load the employee list — the backend didn\'t respond. ' +
+      '<button class="linkbtn" style="padding:0" onclick="renderEmployeeList()">Try again</button></div>';
+    return;
+  }
   if(q){
     employees = employees.filter(e => e.name.toLowerCase().includes(q) || e.id.toLowerCase().includes(q));
   }
