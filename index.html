@@ -3505,14 +3505,33 @@ if(IS_STAGING_BACKEND){
 // the backend for every action except login/setupHr/recoverHr/logout.
 let sessionToken = localStorage.getItem('kmt_session_token') || null;
 let sessionRole = localStorage.getItem('kmt_session_role') || null;
+// HR carries payroll, salary and every employee's personal record — a saved
+// login staying open indefinitely on a shared or lost device was reported as
+// a real concern. Stamped only here, at a genuine fresh login (submitHrLogin/
+// submitHrSetup both go through this — a session RESTORE never calls
+// setSession at all, it reads sessionToken/sessionRole from localStorage
+// directly at script load, see their declaration above), so restoring an
+// existing session never resets this clock. The backend enforces the same
+// 24-hour limit on the token itself (HR_SESSION_LIFETIME_MS in Code 2.js) —
+// this is a second, client-side check on top of that, so an expired session
+// is caught instantly on reopening rather than only after the first backend
+// call comes back unauthorized. Engineers' tracking login is deliberately
+// left alone — see the matching comment on HR_SESSION_LIFETIME_MS.
+const HR_SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+function hrSessionExpired_(){
+  const startedAt = Number(localStorage.getItem('kmt_hr_session_started_at') || 0);
+  return !startedAt || (Date.now() - startedAt) > HR_SESSION_MAX_AGE_MS;
+}
 function setSession(token, role){
   sessionToken = token; sessionRole = role;
   if(token){
     localStorage.setItem('kmt_session_token', token);
     localStorage.setItem('kmt_session_role', role);
+    if(role === 'hr') localStorage.setItem('kmt_hr_session_started_at', String(Date.now()));
   } else {
     localStorage.removeItem('kmt_session_token');
     localStorage.removeItem('kmt_session_role');
+    localStorage.removeItem('kmt_hr_session_started_at');
   }
 }
 // Called when the backend rejects a call as unauthorized. Only acts if we
@@ -4934,7 +4953,24 @@ async function selectRole(role){
     // localStorage. If the token really has expired, the first real API
     // call inside enterHrMain() answers 'unauthorized' and onSessionExpired()
     // already handles that cleanly — this doesn't need to duplicate it.
-    if(hrSession === 'yes' && sessionToken && sessionRole === 'hr'){
+    //
+    // hrSessionExpired_() is the one exception: a session past
+    // HR_SESSION_MAX_AGE_MS is never trusted here, even though the token
+    // might still work for another moment before the backend's own,
+    // slightly longer HR_SESSION_LIFETIME_MS catches up — a saved HR login
+    // is not meant to stay open on a device indefinitely, and this check
+    // needs no network round trip to enforce that, unlike waiting on the
+    // backend to say the same thing. Cleared here, the same way logoutHr
+    // clears it, so this falls straight through to the normal
+    // checkHrAccountExists()/login-form path below rather than needing its
+    // own separate branch.
+    let hasValidHrSession = hrSession === 'yes' && sessionToken && sessionRole === 'hr';
+    if(hasValidHrSession && hrSessionExpired_()){
+      setSession(null, null);
+      await safeSet('hr_session', '', false);
+      hasValidHrSession = false;
+    }
+    if(hasValidHrSession){
       document.getElementById('hrGate').classList.add('hidden');
       // Read the persisted snapshot BEFORE enterHrMain() runs, not after —
       // enterHrMain()'s own first step navigates to 'dashboard', which goes
@@ -15448,6 +15484,10 @@ function updateBonusPreview(){
 async function handleChequeUpload(event){
   const file = event.target.files[0];
   if(!file) return;
+  // See handleDocUpload's comment on pendingDocUploads_ — the same "Save
+  // pressed while this upload was still in flight" gap applies here too.
+  const uploadMarker = registerPendingDocUpload_();
+  try{
   // Re-fetched by id near the end instead — see handleDocUpload's comment
   // for why a reference captured before the Drive upload's await can end up
   // pointing at a detached node if the form redraws while it is in flight.
@@ -15480,6 +15520,9 @@ async function handleChequeUpload(event){
     + (stored ? '<p class="calc-note">Saved to Drive.</p>' : '');
   scheduleEmployeeDraftSave();
   checkBankFieldsLive();
+  } finally {
+    uploadMarker.done();
+  }
 }
 
 // Runs as the bank fields are typed, so a mismatch is caught against the cheque
@@ -15749,9 +15792,34 @@ async function viewEmployeeHandbook(label){
   }
 }
 
+// Tracks every handleDocUpload currently in flight, so saveEmployeeForm can
+// wait for all of them to actually finish writing into editingEmployeeDraft
+// before reading it. A document upload is its own independent async call
+// (Drive first, a compressed inline fallback if that fails) that can run for
+// several seconds on a slow connection — exactly the connection quality that
+// also makes the whole-record save itself fail and need retrying. Pressing
+// Save while an upload from a moment earlier was still in flight used to
+// save the record with that field still holding whatever it was before —
+// blank, for a brand-new upload — even though the upload itself went
+// through (or eventually would have) a moment later, orphaned, never
+// referenced by anything actually saved. HR saw "✓ Saved — view" on screen,
+// the whole-record save eventually report success after a retry or two, and
+// still found the document missing the next time the record was opened.
+const pendingDocUploads_ = new Set();
+function registerPendingDocUpload_(){
+  let resolve;
+  const promise = new Promise(r => { resolve = r; });
+  pendingDocUploads_.add(promise);
+  return { done(){ resolve(); pendingDocUploads_.delete(promise); } };
+}
+async function waitForPendingDocUploads_(){
+  while(pendingDocUploads_.size) await Promise.all(Array.from(pendingDocUploads_));
+}
 async function handleDocUpload(event, field){
   const file = event.target.files[0];
   if(!file) return;
+  const uploadMarker = registerPendingDocUpload_();
+  try{
   // Captured now, before any await — Drive uploads of a real scan can take
   // several seconds, and this handler used to keep using event.target
   // itself at the end to find where to insert the "✓ Saved" card. If
@@ -15829,6 +15897,9 @@ async function handleDocUpload(event, field){
   const label = (liveInput.previousElementSibling && liveInput.previousElementSibling.tagName === 'LABEL')
     ? liveInput.previousElementSibling.textContent : 'Document';
   liveInput.insertAdjacentHTML('afterend', docCardHtml(editingEmployeeDraft[field], label));
+  } finally {
+    uploadMarker.done();
+  }
 }
 
 // ---- loan ledger, employee form ----
@@ -16392,6 +16463,10 @@ function addOtherDocSlot(){
 async function handleOtherDocUpload(event, idx){
   const file = event.target.files[0];
   if(!file) return;
+  // See handleDocUpload's comment on pendingDocUploads_ — the same "Save
+  // pressed while this upload was still in flight" gap applies here too.
+  const uploadMarker = registerPendingDocUpload_();
+  try{
   // See handleDocUpload's comment above for why this is captured now,
   // before the Drive upload's await, and re-fetched by id at the end.
   const inputId = event.target.id;
@@ -16433,6 +16508,9 @@ async function handleOtherDocUpload(event, idx){
   }
   const label = editingEmployeeDraft.otherDocs[idx].name || 'Document';
   liveInput.insertAdjacentHTML('afterend', docCardHtml(editingEmployeeDraft.otherDocs[idx].dataUrl, label));
+  } finally {
+    uploadMarker.done();
+  }
 }
 
 // ---- employee form draft ----
@@ -16895,6 +16973,23 @@ function showEmpSaveError(text){
 
 async function saveEmployeeForm(){
   if(employeeSaveInFlight) return;
+  // A document upload (handleDocUpload/handleChequeUpload/handleOtherDocUpload)
+  // writes into editingEmployeeDraft asynchronously, on its own timeline —
+  // Drive first, then a compressed inline fallback if that fails. On a slow
+  // connection (the same conditions that make the save below need retrying)
+  // it can still be running when Save is pressed; without this, the save
+  // would go through using whatever that field held before the upload —
+  // usually blank — and the document, even though it may well have finished
+  // uploading a moment later, would never be referenced by anything actually
+  // saved. See pendingDocUploads_'s comment.
+  if(pendingDocUploads_.size){
+    const waitingBtn = document.querySelector('#employeeModal .btn[onclick="saveEmployeeForm()"]')
+      || document.querySelector('[onclick="saveEmployeeForm()"]');
+    const waitingLabel = waitingBtn ? waitingBtn.textContent : null;
+    if(waitingBtn){ waitingBtn.disabled = true; waitingBtn.textContent = 'Waiting for document upload(s)…'; }
+    await waitForPendingDocUploads_();
+    if(waitingBtn){ waitingBtn.disabled = false; waitingBtn.textContent = waitingLabel; }
+  }
   const id = document.getElementById('f_id').value.trim();
   const name = document.getElementById('f_name').value.trim();
   if(!id || !name){

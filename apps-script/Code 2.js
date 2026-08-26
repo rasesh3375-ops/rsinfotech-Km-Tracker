@@ -79,6 +79,12 @@ function deleteAcrossYearFolders_(pathTail, fileName) {
 
 const SESSION_SHEET_NAME = 'SESSIONS';
 const SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+// HR carries payroll, salary and every employee's personal data — a saved
+// login on a shared or lost device staying open for a month was reported as
+// a real concern. Engineers' tracking login (still SESSION_LIFETIME_MS) is
+// deliberately left alone: re-entering a password daily just to check in
+// from the field is exactly the friction the 30-day session exists to avoid.
+const HR_SESSION_LIFETIME_MS = 24 * 60 * 60 * 1000; // 24 hours
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOGIN_LOCKOUT_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -178,7 +184,7 @@ function doLogin_(body) {
       return { error: 'Invalid credentials' };
     }
     clearLoginFailure_(username);
-    const session = createSession_('hr', username);
+    const session = createSession_('hr', username, HR_SESSION_LIFETIME_MS);
     return { ok: true, token: session.token, role: 'hr' };
   } else {
     const row = findRow_(sheet, 'users');
