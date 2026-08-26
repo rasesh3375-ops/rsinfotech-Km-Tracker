@@ -306,9 +306,23 @@ function doUploadDocument_(body) {
 // Drive access (it runs as whoever deployed it, regardless of who is
 // calling the web app), so it reads the file on their behalf and returns
 // it over the same session they are already using.
+// Documents uploaded before uploadDocumentToDrive started compressing large
+// photos (see index.html) can still be several megabytes each — base64
+// adds another third on top of that, both in memory here and over the
+// network to the client. A file past this is more likely to time out than
+// actually arrive, and "check your connection" is the wrong thing to tell
+// someone when the real problem is the file's own size. Checked via
+// getSize() before ever reading the file's bytes, so an oversized file
+// fails fast rather than after doing (and paying for) the expensive part
+// anyway.
+const DRIVE_FILE_VIEW_LIMIT_BYTES = 8 * 1024 * 1024; // 8MB
 function doGetDriveFile_(body) {
   try {
     const file = DriveApp.getFileById(body.fileId);
+    if (file.getSize() > DRIVE_FILE_VIEW_LIMIT_BYTES) {
+      return { ok: false, error: 'This file is ' + (file.getSize() / (1024 * 1024)).toFixed(1) +
+        ' MB — too large to open reliably here. Download it directly from Drive instead, or replace it with a smaller scan.' };
+    }
     const blob = file.getBlob();
     return {
       ok: true,
