@@ -12332,7 +12332,22 @@ function employeeSizeCheck_(e){
 // every single-record save site — that existed only to solve a shared-array
 // race between two people saving different employees at once, which cannot
 // happen anymore once each employee has an independent key.
+//
+// savedAt is stamped fresh on every call, right before the write — a
+// second, different race from the shared-array one above. Aborting a slow
+// request on the client (see apiFetch) does not cancel it on Apps Script's
+// side; it keeps running. Pressing Save again after a "could not save"
+// error — exactly what that message tells HR to do — starts a genuinely
+// new request while the first one may still be in flight, and if a
+// document finished uploading into the draft in between, the two requests
+// carry different content. Nothing then guarantees they land in the order
+// they were sent: the older, document-less one landing SECOND would
+// silently overwrite the newer, complete save. Code 2.js's 'set' handler
+// compares savedAt against whatever is already stored for an employee: key
+// and refuses to let an older write win, so this can no longer happen
+// regardless of arrival order.
 async function saveOneEmployee_(emp){
+  emp.savedAt = Date.now();
   const payload = employeeSizeCheck_(emp);
   const ok = await remoteSet('employee:' + emp.id, payload);
   if(!ok) throw new Error('Could not save — the server did not respond.');
