@@ -15748,9 +15748,10 @@ function base64ToBlob_(base64, mimeType){
 // Shared by every "view a document inside the app" entry point below —
 // takes whatever a getDriveFile/getEmployeeHandbookFile response already
 // resolved to and draws it into the (already-open) full-screen viewer.
-function renderDocInViewer_(box, data, label){
+function renderDocInViewer_(box, data, label, retryOnclick){
   if(!data || !data.ok){
-    box.innerHTML = '<div class="empty pol-warn">' + escapeHtml(data && data.error ? data.error : 'Could not open that document.') + '</div>';
+    box.innerHTML = '<div class="empty pol-warn">' + escapeHtml(data && data.error ? data.error : 'Could not open that document.') +
+      (retryOnclick ? '<div style="margin-top:10px;"><button class="btn ghost" onclick="' + retryOnclick + '">Try again</button></div>' : '') + '</div>';
     return;
   }
   const objectUrl = URL.createObjectURL(base64ToBlob_(data.base64Data, data.mimeType));
@@ -15779,6 +15780,8 @@ async function viewEmployeeDocument(driveUrl, label){
   const m = /\/d\/([^/]+)/.exec(driveUrl || '');
   const box = document.getElementById('docViewerRoot');
   if(!m || !box){ alert('Could not open that document.'); return; }
+  const safeUrl = escapeJsAttr_(driveUrl || '');
+  const safeLabel = escapeJsAttr_(label || 'Document');
   // #docViewerRoot carries class="hidden" (display:none) in the static markup
   // so it stays invisible the rest of the time — moving it into the fullscreen
   // overlay does not by itself undo that, so without this the overlay chrome
@@ -15795,9 +15798,17 @@ async function viewEmployeeDocument(driveUrl, label){
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'getDriveFile', token: sessionToken, fileId: m[1] })
     });
-    renderDocInViewer_(box, await res.json(), label);
+    renderDocInViewer_(box, await res.json(), label, 'viewEmployeeDocument(\'' + safeUrl + '\',\'' + safeLabel + '\')');
   }catch(e){
-    box.innerHTML = '<div class="empty pol-warn">Could not open that document — check your connection and try again.</div>';
+    // A retry button rather than only the message — apiFetch already spent
+    // its own budget (3 attempts, up to ~9s) retrying on its own; a large,
+    // uncompressed document (common for anything uploaded before documents
+    // started being compressed on the way to Drive) reading and base64-
+    // encoding the whole file server-side with no size limit is slow enough
+    // on a flaky connection to exceed even that. Closing and reopening the
+    // viewer was the only way to try again before this.
+    box.innerHTML = '<div class="empty pol-warn">Could not open that document — check your connection and try again.' +
+      '<div style="margin-top:10px;"><button class="btn ghost" onclick="viewEmployeeDocument(\'' + safeUrl + '\',\'' + safeLabel + '\')">Try again</button></div></div>';
   }
 }
 
@@ -15811,6 +15822,7 @@ async function viewEmployeeDocument(driveUrl, label){
 async function viewEmployeeHandbook(label){
   const box = document.getElementById('docViewerRoot');
   if(!box) return;
+  const safeLabel = escapeJsAttr_(label || 'Employee Handbook');
   // See viewEmployeeDocument's identical line above for why this is needed.
   box.classList.remove('hidden');
   box.innerHTML = '<div class="empty">Opening ' + escapeHtml(label) + '…</div>';
@@ -15821,9 +15833,10 @@ async function viewEmployeeHandbook(label){
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'getEmployeeHandbookFile', token: sessionToken })
     });
-    renderDocInViewer_(box, await res.json(), label);
+    renderDocInViewer_(box, await res.json(), label, 'viewEmployeeHandbook(\'' + safeLabel + '\')');
   }catch(e){
-    box.innerHTML = '<div class="empty pol-warn">Could not open the handbook — check your connection and try again.</div>';
+    box.innerHTML = '<div class="empty pol-warn">Could not open the handbook — check your connection and try again.' +
+      '<div style="margin-top:10px;"><button class="btn ghost" onclick="viewEmployeeHandbook(\'' + safeLabel + '\')">Try again</button></div></div>';
   }
 }
 
