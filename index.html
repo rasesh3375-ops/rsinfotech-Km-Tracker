@@ -3583,7 +3583,17 @@ async function remoteGetAllEmployees_(){
     // nothing about the URL ever changed again until that device logged out
     // and back in for a new token. This forces every request to be a unique
     // URL, so nothing upstream of the backend itself can serve a stale answer.
-    const res = await apiFetch(API_URL + '?action=getAllEmployees&token=' + encodeURIComponent(sessionToken || '') + '&_=' + Date.now() + Math.random().toString(36).slice(2));
+    // A generous budget rather than the default 9s, AND a raised per-attempt
+    // cap — this reads and JSON-parses every employee on the whole roster,
+    // not one key, and is the single heaviest read in the app. Widening only
+    // the overall budget wasn't enough: apiFetch aborted every attempt at
+    // the default 8s cap regardless of how much budget was left, so a
+    // response that genuinely needed 9-10s got cut off on every retry —
+    // which is what showed up as the Dashboard's employee count going to 0
+    // with "signal is aborted without reason". Two attempts of up to 15s
+    // each, inside a 32s overall budget, gives a slow-but-working response
+    // room to actually land instead of being aborted mid-flight.
+    const res = await apiFetch(API_URL + '?action=getAllEmployees&token=' + encodeURIComponent(sessionToken || '') + '&_=' + Date.now() + Math.random().toString(36).slice(2), undefined, 2, 32000, 15000);
     const text = await res.text();
     let data;
     try{ data = JSON.parse(text); }
@@ -4535,7 +4545,7 @@ const BACKEND_BACKOFF_MS = 400;
 // surface as a broken screen, so every call to the backend goes through this:
 // it retries with backoff and treats a non-JSON body as a failure, since that
 // error page arrives with a perfectly normal HTTP 200.
-async function apiFetch(url, options, tries){
+async function apiFetch(url, options, tries, budgetMs, attemptMs){
   const attempts = tries || 3;
   // ONE budget for the call, retries included. Each attempt was capped at 8s
   // with no overall cap, so the worst case was 3 x 8s plus 1.2s of backoff —
@@ -4544,8 +4554,23 @@ async function apiFetch(url, options, tries){
   // still finish after the caller has stopped listening, so the retry the
   // backend's flakiness actually needs stays unreachable from that screen.
   // Bounding the whole call here is what makes the retry usable, and it gives
-  // every caller one number to size itself from.
-  const deadline = Date.now() + BACKEND_BUDGET_MS;
+  // every caller one number to size itself from. A caller doing genuinely
+  // heavier work than most (remoteGetAllEmployees_ reading and parsing every
+  // employee on the whole roster, not a single key) can ask for more of it —
+  // otherwise every attempt after the first was already starting with less
+  // than its own BACKEND_ATTEMPT_MS cap left, cutting it off with "signal is
+  // aborted without reason" before a response that was already on its way
+  // ever arrived, on exactly the calls that most needed the room.
+  //
+  // A widened overall budget alone doesn't help if a single attempt is
+  // genuinely slower than BACKEND_ATTEMPT_MS — every attempt was still being
+  // aborted at the same 8s mark regardless of how much budget was left, so a
+  // response that needed 9-10s to come back (reading and parsing the whole
+  // roster, not a single key) got cut off on every retry, budget or no
+  // budget. attemptMs lets a heavy caller raise the per-attempt cap too, not
+  // just the total it's spread across.
+  const deadline = Date.now() + (budgetMs || BACKEND_BUDGET_MS);
+  const perAttemptCap = attemptMs || BACKEND_ATTEMPT_MS;
   let lastErr = null;
   for(let i = 0; i < attempts; i++){
     const remaining = deadline - Date.now();
@@ -4560,7 +4585,7 @@ async function apiFetch(url, options, tries){
     // fast and still gets all 3 tries, whereas a hang has already spent the
     // budget and gains nothing by hanging twice more.
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), Math.min(BACKEND_ATTEMPT_MS, remaining));
+    const timer = setTimeout(() => ctrl.abort(), Math.min(perAttemptCap, remaining));
     try{
       const res = await fetch(url, Object.assign({}, options || {}, { signal: ctrl.signal }));
       const text = await res.text();
@@ -13152,10 +13177,15 @@ async function renderHrDashboardHome(force){
     <div class="sk sk-card" style="height:120px"></div>`;
   try{
     // A hard deadline as well as the per-request timeouts: whatever goes wrong
-    // underneath, the user gets an answer instead of an endless spinner.
+    // underneath, the user gets an answer instead of an endless spinner. Sized
+    // for the worst case of every phase inside genuinely needing its own full
+    // budget — the employee list's 33s (see leftEmployees above) followed by
+    // the engineer-positions read's own ~11s, run one after another, not in
+    // parallel — with margin left over, rather than for the common case,
+    // which finishes in a fraction of this either way.
     await Promise.race([
       buildHrDashboardHome(box),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Dashboard timed out')), 30000))
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Dashboard timed out')), 50000))
     ]);
   }catch(e){
     // Never leave "Loading dashboard…" on screen forever when the backend blips.
@@ -13211,6 +13241,14 @@ async function buildHrDashboardHome(box){
   // one constant is what keeps them reconciled.
   const budget = ms => { const end = Date.now() + ms; return () => Math.max(400, end - Date.now()); };
   const left = budget(BACKEND_BUDGET_MS + 1000);
+  // The employee list gets its own, longer budget, matching the 32s one
+  // remoteGetAllEmployees_ itself now asks apiFetch for (2 attempts of up to
+  // 15s each) — reading and parsing the whole roster is genuinely the
+  // heaviest read on this screen, and giving it the same 10s window as every
+  // lighter read just meant this one card gave up (marked degraded,
+  // correctly, but still empty) before a response already on its way could
+  // land.
+  const leftEmployees = budget(32000 + 1000);
 
   // The independent reads go together rather than one after another.
   // getHolidays() and the per-employee getAttendance() fan-out were dropped
@@ -13220,7 +13258,7 @@ async function buildHrDashboardHome(box){
   // reached from the clock icon in the header now, and that screen loads its
   // own copy, so fetching it here was a backend call for nothing.
   const [employees, users] = await Promise.all([
-    softly(getEmployeesOrThrow_(), left(), [], 'employee list'),
+    softly(getEmployeesOrThrow_(), leftEmployees(), [], 'employee list'),
     softly(getUsers(), left(), [], 'tracking logins')
   ]);
   const onRoll = employees.filter(e => e.employmentStatus !== 'left');
