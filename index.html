@@ -20743,11 +20743,16 @@ async function getPayrollDocsForFY(fy){
 async function getPayrollDocsForFYOrThrow_(fy){
   const monthKeys = FY_MONTH_ORDER.map(m => 'payroll_docs:' + fy + ':' + m);
   const allKeys = monthKeys.concat(['payroll_docs:' + fy]);
+  // Same widened budget as remoteGetAllEmployees_ and the document viewer —
+  // 13 keys in one getBatch is a heavier read than the default budget was
+  // sized for, and HR working through the recovery checklist means this
+  // Dashboard gets reopened repeatedly in quick succession, right when the
+  // backend is busiest with the getBatch/setMany calls each link makes.
   const res = await apiFetch(API_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify({ action: 'getBatch', keys: allKeys, token: sessionToken })
-  });
+  }, 2, 30000, 15000);
   const data = JSON.parse(await res.text());
   if(data && data.error === 'unauthorized'){ onSessionExpired(); throw new Error('Session expired'); }
   if(!data || !data.batch || !data.values) throw new Error('Backend did not answer — could not load this year\'s documents.');
