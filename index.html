@@ -20896,6 +20896,7 @@ async function renderPayrollDocsModule_(){
           <button type="button" class="payroll-docs-tab ${payrollDocsState_.view==='search'?'active':''}" onclick="switchPayrollDocsView_('search')">Search</button>
           <button type="button" class="payroll-docs-tab ${payrollDocsState_.view==='unclassified'?'active':''}" onclick="switchPayrollDocsView_('unclassified')">Unclassified</button>
         </div>
+        <button type="button" class="btn ghost" onclick="openPayrollDocLinkModal()" title="For a file already sitting in Drive with no record here">🔗 Link existing file</button>
         <button type="button" class="btn" onclick="openPayrollDocUploadModal()">+ Upload document</button>
       </div>
       <div id="payrollDocsViewBody"></div>
@@ -21232,6 +21233,11 @@ function payrollDocModalHtml_(){
         <label class="field" id="pdFormFileLabel">File</label>
         <input type="file" id="pdFormFile" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx">
       </div>
+      <div id="pdFormLinkGroup">
+        <label class="field">Drive link</label>
+        <input class="field-input" id="pdFormLinkUrl" placeholder="https://drive.google.com/file/d/…">
+        <p class="card-sub" style="margin:4px 0 0;">Open the file in Google Drive, choose Share → Copy link, and paste it here — the file stays where it is, nothing is re-uploaded.</p>
+      </div>
       <div id="pdFormStatusGroup">
         <label class="field">Status</label>
         <select class="field-input" id="pdFormStatus"><option value="active">Active</option><option value="deleted">Deleted</option></select>
@@ -21263,12 +21269,14 @@ function payrollDocFormCategoryChanged_(){
     : '';
 }
 function payrollDocSetModalGroups_(visibleGroups){
-  ['classify','details','file','status'].forEach(g => {
+  ['classify','details','file','link','status'].forEach(g => {
     const el = document.getElementById('pdForm' + g.charAt(0).toUpperCase() + g.slice(1) + 'Group');
     if(el) el.classList.toggle('hidden', !visibleGroups.includes(g));
   });
   const fileInput = document.getElementById('pdFormFile');
   if(fileInput) fileInput.toggleAttribute('required', visibleGroups.includes('file'));
+  const linkInput = document.getElementById('pdFormLinkUrl');
+  if(linkInput) linkInput.toggleAttribute('required', visibleGroups.includes('link'));
 }
 function closePayrollDocModal(){
   const root = document.getElementById('payrollDocModalRoot');
@@ -21297,6 +21305,29 @@ function openPayrollDocUploadModal(prefill){
   if(prefill && prefill.docType) document.getElementById('pdFormDocType').value = prefill.docType;
   document.getElementById('pdFormDocDate').value = todayStr();
   document.getElementById('pdFormFileLabel').textContent = 'File';
+  document.getElementById('pdFormUploadedBy').value = payrollDocRememberedUploader_();
+}
+// For a file that's already sitting in Drive but has no record here — a
+// document HR (or an earlier version of this module) put straight into the
+// year/month/category folder without going through Upload, or one whose
+// record needs restoring after the file itself survived. Everything the
+// module actually needs to find and show the file again — viewEmployeeDocument
+// and doGetDriveFile_ both work from the file ID embedded in the URL, not
+// from anything stored alongside it — so this asks for exactly that link and
+// nothing else, with no re-upload involved.
+function openPayrollDocLinkModal(prefill){
+  payrollDocModalCtx_ = { mode:'link' };
+  document.getElementById('payrollDocModalRoot').innerHTML = payrollDocModalHtml_();
+  kmtLockBodyScroll('payrollDocModal');
+  payrollDocSetModalGroups_(['classify','details','link']);
+  document.getElementById('payrollDocModalTitle').textContent = 'Link an existing Drive file';
+  document.getElementById('pdFormFy').innerHTML = payrollDocsFyOptions_().map(l=>`<option value="${l}">${l}</option>`).join('');
+  document.getElementById('pdFormFy').value = (prefill && prefill.fy) || payrollDocsState_.fy;
+  document.getElementById('pdFormMonth').value = (prefill && prefill.month) || (payrollDocsState_.month || (new Date().getMonth()+1));
+  document.getElementById('pdFormCategory').value = (prefill && prefill.category) || 'pf';
+  payrollDocFormCategoryChanged_();
+  if(prefill && prefill.docType) document.getElementById('pdFormDocType').value = prefill.docType;
+  document.getElementById('pdFormDocDate').value = todayStr();
   document.getElementById('pdFormUploadedBy').value = payrollDocRememberedUploader_();
 }
 async function openPayrollDocEditModal(fy, id){
@@ -21447,6 +21478,49 @@ async function savePayrollDocForm_(){
       return;
     }
     await addActivityLog(`Uploaded ${typeInfo.label} for ${payrollDocMonthLabel_(month)} ${fy}`);
+    closePayrollDocModal();
+    await refreshPayrollDocCardStat_();
+    await renderPayrollDocsModule_();
+    return;
+  }
+
+  if(ctx.mode === 'link'){
+    const linkUrl = document.getElementById('pdFormLinkUrl').value.trim();
+    if(!/\/d\/[^/]+/.test(linkUrl)){
+      msg.textContent = 'Paste a Drive share link — it should look like https://drive.google.com/file/d/…';
+      msg.classList.add('error');
+      return;
+    }
+    const fy = document.getElementById('pdFormFy').value;
+    const month = Number(document.getElementById('pdFormMonth').value);
+    const category = document.getElementById('pdFormCategory').value;
+    const docType = document.getElementById('pdFormDocType').value;
+    const docName = document.getElementById('pdFormDocName').value.trim();
+    const docDate = document.getElementById('pdFormDocDate').value;
+    const remarks = document.getElementById('pdFormRemarks').value.trim();
+    if(!docDate){ msg.textContent = 'Document date is required.'; msg.classList.add('error'); return; }
+    const typeInfo = payrollDocTypeInfo_(category, docType);
+    if(!typeInfo){ msg.textContent = 'Choose a document type.'; msg.classList.add('error'); return; }
+    const uploadedBy = uploadedByField.value.trim() || 'HR';
+    payrollDocRememberUploader_(uploadedBy);
+    // No upload here at all — viewEmployeeDocument and the backend's
+    // getDriveFile both work from the file ID embedded in this URL, not from
+    // anything stored alongside it, so the pasted link is everything the
+    // record needs to find the file exactly where it already is.
+    const monthList = (await getPayrollDocsForFY(fy)).filter(r => r.month === month);
+    monthList.unshift({
+      id: randomHex(6), fy, month, monthLabel: payrollDocMonthLabel_(month),
+      category, docType, docTypeLabel: typeInfo.label,
+      docName: docName || typeInfo.label, docDate, remarks,
+      fileName: docName || typeInfo.label, url: linkUrl, uploadedBy, uploadedAt: now, status:'active',
+      history: [{ action:'upload', at: now, by: uploadedBy, note: 'Linked to a file already in Drive' }],
+    });
+    if(!(await savePayrollDocsMonth_(fy, month, monthList))){
+      msg.textContent = 'Could not save that record — check your connection and try again.';
+      msg.classList.add('error');
+      return;
+    }
+    await addActivityLog(`Linked ${typeInfo.label} for ${payrollDocMonthLabel_(month)} ${fy} to an existing Drive file`);
     closePayrollDocModal();
     await refreshPayrollDocCardStat_();
     await renderPayrollDocsModule_();
