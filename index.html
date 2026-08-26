@@ -8642,6 +8642,75 @@ if(!window.KMT_RECONCILE_LISTENERS_ARMED_){
   }, { passive:true });
 }
 
+// Confirmed on at least one real desktop (Chromium — both Edge and Chrome;
+// not reproducible in Firefox on the same machine, same mouse, same page):
+// completely normal wheel events arrive, deltaY is sane, nothing on this
+// page ever calls preventDefault (checked directly in that browser's own
+// console, both capture- and bubble-phase) — and the browser's own native
+// "scroll the page" behaviour simply never happens. window.scrollY sits
+// frozen through dozens of wheel ticks. Keyboard scrolling (Page Down,
+// arrows) is completely unaffected, since it doesn't go through the same
+// native wheel-to-scroll compositing path a GPU/driver bug like this one
+// breaks. There is no line of this app's CSS or JS causing it — every one
+// was checked live and ruled out — so this doesn't try to "fix" the cause,
+// it detects the exact symptom (a wheel tick that had a clear, unobstructed
+// path to scroll and the page didn't move) and takes over scrolling
+// manually from that point on, only in the browser session that actually
+// needs it. Everywhere native scroll already works — which is nearly every
+// browser and machine this runs on — this never activates and native
+// scroll's own momentum/smoothness is untouched.
+let kmtWheelNativeBroken_ = null; // null = undetermined, true/false once known
+let kmtWheelProbePending_ = false;
+let kmtWheelProbeMisses_ = 0;
+// Walks up from the wheel event's own target looking for a nested scroll
+// area (a report table wrapper, the full-screen viewer's own #fullscreenBody,
+// a modal body) that actually owns this scroll — those already work
+// natively even in the one broken case seen so far, and must be left alone
+// exactly as before; the fallback below only ever steps in for the
+// whole-page scroll that has nothing nested left to claim it.
+function kmtFindOwnScrollTarget_(el, deltaY){
+  let node = el;
+  while(node && node !== document.body && node !== document.documentElement && node !== document){
+    if(node.nodeType === 1){
+      const style = getComputedStyle(node);
+      if(/(auto|scroll)/.test(style.overflowY) && node.scrollHeight > node.clientHeight + 1){
+        const atTop = node.scrollTop <= 0;
+        const atBottom = node.scrollTop + node.clientHeight >= node.scrollHeight - 1;
+        if((deltaY < 0 && !atTop) || (deltaY > 0 && !atBottom)) return node;
+      }
+    }
+    node = node.parentNode;
+  }
+  return null;
+}
+document.addEventListener('wheel', e => {
+  if(kmtWheelNativeBroken_ === false) return; // confirmed working here — never touch native scroll
+  if(kmtFindOwnScrollTarget_(e.target, e.deltaY)) return; // a nested area owns this tick, not the whole page
+  const pageHeight = document.documentElement.scrollHeight;
+  const atTop = window.scrollY <= 0, atBottom = window.scrollY + window.innerHeight >= pageHeight - 1;
+  const roomToScroll = e.deltaY < 0 ? !atTop : !atBottom;
+  if(kmtWheelNativeBroken_ === true){
+    if(!roomToScroll) return; // already at that edge — nothing to take over
+    e.preventDefault();
+    const px = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * window.innerHeight : e.deltaY;
+    window.scrollBy(0, px);
+    return;
+  }
+  if(kmtWheelNativeBroken_ !== null || !roomToScroll || kmtWheelProbePending_) return;
+  // Give native scroll an unhindered chance first (no preventDefault here),
+  // then check whether the page actually moved. Two misses in a row before
+  // concluding "broken" — one alone could just be an unlucky sub-pixel tick
+  // on a browser where everything is actually fine.
+  kmtWheelProbePending_ = true;
+  const before = window.scrollY;
+  setTimeout(() => {
+    kmtWheelProbePending_ = false;
+    if(window.scrollY !== before){ kmtWheelNativeBroken_ = false; kmtWheelProbeMisses_ = 0; return; }
+    kmtWheelProbeMisses_++;
+    if(kmtWheelProbeMisses_ >= 2) kmtWheelNativeBroken_ = true;
+  }, 150);
+}, { passive:false });
+
 function openFullscreenView(title, sourceId){
   const el = document.getElementById(sourceId);
   if(!el) return;
