@@ -781,8 +781,20 @@
      not as a link straight to Drive — that used to need whoever clicked it
      to have their own Google account with explicit access to that one
      file. Resets a <button> back to looking exactly like the plain block
-     .doc-card already was as a <div>/<a>. */
-  button.doc-card{display:block;width:100%;text-align:left;border:none;font:inherit;color:inherit;cursor:pointer;}
+     .doc-card already was as a <div>/<a>. Block/full-width by default so a
+     .doc-card with no Delete button (the read-only Employee Detail report,
+     which never passes docCardHtml a deleteAction) still fills the whole
+     card exactly as before; .doc-card-row below narrows it to make room for
+     Delete on the edit form's variant. */
+  .doc-card-view{display:block;width:100%;text-align:left;border:none;background:none;font:inherit;color:inherit;cursor:pointer;}
+  /* The employee-form variant: "✓ Saved — view" alongside a Delete button,
+     rather than the view button alone filling the whole card — only used
+     where a document can actually be removed (the edit form), never on the
+     read-only Employee Detail report, which still gets the plain card above. */
+  .doc-card-row{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+  .doc-card-row .doc-card-view{width:auto;flex:1;min-width:0;padding:0;}
+  .doc-card-delete{flex:none;border:1px solid var(--red);color:var(--red);background:none;border-radius:7px;padding:5px 12px;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;}
+  .doc-card-delete:hover{background:var(--red);color:#fff;}
 
   .emp-search-row{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
   .emp-search-row input{flex:2;min-width:160px;}
@@ -14744,8 +14756,8 @@ function employeeModalHtml(emp){
         <input type="file" accept="image/*" id="f_chequeFile" onchange="handleChequeUpload(event)">
         <div id="chequePreview">${!emp.chequeImg ? '' :
           (/^https?:/.test(emp.chequeImg)
-            ? docCardHtml(emp.chequeImg, 'Cancelled cheque')
-            : `<img class="cheque-img" src="${emp.chequeImg}" alt="Cancelled cheque">`)}</div>
+            ? docCardHtml(emp.chequeImg, 'Cancelled cheque', 'deleteEmployeeCheque()')
+            : `<div class="doc-card-row"><img class="cheque-img" src="${emp.chequeImg}" alt="Cancelled cheque"><button type="button" class="doc-card-delete" onclick="deleteEmployeeCheque()">Delete</button></div>`)}</div>
         <p style="font-size:11.5px;color:var(--muted);margin:6px 0 12px;">The cheque stays on screen while you fill in the fields below, so the account number and IFSC are copied from the document rather than from memory. The IFSC is checked against the bank name as you type.</p>
         <label class="field">PAN number</label>
         <input type="text" id="f_pan" placeholder="ABCDE1234F" value="${escapeHtml(emp.pan)}">
@@ -14785,31 +14797,31 @@ function employeeModalHtml(emp){
         <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Tap to scan with your camera, choose a photo from your gallery, or pick a PDF for an already-scanned document. Documents are saved as soon as you upload them.</p>
         <label class="field">Aadhaar card</label>
         <input type="file" accept="image/*,application/pdf" id="f_aadhaarFile" onchange="handleDocUpload(event,'aadhaarCardImg')">
-        ${docCardHtml(emp.aadhaarCardImg, 'Aadhaar card')}
+        ${docCardHtml(emp.aadhaarCardImg, 'Aadhaar card', "deleteEmployeeDoc('aadhaarCardImg','Aadhaar card',this)")}
         <div style="height:12px"></div>
         <label class="field">PAN card</label>
         <input type="file" accept="image/*,application/pdf" id="f_panFile" onchange="handleDocUpload(event,'panCardImg')">
-        ${docCardHtml(emp.panCardImg, 'PAN card')}
+        ${docCardHtml(emp.panCardImg, 'PAN card', "deleteEmployeeDoc('panCardImg','PAN card',this)")}
         <div style="height:12px"></div>
         <label class="field">Passport photo</label>
         <input type="file" accept="image/*" id="f_photoFile" onchange="handleDocUpload(event,'photoImg')">
-        ${docCardHtml(emp.photoImg, 'Passport photo')}
+        ${docCardHtml(emp.photoImg, 'Passport photo', "deleteEmployeeDoc('photoImg','Passport photo',this)")}
         <div style="height:12px"></div>
         <label class="field">Residence proof</label>
         <input type="file" accept="image/*,application/pdf" id="f_residenceFile" onchange="handleDocUpload(event,'residenceProofImg')">
-        ${docCardHtml(emp.residenceProofImg, 'Residence proof')}
+        ${docCardHtml(emp.residenceProofImg, 'Residence proof', "deleteEmployeeDoc('residenceProofImg','Residence proof',this)")}
         <div style="height:12px"></div>
         <label class="field">Last salary slip</label>
         <input type="file" accept="image/*,application/pdf" id="f_lastSlipFile" onchange="handleDocUpload(event,'lastSalarySlipImg')">
-        ${docCardHtml(emp.lastSalarySlipImg, 'Last salary slip')}
+        ${docCardHtml(emp.lastSalarySlipImg, 'Last salary slip', "deleteEmployeeDoc('lastSalarySlipImg','Last salary slip',this)")}
         <div style="height:12px"></div>
         <label class="field">Education certificate</label>
         <input type="file" accept="image/*,application/pdf" id="f_educationFile" onchange="handleDocUpload(event,'educationCertImg')">
-        ${docCardHtml(emp.educationCertImg, 'Education certificate')}
+        ${docCardHtml(emp.educationCertImg, 'Education certificate', "deleteEmployeeDoc('educationCertImg','Education certificate',this)")}
         <div style="height:12px"></div>
         <label class="field">Specimen signature</label>
         <input type="file" accept="image/*" id="f_signatureFile" onchange="handleDocUpload(event,'signatureImg')">
-        ${docCardHtml(emp.signatureImg, 'Specimen signature')}
+        ${docCardHtml(emp.signatureImg, 'Specimen signature', "deleteEmployeeDoc('signatureImg','Specimen signature',this)")}
         <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">A photo of the signature on plain paper is enough — it is what the bank and PF forms are checked against.</p>
         <div style="height:12px"></div>
         <label class="field">Other documents</label>
@@ -15768,12 +15780,20 @@ function dropOversizedInlineDocuments(draft){
 // need whoever clicked it to have their own Google account with explicit
 // sharing access to that one file, which HR does not have and should never
 // need for something the app already uploaded on her behalf.
-function docCardHtml(v, label){
+// deleteAction, when given, is a JS expression string (e.g. a call to
+// deleteEmployeeDoc(...)) rendered as a Delete button alongside "view" — only
+// call sites inside the edit form pass one. The read-only Employee Detail
+// report calls this the same way it always has, with no deleteAction, and
+// gets the original plain card with nothing to remove.
+function docCardHtml(v, label, deleteAction){
   if(!v) return '';
   const safeLabel = escapeJsAttr_(label || 'Document');
-  return /^https?:/.test(v)
-    ? '<button type="button" class="doc-card" onclick="viewEmployeeDocument(\'' + escapeJsAttr_(v) + '\',\'' + safeLabel + '\')">✓ Saved — view</button>'
-    : '<div class="doc-card">✓ Saved (stored in the record)</div>';
+  const viewPart = /^https?:/.test(v)
+    ? '<button type="button" class="doc-card-view" onclick="viewEmployeeDocument(\'' + escapeJsAttr_(v) + '\',\'' + safeLabel + '\')">✓ Saved — view</button>'
+    : '<div class="doc-card-view">✓ Saved (stored in the record)</div>';
+  if(!deleteAction) return '<div class="doc-card">' + viewPart + '</div>';
+  return '<div class="doc-card doc-card-row">' + viewPart +
+    '<button type="button" class="doc-card-delete" onclick="' + deleteAction + '">Delete</button></div>';
 }
 
 function base64ToBlob_(base64, mimeType){
@@ -15831,20 +15851,24 @@ async function viewEmployeeDocument(driveUrl, label){
   box.innerHTML = '<div class="empty">Opening ' + escapeHtml(label) + '…</div>';
   openFullscreenView(label, 'docViewerRoot');
   try{
+    // A raised budget AND a raised per-attempt cap, not just more retries —
+    // the default 8s-per-attempt cap applies no matter how many attempts are
+    // allowed, so a document that genuinely takes longer than 8s to read and
+    // base64-encode server-side (anything sizeable — up to the 8MB
+    // DRIVE_FILE_VIEW_LIMIT_BYTES ceiling, and a base64 encoding runs about a
+    // third larger again) got aborted on every single attempt regardless,
+    // the same "signal is aborted without reason" pattern that hit the
+    // employee list. Two attempts of up to 20s each gives a slow-but-working
+    // read room to actually land.
     const res = await apiFetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'getDriveFile', token: sessionToken, fileId: m[1] })
-    });
+    }, 2, 42000, 20000);
     renderDocInViewer_(box, await res.json(), label, 'viewEmployeeDocument(\'' + safeUrl + '\',\'' + safeLabel + '\')');
   }catch(e){
-    // A retry button rather than only the message — apiFetch already spent
-    // its own budget (3 attempts, up to ~9s) retrying on its own; a large,
-    // uncompressed document (common for anything uploaded before documents
-    // started being compressed on the way to Drive) reading and base64-
-    // encoding the whole file server-side with no size limit is slow enough
-    // on a flaky connection to exceed even that. Closing and reopening the
-    // viewer was the only way to try again before this.
+    // A retry button rather than only the message — closing and reopening
+    // the viewer was the only way to try again before this.
     box.innerHTML = '<div class="empty pol-warn">Could not open that document — check your connection and try again.' +
       '<div style="margin-top:10px;"><button class="btn ghost" onclick="viewEmployeeDocument(\'' + safeUrl + '\',\'' + safeLabel + '\')">Try again</button></div></div>';
   }
@@ -15866,11 +15890,14 @@ async function viewEmployeeHandbook(label){
   box.innerHTML = '<div class="empty">Opening ' + escapeHtml(label) + '…</div>';
   openFullscreenView(label, 'docViewerRoot');
   try{
+    // Same reasoning as viewEmployeeDocument above — a raised per-attempt cap,
+    // not just more retries, since the handbook goes through the identical
+    // read-and-base64-encode path server-side.
     const res = await apiFetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'getEmployeeHandbookFile', token: sessionToken })
-    });
+    }, 2, 42000, 20000);
     renderDocInViewer_(box, await res.json(), label, 'viewEmployeeHandbook(\'' + safeLabel + '\')');
   }catch(e){
     box.innerHTML = '<div class="empty pol-warn">Could not open the handbook — check your connection and try again.' +
@@ -15982,10 +16009,44 @@ async function handleDocUpload(event, field){
   // makes the card identical either way, so "view" works immediately.
   const label = (liveInput.previousElementSibling && liveInput.previousElementSibling.tagName === 'LABEL')
     ? liveInput.previousElementSibling.textContent : 'Document';
-  liveInput.insertAdjacentHTML('afterend', docCardHtml(editingEmployeeDraft[field], label));
+  liveInput.insertAdjacentHTML('afterend', docCardHtml(editingEmployeeDraft[field], label,
+    "deleteEmployeeDoc('" + escapeJsAttr_(field) + "','" + escapeJsAttr_(label) + "',this)"));
   } finally {
     uploadMarker.done();
   }
+}
+// Clears one of the eight named document fields (Aadhaar, PAN, ...) from the
+// in-progress draft — the same editingEmployeeDraft handleDocUpload writes
+// into, so Save afterwards persists the removal exactly like any other field
+// edit. Nothing is deleted from Drive itself: the file stays there as an
+// archive, only the employee record's reference to it is cleared, matching
+// how Payroll Documents' own delete already works. btn.closest('.doc-card')
+// then its previous sibling is the file input that produced it — the same
+// relationship handleDocUpload relies on above — so resetting that input's
+// value here means choosing the exact same file again still fires a change
+// event instead of the browser silently treating it as no change.
+function deleteEmployeeDoc(field, label, btn){
+  if(!confirm('Remove ' + label + '? This clears it from the employee record — upload a new one any time.')) return;
+  editingEmployeeDraft[field] = '';
+  scheduleEmployeeDraftSave();
+  const card = btn.closest('.doc-card');
+  if(!card) return;
+  const fileInput = card.previousElementSibling;
+  if(fileInput && fileInput.tagName === 'INPUT' && fileInput.type === 'file') fileInput.value = '';
+  card.remove();
+}
+// The cancelled cheque field is laid out differently (its preview lives in
+// #chequePreview, not as the file input's own next sibling — see
+// handleChequeUpload), so it gets its own small delete rather than sharing
+// deleteEmployeeDoc's DOM-sibling assumption.
+function deleteEmployeeCheque(){
+  if(!confirm('Remove the cancelled cheque? This clears it from the employee record — upload a new one any time.')) return;
+  editingEmployeeDraft.chequeImg = '';
+  scheduleEmployeeDraftSave();
+  const box = document.getElementById('chequePreview');
+  if(box) box.innerHTML = '';
+  const fileInput = document.getElementById('f_chequeFile');
+  if(fileInput) fileInput.value = '';
 }
 
 // ---- loan ledger, employee form ----
