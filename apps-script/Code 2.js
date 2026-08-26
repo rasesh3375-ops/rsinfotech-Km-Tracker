@@ -26,6 +26,32 @@ function findRow_(sheet, key) {
   return -1;
 }
 
+// Guards employee:<id> rows against an out-of-order overwrite. Aborting a
+// slow request client-side (see apiFetch in index.html) does not cancel it
+// here — it keeps running. Pressing Save again after a "could not save"
+// error, exactly what that message tells HR to do, starts a genuinely new
+// request while the first may still be in flight; if a document finished
+// uploading in between, the two carry different content, and nothing
+// guarantees they reach this lock in the order they were sent. The older,
+// less-complete one landing SECOND used to silently overwrite the newer,
+// complete save. saveOneEmployee_ (index.html) stamps every employee record
+// with savedAt right before sending it; this refuses to let a write with an
+// older savedAt replace one that's already newer. Only applies to
+// employee: keys — every other key in this sheet writes through exactly as
+// before, since only that one form is known to retry itself this way.
+// Malformed/non-JSON values (should not happen for an employee record) fail
+// open, writing through as before rather than getting silently stuck.
+function isStaleEmployeeWrite_(key, incomingValue, existingValue) {
+  if (typeof key !== 'string' || key.indexOf('employee:') !== 0) return false;
+  try {
+    const existing = JSON.parse(existingValue);
+    const incoming = JSON.parse(incomingValue);
+    return !!(existing && incoming && Number(existing.savedAt) > Number(incoming.savedAt));
+  } catch (e) {
+    return false;
+  }
+}
+
 function getOrCreateFolderPath_(pathParts) {
   let folder = DriveApp.getFolderById(ROOT_FOLDER_ID);
   for (const name of pathParts) {
@@ -1009,7 +1035,9 @@ function doPost(e) {
       const sheet = getSheet_();
       const row = findRow_(sheet, body.key);
       if (row === -1) sheet.appendRow([body.key, body.value]);
-      else sheet.getRange(row, 2).setValue(body.value);
+      else if (!isStaleEmployeeWrite_(body.key, body.value, sheet.getRange(row, 2).getValue())) {
+        sheet.getRange(row, 2).setValue(body.value);
+      }
     } else if (body.action === 'delete') {
       const sheet = getSheet_();
       const row = findRow_(sheet, body.key);
@@ -1054,8 +1082,11 @@ function doPost(e) {
       var entries = body.entries || {};
       var savedKeys = [];
       for (var k in entries) {
-        if (indexM[k]) sheetM.getRange(indexM[k], 2).setValue(entries[k]);
-        else sheetM.appendRow([k, entries[k]]);
+        if (!indexM[k]) {
+          sheetM.appendRow([k, entries[k]]);
+        } else if (!isStaleEmployeeWrite_(k, entries[k], dataM[indexM[k] - 1][1])) {
+          sheetM.getRange(indexM[k], 2).setValue(entries[k]);
+        }
         savedKeys.push(k);
       }
       return jsonOut_({ ok: true, many: true, saved: savedKeys });
