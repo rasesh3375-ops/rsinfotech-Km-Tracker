@@ -5270,7 +5270,14 @@ async function enterHrMain(restoreDescriptor){
   // Tracking-tab-only (live status, km totals), so restoring first costs
   // nothing.
   if(restoreDescriptor){
-    try{ await kmtRestoreView(Object.assign({}, restoreDescriptor, { fullscreen: null })); }catch(e){}
+    // push:true — hrNavigate('dashboard') just above is the one real entry
+    // on the stack so far; this restored view needs a stop of its own on
+    // top of it, not a relabelling of Dashboard's own entry, or the ✕ has
+    // nowhere real to go back to on the very first tap. See kmtRestoreView's
+    // own comment on opts.push for the full reasoning (the bug this fixes
+    // only shows up on a cold relaunch that restores to a non-Dashboard
+    // route, which on an iPhone home-screen install is the normal case).
+    try{ await kmtRestoreView(Object.assign({}, restoreDescriptor, { fullscreen: null }), { push: true }); }catch(e){}
   }
 
   // Warm-up, each guarded on its own: a flaky backend may degrade a panel but
@@ -12902,8 +12909,9 @@ function kmtBack(){
 // field value, re-generates the report fresh if it had been generated
 // before, then restores scroll — in that order, since scroll only means
 // anything once the content it's scrolling to is actually back on screen.
-async function kmtRestoreView(descriptor){
+async function kmtRestoreView(descriptor, opts){
   if(!descriptor || !descriptor.kmtView) return;
+  opts = opts || {};
   kmtRestoring = true;
   kmtPendingCardRestore = descriptor.card ? descriptor : null;
   try{
@@ -12938,6 +12946,40 @@ async function kmtRestoreView(descriptor){
       }, 60);
     }
   } finally {
+    // hrNavigate's own kmtCaptureDeparture/kmtCommitArrival both no-op while
+    // kmtRestoring is true (this call is replaying an existing entry, not
+    // creating a new one) — so without this, history.state was never
+    // brought up to date with what a restore actually put on screen.
+    //
+    // Two different callers reach this, and they need two different
+    // outcomes, which is what opts.push chooses between:
+    //
+    // - A popstate-triggered restore (the second branch in the popstate
+    //   listener below) is replaying an entry the browser has ALREADY
+    //   navigated to — history.state is already that exact descriptor.
+    //   replaceState here is a same-content no-op in practice, just keeping
+    //   the stored snapshot's fields/scroll in sync with what got reapplied.
+    //
+    // - enterHrMain's own boot-time restore (opts.push:true) is different:
+    //   it always calls hrNavigate('dashboard') first — the one real push —
+    //   and then restores straight to wherever HR last had open, which on
+    //   an iPhone home-screen install (no OS back gesture, so this is the
+    //   normal cold-launch path) is almost never Dashboard itself. Without
+    //   pushing a SECOND entry here, that restored view — e.g. "Employee
+    //   Loan & EMI" — was only ever painted over the SAME single Dashboard
+    //   entry, never given a stop of its own. The ✕'s kmtBack() had no way
+    //   to tell: it saw kmtView still true and called history.back(),
+    //   which popped straight past Dashboard to the exit-guard placeholder
+    //   underneath it, firing "Are you sure you want to exit?" instead of
+    //   returning to Dashboard. A standalone iOS web app can silently
+    //   swallow that confirm() outright, which is exactly why the ✕ looked
+    //   like it did nothing rather than landing somewhere merely wrong.
+    //   Pushing a genuine second entry here gives that restored view a real
+    //   stop to be popped FROM, so the very first tap after a cold relaunch
+    //   behaves the same as every one after it.
+    if(opts.push) history.pushState(kmtSnapshotView(), '');
+    else history.replaceState(kmtSnapshotView(), '');
+    kmtPersistLastView_();
     kmtRestoring = false;
     kmtPendingCardRestore = null;
   }
