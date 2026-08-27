@@ -20775,11 +20775,29 @@ function payrollDocsRecordsFromValue_(raw){
 // keys the first time it's touched. Shared by getPayrollDocsForFY (one FY)
 // and getPayrollDocsBatch_ (many FYs in one request) so the migration only
 // has to be written once.
-async function payrollDocsMergeFromValues_(fy, values){
+//
+// readSucceeded must be true only when the caller is CERTAIN the read that
+// produced `values` actually reached the backend and answered — never just
+// because every month key came back empty. A failed getBatch (and its
+// per-key safeGet fallback) collapses "genuinely no data under these keys"
+// and "we could not reach the backend at all" into the exact same falsy
+// result, and payrollDocsMonthShardMigrated_ only remembers "already split"
+// for the lifetime of the tab — a hard refresh clears it. Put those two
+// together and a single transient network blip, right after any reload,
+// used to look exactly like "this FY was never split onto month keys" and
+// re-ran the migration from whatever was still sitting in the old
+// payroll_docs:<fy> key — which could be years-stale, or the exact snapshot
+// the FIRST migration was meant to replace — silently overwriting every
+// month's already-correct, already-migrated data. This is what actually
+// happened to FY 2025-26: nine months of real Complete records reverted to
+// Pending/Not Uploaded with no error shown, from a re-migration nobody
+// asked for. Requiring readSucceeded closes that off — migration now only
+// ever runs on a read the caller can vouch for.
+async function payrollDocsMergeFromValues_(fy, values, readSucceeded){
   const monthKeys = FY_MONTH_ORDER.map(m => 'payroll_docs:' + fy + ':' + m);
   const legacyKey = 'payroll_docs:' + fy;
   const hasAnyMonthData = monthKeys.some(k => values[k]);
-  if(!hasAnyMonthData && values[legacyKey] && !payrollDocsMonthShardMigrated_.has(fy)){
+  if(!hasAnyMonthData && readSucceeded && values[legacyKey] && !payrollDocsMonthShardMigrated_.has(fy)){
     payrollDocsMonthShardMigrated_.add(fy);
     let legacyList = [];
     try{ legacyList = JSON.parse(values[legacyKey]) || []; }catch(e){ legacyList = []; }
@@ -20799,15 +20817,21 @@ async function getPayrollDocsForFY(fy){
   const monthKeys = FY_MONTH_ORDER.map(m => 'payroll_docs:' + fy + ':' + m);
   const allKeys = monthKeys.concat(['payroll_docs:' + fy]);
   let values = null;
+  let readSucceeded = false;
   try{
     const data = await backendAction({ action:'getBatch', keys: allKeys });
-    if(data && data.batch && data.values) values = data.values;
+    if(data && data.batch && data.values){ values = data.values; readSucceeded = true; }
   }catch(e){}
   if(!values){
     values = {};
+    // The per-key fallback can't tell a key that's genuinely empty apart
+    // from one safeGet merely failed to reach — see payrollDocsMergeFromValues_'s
+    // comment — so this path never counts as a confirmed read. Migration
+    // stays deferred to the next getBatch call that actually succeeds,
+    // rather than risking a false "never split" verdict here.
     await Promise.all(allKeys.map(async k => { values[k] = await safeGet(k, true); }));
   }
-  return payrollDocsMergeFromValues_(fy, values);
+  return payrollDocsMergeFromValues_(fy, values, readSucceeded);
 }
 // Same read as getPayrollDocsForFY, but for the one place a failed read must
 // not be mistaken for a genuinely empty year: the Dashboard. getBatch/safeGet
@@ -20837,7 +20861,7 @@ async function getPayrollDocsForFYOrThrow_(fy){
   const data = JSON.parse(await res.text());
   if(data && data.error === 'unauthorized'){ onSessionExpired(); throw new Error('Session expired'); }
   if(!data || !data.batch || !data.values) throw new Error('Backend did not answer — could not load this year\'s documents.');
-  return payrollDocsMergeFromValues_(fy, data.values);
+  return payrollDocsMergeFromValues_(fy, data.values, true);
 }
 // Shards the whole-FY list back out across its 12 month keys and writes all
 // of them in one setMany request — one round trip either way, same as the
@@ -20916,7 +20940,7 @@ async function getPayrollDocsBatch_(fyLabels){
     await Promise.all(fyLabels.map(async fy => { out[fy] = await getPayrollDocsForFY(fy); }));
     return out;
   }
-  await Promise.all(fyLabels.map(async fy => { out[fy] = await payrollDocsMergeFromValues_(fy, values); }));
+  await Promise.all(fyLabels.map(async fy => { out[fy] = await payrollDocsMergeFromValues_(fy, values, true); }));
   return out;
 }
 async function getPayrollDocsUnclassified_(){
