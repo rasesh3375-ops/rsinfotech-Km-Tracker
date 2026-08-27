@@ -7070,6 +7070,17 @@ PF_RULES.exclusion = {
 // `wage` is the FINAL PAYABLE basic — after unpaid leave has reduced it — not
 // the contracted figure. The caller is responsible for that reduction, and the
 // Salary Sheet already applies it before Basic and HRA are summed.
+//
+// `emp.salaryHeading` below is read exactly as handed in — this function has
+// no month of its own and cannot tell "now" apart from "some past month
+// being reported on". For a specific month's payroll (computeSalaryForEmployee,
+// monthlyPayFor) the caller MUST build its own object via
+// Object.assign({}, emp, ratePayAsOf(emp, thatMonth)) first, the same way
+// those two already do — a heading change recorded through Record Increment
+// must never move a month that has already been paid. Passing a raw `emp`
+// here for anything but a "right now"/hypothetical calculation (the live
+// employee-form preview, the CTC Calculator) will silently apply today's
+// heading to a past month.
 function pfConfigStatus(emp){
   const e = (emp || {}).pfEligible;
   if(e !== 'yes' && e !== 'no') return { configured:false, eligible:false, type:'', problem:'PF eligibility not configured' };
@@ -19221,7 +19232,13 @@ async function renderLeaveBalanceNextYearReport(){
   }
 
   const P = LEAVE_POLICY;
-  const slEligible = e => CONSULTANT_REPORT_HEADINGS.indexOf(e.salaryHeading || 'managerial') !== -1 && e.employeeType !== 'wfh';
+  // The heading as it stood at the close of the FY being reported, not
+  // whatever it is today — a heading change recorded since (Record
+  // Increment) must not move a past/closed year's SL eligibility, the same
+  // "as of this month, not as of right now" rule computeSalaryForEmployee
+  // already applies via ratePayAsOf. Reading the flat field here used to
+  // apply today's heading to every FY ever reported, past or future.
+  const slEligible = e => CONSULTANT_REPORT_HEADINGS.indexOf(ratePayAsOf(e, fyEnd).salaryHeading || 'managerial') !== -1 && e.employeeType !== 'wfh';
   const elRows = await elFyRows(employees, startYear);
   const rows = elRows.map(r => {
     const eligible = slEligible(r.emp);
