@@ -14404,6 +14404,17 @@ function employeeModalHtml(emp){
   // stay exactly as they always were: plain, editable inputs.
   const salHist = salaryHistoryOf(emp);
   const hasIncrementHistory = Array.isArray(emp.salaryHistory) && emp.salaryHistory.length > 0;
+  // Locking isn't only for an employee who already has a recorded increment —
+  // an existing employee with NONE yet (never had Record Increment used) is
+  // exactly the case that broke Kalpesh's and Nikhil's payroll: with no
+  // salaryHistory on file, salaryHistoryOf's fallback synthesizes one entry
+  // from the flat ratePay/salaryHeading fields, effective for every date —
+  // so a plain edit to this field silently rewrote every past month's Salary
+  // Sheet grouping and PF/ESI/PT the moment it was saved, not just the
+  // current one. editingEmployeeId is only null while adding a brand-new
+  // employee who has never been saved before, so there is no "past" for a
+  // direct edit to disturb yet — that is the one case still left editable.
+  const lockPayFields = hasIncrementHistory || !!editingEmployeeId;
   const curPay = currentRatePay(emp);
   // bondApplicable didn't exist until after retentionMoney/retentionMonths/
   // bondStart did, so a legacy record can carry real, currently-deducting
@@ -14728,9 +14739,9 @@ function employeeModalHtml(emp){
       <div class="field-group field-group-wide">
         <div class="sec-title">Rate of pay &amp; advances</div>
         <label class="field">Rate of pay (monthly)</label>
-        <input type="number" id="f_ratePay" placeholder="0" value="${curPay.ratePay||''}" oninput="renderPayrollBreakdown()" ${hasIncrementHistory ? 'readonly' : ''}>
+        <input type="number" id="f_ratePay" placeholder="0" value="${curPay.ratePay||''}" oninput="renderPayrollBreakdown()" ${lockPayFields ? 'readonly' : ''}>
         <div id="ratePayNote" style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.55;"></div>
-        ${hasIncrementHistory ? `<p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Current since ${fmtDateIN(salHist.slice().sort((a,b)=>(a.from||'').localeCompare(b.from||'')).slice(-1)[0].from) || 'before increments were tracked'}. Rate of Pay and heading now change only through Record Increment further down, so a raise is never confused with an ordinary edit to the rest of this record.</p>` : ''}
+        ${lockPayFields ? `<p style="font-size:12px;color:var(--muted);margin:8px 0 0;">${hasIncrementHistory ? `Current since ${fmtDateIN(salHist.slice().sort((a,b)=>(a.from||'').localeCompare(b.from||'')).slice(-1)[0].from) || 'before increments were tracked'}. ` : ''}Rate of Pay and heading change only through Record Increment further down, so a raise — or a heading change for an employee already on payroll — is never applied to past months by mistake.</p>` : ''}
         <div style="height:12px"></div>
         <div id="payrollBreakdownBox"></div>
         <div style="height:12px"></div>
@@ -14798,7 +14809,7 @@ function employeeModalHtml(emp){
       <div class="field-group">
         <div class="sec-title">Salary sheet heading</div>
         <label class="field">Heading</label>
-        <select class="field-input" id="f_salaryHeading" onchange="toggleStatutoryFieldsForHeading()" ${hasIncrementHistory ? 'disabled' : ''}>
+        <select class="field-input" id="f_salaryHeading" onchange="toggleStatutoryFieldsForHeading()" ${lockPayFields ? 'disabled' : ''}>
           ${Object.keys(SALARY_HEADINGS).map(k => `<option value="${k}" ${(curPay.salaryHeading===k)?'selected':''}>${SALARY_HEADINGS[k].label}</option>`).join('')}
         </select>
         <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Picks which Basic/HRA/LTA split formula applies to this employee on the Salary Sheet, and which of PF/ESI/PT apply at all — set once here, applied automatically every month.</p>
