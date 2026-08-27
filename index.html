@@ -21206,7 +21206,25 @@ async function payrollDocsMergeFromValues_(fy, values, readSucceeded){
   monthKeys.forEach(k => { out.push(...payrollDocsRecordsFromValue_(values[k])); });
   return out;
 }
+// Keyed by FY label. Dashboard, every level of Browse, and
+// getPayrollDocsForFYOrThrow_ below all read the exact same records for a
+// given financial year — before this, switching Dashboard -> Browse, or
+// clicking a month then a category then a document type inside Browse,
+// re-fetched that same FY from the backend on every single click, which is
+// what made moving around Payroll Documents feel slow. Cleared only by the
+// two functions that can actually change what's stored for a FY
+// (savePayrollDocsMonth_, savePayrollDocsForFY), so a cached read is never
+// stale after a save. Never populated from a degraded/uncertain read (the
+// per-key safeGet fallback, or an OrThrow_ failure) — caching one of those
+// would mean silently repeating a wrong "Not Uploaded" for every fetch
+// after it, exactly the failure class getPayrollDocsForFYOrThrow_ exists
+// to catch in the first place.
+let payrollDocsFyCache_ = {};
+function payrollDocsInvalidateFyCache_(fy){
+  delete payrollDocsFyCache_[fy];
+}
 async function getPayrollDocsForFY(fy){
+  if(payrollDocsFyCache_[fy]) return payrollDocsFyCache_[fy];
   const monthKeys = FY_MONTH_ORDER.map(m => 'payroll_docs:' + fy + ':' + m);
   const allKeys = monthKeys.concat(['payroll_docs:' + fy]);
   let values = null;
@@ -21224,7 +21242,9 @@ async function getPayrollDocsForFY(fy){
     // rather than risking a false "never split" verdict here.
     await Promise.all(allKeys.map(async k => { values[k] = await safeGet(k, true); }));
   }
-  return payrollDocsMergeFromValues_(fy, values, readSucceeded);
+  const out = await payrollDocsMergeFromValues_(fy, values, readSucceeded);
+  if(readSucceeded) payrollDocsFyCache_[fy] = out;
+  return out;
 }
 // Same read as getPayrollDocsForFY, but for the one place a failed read must
 // not be mistaken for a genuinely empty year: the Dashboard. getBatch/safeGet
@@ -21239,6 +21259,12 @@ async function getPayrollDocsForFY(fy){
 // above, which is the right behaviour for them — they need *some* answer to
 // proceed, not a hard stop.
 async function getPayrollDocsForFYOrThrow_(fy){
+  // Shares getPayrollDocsForFY's own cache — if Browse (or an earlier
+  // Dashboard visit) already has a confirmed read for this FY, reuse it
+  // rather than paying for another 13-key getBatch. Re-opening the
+  // Dashboard right after Browse used to always re-fetch even though
+  // nothing had changed.
+  if(payrollDocsFyCache_[fy]) return payrollDocsFyCache_[fy];
   const monthKeys = FY_MONTH_ORDER.map(m => 'payroll_docs:' + fy + ':' + m);
   const allKeys = monthKeys.concat(['payroll_docs:' + fy]);
   // Same widened budget as remoteGetAllEmployees_ and the document viewer —
@@ -21254,7 +21280,9 @@ async function getPayrollDocsForFYOrThrow_(fy){
   const data = JSON.parse(await res.text());
   if(data && data.error === 'unauthorized'){ onSessionExpired(); throw new Error('Session expired'); }
   if(!data || !data.batch || !data.values) throw new Error('Backend did not answer — could not load this year\'s documents.');
-  return payrollDocsMergeFromValues_(fy, data.values, true);
+  const out = await payrollDocsMergeFromValues_(fy, data.values, true);
+  payrollDocsFyCache_[fy] = out;
+  return out;
 }
 // Shards the whole-FY list back out across its 12 month keys and writes all
 // of them in one setMany request — one round trip either way, same as the
@@ -21285,7 +21313,10 @@ async function savePayrollDocsForFY(fy, list){
     const results = await Promise.all(keys.map(k => remoteSet(k, entries[k])));
     ok = results.every(Boolean);
   }
-  if(ok) await notePayrollDocsFy_(fy);
+  if(ok){
+    await notePayrollDocsFy_(fy);
+    payrollDocsInvalidateFyCache_(fy);
+  }
   return ok;
 }
 // Writes exactly one month's key, not the whole financial year. Every
@@ -21310,7 +21341,10 @@ async function savePayrollDocsMonth_(fy, month, monthList){
   // out everything added since. isStalePayrollDocsWrite_ (Code 2.js) refuses
   // to let an older savedAt overwrite a newer one for this exact key shape.
   const ok = await remoteSet('payroll_docs:' + fy + ':' + month, JSON.stringify({ savedAt: Date.now(), records: monthList }));
-  if(ok) await notePayrollDocsFy_(fy);
+  if(ok){
+    await notePayrollDocsFy_(fy);
+    payrollDocsInvalidateFyCache_(fy);
+  }
   return ok;
 }
 // One request for many financial years at once (getBatch, the same primitive
