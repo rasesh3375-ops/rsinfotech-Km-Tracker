@@ -1342,49 +1342,139 @@ function sendDailyDigestEmail() {
 //
 // The FY 2025-26 migration-safety bug (see index.html's payrollDocsMergeFromValues_)
 // overwrote payroll_docs:2025-26:<month> for April-December, February and March with
-// a stale leftover snapshot, wiping whatever PF/ESI/PT/Wages/Payslip records had been
-// added since. The underlying PF Challan PDFs themselves were never touched — they are
-// still exactly where HR uploaded them, in HR Management/2025-26/Office Documents/
-// Payroll Documents/PF Challan/ — only the tracker's pointer to each one was lost.
+// a stale leftover snapshot, wiping every PF/ESI/Professional Tax/Wages/Payslip record
+// added since. The underlying PDFs were never touched — every one of them is still
+// exactly where HR uploaded it in Drive (HR Management/<year>/Office Documents/Payroll
+// Documents/<Month>/<Category>/, though some months' files ended up filed under the
+// 2026-27 year folder instead of 2025-26 by the app's own date-based filing — that's a
+// separate, pre-existing quirk, not something this script needs to fix). Only each
+// month's tracker record pointing at its files was lost.
 //
-// This restores just that: for each month below, if no active PF Challan record exists
-// yet, it adds one pointing at the file already in Drive. It only ever adds a record —
-// it never removes or overwrites anything already in a month's key, so it's safe to
-// run more than once and safe to run even if some months already have their PF Challan
-// (or other) records back through the app's own "Link existing file" flow. ESI, PT,
-// Wages and Payslip aren't touched here because no files for them turned up in Drive
-// under this year's Payroll Documents folder — if HR remembers uploading any of those
-// for 2025-26, they need to be found and linked separately; this script can't recover
-// what it can't find.
+// This restores all of it: for every (month, docType) pair below, if no active record
+// of that type already exists, it adds one pointing at the file already in Drive. It
+// only ever adds a record — it never removes or overwrites anything already in a
+// month's key — so it's safe to run more than once and safe to run even if some records
+// already came back through the app's own "Link existing file" flow. March's ESI
+// Challan is the one exception: no such file turned up anywhere in Drive under any
+// naming pattern searched, so it genuinely isn't here — if HR finds it, it needs linking
+// separately.
 function restorePayrollDocsPf202526() {
   var FY = '2025-26';
-  // month -> [Drive file ID, calendar-month docDate] — found under HR Management/
-  // 2025-26/Office Documents/Payroll Documents/PF Challan/ by title "PF Challan - <date>".
-  // January (month 1) is deliberately left out — its record survived the bug untouched.
-  var MONTH_FILES = {
-    4:  ['16BRfznwbKVGaKYAhOjNZlxaqGx5aFQi7', '2025-04-01'],
-    5:  ['1Zw3iWKLTlQjzVHpl3kFKSaNVmM5lXLRG', '2025-05-01'],
-    6:  ['1qMk3wx-bxOw-4OY2VR8KMtJdRfeZhxai', '2025-06-01'],
-    7:  ['1rYG5XxOcj4c6Jjdjd6loGvGo4zTwtUPW', '2025-07-01'],
-    8:  ['1uGqdqm_YjzrAcRMc-g55Fe3QeUr58KP-', '2025-08-01'],
-    9:  ['1WZ9f1w-JScJeUCOuTZl5JyCjah4BQwn9', '2025-09-01'],
-    10: ['128n-h7DgAB5Ew1rpSS6jsY4J163jDZrt', '2025-10-01'],
-    11: ['1ZYg2zKa32cwgF_dqxu7IaDVNQAl3Glwm', '2025-11-01'],
-    12: ['1AotdiXPFOqTFMIrYycakH6qHarm2weNf', '2025-12-01'],
-    2:  ['1a3caBsnAoD1cA53YNiN2YR3QftZy345F', '2026-02-01'],
-    3:  ['1EZmEBQ6yJUBXfvNHoyeURlx2U8Z_lqMu', '2026-03-01'],
-  };
-  var MONTH_LABELS = { 4:'April', 5:'May', 6:'June', 7:'July', 8:'August', 9:'September',
-    10:'October', 11:'November', 12:'December', 2:'February', 3:'March' };
+  var MONTH_LABELS = { 1:'January', 2:'February', 3:'March', 4:'April', 5:'May', 6:'June',
+    7:'July', 8:'August', 9:'September', 10:'October', 11:'November', 12:'December' };
+  // (month, category, docType) -> the Drive file already holding that document, found by
+  // searching Drive for every "<FY>_<Month>_<DocType>_RS-Infotech_<hash>.<ext>" file this
+  // year and taking the most recently created one per slot, in case of retry duplicates.
+  var RECORDS = [
+    { month: 2, category: "esi", docType: "esiChallan", docTypeLabel: "ESI Challan", fileId: "1mneVTCBQ2fN12ZV0VOmqWn0ApzoN7Sn0", docDate: "2026-02-01" },
+    { month: 2, category: "esi", docType: "esiReceipt", docTypeLabel: "ESI Payment Receipt", fileId: "1o-q9-XEu76jtTw1epbsJRtM27nJOFVYw", docDate: "2026-02-01" },
+    { month: 2, category: "payslip", docType: "payslip", docTypeLabel: "Payslip", fileId: "1DzEx8mfperluOUODUD4C-sR_-8O0tPVf", docDate: "2026-02-01" },
+    { month: 2, category: "pf", docType: "pfChallan", docTypeLabel: "PF Challan", fileId: "1LMgUlAlSqcKPnwKtaC57XsGFP25U0Jqq", docDate: "2026-02-01" },
+    { month: 2, category: "pf", docType: "pfEcr", docTypeLabel: "PF ECR", fileId: "1Fh_QIM84nWpnAwIJDoUgoqSO1qIQozaF", docDate: "2026-02-01" },
+    { month: 2, category: "pf", docType: "pfReceipt", docTypeLabel: "PF Payment Receipt", fileId: "16VgNqN8c_xVmhkJse8NTrUm-lXFfXWkt", docDate: "2026-02-01" },
+    { month: 2, category: "pt", docType: "ptChallan", docTypeLabel: "Professional Tax Challan", fileId: "1aq8O73s2pLm6zW9Jrj_5XBhVT25dcPB-", docDate: "2026-02-01" },
+    { month: 2, category: "pt", docType: "ptReceipt", docTypeLabel: "Professional Tax Payment Receipt", fileId: "11HqVYnIAd0iFJHv5QM-UXtCYEQvrWfBV", docDate: "2026-02-01" },
+    { month: 2, category: "wages", docType: "wagesRegister", docTypeLabel: "Wages Register", fileId: "1rht9be4H8c8v63qS5bi2WPPvEFDYfSqV", docDate: "2026-02-01" },
+    { month: 3, category: "esi", docType: "esiReceipt", docTypeLabel: "ESI Payment Receipt", fileId: "1qf9ezXH3940WXZNK4CVZqBmuK0dYC8kk", docDate: "2026-03-01" },
+    { month: 3, category: "payslip", docType: "payslip", docTypeLabel: "Payslip", fileId: "1V8vyhqHyErZO0FJn5yHsECH_vImXF0cD", docDate: "2026-03-01" },
+    { month: 3, category: "pf", docType: "pfChallan", docTypeLabel: "PF Challan", fileId: "1HPjJnynENAbBDRkpDtyyLETyf0n4m3va", docDate: "2026-03-01" },
+    { month: 3, category: "pf", docType: "pfEcr", docTypeLabel: "PF ECR", fileId: "1PmWcqBGVztuZ9982dykYCKkRoQ_enHji", docDate: "2026-03-01" },
+    { month: 3, category: "pf", docType: "pfReceipt", docTypeLabel: "PF Payment Receipt", fileId: "1_Be7IIZp0vTKQrGDb3ELqk9Lr7mBy6M4", docDate: "2026-03-01" },
+    { month: 3, category: "pt", docType: "ptChallan", docTypeLabel: "Professional Tax Challan", fileId: "1-xyFISX9iGccUnyyqe-ofKhv_5-dppdk", docDate: "2026-03-01" },
+    { month: 3, category: "pt", docType: "ptReceipt", docTypeLabel: "Professional Tax Payment Receipt", fileId: "1ZwC9fZydOHkjb5IhKmcHMvkt5w93EFJe", docDate: "2026-03-01" },
+    { month: 3, category: "wages", docType: "wagesRegister", docTypeLabel: "Wages Register", fileId: "1VqlwxbAW4TIW_zhHsf6f3ICDRUR4UljS", docDate: "2026-03-01" },
+    { month: 4, category: "esi", docType: "esiChallan", docTypeLabel: "ESI Challan", fileId: "1qr70UVReg3pkGJq7jhVBb17KMWBV5G6u", docDate: "2025-04-01" },
+    { month: 4, category: "esi", docType: "esiReceipt", docTypeLabel: "ESI Payment Receipt", fileId: "15MqNSidkAulCvcLeOynBSOqGTfr6vv5c", docDate: "2025-04-01" },
+    { month: 4, category: "payslip", docType: "payslip", docTypeLabel: "Payslip", fileId: "13cYkBQxxm-e0CEddS1ajNDjHOMg6z-jk", docDate: "2025-04-01" },
+    { month: 4, category: "pf", docType: "pfChallan", docTypeLabel: "PF Challan", fileId: "15nQbnXBfuzW-avhDGW3HjxOdmBcUTyUH", docDate: "2025-04-01" },
+    { month: 4, category: "pf", docType: "pfEcr", docTypeLabel: "PF ECR", fileId: "1D3y8y_TiYV5h7LjEfcjenel1Wvav6WeU", docDate: "2025-04-01" },
+    { month: 4, category: "pf", docType: "pfReceipt", docTypeLabel: "PF Payment Receipt", fileId: "1KBfqqUsWcgSxGuzCHBmrsQWdYbKY-4ZX", docDate: "2025-04-01" },
+    { month: 4, category: "pt", docType: "ptChallan", docTypeLabel: "Professional Tax Challan", fileId: "1vWfU5Xd2rpjprFQDf_fM00xns1BFp6fu", docDate: "2025-04-01" },
+    { month: 4, category: "pt", docType: "ptReceipt", docTypeLabel: "Professional Tax Payment Receipt", fileId: "1W-r7iulGGp5KIRtOFNewG615bsjrMFf2", docDate: "2025-04-01" },
+    { month: 4, category: "wages", docType: "wagesRegister", docTypeLabel: "Wages Register", fileId: "16JZevbBCnThTstUhXoSGRS-nLWayDBRO", docDate: "2025-04-01" },
+    { month: 5, category: "esi", docType: "esiChallan", docTypeLabel: "ESI Challan", fileId: "1Rq264PPQIChsyzjFB_AB3hrAgVH46W_S", docDate: "2025-05-01" },
+    { month: 5, category: "esi", docType: "esiReceipt", docTypeLabel: "ESI Payment Receipt", fileId: "1fpskXMhrlYkPScjlMCnjw8sQL1qVEobX", docDate: "2025-05-01" },
+    { month: 5, category: "payslip", docType: "payslip", docTypeLabel: "Payslip", fileId: "1VLne4GLXqPwhqLJ_Cn_IeVz_qcUfXey1", docDate: "2025-05-01" },
+    { month: 5, category: "pf", docType: "pfChallan", docTypeLabel: "PF Challan", fileId: "1pVSyi5XBq0cDv1Fc_kXr3vnzT3a2e3LB", docDate: "2025-05-01" },
+    { month: 5, category: "pf", docType: "pfEcr", docTypeLabel: "PF ECR", fileId: "1paL_aknqx6A2aA0VpFTjNVgQx7N-1i16", docDate: "2025-05-01" },
+    { month: 5, category: "pf", docType: "pfReceipt", docTypeLabel: "PF Payment Receipt", fileId: "11fUYTrNkAoLM3YvtS-dDfVH_wTOoWEgO", docDate: "2025-05-01" },
+    { month: 5, category: "pt", docType: "ptChallan", docTypeLabel: "Professional Tax Challan", fileId: "1dVddITPF70S2UP9cl3uKezOpvV3GH8Qg", docDate: "2025-05-01" },
+    { month: 5, category: "pt", docType: "ptReceipt", docTypeLabel: "Professional Tax Payment Receipt", fileId: "1rLFIyIPNxW-1xC4qy_1fDRz7lErhbCR5", docDate: "2025-05-01" },
+    { month: 5, category: "wages", docType: "wagesRegister", docTypeLabel: "Wages Register", fileId: "1EUpllqnPFpZcuvWqxpnbiDybAf28xXum", docDate: "2025-05-01" },
+    { month: 6, category: "esi", docType: "esiChallan", docTypeLabel: "ESI Challan", fileId: "15wYbxQbJg87eCsIpr5j1yymRJdADN7WN", docDate: "2025-06-01" },
+    { month: 6, category: "esi", docType: "esiReceipt", docTypeLabel: "ESI Payment Receipt", fileId: "1a7s5OkZ7ST4EYl1Xy7-Esnub3klwuGAI", docDate: "2025-06-01" },
+    { month: 6, category: "payslip", docType: "payslip", docTypeLabel: "Payslip", fileId: "175XZkTivOtDMTBXHOdE2gsWDnztK3OMP", docDate: "2025-06-01" },
+    { month: 6, category: "pf", docType: "pfChallan", docTypeLabel: "PF Challan", fileId: "1QoG8za2mcQUMTUxMfDB7sEBlSy5xVGnw", docDate: "2025-06-01" },
+    { month: 6, category: "pf", docType: "pfEcr", docTypeLabel: "PF ECR", fileId: "1lmjXhWav24T12DSTlCUKAyM3dxGGs54K", docDate: "2025-06-01" },
+    { month: 6, category: "pf", docType: "pfReceipt", docTypeLabel: "PF Payment Receipt", fileId: "1b_Xv0Ip2jAZBn2o0srqAJypQ2enM3XMd", docDate: "2025-06-01" },
+    { month: 6, category: "pt", docType: "ptChallan", docTypeLabel: "Professional Tax Challan", fileId: "1TrrIwKxuVt6s9WeWYwOhsbpbSH_lxRhW", docDate: "2025-06-01" },
+    { month: 6, category: "pt", docType: "ptReceipt", docTypeLabel: "Professional Tax Payment Receipt", fileId: "1PyyCQL1-HAApMmhGo1WFqtnJwjlxKYVY", docDate: "2025-06-01" },
+    { month: 6, category: "wages", docType: "wagesRegister", docTypeLabel: "Wages Register", fileId: "155GSLMzxS96pbIb3vhxU4u2UNI15FEq8", docDate: "2025-06-01" },
+    { month: 7, category: "esi", docType: "esiChallan", docTypeLabel: "ESI Challan", fileId: "1Zei2QEwcSkSk_TgSC5n9NGlreoIZCtWT", docDate: "2025-07-01" },
+    { month: 7, category: "esi", docType: "esiReceipt", docTypeLabel: "ESI Payment Receipt", fileId: "1y4E9vigKImUJBR3Kb7bnhKtGL5hUfEKh", docDate: "2025-07-01" },
+    { month: 7, category: "payslip", docType: "payslip", docTypeLabel: "Payslip", fileId: "18QMUSoFn_BJO1VMRVGotHfzzvbj-ikb9", docDate: "2025-07-01" },
+    { month: 7, category: "pf", docType: "pfChallan", docTypeLabel: "PF Challan", fileId: "1urma70yGoNz4aHp9mJW9Q9FKoov2uLUD", docDate: "2025-07-01" },
+    { month: 7, category: "pf", docType: "pfEcr", docTypeLabel: "PF ECR", fileId: "1vQZoH40tlvGJw0ojddHWISFL7PfLk8lD", docDate: "2025-07-01" },
+    { month: 7, category: "pf", docType: "pfReceipt", docTypeLabel: "PF Payment Receipt", fileId: "1XT3lmAik7bNxyPYfcXt6i_-P37w4YWka", docDate: "2025-07-01" },
+    { month: 7, category: "pt", docType: "ptChallan", docTypeLabel: "Professional Tax Challan", fileId: "1vgqcMiurbPJJxmnGgVmqrH6CJGXNOS3M", docDate: "2025-07-01" },
+    { month: 7, category: "pt", docType: "ptReceipt", docTypeLabel: "Professional Tax Payment Receipt", fileId: "1dV7Xxlw_OSTcmceNZILmS7gqjrY3-im4", docDate: "2025-07-01" },
+    { month: 7, category: "wages", docType: "wagesRegister", docTypeLabel: "Wages Register", fileId: "1KifPYjTUrO2XL4cpY5dM_RDKI73ceUPJ", docDate: "2025-07-01" },
+    { month: 8, category: "esi", docType: "esiChallan", docTypeLabel: "ESI Challan", fileId: "1uqTYY8MQ0OGaGI7xozBhfwWHmFsSfxQS", docDate: "2025-08-01" },
+    { month: 8, category: "esi", docType: "esiReceipt", docTypeLabel: "ESI Payment Receipt", fileId: "1gY1ay-_zsPFbr9j0_cW_N_1INzi7BxA1", docDate: "2025-08-01" },
+    { month: 8, category: "payslip", docType: "payslip", docTypeLabel: "Payslip", fileId: "1QTTAmiJ1rLX3KY_fxRpFAFBL5iLYNNBm", docDate: "2025-08-01" },
+    { month: 8, category: "pf", docType: "pfChallan", docTypeLabel: "PF Challan", fileId: "13_NaLmoAhs1GTtKXB2eEpeUkuRtQ7QLi", docDate: "2025-08-01" },
+    { month: 8, category: "pf", docType: "pfEcr", docTypeLabel: "PF ECR", fileId: "1o-baR_8gBjdLwtRnvp-Rud_cPfUH7TsF", docDate: "2025-08-01" },
+    { month: 8, category: "pf", docType: "pfReceipt", docTypeLabel: "PF Payment Receipt", fileId: "1ori7Ns3_JydoEWCqRoUIfh55-D2Sm8EI", docDate: "2025-08-01" },
+    { month: 8, category: "pt", docType: "ptChallan", docTypeLabel: "Professional Tax Challan", fileId: "1pkyzFjn_nZhQ0u-Gl2kEwe4CFc-Lf8Q4", docDate: "2025-08-01" },
+    { month: 8, category: "pt", docType: "ptReceipt", docTypeLabel: "Professional Tax Payment Receipt", fileId: "1wcOpUZF1YKImk5S194Hb9sMFpIUv2YC9", docDate: "2025-08-01" },
+    { month: 8, category: "wages", docType: "wagesRegister", docTypeLabel: "Wages Register", fileId: "1Vi7mV1GLROq45GC-M8F4voxl95RGtoRN", docDate: "2025-08-01" },
+    { month: 9, category: "esi", docType: "esiChallan", docTypeLabel: "ESI Challan", fileId: "1fTYCVmFWqycp-4sb2_QWTHWfLaNgkd7G", docDate: "2025-09-01" },
+    { month: 9, category: "esi", docType: "esiReceipt", docTypeLabel: "ESI Payment Receipt", fileId: "17IeM0FpODvVYB4P7mdW8pMZO0GiPJOB5", docDate: "2025-09-01" },
+    { month: 9, category: "payslip", docType: "payslip", docTypeLabel: "Payslip", fileId: "1kuzIP4yjAqZy8F1B9WCiQnxC7brk2uP8", docDate: "2025-09-01" },
+    { month: 9, category: "pf", docType: "pfChallan", docTypeLabel: "PF Challan", fileId: "1mov1yKzcpRY5cxgqsJApNjNRuDZh5nwf", docDate: "2025-09-01" },
+    { month: 9, category: "pf", docType: "pfEcr", docTypeLabel: "PF ECR", fileId: "19Z9-e-yMDLWnxuUzYY8A5KjXaG6Y49kI", docDate: "2025-09-01" },
+    { month: 9, category: "pf", docType: "pfReceipt", docTypeLabel: "PF Payment Receipt", fileId: "1SSzenWlC-M-Tvf0OFhbdnL5XGa15LDaE", docDate: "2025-09-01" },
+    { month: 9, category: "pt", docType: "ptChallan", docTypeLabel: "Professional Tax Challan", fileId: "1vQRrh9UGIA_ugz5R7gCkaBzFR01iNXGS", docDate: "2025-09-01" },
+    { month: 9, category: "pt", docType: "ptReceipt", docTypeLabel: "Professional Tax Payment Receipt", fileId: "1L7CTjjTHCylCjM_uTikUhDfmG6gOGmN7", docDate: "2025-09-01" },
+    { month: 9, category: "wages", docType: "wagesRegister", docTypeLabel: "Wages Register", fileId: "1eLmgUav4omGetEC-jlzoUJye5y8naZq6", docDate: "2025-09-01" },
+    { month: 10, category: "esi", docType: "esiChallan", docTypeLabel: "ESI Challan", fileId: "1Timm62edNAtOcstcUk50M9XE_THNGRBj", docDate: "2025-10-01" },
+    { month: 10, category: "esi", docType: "esiReceipt", docTypeLabel: "ESI Payment Receipt", fileId: "15JZH2FOHo3f5tdOZLWvFc8j8tNG8DrBv", docDate: "2025-10-01" },
+    { month: 10, category: "payslip", docType: "payslip", docTypeLabel: "Payslip", fileId: "1vMsmaQIP-qjW3g0XBc-JdG_WBUllyvDm", docDate: "2025-10-01" },
+    { month: 10, category: "pf", docType: "pfChallan", docTypeLabel: "PF Challan", fileId: "1KAlXlNe4YCrTFY2Cgch_nyu74FCXmepo", docDate: "2025-10-01" },
+    { month: 10, category: "pf", docType: "pfEcr", docTypeLabel: "PF ECR", fileId: "1POKbW9dlg1kB4cxeUBD23a4ij9uJI6jR", docDate: "2025-10-01" },
+    { month: 10, category: "pf", docType: "pfReceipt", docTypeLabel: "PF Payment Receipt", fileId: "1rFrh7vpLBY3FsGViGKbhREIbtERZhS8q", docDate: "2025-10-01" },
+    { month: 10, category: "pt", docType: "ptChallan", docTypeLabel: "Professional Tax Challan", fileId: "1QcUKVfPNSTUgxzMax3elt1c6pX2G0u5C", docDate: "2025-10-01" },
+    { month: 10, category: "pt", docType: "ptReceipt", docTypeLabel: "Professional Tax Payment Receipt", fileId: "1rraK6z-xhErgFi0Ob61iQ7j_mwqxgdzK", docDate: "2025-10-01" },
+    { month: 10, category: "wages", docType: "wagesRegister", docTypeLabel: "Wages Register", fileId: "1GjlK_cBFvnWfbx5XOhG4oaz_gt3Hj2Og", docDate: "2025-10-01" },
+    { month: 11, category: "esi", docType: "esiChallan", docTypeLabel: "ESI Challan", fileId: "1znGaMltQuPa898eVALBhFwr-BjB9HFFS", docDate: "2025-11-01" },
+    { month: 11, category: "esi", docType: "esiReceipt", docTypeLabel: "ESI Payment Receipt", fileId: "1j5qkuiPFQ6-6HwYMljJzc4jBCam5C80F", docDate: "2025-11-01" },
+    { month: 11, category: "payslip", docType: "payslip", docTypeLabel: "Payslip", fileId: "1UJDwHgBt9jNWNY1NrwcMkxnxpjOFJHr7", docDate: "2025-11-01" },
+    { month: 11, category: "pf", docType: "pfChallan", docTypeLabel: "PF Challan", fileId: "1PSYyEv8fn-CgB0HfPj_lkD0LdiSpzLAc", docDate: "2025-11-01" },
+    { month: 11, category: "pf", docType: "pfEcr", docTypeLabel: "PF ECR", fileId: "1Xui1YvOl4aUWAFQPzFahSC6fHBimXOLT", docDate: "2025-11-01" },
+    { month: 11, category: "pf", docType: "pfReceipt", docTypeLabel: "PF Payment Receipt", fileId: "1TknkAyqLez5V8MP4sMZ0h-KnNfAgUa7r", docDate: "2025-11-01" },
+    { month: 11, category: "pt", docType: "ptChallan", docTypeLabel: "Professional Tax Challan", fileId: "1pwHTvHuD_rM_C7PsvEW7B8kpb8j0efOP", docDate: "2025-11-01" },
+    { month: 11, category: "pt", docType: "ptReceipt", docTypeLabel: "Professional Tax Payment Receipt", fileId: "1eKN6WK6oKD_mvhuW_-wWhtoDGTMEypbf", docDate: "2025-11-01" },
+    { month: 11, category: "wages", docType: "wagesRegister", docTypeLabel: "Wages Register", fileId: "16fwGG-Y14douoyo4KXDTi3L4pdMp_OmR", docDate: "2025-11-01" },
+    { month: 12, category: "esi", docType: "esiChallan", docTypeLabel: "ESI Challan", fileId: "11g7u7izaFvdWPovPmTTd3f757Se5usrl", docDate: "2025-12-01" },
+    { month: 12, category: "esi", docType: "esiReceipt", docTypeLabel: "ESI Payment Receipt", fileId: "1c9bEYrwppyJ-nt8Ses35-llLN9Gzc2Ev", docDate: "2025-12-01" },
+    { month: 12, category: "payslip", docType: "payslip", docTypeLabel: "Payslip", fileId: "1G1Sx4nIbupIKzq6-q33MYsEI8KLuSwkJ", docDate: "2025-12-01" },
+    { month: 12, category: "pf", docType: "pfChallan", docTypeLabel: "PF Challan", fileId: "1BvkwqckHHeGcBRNIW_kk6B1IBeeKwpWP", docDate: "2025-12-01" },
+    { month: 12, category: "pf", docType: "pfEcr", docTypeLabel: "PF ECR", fileId: "1xtoPbyWLQpFLYfhRfu01u-vaFBASD44H", docDate: "2025-12-01" },
+    { month: 12, category: "pf", docType: "pfReceipt", docTypeLabel: "PF Payment Receipt", fileId: "10mF2d1MMQmtNgK-Grfmi4hgCAH45Oq_Y", docDate: "2025-12-01" },
+    { month: 12, category: "pt", docType: "ptChallan", docTypeLabel: "Professional Tax Challan", fileId: "1PTmYAALxyKdjGlbE8G2fDJ0h_oy9XAXT", docDate: "2025-12-01" },
+    { month: 12, category: "pt", docType: "ptReceipt", docTypeLabel: "Professional Tax Payment Receipt", fileId: "1abcWpfEdlGwwRzrcL0_Dp3Nx_ehWPqIv", docDate: "2025-12-01" },
+    { month: 12, category: "wages", docType: "wagesRegister", docTypeLabel: "Wages Register", fileId: "1fJyXM3KQU_NqxpDeVPQ2QqMD_scxhu7S", docDate: "2025-12-01" },
+  ];
 
   var sheet = getSheet_();
   var now = new Date().toISOString();
   var summary = [];
 
-  Object.keys(MONTH_FILES).forEach(function (monthStr) {
+  var byMonth = {};
+  RECORDS.forEach(function (r) { (byMonth[r.month] = byMonth[r.month] || []).push(r); });
+
+  Object.keys(byMonth).forEach(function (monthStr) {
     var month = Number(monthStr);
-    var fileId = MONTH_FILES[month][0];
-    var docDate = MONTH_FILES[month][1];
     var key = 'payroll_docs:' + FY + ':' + month;
     var row = findRow_(sheet, key);
     var raw = row > 0 ? sheet.getRange(row, 2).getValue() : null;
@@ -1397,33 +1487,33 @@ function restorePayrollDocsPf202526() {
       } catch (e) { records = []; }
     }
 
-    var alreadyThere = records.some(function (r) {
-      return r && r.status === 'active' && r.category === 'pf' && r.docType === 'pfChallan';
+    var added = [], skipped = [];
+    byMonth[month].forEach(function (r) {
+      var alreadyThere = records.some(function (rec) {
+        return rec && rec.status === 'active' && rec.category === r.category && rec.docType === r.docType;
+      });
+      if (alreadyThere) { skipped.push(r.docTypeLabel); return; }
+      var url = 'https://drive.google.com/file/d/' + r.fileId + '/view?usp=drivesdk';
+      records.unshift({
+        id: Utilities.getUuid().slice(0, 6),
+        fy: FY, month: month, monthLabel: MONTH_LABELS[month],
+        category: r.category, docType: r.docType, docTypeLabel: r.docTypeLabel,
+        docName: r.docTypeLabel, docDate: r.docDate, remarks: '',
+        fileName: r.docTypeLabel, url: url, uploadedBy: 'HR', uploadedAt: now, status: 'active',
+        history: [{ action: 'upload', at: now, by: 'HR',
+          note: 'Restored — relinked to the existing Drive file after the migration-safety bug wiped this record' }],
+      });
+      added.push(r.docTypeLabel);
     });
-    if (alreadyThere) {
-      summary.push(MONTH_LABELS[month] + ': already has a PF Challan record, left alone.');
-      return;
-    }
 
-    var url = 'https://drive.google.com/file/d/' + fileId + '/view?usp=drivesdk';
-    records.unshift({
-      id: Utilities.getUuid().slice(0, 6),
-      fy: FY, month: month, monthLabel: MONTH_LABELS[month],
-      category: 'pf', docType: 'pfChallan', docTypeLabel: 'PF Challan',
-      docName: 'PF Challan', docDate: docDate, remarks: '',
-      fileName: 'PF Challan', url: url, uploadedBy: 'HR', uploadedAt: now, status: 'active',
-      history: [{ action: 'upload', at: now, by: 'HR',
-        note: 'Restored — relinked to the existing Drive file after the migration-safety bug wiped this record' }],
-    });
-
-    var value = JSON.stringify({ savedAt: Date.now(), records: records });
-    if (row > 0) {
-      sheet.getRange(row, 2).setValue(value);
-    } else {
-      sheet.appendRow([key, value]);
+    if (added.length) {
+      var value = JSON.stringify({ savedAt: Date.now(), records: records });
+      if (row > 0) { sheet.getRange(row, 2).setValue(value); } else { sheet.appendRow([key, value]); }
     }
-    summary.push(MONTH_LABELS[month] + ': PF Challan record restored.');
+    summary.push(MONTH_LABELS[month] + ': restored [' + added.join(', ') + ']' +
+      (skipped.length ? '; already had [' + skipped.join(', ') + ']' : ''));
   });
 
   Logger.log(summary.join('\n'));
 }
+
