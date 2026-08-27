@@ -12977,8 +12977,33 @@ async function kmtRestoreView(descriptor, opts){
     //   Pushing a genuine second entry here gives that restored view a real
     //   stop to be popped FROM, so the very first tap after a cold relaunch
     //   behaves the same as every one after it.
-    if(opts.push) history.pushState(kmtSnapshotView(), '');
-    else history.replaceState(kmtSnapshotView(), '');
+    //
+    //   One push isn't enough on its own once the restored view has open
+    //   MODALS, though — say Employee Master with the Employee modal open
+    //   and Record Increment open on top of that (kmt_last_view captures
+    //   exactly this if that's what HR had open when the app last closed).
+    //   A single flat push gives that whole nested state ONE entry with no
+    //   layer underneath it for "Employee modal only, Increment not open
+    //   yet" — the entry every ordinary, non-restored session builds
+    //   naturally, one real push per modal opened. Without it, closing just
+    //   Record Increment (kmtBack() -> history.back()) skips straight past
+    //   that missing layer to Dashboard, closing the Employee modal too
+    //   instead of leaving it open underneath — reported as Record
+    //   Increment's own ✕ "not working" right after reopening the app mid
+    //   an edit. Pushing one entry per modal, shallowest first, then the
+    //   full state last (matching what really is on screen right now),
+    //   reconstructs the exact same layering a live session would have
+    //   built up one modal at a time.
+    const kmtFull_ = kmtSnapshotView();
+    if(opts.push){
+      const kmtModals_ = kmtFull_.modals || [];
+      for(let kmtI_ = 0; kmtI_ < kmtModals_.length; kmtI_++){
+        history.pushState(Object.assign({}, kmtFull_, { modals: kmtModals_.slice(0, kmtI_) }), '');
+      }
+      history.pushState(kmtFull_, '');
+    } else {
+      history.replaceState(kmtFull_, '');
+    }
     kmtPersistLastView_();
     kmtRestoring = false;
     kmtPendingCardRestore = null;
