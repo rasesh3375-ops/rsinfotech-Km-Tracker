@@ -2231,6 +2231,18 @@
         <div id="reportsLanding" class="gen-landing">
           <h1>Reports</h1>
           <p>View attendance, leave, payroll and employee reports — tap a section to open it.</p>
+          <!-- Jump straight to a report by name instead of scrolling the list
+               below — same field-input select used everywhere else in the
+               app. Populated by populateReportTypeSelect_(), called at the
+               end of renderReportsTab() once every header below (static and
+               the nine employee-scoped ones) exists and is numbered, so this
+               never lists a report the accordion itself doesn't have yet. -->
+          <div style="max-width:420px;margin-bottom:16px;">
+            <label class="field">Jump to a report</label>
+            <select class="field-input" id="rptTypeSelect" onchange="reportTypeSelectChanged_()">
+              <option value="">Choose a report…</option>
+            </select>
+          </div>
           <!-- Flattened accordion, same shape as the Generator tab's: every
                report collapsed by default, one open at a time, tapping a
                header expands its content directly below that same header —
@@ -17822,6 +17834,7 @@ async function renderReportsTab(){
     const numEl = btn.querySelector('.gen-accordion-num');
     if(numEl) numEl.textContent = i + 1;
   });
+  populateReportTypeSelect_();
   // The static report cards below (Attendance, PF, Consultant, ...) were
   // written directly as HTML rather than built from the `reports` array
   // above, so they never picked up the same "N employees with data" line —
@@ -20508,6 +20521,35 @@ function openReportsCard(sectionId){
   }
   updateAccordionHeaders_();
   kmtCommitArrival();
+}
+
+// The "Jump to a report" select above the accordion — reads the same headers
+// openReportsCard already drives (title text and data-target), so it can
+// never list a report the accordion itself doesn't have, and never needs its
+// own copy of the report names to keep in sync.
+function populateReportTypeSelect_(){
+  const sel = document.getElementById('rptTypeSelect');
+  if(!sel) return;
+  const headers = Array.from(document.querySelectorAll('#reportsLanding .gen-accordion-header[data-target]'));
+  sel.innerHTML = '<option value="">Choose a report…</option>' + headers.map(btn => {
+    const num = (btn.querySelector('.gen-accordion-num') || {}).textContent || '';
+    const title = (btn.querySelector('.gen-accordion-title') || {}).textContent || '';
+    return `<option value="${escapeHtml(btn.dataset.target)}">${escapeHtml(num ? num + '. ' + title : title)}</option>`;
+  }).join('');
+}
+// Resets back to the placeholder after opening, same as any other jump-to
+// menu — so picking the same report again still fires a change event, and
+// the select never sits showing a report the accordion collapsed a moment
+// later (openReportsCard's own tap-to-close toggle, or a different section
+// opened directly in the list below).
+function reportTypeSelectChanged_(){
+  const sel = document.getElementById('rptTypeSelect');
+  const sectionId = sel.value;
+  if(!sectionId) return;
+  sel.value = '';
+  openReportsCard(sectionId);
+  const el = document.getElementById(sectionId);
+  if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
 }
 
 // Same accordion again for Settings' five sections — a fixed list rather
