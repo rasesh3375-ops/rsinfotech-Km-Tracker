@@ -8020,6 +8020,8 @@ async function openDayTimeEditor(employeeId, dateStr){
   const employees = await getEmployees();
   const emp = employees.find(e => e.id === employeeId);
   if(!emp) return;
+  kmtCaptureDeparture();
+  kmtPushModal_('dayTime', { employeeId: employeeId, dateStr: dateStr }, 'checklistModalRoot');
   kmtLockBodyScroll('checklistModalRoot');
   // Just the one day. This used to read the employee's entire attendance
   // history — every day they have ever worked — to fill in two time boxes, and
@@ -8031,9 +8033,9 @@ async function openDayTimeEditor(employeeId, dateStr){
   dayTimeEditorFor = { employeeId, dateStr, currentCode: (pend && pend.code) || entry.code || '' };
 
   document.getElementById('checklistModalRoot').innerHTML = `
-    <div class="modal-overlay" onclick="if(event.target===this)closeDayTimeEditor()">
+    <div class="modal-overlay" onclick="if(event.target===this)kmtBack()">
       <div class="modal-box">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="closeDayTimeEditor()" title="Close" aria-label="Close">✕</button></div>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <h2 style="margin:0 0 4px;">${escapeHtml(emp.name)}</h2>
         <p class="hint" style="margin:0 0 14px;">${escapeHtml(dateStr)} · shift ${minToHHMM(LEAVE_POLICY.shift.startMin)} to ${minToHHMM(LEAVE_POLICY.shift.endMin)}</p>
         <label class="field">Time in</label>
@@ -8049,12 +8051,14 @@ async function openDayTimeEditor(employeeId, dateStr){
       </div>
     </div>`;
   renderDayTimeVerdict();
+  kmtCommitArrival();
 }
 
 function closeDayTimeEditor(){
   document.getElementById('checklistModalRoot').innerHTML = '';
   dayTimeEditorFor = null;
   kmtUnlockBodyScroll('checklistModalRoot');
+  kmtPopModal_('checklistModalRoot');
 }
 
 // What the policy makes of the times, shown before anything is applied.
@@ -8092,7 +8096,7 @@ function applyDayTimes(){
   if(!dayTimeEditorFor) return;
   const { employeeId, dateStr, currentCode } = dayTimeEditorFor;
   const j = judgeDayTimes();
-  if(!j){ closeDayTimeEditor(); return; }
+  if(!j){ closeDayTimeEditor(); kmtBack(); return; }
   const r = j.r;
   const inTime  = (document.getElementById('dayInTime')  || {}).value || '';
   const outTime = (document.getElementById('dayOutTime') || {}).value || '';
@@ -8111,6 +8115,7 @@ function applyDayTimes(){
   persistPendingAttendance();
   updateAttendanceSaveBar();
   closeDayTimeEditor();
+  kmtBack();
   renderAttendanceSheet();
 }
 
@@ -8124,6 +8129,7 @@ function clearDayTimes(){
   persistPendingAttendance();
   updateAttendanceSaveBar();
   closeDayTimeEditor();
+  kmtBack();
   renderAttendanceSheet();
 }
 
@@ -12672,6 +12678,32 @@ let hrRoute = 'dashboard';
 let kmtRestoring = false;
 let kmtPendingCardRestore = null;
 const kmtCardGenerated = new Set();
+// Every modal that's actually destroyed on close (innerHTML = '') rather
+// than just hidden/reparented — Add/Edit Employee, Record Increment, the
+// three checklistModalRoot tenants, every Payroll Documents sub-form, the
+// Apprentice detail panel. Ordered outer-to-inner. This is what closes the
+// gap kmtSnapshotView's route/card/fullscreen model can't see on its own:
+// opening a document viewer from inside one of these used to replay a
+// history entry that predated the modal ever existing, so hrNavigate's own
+// "close everything" side effect destroyed it instead of just revealing it
+// again. See kmtSnapshotView's `modals` field and kmtReconcileModals_.
+let kmtOpenModals = [];
+// Call at the top of every modal-open function, before the innerHTML write.
+// checklistModalRoot has three different tenants (the Joining/Exit
+// checklist, Left Employees, the Day-Time editor) that can never coexist —
+// whichever opens second is about to overwrite the first's innerHTML
+// regardless, so the stack should reflect one occupant per root, not grow
+// two "open" entries for the one physical DOM node.
+function kmtPushModal_(kind, params, root){
+  const dupe = kmtOpenModals.findIndex(m => m.root === root);
+  if(dupe !== -1) kmtOpenModals.splice(dupe, 1);
+  kmtOpenModals.push({ kind: kind, params: params, root: root });
+}
+// Call right before a modal-close function clears its root's innerHTML.
+function kmtPopModal_(root){
+  const idx = kmtOpenModals.findIndex(m => m.root === root);
+  if(idx !== -1) kmtOpenModals.splice(idx, 1);
+}
 document.addEventListener('click', e => {
   const btn = e.target.closest && e.target.closest('[data-kmt-generate]');
   if(!btn) return;
@@ -12750,6 +12782,37 @@ function armHrCloseBtnObserver(){
 // Generic on purpose: this covers every current and future report's
 // filters without a hand-maintained field list, the same reasoning
 // staticReportCardStats() already uses for the Reports landing counts.
+// Snapshots kmtOpenModals the same generic way kmtSnapshotView scrapes a
+// card's fields, plus the two bits of state a plain field scrape can't
+// see: which Employee-modal accordion section is open (openEmpAccordionSection
+// tracks that purely via .hidden class membership, not a field value), and
+// the Payroll Doc modal's own mode/fy/id (payrollDocModalCtx_ decides which
+// template group even renders — payrollDocSetModalGroups_ — so it has to be
+// known before fields can be reapplied at all).
+function kmtSnapshotModals_(){
+  return kmtOpenModals.map(m => {
+    const root = document.getElementById(m.root);
+    const fields = {};
+    if(root){
+      root.querySelectorAll('select[id], input[id], textarea[id]').forEach(el => { fields[el.id] = el.value; });
+    }
+    // The overlay scrolls, not the box — see CLAUDE.md's note on why
+    // position:sticky works inside .modal-box at all.
+    const overlay = root ? root.querySelector('.modal-overlay') : null;
+    const entry = { kind: m.kind, root: m.root, params: m.params, fields: fields, scrollTop: overlay ? overlay.scrollTop : 0 };
+    if(m.kind === 'employee'){
+      entry.openSection = EMP_ACCORDION_SECTIONS.find(id => {
+        const el = document.getElementById(id);
+        return el && !el.classList.contains('hidden');
+      }) || null;
+    }
+    // Always the live context, not whatever was true when this entry was
+    // pushed — editing/reclassifying/replacing a record can change what
+    // payrollDocModalCtx_ describes without the modal ever closing.
+    if(m.kind === 'payrollDoc') entry.params = payrollDocModalCtx_;
+    return entry;
+  });
+}
 function kmtSnapshotView(){
   const card = kmtActiveCard();
   const scopeEl = card ? document.getElementById(card) : document.getElementById('hrContent');
@@ -12772,7 +12835,8 @@ function kmtSnapshotView(){
     scrollY: window.scrollY,
     fsScrollTop: (fullscreenActiveId && fsBody) ? fsBody.scrollTop : 0,
     fields: fields,
-    generated: card ? kmtCardGenerated.has(card) : false
+    generated: card ? kmtCardGenerated.has(card) : false,
+    modals: kmtSnapshotModals_()
   };
 }
 
@@ -12832,7 +12896,7 @@ async function kmtRestoreView(descriptor){
   kmtRestoring = true;
   kmtPendingCardRestore = descriptor.card ? descriptor : null;
   try{
-    await hrNavigate(descriptor.route, { restoring:true });
+    await hrNavigate(descriptor.route, { restoring:true, modals: descriptor.modals || [] });
     await new Promise(r => setTimeout(r, 60));
     if(descriptor.card){
       if(descriptor.route === 'reports') openReportsCard(descriptor.card);
@@ -12865,6 +12929,90 @@ async function kmtRestoreView(descriptor){
   } finally {
     kmtRestoring = false;
     kmtPendingCardRestore = null;
+  }
+}
+
+// Which real open function reopens a modal kind, given its saved params —
+// used only for the "should be open, isn't" case below. Most kinds don't
+// actually need this in practice (the reported bug is fixed by the "already
+// open, leave alone" case doing nothing), but it's what makes a genuine
+// hardware/browser Back reach a modal that isn't the one most recently
+// closed too, not just the one directly underneath it.
+async function kmtReopenModal_(entry){
+  const p = entry.params || {};
+  if(entry.kind === 'employee') return openAddEmployeeModal(p.id);
+  if(entry.kind === 'increment') return openIncrementModal(p.id);
+  if(entry.kind === 'leftEmployees') return openLeftEmployeesModal();
+  if(entry.kind === 'dayTime') return openDayTimeEditor(p.employeeId, p.dateStr);
+  if(entry.kind === 'apprenticeDetail') return toggleApprenticeDetail_(p.empId);
+  if(entry.kind === 'checklist'){
+    if(p.empId){ currentChecklistType = p.type; return openChecklistFor(p.empId); }
+    return openChecklistPicker(p.type);
+  }
+  if(entry.kind === 'payrollDocHistory') return openPayrollDocHistoryModal(p.fy, p.id);
+  if(entry.kind === 'payrollDoc'){
+    if(p.mode === 'upload') return openPayrollDocUploadModal();
+    if(p.mode === 'link') return openPayrollDocLinkModal();
+    if(p.mode === 'edit') return openPayrollDocEditModal(p.fy, p.id);
+    if(p.mode === 'reclassify') return openPayrollDocReclassifyModal(p.fy, p.id);
+    if(p.mode === 'replace') return openPayrollDocReplaceModal(p.fy, p.id);
+    if(p.mode === 'classify') return openPayrollDocClassifyModal(p.id);
+  }
+}
+// Which real close function tears a modal kind down for good (not just
+// hides it). Always force:true on the Employee modal specifically — by the
+// time this runs, its own unsaved-changes gate has already either been
+// satisfied (employeeModalCanClose_() ran in the X/backdrop's own onclick,
+// before kmtBack() ever got called) or deliberately bypassed (a genuine
+// sidebar navigation away, same as this codebase has always done — nothing
+// typed is lost, see scheduleEmployeeDraftSave). Asking again in here would
+// mean asking twice for the same close, or asking a second time after the
+// user already said yes once.
+function kmtCloseModalByKind_(kind){
+  if(kind === 'employee') return closeEmployeeModal(true);
+  if(kind === 'increment') return closeIncrementModal();
+  if(kind === 'leftEmployees') return closeLeftEmployeesModal();
+  if(kind === 'dayTime') return closeDayTimeEditor();
+  if(kind === 'apprenticeDetail') return closeApprenticeDetail_();
+  if(kind === 'checklist') return closeChecklistModal();
+  if(kind === 'payrollDoc' || kind === 'payrollDocHistory') return closePayrollDocModal();
+}
+// The one diff that reconciles what's actually open (kmtOpenModals) against
+// what a target view's own snapshot says should be open (targetModals) —
+// called from hrNavigate on every navigation, restoring or not. A modal
+// that's open now and correctly still wanted is left completely untouched:
+// no teardown, no rebuild, so every unsaved keystroke, the expanded
+// Employee-modal section, scroll position and search text all survive
+// automatically, because nothing ever touched the DOM node holding them.
+// That's what actually fixes "View a document from inside Add Employee's
+// Documents section, press X, press X again" — the employee modal was
+// never destroyed in between, it was only ever hidden behind the fullscreen
+// viewer.
+async function kmtReconcileModals_(targetModals){
+  const target = targetModals || [];
+  // Outermost first, so closing/reopening an inner one never disturbs
+  // whatever the pass has already settled directly underneath it.
+  const current = kmtOpenModals.slice();
+  for(const entry of current){
+    const want = target.find(t => t.kind === entry.kind && t.root === entry.root);
+    const stillWanted = want && JSON.stringify(want.params) === JSON.stringify(entry.params);
+    if(!stillWanted) kmtCloseModalByKind_(entry.kind);
+  }
+  for(const want of target){
+    const already = kmtOpenModals.find(m => m.kind === want.kind && m.root === want.root &&
+      JSON.stringify(m.params) === JSON.stringify(want.params));
+    if(already) continue; // exactly the "leave it alone" case described above
+    await kmtReopenModal_(want);
+    const root = document.getElementById(want.root);
+    if(root){
+      Object.keys(want.fields || {}).forEach(id => {
+        const el = document.getElementById(id);
+        if(el) el.value = want.fields[id];
+      });
+      if(want.kind === 'employee' && want.openSection) openEmpAccordionSection(want.openSection);
+      const overlay = root.querySelector('.modal-overlay');
+      if(overlay) overlay.scrollTop = want.scrollTop || 0;
+    }
   }
 }
 
@@ -12934,28 +13082,23 @@ async function hrNavigate(route, opts){
   kmtCaptureDeparture();
   // Navigating away must never leave a full-screen report, or any of the
   // app's other body-scroll-locking modals (Add/Edit Employee, Record
-  // Increment, a Joining/Exit checklist, a Payroll Documents form, global
-  // search), stuck open behind — or worse, floating on top of — the screen
-  // being navigated to. Every one of these is normally closed by its own
-  // ✕/backdrop/Escape, none of which fire when the sidebar (or any other
-  // in-app link) is what actually navigates away — so kmtLockBodyScroll's
-  // owner for it never gets released, document.body stays permanently
-  // overflow:hidden, and mouse-wheel scrolling silently stops working for
-  // the rest of the session, on every screen, not just the one the modal
-  // was opened from. force:true on closeEmployeeModal skips its "unsaved
-  // changes?" confirm — that guard is for someone clicking the form's own
-  // ✕, not for a deliberate navigation elsewhere, and nothing typed is
-  // actually lost since the draft is autosaved regardless (see
-  // scheduleEmployeeDraftSave). Every other close function here has no such
-  // guard and is already safe to call unconditionally even when its own
-  // modal isn't open — innerHTML = '' twice is a no-op, and
-  // kmtUnlockBodyScroll on an owner that was never locked is a no-op too
-  // (kmtBodyLockOwners is a Set).
+  // Increment, a Joining/Exit checklist, a Payroll Documents form, the
+  // Apprentice detail panel), stuck open behind — or worse, floating on top
+  // of — the screen being navigated to, UNLESS this navigation is a kmt
+  // restore that specifically wants that exact modal open again (opts.modals),
+  // in which case it must be left completely untouched — see
+  // kmtReconcileModals_'s own comment for why that's what actually fixes
+  // "View a document from inside Add Employee's Documents section, X, X".
+  // A genuine deliberate navigation elsewhere (sidebar, breadcrumb — not a
+  // restore) passes no modals to keep, so every one of them still closes
+  // exactly as before — kmtCloseModalByKind_ always force-closes the
+  // Employee modal without its "unsaved changes?" confirm (see its own
+  // comment for why). Every other close function has no such guard and is
+  // already safe to call unconditionally even when its own modal isn't
+  // open — innerHTML = '' twice is a no-op, and kmtUnlockBodyScroll on an
+  // owner that was never locked is a no-op too (kmtBodyLockOwners is a Set).
   if(fullscreenActiveId) closeFullscreenView();
-  closeEmployeeModal(true);
-  closeIncrementModal();
-  closeChecklistModal();
-  closePayrollDocModal();
+  await kmtReconcileModals_(opts.restoring ? (opts.modals || []) : []);
   closeGlobalSearch();
   // Belt and braces on top of the explicit closes just above: if any owner
   // is still locked despite all of that (its root was already empty some
@@ -14264,11 +14407,11 @@ function employeeModalHtml(emp){
   const bondApplicable = emp.bondApplicable === 'yes' ||
     (emp.bondApplicable !== 'no' && !!(emp.retentionMoney && emp.retentionMonths && emp.bondStart));
   return `
-  <div class="modal-overlay" id="employeeModalOverlay" onclick="if(event.target===this)closeEmployeeModal()">
+  <div class="modal-overlay" id="employeeModalOverlay" onclick="if(event.target===this&&employeeModalCanClose_())kmtBack()">
     <div class="modal-box">
       <div class="modal-head">
         <h2>${editingEmployeeId ? 'Edit employee' : 'Add employee'}</h2>
-        <button class="modal-x" type="button" title="Close" aria-label="Close" onclick="closeEmployeeModal()">✕</button>
+        <button class="modal-x" type="button" title="Close" aria-label="Close" onclick="if(employeeModalCanClose_())kmtBack()">✕</button>
       </div>
       <p class="hint">This information is stored once and auto-fills letters and payslips for this employee — no need to retype it each time. Close it at any point with the × above — anything typed is kept on this device and offered back next time.</p>
 
@@ -16964,6 +17107,13 @@ if(window.visualViewport){
 // whatever fixed window was tried.
 
 async function openAddEmployeeModal(id){
+  // Bracketed with the same kmtCaptureDeparture/kmtCommitArrival pair every
+  // route/card open already uses, and pushed onto kmtOpenModals, so a
+  // fullscreen view opened from inside this modal (a document from the
+  // Documents section, say) has something to pop back to that actually
+  // knows this modal exists — see kmtSnapshotModals_/kmtReconcileModals_.
+  kmtCaptureDeparture();
+  kmtPushModal_('employee', { id: id || null }, 'employeeModalRoot');
   kmtLockBodyScroll('employeeModalRoot');
   editingEmployeeId = id || null;
   if(id){
@@ -17007,14 +17157,20 @@ async function openAddEmployeeModal(id){
   kmtSettleAndReveal_(document.getElementById('employeeModalOverlay'));
 
   // Offer the draft back only when it belongs to this form — a half-finished
-  // new employee must never be poured into someone else's record.
-  const draft = readEmployeeDraft();
-  if(draft && draft.forId === (editingEmployeeId || '')){
-    const when = new Date(draft.at).toLocaleString();
-    if(confirm('An unsaved draft of this form from ' + when + ' was found on this device.\n\nRestore it?')){
-      applyEmployeeDraft(draft.fields);
-    } else {
-      clearEmployeeDraft();
+  // new employee must never be poured into someone else's record. Skipped
+  // during a kmt restore: kmtReconcileModals_ is about to reapply this
+  // exact modal's own captured field values right after this call returns,
+  // so prompting about a stale localStorage draft here would either fight
+  // that reapply or double-prompt on every single Back through this modal.
+  if(!kmtRestoring){
+    const draft = readEmployeeDraft();
+    if(draft && draft.forId === (editingEmployeeId || '')){
+      const when = new Date(draft.at).toLocaleString();
+      if(confirm('An unsaved draft of this form from ' + when + ' was found on this device.\n\nRestore it?')){
+        applyEmployeeDraft(draft.fields);
+      } else {
+        clearEmployeeDraft();
+      }
     }
   }
   const root = document.getElementById('employeeModalRoot');
@@ -17027,22 +17183,39 @@ async function openAddEmployeeModal(id){
   }
   employeeFormTouched = false;
   document.addEventListener('keydown', employeeModalEscHandler);
+  kmtCommitArrival();
 }
 // Closing is now possible from anywhere — the ×, the backdrop, or Escape — so
 // it has to ask before throwing away a half-filled form. Only once something
 // has actually been typed: confirming on a form nobody touched is noise.
 let employeeFormTouched = false;
 
-function closeEmployeeModal(force){
-  if(!force && employeeFormTouched && document.getElementById('employeeModalOverlay')){
-    if(!confirm('Close without saving?\n\nWhat you have typed is kept on this device and offered back the next time you open this form.')) return;
+// Pure gate, no side effects — safe to call synchronously from an onclick
+// before deciding whether to navigate at all. Split out from the teardown
+// below because history.back() (what kmtBack() calls) is asynchronous: a
+// confirm() that only ran once the popped state got replayed would run
+// AFTER the browser already committed the navigation, too late to cancel.
+function employeeModalCanClose_(){
+  if(employeeFormTouched && document.getElementById('employeeModalOverlay')){
+    return confirm('Close without saving?\n\nWhat you have typed is kept on this device and offered back the next time you open this form.');
   }
+  return true;
+}
+function closeEmployeeModal(force){
+  // force still means "skip the gate" for hrNavigate's own bulk-close on a
+  // genuine sidebar navigation (not a kmt restore) — see hrNavigate's
+  // comment on why that one case is intentionally not gated. Every other
+  // caller (kmtBack() via the modal's own ×/backdrop/Escape,
+  // kmtReconcileModals_ closing a modal that's genuinely going away) has
+  // already run employeeModalCanClose_() itself before ever reaching here.
+  if(!force && !employeeModalCanClose_()) return;
   employeeFormTouched = false;
   document.removeEventListener('keydown', employeeModalEscHandler);
   document.getElementById('employeeModalRoot').innerHTML = '';
   editingEmployeeDraft = null;
   editingEmployeeId = null;
   kmtUnlockBodyScroll('employeeModalRoot');
+  kmtPopModal_('employeeModalRoot');
 }
 
 function employeeModalEscHandler(e){
@@ -17051,7 +17224,7 @@ function employeeModalEscHandler(e){
   // Not while a picker or another modal is on top of it.
   if(document.getElementById('checklistModalRoot').innerHTML) return;
   if(document.getElementById('incrementModalRoot').innerHTML) return;
-  closeEmployeeModal();
+  if(employeeModalCanClose_()) kmtBack();
 }
 
 // ---- record increment ----
@@ -17064,11 +17237,13 @@ async function openIncrementModal(id){
   const employees = await getEmployees();
   const emp = employees.find(e => e.id === id);
   if(!emp) return;
+  kmtCaptureDeparture();
+  kmtPushModal_('increment', { id: id }, 'incrementModalRoot');
   kmtLockBodyScroll('incrementModalRoot');
   const cur = currentRatePay(emp);
-  document.getElementById('incrementModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeIncrementModal()">
+  document.getElementById('incrementModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)kmtBack()">
     <div class="modal-box">
-      <div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="closeIncrementModal()" title="Close" aria-label="Close">✕</button></div>
+      <div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
       <h2>Record Increment — ${escapeHtml(emp.name || emp.id)}</h2>
       <p class="hint">Adds a new Rate of Pay effective from the date you choose. Every report dated before that day keeps showing ₹${fmtMoney(cur.ratePay)} — nothing already generated moves.</p>
       <label class="field">New Rate of Pay (monthly)</label>
@@ -17087,11 +17262,13 @@ async function openIncrementModal(id){
       </div>
     </div>
   </div>`;
+  kmtCommitArrival();
 }
 
 function closeIncrementModal(){
   document.getElementById('incrementModalRoot').innerHTML = '';
   kmtUnlockBodyScroll('incrementModalRoot');
+  kmtPopModal_('incrementModalRoot');
 }
 
 // The record of every Rate of Pay change on file, with a Remove link on
@@ -17188,6 +17365,10 @@ async function saveIncrement(id){
     ' → ₹' + fmtMoney(ratePay) + ' effective ' + fmtDateIN(from) +
     (salaryHeading !== before.salaryHeading ? ', heading changed to ' + ((SALARY_HEADINGS[salaryHeading]||{}).label || salaryHeading) : ''));
   closeIncrementModal();
+  // Pops the history entry this modal's own open pushed — see the matching
+  // comment on the Employee modal's save-success close for why this can't
+  // be left for a later Back to discover on its own.
+  kmtBack();
   // Refresh the edit form behind it, if open, so the new figure shows at once.
   if(editingEmployeeId === id){
     editingEmployeeDraft = JSON.parse(JSON.stringify(emp));
@@ -17457,6 +17638,10 @@ async function saveEmployeeForm(){
   // so nothing below is allowed to hold the form open or say the save failed.
   try{ clearEmployeeDraft(); }catch(e){}
   closeEmployeeModal(true);
+  // Closes the DOM above, but the history entry this modal pushed on open
+  // is still sitting on the stack — pop it too, or a later Back would try
+  // to reopen the very form that was just successfully saved and closed.
+  kmtBack();
   showSavedToast((isNew ? 'Added ' : 'Updated ') + name + ' (' + id + ')');
   // A toast fades on its own in a few seconds — fine for confirming the
   // save, not for telling HR a document silently didn't make it in. This
@@ -17678,6 +17863,7 @@ async function reactivateEmployee(id){
   await refreshDashboard();
   await renderUserList();
   closeLeftEmployeesModal();
+  kmtBack();
 }
 
 async function renderEmployeeList(){
@@ -17783,6 +17969,8 @@ async function empJumpSelectChanged_(){
 // getEmployees() again, so it never goes stale across an actual edit.
 let leftEmployeesModalList_ = [];
 function openLeftEmployeesModal(){
+  kmtCaptureDeparture();
+  kmtPushModal_('leftEmployees', {}, 'checklistModalRoot');
   kmtLockBodyScroll('checklistModalRoot');
   getEmployees().then(employees => {
     leftEmployeesModalList_ = employees.filter(e => e.employmentStatus === 'left');
@@ -17791,12 +17979,13 @@ function openLeftEmployeesModal(){
 }
 function renderLeftEmployeesModal_(){
   if(!leftEmployeesModalList_.length){
-    document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeLeftEmployeesModal()"><div class="modal-box"><div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="closeLeftEmployeesModal()" title="Close" aria-label="Close">✕</button></div><h2>Left employees</h2><p class="hint">No employees marked as left yet.</p></div></div>`;
+    document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)kmtBack()"><div class="modal-box"><div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div><h2>Left employees</h2><p class="hint">No employees marked as left yet.</p></div></div>`;
+    kmtCommitArrival();
     return;
   }
-  document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeLeftEmployeesModal()">
+  document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)kmtBack()">
     <div class="modal-box">
-      <div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="closeLeftEmployeesModal()" title="Close" aria-label="Close">✕</button></div>
+      <div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
       <h2>Left employees</h2>
       <p class="hint">Their full record is kept on file — view details, reactivate if they rejoin, or delete permanently once there is no further reason to keep them on file. A complete backup is saved to Drive before a delete goes through.</p>
       <!-- Same search + jump pattern as the active Employee Master list,
@@ -17816,6 +18005,7 @@ function renderLeftEmployeesModal_(){
   </div>`;
   populateLeftEmpJumpSelect_();
   renderLeftEmployeesListBox_('');
+  kmtCommitArrival();
 }
 function populateLeftEmpJumpSelect_(){
   const sel = document.getElementById('leftEmpJumpSelect');
@@ -17836,7 +18026,12 @@ function renderLeftEmployeesListBox_(q){
     <div class="head"><strong>${escapeHtml(e.name)}</strong><span class="id">${e.id}</span></div>
     <div class="sub">${escapeHtml(e.designation || '—')} · left ${e.leftDate ? fmtDateIN(e.leftDate) : 'date not recorded'}</div>
     <div class="actions">
-      <button class="btn ghost" onclick="closeLeftEmployeesModal();openAddEmployeeModal('${e.id}')">View details</button>
+      <!-- No explicit close first: openAddEmployeeModal pushes its own entry
+           on top of this one instead, so it opens over Left Employees
+           rather than tearing it down — X on the Employee modal then
+           correctly reveals this list again, exactly as it was, matching
+           the Documents-under-a-document-viewer fix elsewhere in this file. -->
+      <button class="btn ghost" onclick="openAddEmployeeModal('${e.id}')">View details</button>
       <button class="btn ghost" onclick="reactivateEmployee('${e.id}')">Reactivate</button>
       <button class="btn ghost btn-danger" onclick="deleteEmployee('${e.id}').then(openLeftEmployeesModal)"
               title="Saves a complete backup to Drive, then permanently removes the record, attendance, tracking login and history from the app.">Delete</button>
@@ -17864,6 +18059,7 @@ function leftEmpJumpSelectChanged_(){
 function closeLeftEmployeesModal(){
   document.getElementById('checklistModalRoot').innerHTML = '';
   kmtUnlockBodyScroll('checklistModalRoot');
+  kmtPopModal_('checklistModalRoot');
 }
 
 // ---- reports tab ----
@@ -20404,36 +20600,54 @@ async function viewReport(key, label, monthFilter){
 }
 
 // ---- checklists ----
+// Picker and per-employee checklist are two states of ONE checklistModalRoot
+// occupant, not two competing stack entries — like the Employee modal's
+// openSection, this is a drill-down within the same modal, and Back should
+// walk one level (checklist → picker → whatever opened the picker), not
+// skip straight past the picker. kmtOpenModals holds one 'checklist' entry
+// whose params.empId is null while the picker shows and set once drilled
+// into someone — kmtReconcileModals_ treats a params change as "close then
+// reopen the right one," which is what makes that one-level Back work.
 function openChecklistPicker(type){
-  kmtLockBodyScroll('checklistModalRoot');
+  kmtCaptureDeparture();
   currentChecklistType = type;
+  kmtPushModal_('checklist', { type: type, empId: null }, 'checklistModalRoot');
+  kmtLockBodyScroll('checklistModalRoot');
   getEmployees().then(employees => {
     if(!employees.length){
-      document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeChecklistModal()"><div class="modal-box"><div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="closeChecklistModal()" title="Close" aria-label="Close">✕</button></div><h2>${type==='joining'?'Joining':'Exit'} checklist</h2><p class="hint">Add employees first in Employee Master.</p></div></div>`;
+      document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)kmtBack()"><div class="modal-box"><div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div><h2>${type==='joining'?'Joining':'Exit'} checklist</h2><p class="hint">Add employees first in Employee Master.</p></div></div>`;
+      kmtCommitArrival();
       return;
     }
-    document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeChecklistModal()">
+    document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)kmtBack()">
       <div class="modal-box">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="closeChecklistModal()" title="Close" aria-label="Close">✕</button></div>
+        <div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
         <h2>${type==='joining'?'Joining':'Exit'} checklist</h2>
         <p class="hint">Choose an employee to view or update their checklist.</p>
         ${employees.map(e => `<div class="emp-row" style="cursor:pointer;" onclick="openChecklistFor('${e.id}')"><div class="head"><strong>${escapeHtml(e.name)}</strong><span class="id">${e.id}</span></div></div>`).join('')}
       </div>
     </div>`;
+    kmtCommitArrival();
   });
 }
 async function openChecklistFor(empId){
+  kmtCaptureDeparture();
   const employees = await getEmployees();
   const emp = employees.find(e => e.id === empId);
   const items = CHECKLIST_ITEMS[currentChecklistType];
   const state = (emp.checklists && emp.checklists[currentChecklistType]) || {};
-  document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeChecklistModal()">
+  // Same physical root as the picker — kmtPushModal_ evicts that entry and
+  // replaces it with this one, so kmtOpenModals still holds exactly one
+  // 'checklist' entry, now with empId set instead of null.
+  kmtPushModal_('checklist', { type: currentChecklistType, empId: empId }, 'checklistModalRoot');
+  document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)kmtBack()">
     <div class="modal-box">
-      <div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="closeChecklistModal()" title="Close" aria-label="Close">✕</button></div>
+      <div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="kmtBack()" title="Close" aria-label="Close">✕</button></div>
       <h2>${escapeHtml(emp.name)} — ${currentChecklistType === 'joining' ? 'Joining' : 'Exit'} checklist</h2>
       ${items.map((label,i) => `<div class="checklist-row"><input type="checkbox" id="chk_${i}" ${state[label] ? 'checked' : ''} onchange="toggleChecklistItem('${empId}','${escapeJsAttr_(label)}',this.checked)"><label for="chk_${i}">${label}</label></div>`).join('')}
     </div>
   </div>`;
+  kmtCommitArrival();
 }
 async function toggleChecklistItem(empId, label, checked){
   const employees = await getEmployees();
@@ -20454,6 +20668,7 @@ async function toggleChecklistItem(empId, label, checked){
 function closeChecklistModal(){
   document.getElementById('checklistModalRoot').innerHTML = '';
   kmtUnlockBodyScroll('checklistModalRoot');
+  kmtPopModal_('checklistModalRoot');
 }
 
 // ---- joining kit / issued assets ----
@@ -21608,11 +21823,11 @@ async function renderPayrollDocsUnclassified_(body){
 let payrollDocModalCtx_ = null;
 function payrollDocModalHtml_(){
   return `
-  <div class="modal-overlay" id="payrollDocModalOverlay" onclick="if(event.target===this)closePayrollDocModal()">
+  <div class="modal-overlay" id="payrollDocModalOverlay" onclick="if(event.target===this)kmtBack()">
     <div class="modal-box">
       <div class="modal-head">
         <h2 id="payrollDocModalTitle"></h2>
-        <button class="modal-x" type="button" title="Close" aria-label="Close" onclick="closePayrollDocModal()">✕</button>
+        <button class="modal-x" type="button" title="Close" aria-label="Close" onclick="kmtBack()">✕</button>
       </div>
       <div id="pdFormClassifyGroup">
         <div class="row-inline">
@@ -21687,6 +21902,7 @@ function closePayrollDocModal(){
   const root = document.getElementById('payrollDocModalRoot');
   if(root) root.innerHTML = '';
   kmtUnlockBodyScroll('payrollDocModal');
+  kmtPopModal_('payrollDocModalRoot');
 }
 function payrollDocRememberedUploader_(){
   try{ return localStorage.getItem('kmt_payroll_doc_uploader') || ''; }catch(e){ return ''; }
@@ -21697,7 +21913,9 @@ function payrollDocRememberUploader_(name){
 }
 
 function openPayrollDocUploadModal(prefill){
+  kmtCaptureDeparture();
   payrollDocModalCtx_ = { mode:'upload' };
+  kmtPushModal_('payrollDoc', payrollDocModalCtx_, 'payrollDocModalRoot');
   document.getElementById('payrollDocModalRoot').innerHTML = payrollDocModalHtml_();
   kmtLockBodyScroll('payrollDocModal');
   payrollDocSetModalGroups_(['classify','details','file']);
@@ -21711,6 +21929,7 @@ function openPayrollDocUploadModal(prefill){
   document.getElementById('pdFormDocDate').value = todayStr();
   document.getElementById('pdFormFileLabel').textContent = 'File';
   document.getElementById('pdFormUploadedBy').value = payrollDocRememberedUploader_();
+  kmtCommitArrival();
 }
 // For a file that's already sitting in Drive but has no record here — a
 // document HR (or an earlier version of this module) put straight into the
@@ -21721,7 +21940,9 @@ function openPayrollDocUploadModal(prefill){
 // from anything stored alongside it — so this asks for exactly that link and
 // nothing else, with no re-upload involved.
 function openPayrollDocLinkModal(prefill){
+  kmtCaptureDeparture();
   payrollDocModalCtx_ = { mode:'link' };
+  kmtPushModal_('payrollDoc', payrollDocModalCtx_, 'payrollDocModalRoot');
   document.getElementById('payrollDocModalRoot').innerHTML = payrollDocModalHtml_();
   kmtLockBodyScroll('payrollDocModal');
   payrollDocSetModalGroups_(['classify','details','link']);
@@ -21734,12 +21955,15 @@ function openPayrollDocLinkModal(prefill){
   if(prefill && prefill.docType) document.getElementById('pdFormDocType').value = prefill.docType;
   document.getElementById('pdFormDocDate').value = todayStr();
   document.getElementById('pdFormUploadedBy').value = payrollDocRememberedUploader_();
+  kmtCommitArrival();
 }
 async function openPayrollDocEditModal(fy, id){
   const list = await getPayrollDocsForFY(fy);
   const rec = list.find(r => r.id === id);
   if(!rec) return;
+  kmtCaptureDeparture();
   payrollDocModalCtx_ = { mode:'edit', fy, id };
+  kmtPushModal_('payrollDoc', payrollDocModalCtx_, 'payrollDocModalRoot');
   document.getElementById('payrollDocModalRoot').innerHTML = payrollDocModalHtml_();
   kmtLockBodyScroll('payrollDocModal');
   payrollDocSetModalGroups_(['details','status']);
@@ -21749,12 +21973,15 @@ async function openPayrollDocEditModal(fy, id){
   document.getElementById('pdFormRemarks').value = rec.remarks || '';
   document.getElementById('pdFormUploadedBy').value = rec.uploadedBy || payrollDocRememberedUploader_();
   document.getElementById('pdFormStatus').value = rec.status;
+  kmtCommitArrival();
 }
 async function openPayrollDocReclassifyModal(fy, id){
   const list = await getPayrollDocsForFY(fy);
   const rec = list.find(r => r.id === id);
   if(!rec) return;
+  kmtCaptureDeparture();
   payrollDocModalCtx_ = { mode:'reclassify', fy, id };
+  kmtPushModal_('payrollDoc', payrollDocModalCtx_, 'payrollDocModalRoot');
   document.getElementById('payrollDocModalRoot').innerHTML = payrollDocModalHtml_();
   kmtLockBodyScroll('payrollDocModal');
   payrollDocSetModalGroups_(['classify']);
@@ -21766,21 +21993,27 @@ async function openPayrollDocReclassifyModal(fy, id){
   payrollDocFormCategoryChanged_();
   document.getElementById('pdFormDocType').value = rec.docType;
   document.getElementById('pdFormUploadedBy').value = payrollDocRememberedUploader_() || rec.uploadedBy || '';
+  kmtCommitArrival();
 }
 async function openPayrollDocReplaceModal(fy, id){
   const list = await getPayrollDocsForFY(fy);
   const rec = list.find(r => r.id === id);
   if(!rec) return;
+  kmtCaptureDeparture();
   payrollDocModalCtx_ = { mode:'replace', fy, id };
+  kmtPushModal_('payrollDoc', payrollDocModalCtx_, 'payrollDocModalRoot');
   document.getElementById('payrollDocModalRoot').innerHTML = payrollDocModalHtml_();
   kmtLockBodyScroll('payrollDocModal');
   payrollDocSetModalGroups_(['file']);
   document.getElementById('payrollDocModalTitle').textContent = 'Replace file — ' + rec.docTypeLabel + ' (' + rec.monthLabel + ' ' + rec.fy + ')';
   document.getElementById('pdFormFileLabel').textContent = 'New file — the current one is kept, not deleted, and stays reachable from History';
   document.getElementById('pdFormUploadedBy').value = payrollDocRememberedUploader_() || rec.uploadedBy || '';
+  kmtCommitArrival();
 }
 function openPayrollDocClassifyModal(unclassifiedId){
+  kmtCaptureDeparture();
   payrollDocModalCtx_ = { mode:'classify', id: unclassifiedId };
+  kmtPushModal_('payrollDoc', payrollDocModalCtx_, 'payrollDocModalRoot');
   document.getElementById('payrollDocModalRoot').innerHTML = payrollDocModalHtml_();
   kmtLockBodyScroll('payrollDocModal');
   payrollDocSetModalGroups_(['classify','details']);
@@ -21792,23 +22025,30 @@ function openPayrollDocClassifyModal(unclassifiedId){
   payrollDocFormCategoryChanged_();
   document.getElementById('pdFormDocDate').value = todayStr();
   document.getElementById('pdFormUploadedBy').value = payrollDocRememberedUploader_();
+  kmtCommitArrival();
 }
 async function openPayrollDocHistoryModal(fy, id){
   const list = await getPayrollDocsForFY(fy);
   const rec = list.find(r => r.id === id);
   if(!rec) return;
+  kmtCaptureDeparture();
+  // Not a payrollDocModalCtx_ form, so its own kind rather than 'payrollDoc'
+  // — kmtSnapshotModals_ only refreshes params live for kind 'payrollDoc',
+  // and this doesn't have (or need) a payrollDocModalCtx_ to read back from.
+  kmtPushModal_('payrollDocHistory', { fy: fy, id: id }, 'payrollDocModalRoot');
   const history = (rec.history || []).slice().reverse();
   document.getElementById('payrollDocModalRoot').innerHTML = `
-  <div class="modal-overlay" id="payrollDocHistoryOverlay" onclick="if(event.target===this)closePayrollDocModal()">
+  <div class="modal-overlay" id="payrollDocHistoryOverlay" onclick="if(event.target===this)kmtBack()">
     <div class="modal-box">
       <div class="modal-head">
         <h2>History — ${escapeHtml(rec.docTypeLabel)} (${escapeHtml(rec.monthLabel)} ${escapeHtml(rec.fy)})</h2>
-        <button class="modal-x" type="button" title="Close" aria-label="Close" onclick="closePayrollDocModal()">✕</button>
+        <button class="modal-x" type="button" title="Close" aria-label="Close" onclick="kmtBack()">✕</button>
       </div>
       ${history.length ? `<div class="payroll-docs-list">` + history.map(payrollDocHistoryEntryHtml_).join('') + `</div>` : '<div class="empty">No history recorded.</div>'}
     </div>
   </div>`;
   kmtLockBodyScroll('payrollDocModal');
+  kmtCommitArrival();
 }
 function payrollDocHistoryEntryHtml_(h){
   const actionLabel = { upload:'Uploaded', edit:'Edited', reclassify:'Reclassified', replace:'Replaced', delete:'Deleted' }[h.action] || h.action;
@@ -21884,6 +22124,7 @@ async function savePayrollDocForm_(){
     }
     await addActivityLog(`Uploaded ${typeInfo.label} for ${payrollDocMonthLabel_(month)} ${fy}`);
     closePayrollDocModal();
+    kmtBack();
     await refreshPayrollDocCardStat_();
     await renderPayrollDocsModule_();
     return;
@@ -21927,6 +22168,7 @@ async function savePayrollDocForm_(){
     }
     await addActivityLog(`Linked ${typeInfo.label} for ${payrollDocMonthLabel_(month)} ${fy} to an existing Drive file`);
     closePayrollDocModal();
+    kmtBack();
     await refreshPayrollDocCardStat_();
     await renderPayrollDocsModule_();
     return;
@@ -21963,6 +22205,7 @@ async function savePayrollDocForm_(){
     }
     await addActivityLog(`Edited ${rec.docTypeLabel} for ${rec.monthLabel} ${rec.fy}`);
     closePayrollDocModal();
+    kmtBack();
     await renderPayrollDocsModule_();
     return;
   }
@@ -22020,6 +22263,7 @@ async function savePayrollDocForm_(){
     }
     await addActivityLog(`Reclassified a document to ${newTypeInfo.label} for ${payrollDocMonthLabel_(newMonth)} ${newFy}`);
     closePayrollDocModal();
+    kmtBack();
     payrollDocsState_.fy = newFy; payrollDocsState_.month = null; payrollDocsState_.category = null; payrollDocsState_.docType = null;
     await renderPayrollDocsModule_();
     return;
@@ -22057,6 +22301,7 @@ async function savePayrollDocForm_(){
     }
     await addActivityLog(`Replaced ${freshRec.docTypeLabel} for ${freshRec.monthLabel} ${freshRec.fy}`);
     closePayrollDocModal();
+    kmtBack();
     await renderPayrollDocsModule_();
     return;
   }
@@ -22102,6 +22347,7 @@ async function savePayrollDocForm_(){
     await savePayrollDocsUnclassified_(unclassified);
     await addActivityLog(`Classified a document as ${typeInfo.label} for ${payrollDocMonthLabel_(month)} ${fy}`);
     closePayrollDocModal();
+    kmtBack();
     await renderPayrollDocsModule_();
     return;
   }
@@ -22169,20 +22415,27 @@ async function toggleApprenticeDetail_(empId){
   const panel = document.getElementById('apprenticeDetailPanelRoot');
   if(!panel) return;
   if(apprenticeDetailOpenId_ === empId){
-    apprenticeDetailOpenId_ = null;
-    panel.innerHTML = '';
+    // Reached by clicking the same row again, not the panel's own × — same
+    // "click the open header again to collapse" shape openGeneratorCard
+    // already uses, so it goes through the same kmtBack() every other close
+    // does rather than tearing the panel down ad hoc.
+    kmtBack();
     return;
   }
   const employees = await getEmployees();
   const e = employees.find(x => x.id === empId);
   if(!e) return;
+  kmtCaptureDeparture();
+  kmtPushModal_('apprenticeDetail', { empId: empId }, 'apprenticeDetailPanelRoot');
   apprenticeDetailOpenId_ = empId;
   panel.innerHTML = apprenticeDetailPanelHtml_(e);
+  kmtCommitArrival();
 }
 function closeApprenticeDetail_(){
   apprenticeDetailOpenId_ = null;
   const panel = document.getElementById('apprenticeDetailPanelRoot');
   if(panel) panel.innerHTML = '';
+  kmtPopModal_('apprenticeDetailPanelRoot');
 }
 function apprenticeDetailPanelHtml_(e){
   const initials = (e.name||'').trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase() || '?';
@@ -22190,7 +22443,7 @@ function apprenticeDetailPanelHtml_(e){
   return `<div class="apprentice-detail-panel">
     <div class="apprentice-detail-head">
       <strong>Apprentice Details</strong>
-      <button type="button" class="fs-close-btn" onclick="closeApprenticeDetail_()" title="Close" aria-label="Close">✕</button>
+      <button type="button" class="fs-close-btn" onclick="kmtBack()" title="Close" aria-label="Close">✕</button>
     </div>
     <div class="apprentice-detail-body">
       <div class="apprentice-detail-top">
@@ -22209,7 +22462,7 @@ function apprenticeDetailPanelHtml_(e){
       <label class="field">Contract Details</label>
       <div>${escapeHtml(e.apprenticeContractDetails || '—')}</div>
     </div>
-    <button type="button" class="btn ghost full" onclick="closeApprenticeDetail_()">Close</button>
+    <button type="button" class="btn ghost full" onclick="kmtBack()">Close</button>
   </div>`;
 }
 // Same debounce-and-compare resize pattern the Attendance/Salary sheets and
