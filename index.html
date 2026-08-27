@@ -2214,6 +2214,18 @@
           <div class="emp-search-row">
             <input type="text" id="empSearchInput" placeholder="Search by name or employee ID..." oninput="renderEmployeeList()" />
           </div>
+          <!-- Jump straight to one employee's card instead of scrolling the
+               list below — same "field-input select, scroll to the section"
+               pattern as Reports' "Jump to a report". Populated inside
+               renderEmployeeList() from the same employees array the cards
+               below are built from, so it always matches who's actually on
+               screen. -->
+          <div style="max-width:420px;margin:12px 0;">
+            <label class="field">Jump to an employee</label>
+            <select class="field-input" id="empJumpSelect" onchange="empJumpSelectChanged_()">
+              <option value="">Choose an employee…</option>
+            </select>
+          </div>
           <button class="btn" onclick="openAddEmployeeModal()">+ Add employee</button>
         </section>
         <section class="block">
@@ -17674,6 +17686,10 @@ async function renderEmployeeList(){
       '<button class="linkbtn" style="padding:0" onclick="renderEmployeeList()">Try again</button></div>';
     return;
   }
+  // Built from every active employee, not the search-narrowed list below —
+  // the jump select should always be able to reach anyone on roll regardless
+  // of what's currently typed into the search box.
+  populateEmpJumpSelect_(employees);
   if(q){
     employees = employees.filter(e => e.name.toLowerCase().includes(q) || e.id.toLowerCase().includes(q));
   }
@@ -17681,7 +17697,7 @@ async function renderEmployeeList(){
     box.innerHTML = '<div class="empty">No employees added yet. Click "+ Add employee" to build your master list.</div>';
   } else {
     box.innerHTML = employees.map(e => `
-      <div class="emp-row">
+      <div class="emp-row" id="empRow_${e.id}">
         <div class="head"><strong>${escapeHtml(e.name)}</strong><span class="id">${e.id}</span></div>
         <div class="sub">${escapeHtml(e.designation || '—')} · ${escapeHtml(e.department || '—')}</div>
         <div class="actions">
@@ -17696,6 +17712,32 @@ async function renderEmployeeList(){
   const leftCount = (await getEmployees()).filter(e => e.employmentStatus === 'left').length;
   const leftCountEl = document.getElementById('leftEmployeeCount');
   if(leftCountEl) leftCountEl.textContent = leftCount + ' on file';
+}
+
+function populateEmpJumpSelect_(employees){
+  const sel = document.getElementById('empJumpSelect');
+  if(!sel) return;
+  const sorted = [...employees].sort((a, b) => a.name.localeCompare(b.name));
+  sel.innerHTML = '<option value="">Choose an employee…</option>' + sorted.map(e =>
+    `<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)} (${escapeHtml(e.id)})</option>`
+  ).join('');
+}
+// Same reset-after-use behaviour as Reports' "Jump to a report" select. If
+// the search box currently hides the chosen employee's row, clears it and
+// re-renders first — the point of this select is to always be able to reach
+// anyone on roll, not just whoever the search happens to already show.
+async function empJumpSelectChanged_(){
+  const sel = document.getElementById('empJumpSelect');
+  const empId = sel.value;
+  if(!empId) return;
+  sel.value = '';
+  if(!document.getElementById('empRow_' + empId)){
+    const search = document.getElementById('empSearchInput');
+    if(search) search.value = '';
+    await renderEmployeeList();
+  }
+  const row = document.getElementById('empRow_' + empId);
+  if(row) row.scrollIntoView({behavior:'smooth', block:'center'});
 }
 
 function openLeftEmployeesModal(){
