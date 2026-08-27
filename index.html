@@ -3568,7 +3568,28 @@ let sessionRole = localStorage.getItem('kmt_session_role') || null;
 const HR_SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 function hrSessionExpired_(){
   const startedAt = Number(localStorage.getItem('kmt_hr_session_started_at') || 0);
-  return !startedAt || (Date.now() - startedAt) > HR_SESSION_MAX_AGE_MS;
+  // A missing timestamp does not mean the session actually started 24
+  // hours ago — it means this one auxiliary key didn't come back from
+  // storage, while kmt_session_token/kmt_session_role sitting right next
+  // to it did (setSession always writes all three together, so losing
+  // only this one is exactly the kind of partial storage eviction some
+  // browsers do under memory/storage pressure — reported as HR having to
+  // log back in within minutes of reopening the app, far short of the
+  // real 24-hour window). Treating "missing" the same as "definitely
+  // expired" force-logged HR out of a session the real, authoritative
+  // check would still have accepted: the backend enforces the same
+  // 24-hour HR_SESSION_LIFETIME_MS on the token itself, independent of
+  // this client-side clock. Healing it here — stamp it now, trust the
+  // session for this one open — costs nothing: if the token genuinely is
+  // old, the first backend call in enterHrMain's warm-up sequence still
+  // rejects it with 'unauthorized' and onSessionExpired() catches that
+  // properly, this time with its usual "session has expired" message
+  // instead of a silent, unexplained trip back to the login screen.
+  if(!startedAt){
+    localStorage.setItem('kmt_hr_session_started_at', String(Date.now()));
+    return false;
+  }
+  return (Date.now() - startedAt) > HR_SESSION_MAX_AGE_MS;
 }
 function setSession(token, role){
   sessionToken = token; sessionRole = role;
