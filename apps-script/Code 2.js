@@ -1336,3 +1336,94 @@ function sendDailyDigestEmail() {
   Logger.log('Daily digest sent to ' + DAILY_DIGEST_EMAIL + ' — ' + absent.length + ' absent, ' +
     todayLog.length + ' activity log entr(y/ies).');
 }
+
+// One-off, run once from this editor (function dropdown -> restorePayrollDocsPf202526_
+// -> Run), same as organiseDriveByYear/migrateAttendanceToFY. Not called by the web app.
+//
+// The FY 2025-26 migration-safety bug (see index.html's payrollDocsMergeFromValues_)
+// overwrote payroll_docs:2025-26:<month> for April-December, February and March with
+// a stale leftover snapshot, wiping whatever PF/ESI/PT/Wages/Payslip records had been
+// added since. The underlying PF Challan PDFs themselves were never touched — they are
+// still exactly where HR uploaded them, in HR Management/2025-26/Office Documents/
+// Payroll Documents/PF Challan/ — only the tracker's pointer to each one was lost.
+//
+// This restores just that: for each month below, if no active PF Challan record exists
+// yet, it adds one pointing at the file already in Drive. It only ever adds a record —
+// it never removes or overwrites anything already in a month's key, so it's safe to
+// run more than once and safe to run even if some months already have their PF Challan
+// (or other) records back through the app's own "Link existing file" flow. ESI, PT,
+// Wages and Payslip aren't touched here because no files for them turned up in Drive
+// under this year's Payroll Documents folder — if HR remembers uploading any of those
+// for 2025-26, they need to be found and linked separately; this script can't recover
+// what it can't find.
+function restorePayrollDocsPf202526_() {
+  var FY = '2025-26';
+  // month -> [Drive file ID, calendar-month docDate] — found under HR Management/
+  // 2025-26/Office Documents/Payroll Documents/PF Challan/ by title "PF Challan - <date>".
+  // January (month 1) is deliberately left out — its record survived the bug untouched.
+  var MONTH_FILES = {
+    4:  ['16BRfznwbKVGaKYAhOjNZlxaqGx5aFQi7', '2025-04-01'],
+    5:  ['1Zw3iWKLTlQjzVHpl3kFKSaNVmM5lXLRG', '2025-05-01'],
+    6:  ['1qMk3wx-bxOw-4OY2VR8KMtJdRfeZhxai', '2025-06-01'],
+    7:  ['1rYG5XxOcj4c6Jjdjd6loGvGo4zTwtUPW', '2025-07-01'],
+    8:  ['1uGqdqm_YjzrAcRMc-g55Fe3QeUr58KP-', '2025-08-01'],
+    9:  ['1WZ9f1w-JScJeUCOuTZl5JyCjah4BQwn9', '2025-09-01'],
+    10: ['128n-h7DgAB5Ew1rpSS6jsY4J163jDZrt', '2025-10-01'],
+    11: ['1ZYg2zKa32cwgF_dqxu7IaDVNQAl3Glwm', '2025-11-01'],
+    12: ['1AotdiXPFOqTFMIrYycakH6qHarm2weNf', '2025-12-01'],
+    2:  ['1a3caBsnAoD1cA53YNiN2YR3QftZy345F', '2026-02-01'],
+    3:  ['1EZmEBQ6yJUBXfvNHoyeURlx2U8Z_lqMu', '2026-03-01'],
+  };
+  var MONTH_LABELS = { 4:'April', 5:'May', 6:'June', 7:'July', 8:'August', 9:'September',
+    10:'October', 11:'November', 12:'December', 2:'February', 3:'March' };
+
+  var sheet = getSheet_();
+  var now = new Date().toISOString();
+  var summary = [];
+
+  Object.keys(MONTH_FILES).forEach(function (monthStr) {
+    var month = Number(monthStr);
+    var fileId = MONTH_FILES[month][0];
+    var docDate = MONTH_FILES[month][1];
+    var key = 'payroll_docs:' + FY + ':' + month;
+    var row = findRow_(sheet, key);
+    var raw = row > 0 ? sheet.getRange(row, 2).getValue() : null;
+
+    var records = [];
+    if (raw) {
+      try {
+        var parsed = JSON.parse(raw);
+        records = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.records) ? parsed.records : []);
+      } catch (e) { records = []; }
+    }
+
+    var alreadyThere = records.some(function (r) {
+      return r && r.status === 'active' && r.category === 'pf' && r.docType === 'pfChallan';
+    });
+    if (alreadyThere) {
+      summary.push(MONTH_LABELS[month] + ': already has a PF Challan record, left alone.');
+      return;
+    }
+
+    var url = 'https://drive.google.com/file/d/' + fileId + '/view?usp=drivesdk';
+    records.unshift({
+      id: Utilities.getUuid().slice(0, 6),
+      fy: FY, month: month, monthLabel: MONTH_LABELS[month],
+      category: 'pf', docType: 'pfChallan', docTypeLabel: 'PF Challan',
+      docName: 'PF Challan', docDate: docDate, remarks: '',
+      fileName: 'PF Challan', url: url, uploadedBy: 'HR', uploadedAt: now, status: 'active',
+      history: [{ action: 'upload', at: now, by: 'HR',
+        note: 'Restored — relinked to the existing Drive file after the migration-safety bug wiped this record' }],
+    });
+
+    var value = JSON.stringify({ savedAt: Date.now(), records: records });
+    if (row > 0) {
+      sheet.getRange(row, 2).setValue(value);
+    } else {
+      sheet.appendRow([key, value]);
+    }
+    summary.push(MONTH_LABELS[month] + ': PF Challan record restored.');
+  });
+
+  Logger.log(summary.join('\n'));
+}
