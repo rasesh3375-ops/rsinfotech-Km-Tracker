@@ -2229,7 +2229,19 @@
           <button class="btn" onclick="openAddEmployeeModal()">+ Add employee</button>
         </section>
         <section class="block">
-          <div id="employeeListBox"></div>
+          <!-- Collapsed by default — HR reaches a specific person via search
+               or the jump select above; the down arrow here just shows or
+               hides the full list of cards, a plain on/off toggle rather
+               than the multi-section "only one open" accordion Reports uses,
+               since there's only ever this one thing to show or hide here.
+               empJumpSelectChanged_() expands this itself if it's collapsed
+               when jumping to someone, so a card is never scrolled to while
+               still hidden. -->
+          <button type="button" class="gen-accordion-header" id="empListToggle" onclick="toggleEmployeeListCollapse_()" aria-expanded="false">
+            <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Employee list</strong></span>
+            <span class="gen-accordion-chevron">▼</span>
+          </button>
+          <div id="employeeListBox" class="hidden gen-accordion-body"></div>
         </section>
         <section class="block">
           <h2 style="margin:0 0 4px;">Left Employees</h2>
@@ -17672,6 +17684,9 @@ async function renderEmployeeList(){
   const box = document.getElementById('employeeListBox');
   if(!box) return;
   const q = (document.getElementById('empSearchInput')?.value || '').trim().toLowerCase();
+  // Typing a search with the list collapsed would otherwise look like
+  // nothing happened — results filtering into a hidden box.
+  if(q) expandEmployeeList_();
   // getEmployeesOrThrow_ rather than the plain getEmployees() every other
   // caller uses — this is the one screen most likely to be mistaken for
   // "the company's whole roster just vanished" rather than "the backend
@@ -17722,6 +17737,27 @@ function populateEmpJumpSelect_(employees){
     `<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)} (${escapeHtml(e.id)})</option>`
   ).join('');
 }
+// A plain on/off toggle for the whole card list below — not the "only one
+// open" accordion Reports/Generator/Settings use, since there's only this
+// one thing here to show or hide. Collapsed by default: HR reaches a
+// specific person through search or the jump select above, not by scrolling
+// the full roster.
+function toggleEmployeeListCollapse_(){
+  const box = document.getElementById('employeeListBox');
+  const btn = document.getElementById('empListToggle');
+  if(!box || !btn) return;
+  const open = box.classList.toggle('hidden') === false;
+  btn.classList.toggle('active', open);
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+function expandEmployeeList_(){
+  const box = document.getElementById('employeeListBox');
+  const btn = document.getElementById('empListToggle');
+  if(box && box.classList.contains('hidden')){
+    box.classList.remove('hidden');
+    if(btn){ btn.classList.add('active'); btn.setAttribute('aria-expanded', 'true'); }
+  }
+}
 // Same reset-after-use behaviour as Reports' "Jump to a report" select. If
 // the search box currently hides the chosen employee's row, clears it and
 // re-renders first — the point of this select is to always be able to reach
@@ -17731,6 +17767,7 @@ async function empJumpSelectChanged_(){
   const empId = sel.value;
   if(!empId) return;
   sel.value = '';
+  expandEmployeeList_();
   if(!document.getElementById('empRow_' + empId)){
     const search = document.getElementById('empSearchInput');
     if(search) search.value = '';
