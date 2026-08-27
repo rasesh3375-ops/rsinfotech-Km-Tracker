@@ -1337,7 +1337,7 @@ function sendDailyDigestEmail() {
     todayLog.length + ' activity log entr(y/ies).');
 }
 
-// One-off, run once from this editor (function dropdown -> restorePayrollDocsPf202526_
+// One-off, run once from this editor (function dropdown -> restorePayrollDocsPf202526
 // -> Run), same as organiseDriveByYear/migrateAttendanceToFY. Not called by the web app.
 //
 // The FY 2025-26 migration-safety bug (see index.html's payrollDocsMergeFromValues_)
@@ -1356,7 +1356,7 @@ function sendDailyDigestEmail() {
 // under this year's Payroll Documents folder — if HR remembers uploading any of those
 // for 2025-26, they need to be found and linked separately; this script can't recover
 // what it can't find.
-function restorePayrollDocsPf202526_() {
+function restorePayrollDocsPf202526() {
   var FY = '2025-26';
   // month -> [Drive file ID, calendar-month docDate] — found under HR Management/
   // 2025-26/Office Documents/Payroll Documents/PF Challan/ by title "PF Challan - <date>".
