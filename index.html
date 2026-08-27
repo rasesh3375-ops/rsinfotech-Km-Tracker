@@ -2229,7 +2229,19 @@
           <button class="btn" onclick="openAddEmployeeModal()">+ Add employee</button>
         </section>
         <section class="block">
-          <div id="employeeListBox"></div>
+          <!-- Collapsed by default — HR reaches a specific person via search
+               or the jump select above; the down arrow here just shows or
+               hides the full list of cards, a plain on/off toggle rather
+               than the multi-section "only one open" accordion Reports uses,
+               since there's only ever this one thing to show or hide here.
+               empJumpSelectChanged_() expands this itself if it's collapsed
+               when jumping to someone, so a card is never scrolled to while
+               still hidden. -->
+          <button type="button" class="gen-accordion-header" id="empListToggle" onclick="toggleEmployeeListCollapse_()" aria-expanded="false">
+            <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Employee list</strong></span>
+            <span class="gen-accordion-chevron">▼</span>
+          </button>
+          <div id="employeeListBox" class="hidden gen-accordion-body"></div>
         </section>
         <section class="block">
           <h2 style="margin:0 0 4px;">Left Employees</h2>
@@ -17672,6 +17684,9 @@ async function renderEmployeeList(){
   const box = document.getElementById('employeeListBox');
   if(!box) return;
   const q = (document.getElementById('empSearchInput')?.value || '').trim().toLowerCase();
+  // Typing a search with the list collapsed would otherwise look like
+  // nothing happened — results filtering into a hidden box.
+  if(q) expandEmployeeList_();
   // getEmployeesOrThrow_ rather than the plain getEmployees() every other
   // caller uses — this is the one screen most likely to be mistaken for
   // "the company's whole roster just vanished" rather than "the backend
@@ -17722,6 +17737,27 @@ function populateEmpJumpSelect_(employees){
     `<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)} (${escapeHtml(e.id)})</option>`
   ).join('');
 }
+// A plain on/off toggle for the whole card list below — not the "only one
+// open" accordion Reports/Generator/Settings use, since there's only this
+// one thing here to show or hide. Collapsed by default: HR reaches a
+// specific person through search or the jump select above, not by scrolling
+// the full roster.
+function toggleEmployeeListCollapse_(){
+  const box = document.getElementById('employeeListBox');
+  const btn = document.getElementById('empListToggle');
+  if(!box || !btn) return;
+  const open = box.classList.toggle('hidden') === false;
+  btn.classList.toggle('active', open);
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+function expandEmployeeList_(){
+  const box = document.getElementById('employeeListBox');
+  const btn = document.getElementById('empListToggle');
+  if(box && box.classList.contains('hidden')){
+    box.classList.remove('hidden');
+    if(btn){ btn.classList.add('active'); btn.setAttribute('aria-expanded', 'true'); }
+  }
+}
 // Same reset-after-use behaviour as Reports' "Jump to a report" select. If
 // the search box currently hides the chosen employee's row, clears it and
 // re-renders first — the point of this select is to always be able to reach
@@ -17731,6 +17767,7 @@ async function empJumpSelectChanged_(){
   const empId = sel.value;
   if(!empId) return;
   sel.value = '';
+  expandEmployeeList_();
   if(!document.getElementById('empRow_' + empId)){
     const search = document.getElementById('empSearchInput');
     if(search) search.value = '';
@@ -17740,32 +17777,89 @@ async function empJumpSelectChanged_(){
   if(row) row.scrollIntoView({behavior:'smooth', block:'center'});
 }
 
+// Cached at open time so search/jump filtering below doesn't refetch on
+// every keystroke — deleteEmployee/reactivateEmployee both re-run
+// openLeftEmployeesModal itself afterward, which refreshes this from
+// getEmployees() again, so it never goes stale across an actual edit.
+let leftEmployeesModalList_ = [];
 function openLeftEmployeesModal(){
   kmtLockBodyScroll('checklistModalRoot');
   getEmployees().then(employees => {
-    const left = employees.filter(e => e.employmentStatus === 'left');
-    if(!left.length){
-      document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeLeftEmployeesModal()"><div class="modal-box"><div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="closeLeftEmployeesModal()" title="Close" aria-label="Close">✕</button></div><h2>Left employees</h2><p class="hint">No employees marked as left yet.</p></div></div>`;
-      return;
-    }
-    document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeLeftEmployeesModal()">
-      <div class="modal-box">
-        <div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="closeLeftEmployeesModal()" title="Close" aria-label="Close">✕</button></div>
-        <h2>Left employees</h2>
-        <p class="hint">Their full record is kept on file — view details, reactivate if they rejoin, or delete permanently once there is no further reason to keep them on file. A complete backup is saved to Drive before a delete goes through.</p>
-        ${left.map(e => `<div class="emp-row">
-          <div class="head"><strong>${escapeHtml(e.name)}</strong><span class="id">${e.id}</span></div>
-          <div class="sub">${escapeHtml(e.designation || '—')} · left ${e.leftDate ? fmtDateIN(e.leftDate) : 'date not recorded'}</div>
-          <div class="actions">
-            <button class="btn ghost" onclick="closeLeftEmployeesModal();openAddEmployeeModal('${e.id}')">View details</button>
-            <button class="btn ghost" onclick="reactivateEmployee('${e.id}')">Reactivate</button>
-            <button class="btn ghost btn-danger" onclick="deleteEmployee('${e.id}').then(openLeftEmployeesModal)"
-                    title="Saves a complete backup to Drive, then permanently removes the record, attendance, tracking login and history from the app.">Delete</button>
-          </div>
-        </div>`).join('')}
-      </div>
-    </div>`;
+    leftEmployeesModalList_ = employees.filter(e => e.employmentStatus === 'left');
+    renderLeftEmployeesModal_();
   });
+}
+function renderLeftEmployeesModal_(){
+  if(!leftEmployeesModalList_.length){
+    document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeLeftEmployeesModal()"><div class="modal-box"><div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="closeLeftEmployeesModal()" title="Close" aria-label="Close">✕</button></div><h2>Left employees</h2><p class="hint">No employees marked as left yet.</p></div></div>`;
+    return;
+  }
+  document.getElementById('checklistModalRoot').innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeLeftEmployeesModal()">
+    <div class="modal-box">
+      <div class="rpt-actions-top" style="margin-bottom:6px;"><button class="x-close" onclick="closeLeftEmployeesModal()" title="Close" aria-label="Close">✕</button></div>
+      <h2>Left employees</h2>
+      <p class="hint">Their full record is kept on file — view details, reactivate if they rejoin, or delete permanently once there is no further reason to keep them on file. A complete backup is saved to Drive before a delete goes through.</p>
+      <!-- Same search + jump pattern as the active Employee Master list,
+           for the same reason: scrolling gets unwieldy once there are many
+           left employees on file. -->
+      <div class="emp-search-row">
+        <input type="text" id="leftEmpSearchInput" placeholder="Search by name or employee ID..." oninput="filterLeftEmployeesList_()" />
+      </div>
+      <div style="max-width:420px;margin:12px 0;">
+        <label class="field">Jump to an employee</label>
+        <select class="field-input" id="leftEmpJumpSelect" onchange="leftEmpJumpSelectChanged_()">
+          <option value="">Choose an employee…</option>
+        </select>
+      </div>
+      <div id="leftEmployeesListBox"></div>
+    </div>
+  </div>`;
+  populateLeftEmpJumpSelect_();
+  renderLeftEmployeesListBox_('');
+}
+function populateLeftEmpJumpSelect_(){
+  const sel = document.getElementById('leftEmpJumpSelect');
+  if(!sel) return;
+  const sorted = [...leftEmployeesModalList_].sort((a, b) => a.name.localeCompare(b.name));
+  sel.innerHTML = '<option value="">Choose an employee…</option>' + sorted.map(e =>
+    `<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)} (${escapeHtml(e.id)})</option>`
+  ).join('');
+}
+function renderLeftEmployeesListBox_(q){
+  const box = document.getElementById('leftEmployeesListBox');
+  if(!box) return;
+  const query = (q || '').trim().toLowerCase();
+  const filtered = query
+    ? leftEmployeesModalList_.filter(e => e.name.toLowerCase().includes(query) || e.id.toLowerCase().includes(query))
+    : leftEmployeesModalList_;
+  box.innerHTML = filtered.map(e => `<div class="emp-row" id="leftEmpRow_${e.id}">
+    <div class="head"><strong>${escapeHtml(e.name)}</strong><span class="id">${e.id}</span></div>
+    <div class="sub">${escapeHtml(e.designation || '—')} · left ${e.leftDate ? fmtDateIN(e.leftDate) : 'date not recorded'}</div>
+    <div class="actions">
+      <button class="btn ghost" onclick="closeLeftEmployeesModal();openAddEmployeeModal('${e.id}')">View details</button>
+      <button class="btn ghost" onclick="reactivateEmployee('${e.id}')">Reactivate</button>
+      <button class="btn ghost btn-danger" onclick="deleteEmployee('${e.id}').then(openLeftEmployeesModal)"
+              title="Saves a complete backup to Drive, then permanently removes the record, attendance, tracking login and history from the app.">Delete</button>
+    </div>
+  </div>`).join('');
+}
+function filterLeftEmployeesList_(){
+  renderLeftEmployeesListBox_(document.getElementById('leftEmpSearchInput')?.value || '');
+}
+// Same reset-after-use + search-clearing behaviour as the active list's
+// empJumpSelectChanged_.
+function leftEmpJumpSelectChanged_(){
+  const sel = document.getElementById('leftEmpJumpSelect');
+  const empId = sel.value;
+  if(!empId) return;
+  sel.value = '';
+  if(!document.getElementById('leftEmpRow_' + empId)){
+    const search = document.getElementById('leftEmpSearchInput');
+    if(search) search.value = '';
+    renderLeftEmployeesListBox_('');
+  }
+  const row = document.getElementById('leftEmpRow_' + empId);
+  if(row) row.scrollIntoView({behavior:'smooth', block:'center'});
 }
 function closeLeftEmployeesModal(){
   document.getElementById('checklistModalRoot').innerHTML = '';
