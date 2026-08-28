@@ -865,6 +865,33 @@
      clearance, the same as the sticky elements already get via padding. */
   .modal-overlay{position:fixed;inset:0;height:100vh;height:100dvh;background:rgba(22,33,62,0.55);display:flex;align-items:flex-start;justify-content:center;padding:20px 12px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scroll-padding-top:env(safe-area-inset-top, 0px);scroll-padding-bottom:env(safe-area-inset-bottom, 0px);z-index:var(--z-modal);transform:translateZ(0);backface-visibility:hidden;}
   .modal-box{background:var(--paper);border-radius:14px;max-width:520px;width:100%;padding:22px;margin:20px 0 40px;}
+
+  /* ---- Zoom inside position:fixed overlays ----
+     A `zoom` on <html> does not reach position:fixed descendants on
+     WebKit/iOS — they are sized and positioned against the viewport and
+     escape it entirely — which is why the page behind zoomed fine while an
+     open Add Employee modal, the fullscreen report viewer and global search
+     all stayed stubbornly at 100%.
+     Applied to the CONTENT box inside each overlay, never to the fixed
+     element itself: the overlay keeps its exact inset:0 viewport size, so
+     nothing can overflow the screen or overlap anything, and its own
+     overflow-y:auto simply scrolls the now-larger box — which is what
+     zooming a dialog should do.
+     --kmt-fixed-zoom is set to 1 wherever the browser DOES already scale
+     fixed descendants (Chromium), so this can never double-scale; see
+     kmtFixedInheritsZoom_, which measures that for real rather than
+     sniffing a user-agent string.
+     #hrSidebar is deliberately excluded: it is a fixed-WIDTH drawer, so
+     scaling its contents would spill them out of it rather than enlarge
+     it — exactly the overlap this whole approach exists to avoid. */
+  .modal-overlay > .modal-box,
+  .gs-overlay > .gs-panel,
+  #fullscreenSheetRoot > *{ zoom:var(--kmt-fixed-zoom, 1); }
+  /* Only once actually zoomed. At 100% the deliberate overflow-x:hidden
+     above stays exactly as it was (it is the anti-rubber-band fix, see its
+     own comment); zoomed in, a box wider than the screen has to be
+     reachable rather than silently clipped. */
+  html.kmt-zoomed .modal-overlay{overflow-x:auto;}
   .modal-box h2{margin:0 0 6px;font-size:19px;}
   /* Title bar that stays put. The overlay is the scrolling element, so sticky
      children of the box pin against it without the box having to become its own
@@ -8752,19 +8779,55 @@ if(!window.KMT_ZOOM_ARMED_){
   const KMT_ZOOM_MIN = 0.5, KMT_ZOOM_MAX = 2.0, KMT_ZOOM_STEP = 0.1;
   let kmtZoomLevel_ = 1;
 
+  // Does a `zoom` on <html> actually reach position:fixed descendants?
+  // Chromium: yes. WebKit/iOS: no — a fixed element is sized and positioned
+  // against the viewport and escapes the root's zoom entirely, which is
+  // exactly why an open modal, the fullscreen viewer and global search all
+  // stayed at 100% while the page behind them zoomed correctly.
+  // Measured for real, once, rather than sniffed from a user-agent string:
+  // a fixed probe of known width is measured under a temporary 2x root
+  // zoom, and whatever the browser actually did is the answer. Returns null
+  // (rather than caching a wrong guess) if <body> doesn't exist yet — the
+  // very first call can happen at parse time, restoring a saved level.
+  let kmtFixedZoomInherits_ = null;
+  function kmtFixedInheritsZoom_(){
+    if(kmtFixedZoomInherits_ !== null) return kmtFixedZoomInherits_;
+    if(!document.body) return null;
+    const probe = document.createElement('div');
+    probe.style.cssText = 'position:fixed;top:0;left:0;width:100px;height:1px;opacity:0;pointer-events:none;';
+    document.body.appendChild(probe);
+    const root = document.documentElement;
+    const before = root.style.zoom;
+    root.style.zoom = '2';
+    const measured = probe.getBoundingClientRect().width;
+    root.style.zoom = before;
+    probe.remove();
+    kmtFixedZoomInherits_ = measured > 150; // ~200 if it scaled, ~100 if it didn't
+    return kmtFixedZoomInherits_;
+  }
+
   // smooth:true (keyboard/trackpad-step changes, a handful of discrete jumps)
   // gets a brief eased transition so a step doesn't read as a jump-cut.
   // smooth:false (live touch-pinch, and continuous trackpad pinch deltas)
   // applies immediately — a transition there would make the zoom visibly
   // lag behind where the fingers actually are, which is the "lag" this was
   // explicitly asked to avoid, not the smoothness it was asked for.
+  // Deliberately no early return when the level hasn't changed: the
+  // fixed-overlay half below can still need setting on a call that lands on
+  // the same number (the first post-DOMContentLoaded re-apply is exactly
+  // that), and writing an identical style value is a no-op in the browser
+  // anyway.
   function kmtApplyZoom_(level, smooth){
-    const clamped = Math.min(KMT_ZOOM_MAX, Math.max(KMT_ZOOM_MIN, level));
-    if(clamped === kmtZoomLevel_) return;
-    kmtZoomLevel_ = clamped;
+    kmtZoomLevel_ = Math.min(KMT_ZOOM_MAX, Math.max(KMT_ZOOM_MIN, level));
     const root = document.documentElement;
     root.style.transition = smooth ? 'zoom .12s ease-out' : 'none';
     root.style.zoom = kmtZoomLevel_;
+    // Where fixed descendants are NOT scaled by the line above, each
+    // overlay's own content box carries the zoom itself — see the
+    // --kmt-fixed-zoom rule in the stylesheet.
+    root.style.setProperty('--kmt-fixed-zoom',
+      kmtFixedInheritsZoom_() === false ? String(kmtZoomLevel_) : '1');
+    root.classList.toggle('kmt-zoomed', kmtZoomLevel_ !== 1);
     try{ localStorage.setItem('kmt_zoom_level', String(kmtZoomLevel_)); }catch(e){}
   }
   function kmtResetZoom_(){ kmtApplyZoom_(1, true); }
@@ -8777,9 +8840,16 @@ if(!window.KMT_ZOOM_ARMED_){
     let saved = 1;
     try{ saved = parseFloat(localStorage.getItem('kmt_zoom_level')); }catch(e){}
     if(!(saved >= KMT_ZOOM_MIN && saved <= KMT_ZOOM_MAX)) saved = 1;
-    kmtZoomLevel_ = 0; // force kmtApplyZoom_'s no-op-on-unchanged guard to still apply it once
     kmtApplyZoom_(saved, false);
   })();
+  // That first apply runs inline, before <body> necessarily exists, so
+  // kmtFixedInheritsZoom_ had nothing to measure and the overlay half of
+  // the zoom was left at 1. Re-apply once the document is ready so a
+  // restored zoom is right in modals too, from the first paint.
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded',
+      () => kmtApplyZoom_(kmtZoomLevel_, false), { once:true });
+  }
 
   // Ctrl/Cmd + (zoom in), Ctrl/Cmd - (zoom out), Ctrl/Cmd 0 (reset) — the
   // same three shortcuts every browser already binds to its own native
