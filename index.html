@@ -3293,11 +3293,6 @@
             <option value="percent">Percentage (12%)</option>
             <option value="fixed">Fixed ₹1,800</option>
           </select>
-          <label class="field" style="margin-top:12px;">Employer's PF share deducted from Take Home?</label>
-          <select class="field-input" id="rateCalcPfBoth" onchange="clearSalCalcBox_('rateCalcBox')">
-            <option value="no">No — employee side only (standard: Take Home is Rate of Pay minus the employee's own PF/ESI/PT)</option>
-            <option value="yes">Yes — both sides (Take Home must also absorb the employer's PF share)</option>
-          </select>
         </div>
 
         <label class="field" style="margin-top:12px;">Rate of Pay (monthly)</label>
@@ -3323,11 +3318,6 @@
           <select class="field-input" id="takeHomeCalcPfType" onchange="clearSalCalcBox_('takeHomeCalcBox')">
             <option value="percent">Percentage (12%)</option>
             <option value="fixed">Fixed ₹1,800</option>
-          </select>
-          <label class="field" style="margin-top:12px;">Employer's PF share deducted from Take Home?</label>
-          <select class="field-input" id="takeHomeCalcPfBoth" onchange="clearSalCalcBox_('takeHomeCalcBox')">
-            <option value="no">No — employee side only (standard: Take Home is Rate of Pay minus the employee's own PF/ESI/PT)</option>
-            <option value="yes">Yes — both sides (an agreed Take Home must also absorb the employer's PF share — e.g. a Take Home agreed before PF applied)</option>
           </select>
         </div>
 
@@ -19193,38 +19183,30 @@ function renderCtcCalculator(){
 // Calculator use — so none of the three tools can ever disagree about what a
 // given Rate of Pay actually costs or pays out.
 //
-// Take Home = Rate of Pay − employee PF − employee ESI − PT, and — only when
-// the employer's PF share is also being deducted from Take Home (the "both
-// sides" toggle) — the employer's own PF retirement contribution on top.
-// That toggle is the one formula genuinely new to these two tools: the CTC
-// Calculator's own Take Home never subtracts employer PF, since there it
-// only ever decides whether that share is ADDED to the CTC figure, not
-// taken out of Take Home. This is specifically for an agreed Take Home that
-// must stay the same once PF is introduced or already applies.
+// Take Home = Rate of Pay − employee PF − employee ESI − PT. Employee-side
+// deductions and nothing else: those three are the only things that come
+// OUT of what the company pays the employee, so they are the only things
+// standing between Rate of Pay and Take Home. Read the other way, which is
+// how HR actually uses these two tabs, Rate of Pay = Take Home + employee
+// PF + employee ESI + PT — e.g. an agreed Take Home of ₹30,000 under Fixed
+// ₹1,800 PF with ₹200 PT needs a Rate of Pay of exactly ₹32,000.
 //
-// Only Employer EPF + Employer EPS — the actual retirement contribution —
-// is ever absorbed this way, never EDLI or PF Admin Charges. Those two are a
-// separate, small statutory employer cost (group insurance + an
-// administrative fee, together 1% of wage), not part of anyone's retirement
-// savings and never something a Take Home figure is negotiated around — the
-// employer bears them regardless of this toggle. b.employerPf (the CTC
-// Calculator's own figure, unchanged) still includes both; this deliberately
-// reads employerEpf/employerEps off b.pf directly instead.
-function salCalcTakeHomeOf_(b, pfBothSides){
-  const employerRetirement = b.pf.applicable ? (b.pf.employerEpf + b.pf.employerEps) : 0;
-  return b.netMonthly - (pfBothSides ? employerRetirement : 0);
+// The employer's own PF and ESI contributions are deliberately NOT in this
+// bridge. They are paid by the company on top of the salary, never withheld
+// from it, so folding them in here would overstate the Rate of Pay needed
+// to deliver a given Take Home (that same ₹30,000 wrongly came out as
+// ₹33,800 while it did). They belong in CTC — and only CTC — which is what
+// salCalcCtcOf_ below is for. Whichever of PF, ESI and PT a Salary Heading
+// does not attract simply contributes nothing, so this holds for every
+// heading without a special case: an Apprentice with none of the three has
+// Rate of Pay and Take Home equal.
+function salCalcTakeHomeOf_(b){
+  return b.netMonthly;
 }
-// CTC here — unlike the CTC Calculator's own monthlyCtc/annualCtc, which
-// the "both sides" toggle there decides to include or exclude — is always
-// the FULL cost to company, independent of these two tabs' own "both sides"
-// toggle: that toggle only ever decides whether Take Home absorbs the
-// employer's PF share, a Take-Home-negotiation question, not a "does the
-// employer really pay this" one. The employer's PF and ESI contributions
-// are statutory and paid either way, so CTC always includes them, and
-// changing whether a candidate's Take Home is quoted net-of-employer-PF
-// must never make the actual cost to the company look smaller. Same
-// EPF+EPS-only reading as salCalcTakeHomeOf_ (never EDLI or PF Admin
-// Charges), plus Employer ESI where the heading has ESI and it's covered.
+// Cost to company: what the employee is paid, plus what the employer pays
+// on top for them. Same EPF+EPS-only reading of the employer's PF (never
+// EDLI or PF Admin Charges — see the note in the stylesheet), plus Employer
+// ESI where the heading has ESI and it's covered.
 // Diwali Bonus is a manually entered, per-employee figure
 // (diwaliBonusAmount) with no formula of its own — nothing to include here
 // for a hypothetical, not-yet-hired candidate.
@@ -19266,7 +19248,6 @@ function renderRateCalculator(){
   const headingKey = document.getElementById('rateCalcHeading').value;
   const heading = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
   const pfType = document.getElementById('rateCalcPfType').value;
-  const pfBothSides = document.getElementById('rateCalcPfBoth').value === 'yes';
   const rate = Number(document.getElementById('rateCalcAmount').value) || 0;
 
   if(!rate){
@@ -19274,8 +19255,12 @@ function renderRateCalculator(){
     return;
   }
 
-  const b = ctcCalcBreakdown_(rate, headingKey, pfType, 0, 0, pfBothSides);
-  const takeHome = salCalcTakeHomeOf_(b, pfBothSides);
+  // false — ctcCalcBreakdown_'s own pfBothSides only steers its monthlyCtc/
+  // annualCtc fields, which these two tabs never read (they use
+  // salCalcCtcOf_ instead). Passed explicitly so it isn't mistaken for a
+  // setting that means something here.
+  const b = ctcCalcBreakdown_(rate, headingKey, pfType, 0, 0, false);
+  const takeHome = salCalcTakeHomeOf_(b);
   const ctc = salCalcCtcOf_(b);
   const money = rupees;
 
@@ -19294,7 +19279,6 @@ function renderRateCalculator(){
       hrRow('PF — employee', b.pf.applicable ? money(b.pf.employee) : '—') +
       hrRow('ESI — employee', heading.esi ? (b.esi.covered ? money(b.esi.employee) : '—') : '—') +
       hrRow('PT', heading.pt ? money(b.pt) : '—') +
-      (pfBothSides ? hrRow('PF — employer EPF/EPS (absorbed into Take Home)', b.pf.applicable ? money(b.pf.employerEpf + b.pf.employerEps) : '—') : '') +
       `<div class="hr-sheet-net"><span>Take Home Salary</span><span>${money(takeHome)}</span></div>`)}
     ${hrCard('<strong>CTC (monthly)</strong>',
       hrRow('Rate of Pay', money(b.gross)) +
@@ -19323,7 +19307,6 @@ function renderTakeHomeCalculator(){
   const headingKey = document.getElementById('takeHomeCalcHeading').value;
   const heading = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
   const pfType = document.getElementById('takeHomeCalcPfType').value;
-  const pfBothSides = document.getElementById('takeHomeCalcPfBoth').value === 'yes';
   const takeHomeTarget = Number(document.getElementById('takeHomeCalcAmount').value) || 0;
 
   if(!takeHomeTarget){
@@ -19331,10 +19314,12 @@ function renderTakeHomeCalculator(){
     return;
   }
 
+  // false — see the matching note in renderRateCalculator: this only steers
+  // ctcCalcBreakdown_'s own CTC fields, which neither tab reads.
   const rate = ctcCalcSolveRate_(takeHomeTarget, headingKey, pfType, 0, 0,
-    b => salCalcTakeHomeOf_(b, pfBothSides), pfBothSides);
-  const b = ctcCalcBreakdown_(rate, headingKey, pfType, 0, 0, pfBothSides);
-  const takeHome = salCalcTakeHomeOf_(b, pfBothSides);
+    salCalcTakeHomeOf_, false);
+  const b = ctcCalcBreakdown_(rate, headingKey, pfType, 0, 0, false);
+  const takeHome = salCalcTakeHomeOf_(b);
   const ctc = salCalcCtcOf_(b);
   const money = rupees;
 
@@ -19353,7 +19338,6 @@ function renderTakeHomeCalculator(){
       hrRow('PF — employee', b.pf.applicable ? money(b.pf.employee) : '—') +
       hrRow('ESI — employee', heading.esi ? (b.esi.covered ? money(b.esi.employee) : '—') : '—') +
       hrRow('PT', heading.pt ? money(b.pt) : '—') +
-      (pfBothSides ? hrRow('PF — employer EPF/EPS (absorbed into Take Home)', b.pf.applicable ? money(b.pf.employerEpf + b.pf.employerEps) : '—') : '') +
       `<div class="hr-sheet-net"><span>Take Home Salary</span><span>${money(takeHome)}</span></div>`)}
     ${hrCard('<strong>CTC (monthly)</strong>',
       hrRow('Rate of Pay', money(b.gross)) +
