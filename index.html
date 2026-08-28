@@ -3278,6 +3278,12 @@
           </div>
         </div>
 
+        <label class="field" style="margin-top:12px;">Diwali Bonus</label>
+        <select class="field-input" id="ctcCalcDiwali">
+          <option value="no">No — not part of this CTC</option>
+          <option value="yes">Yes — one month's Rate of Pay, included in the annual CTC</option>
+        </select>
+
         <div style="height:14px"></div>
         <button class="btn full" onclick="withBusy(this,'Calculating…',renderCtcCalculator)">Calculate</button>
         <div style="height:14px"></div>
@@ -14832,14 +14838,28 @@ function diwaliBonusFor(emp){
   return manual > 0 ? Math.round(manual * 100) / 100 : 0;
 }
 
+// One month at the Rate of Pay, worked out through the heading's own
+// Basic/HRA/LTA split — the app's long-standing default bonus figure, and
+// the only bonus formula this codebase has ever had. Split out of
+// suggestedDiwaliBonus below so the CTC Calculator for Employer can ask the
+// same question for a hypothetical rate, where there is no employee record
+// to read, without a second copy of the arithmetic that could drift from
+// this one.
+//
+// This is a SUGGESTION, not what anyone is actually paid: an employee's real
+// Diwali bonus is the manually entered diwaliBonusAmount and nothing else
+// (see diwaliBonusFor above, and CLAUDE.md). Nothing here changes that.
+function diwaliBonusForRate_(rate, headingKey){
+  const h = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
+  const r = Number(rate) || 0;
+  return Math.round((h.flat ? r : r * (h.basicPct + h.hraPct + h.ltaPct)) * 100) / 100;
+}
 // One month at the Rate of Pay — what the bonus used to default to, kept as the
 // suggestion offered on the form so the old figure is one tap away rather than
 // something to work out by hand.
 function suggestedDiwaliBonus(emp){
   const asOf = currentRatePay(emp);
-  const h = SALARY_HEADINGS[asOf.salaryHeading] || SALARY_HEADINGS.managerial;
-  const rate = asOf.ratePay;
-  return Math.round((h.flat ? rate : rate * (h.basicPct + h.hraPct + h.ltaPct)) * 100) / 100;
+  return diwaliBonusForRate_(asOf.ratePay, asOf.salaryHeading);
 }
 
 // Three states, not two. An eligible employee with no amount set is not somebody
@@ -19119,7 +19139,11 @@ function updateCtcCalcAmountLabel_(){
 // as the Salary Sheet does, rather than re-deriving PF/ESI/PT here, so
 // this can never drift from what the Salary Sheet would actually charge
 // for the same heading and wage.
-function ctcCalcBreakdown_(rate, headingKey, pfType, otherAllowances, bonus, pfBothSides){
+// includeDiwali is used ONLY by the CTC Calculator for Employer. Left off
+// (every other caller passes six arguments) it is undefined, diwaliBonus
+// comes out 0 and annualCtc is exactly what it always was — so the Rate of
+// Pay, Take Home Salary and Monthly CTC tabs are untouched by it.
+function ctcCalcBreakdown_(rate, headingKey, pfType, otherAllowances, bonus, pfBothSides, includeDiwali){
   const heading = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
   let basic, hra, lta;
   if(heading.flat){ basic = rate; hra = 0; lta = 0; }
@@ -19147,9 +19171,15 @@ function ctcCalcBreakdown_(rate, headingKey, pfType, otherAllowances, bonus, pfB
   const employerPf = pf.applicable ? (pf.employerEpf + pf.employerEps + pf.admin + pf.edli) : 0;
   const employerMonthly = (pfBothSides ? employerPf : 0) + (esi.covered ? esi.employer : 0);
   const netMonthly = gross - (pf.applicable ? pf.employee : 0) - (esi.covered ? esi.employee : 0) - pt;
+  // Annual, like the Eligible Bonus alongside it — a bonus is paid once a
+  // year, so it belongs in the annual CTC and not in the monthly one. Take
+  // Home is untouched by it: a bonus is paid on top of the salary, never
+  // withheld from it, and nothing is ever deducted from a Diwali bonus
+  // (see CLAUDE.md).
+  const diwaliBonus = includeDiwali ? diwaliBonusForRate_(rate, headingKey) : 0;
   const monthlyCtc = gross + employerMonthly + otherAllowances;
-  const annualCtc = monthlyCtc * 12 + bonus;
-  return { basic, hra, lta, gross, pf, esi, pt, employerPf, employerMonthly, netMonthly, monthlyCtc, annualCtc };
+  const annualCtc = monthlyCtc * 12 + bonus + diwaliBonus;
+  return { basic, hra, lta, gross, pf, esi, pt, employerPf, employerMonthly, netMonthly, monthlyCtc, annualCtc, diwaliBonus };
 }
 
 // Binary search for the Rate of Pay that makes targetFn(breakdown) equal
@@ -19159,11 +19189,11 @@ function ctcCalcBreakdown_(rate, headingKey, pfType, otherAllowances, bonus, pfB
 // of Pay too, and a plain bisection finds the answer reliably without
 // needing a closed-form inverse of rules that already live in
 // calculatePfFor/computeEsi/monthlyPtFor.
-function ctcCalcSolveRate_(target, headingKey, pfType, otherAllowances, bonus, targetFn, pfBothSides){
+function ctcCalcSolveRate_(target, headingKey, pfType, otherAllowances, bonus, targetFn, pfBothSides, includeDiwali){
   let lo = 0, hi = 3000000; // generous enough for any realistic Rate of Pay
   for(let i = 0; i < 60; i++){
     const mid = (lo + hi) / 2;
-    const value = targetFn(ctcCalcBreakdown_(mid, headingKey, pfType, otherAllowances, bonus, pfBothSides));
+    const value = targetFn(ctcCalcBreakdown_(mid, headingKey, pfType, otherAllowances, bonus, pfBothSides, includeDiwali));
     if(value < target) lo = mid; else hi = mid;
   }
   return (lo + hi) / 2;
@@ -19175,6 +19205,7 @@ function renderCtcCalculator(){
   const heading = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
   const pfType = document.getElementById('ctcCalcPfType').value;
   const pfBothSides = document.getElementById('ctcCalcPfBoth').value === 'yes';
+  const includeDiwali = (document.getElementById('ctcCalcDiwali') || {}).value === 'yes';
   const mode = document.getElementById('ctcCalcMode').value;
   const amount = Number(document.getElementById('ctcCalcAmount').value) || 0;
   const bonus = Number(document.getElementById('ctcCalcBonus').value) || 0;
@@ -19187,13 +19218,16 @@ function renderCtcCalculator(){
 
   const rate = ctcCalcSolveRate_(amount, headingKey, pfType, otherAllowances, bonus,
     mode === 'ctc' ? b => b.annualCtc : mode === 'ctcMonthly' ? b => b.monthlyCtc : b => b.netMonthly,
-    pfBothSides);
-  const b = ctcCalcBreakdown_(rate, headingKey, pfType, otherAllowances, bonus, pfBothSides);
+    pfBothSides, includeDiwali);
+  const b = ctcCalcBreakdown_(rate, headingKey, pfType, otherAllowances, bonus, pfBothSides, includeDiwali);
   const money = rupees;
 
   box.innerHTML = `
     ${hrCard('<strong>Result</strong>',
+      hrRow('Rate of Pay (monthly)', '<strong>' + money(b.gross) + '</strong>') +
       hrRow('Take Home (monthly)', '<strong>' + money(b.netMonthly) + '</strong>') +
+      (includeDiwali ? hrRow('Diwali Bonus (annual)', '<strong>' + money(b.diwaliBonus) + '</strong>') : '') +
+      hrRow('CTC (monthly)', '<strong>' + money(b.monthlyCtc) + '</strong>') +
       hrRow('CTC (annual)', '<strong>' + money(b.annualCtc) + '</strong>'),
       'sal-grand-card')}
     ${hrCard('<strong>Rate of Pay</strong>',
@@ -19215,6 +19249,7 @@ function renderCtcCalculator(){
     ${hrCard('<strong>Annual CTC</strong>',
       hrRow('Monthly CTC × 12', money(b.monthlyCtc * 12)) +
       hrRow('Eligible Bonus', money(bonus)) +
+      (includeDiwali ? hrRow('Diwali Bonus (one month\'s Rate of Pay)', money(b.diwaliBonus)) : '') +
       `<div class="hr-sheet-net"><span>Annual CTC</span><span>${money(b.annualCtc)}</span></div>`)}
   `;
 }
