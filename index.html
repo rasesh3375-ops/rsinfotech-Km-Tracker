@@ -2791,10 +2791,16 @@
                 <span class="gen-accordion-desc">Check the exact salary before appointing anyone — enter Take Home or CTC, either way.</span></span>
               <span class="gen-accordion-chevron">▼</span>
             </button>
-            <button type="button" class="gen-accordion-header" data-target="genSecSalaryCalculator" onclick="openSalaryCalculatorCard()" aria-expanded="false">
+            <button type="button" class="gen-accordion-header" data-target="genSecRateCalculator" onclick="openRateCalculatorCard()" aria-expanded="false">
               <span class="gen-accordion-num">15</span>
-              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Employee Salary Calculator</strong>
-                <span class="gen-accordion-desc">Rate of Pay and Take Home for an employee — enter either one and the other is worked out from it.</span></span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Rate of Pay Calculator</strong>
+                <span class="gen-accordion-desc">Enter a new employee's Rate of Pay and see their exact Take Home Salary.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
+            </button>
+            <button type="button" class="gen-accordion-header" data-target="genSecTakeHomeCalculator" onclick="openTakeHomeCalculatorCard()" aria-expanded="false">
+              <span class="gen-accordion-num">16</span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Take Home Salary Calculator</strong>
+                <span class="gen-accordion-desc">Enter a new employee's agreed Take Home Salary and see the Rate of Pay it needs.</span></span>
               <span class="gen-accordion-chevron">▼</span>
             </button>
           </div>
@@ -3237,49 +3243,65 @@
       </section>
       </div>
 
-      <div id="genSecSalaryCalculator" class="hidden gen-accordion-body">
+      <div id="genSecRateCalculator" class="hidden gen-accordion-body">
       <section class="block">
-        <h2 style="margin:0 0 4px;">Employee Salary Calculator</h2>
-        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Check an employee's exact Rate of Pay or Take Home Salary — enter either one and the other is worked out from it, using the same Salary Heading split and PF/ESI/PT rules the Salary Sheet uses. Nothing here is saved.</p>
+        <h2 style="margin:0 0 4px;">Rate of Pay Calculator</h2>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">For a new employee — enter a Rate of Pay and see the exact Take Home Salary it produces, using the same Salary Heading split and PF/ESI/PT rules the Salary Sheet uses. Not tied to any employee record; nothing here is saved.</p>
 
-        <label class="field">Employee <span style="font-weight:400;color:var(--muted);">(optional — uses their real PF/ESI eligibility and current Salary Heading; leave blank for a what-if figure)</span></label>
-        <select class="field-input" id="salCalcEmp" onchange="applySalCalcEmployee_()"></select>
-        <div id="salCalcEmpHint" style="font-size:12px;color:var(--muted);margin-top:6px;"></div>
+        <label class="field">Salary Heading</label>
+        <select class="field-input" id="rateCalcHeading" onchange="updateRateCalcPfTypeVisibility_()"></select>
 
-        <label class="field" style="margin-top:12px;">Salary Heading</label>
-        <select class="field-input" id="salCalcHeading" onchange="updateSalCalcPfTypeVisibility_()"></select>
-
-        <div id="salCalcPfTypeWrap" style="margin-top:12px;">
+        <div id="rateCalcPfTypeWrap" style="margin-top:12px;">
           <label class="field">PF Contribution</label>
-          <select class="field-input" id="salCalcPfType">
+          <select class="field-input" id="rateCalcPfType">
             <option value="percent">Percentage (12%)</option>
             <option value="fixed">Fixed ₹1,800</option>
           </select>
           <label class="field" style="margin-top:12px;">Employer's PF share deducted from Take Home?</label>
-          <select class="field-input" id="salCalcPfBoth">
+          <select class="field-input" id="rateCalcPfBoth">
             <option value="no">No — employee side only (standard: Take Home is Rate of Pay minus the employee's own PF/ESI/PT)</option>
-            <option value="yes">Yes — both sides (an agreed Take Home must also absorb the employer's PF share)</option>
+            <option value="yes">Yes — both sides (Take Home must also absorb the employer's PF share)</option>
           </select>
         </div>
 
-        <div class="row-inline" style="margin-top:12px;">
-          <div>
-            <label class="field">I know</label>
-            <select class="field-input" id="salCalcMode" onchange="updateSalCalcAmountLabel_()">
-              <option value="takehome">Take Home Salary (monthly)</option>
-              <option value="rate">Rate of Pay (monthly)</option>
-            </select>
-          </div>
-          <div>
-            <label class="field" id="salCalcAmountLabel">Take Home Salary (monthly)</label>
-            <input class="field-input" type="number" id="salCalcAmount" placeholder="e.g. 30000">
-          </div>
-        </div>
+        <label class="field" style="margin-top:12px;">Rate of Pay (monthly)</label>
+        <input class="field-input" type="number" id="rateCalcAmount" placeholder="e.g. 30000">
 
         <div style="height:14px"></div>
-        <button class="btn full" onclick="withBusy(this,'Calculating…',renderSalaryCalculator)">Calculate</button>
+        <button class="btn full" onclick="withBusy(this,'Calculating…',renderRateCalculator)">Calculate</button>
         <div style="height:14px"></div>
-        <div id="salCalcBox"></div>
+        <div id="rateCalcBox"></div>
+      </section>
+      </div>
+
+      <div id="genSecTakeHomeCalculator" class="hidden gen-accordion-body">
+      <section class="block">
+        <h2 style="margin:0 0 4px;">Take Home Salary Calculator</h2>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">For a new employee — enter an agreed Take Home Salary and see the Rate of Pay it needs, using the same Salary Heading split and PF/ESI/PT rules the Salary Sheet uses. Not tied to any employee record; nothing here is saved.</p>
+
+        <label class="field">Salary Heading</label>
+        <select class="field-input" id="takeHomeCalcHeading" onchange="updateTakeHomeCalcPfTypeVisibility_()"></select>
+
+        <div id="takeHomeCalcPfTypeWrap" style="margin-top:12px;">
+          <label class="field">PF Contribution</label>
+          <select class="field-input" id="takeHomeCalcPfType">
+            <option value="percent">Percentage (12%)</option>
+            <option value="fixed">Fixed ₹1,800</option>
+          </select>
+          <label class="field" style="margin-top:12px;">Employer's PF share deducted from Take Home?</label>
+          <select class="field-input" id="takeHomeCalcPfBoth">
+            <option value="no">No — employee side only (standard: Take Home is Rate of Pay minus the employee's own PF/ESI/PT)</option>
+            <option value="yes">Yes — both sides (an agreed Take Home must also absorb the employer's PF share — e.g. a Take Home agreed before PF applied)</option>
+          </select>
+        </div>
+
+        <label class="field" style="margin-top:12px;">Take Home Salary (monthly)</label>
+        <input class="field-input" type="number" id="takeHomeCalcAmount" placeholder="e.g. 30000">
+
+        <div style="height:14px"></div>
+        <button class="btn full" onclick="withBusy(this,'Calculating…',renderTakeHomeCalculator)">Calculate</button>
+        <div style="height:14px"></div>
+        <div id="takeHomeCalcBox"></div>
       </section>
       </div>
 
@@ -18805,7 +18827,7 @@ function updateCtcCalcAmountLabel_(){
 // as the Salary Sheet does, rather than re-deriving PF/ESI/PT here, so
 // this can never drift from what the Salary Sheet would actually charge
 // for the same heading and wage.
-function ctcCalcBreakdown_(rate, headingKey, pfType, otherAllowances, bonus, pfBothSides, emp){
+function ctcCalcBreakdown_(rate, headingKey, pfType, otherAllowances, bonus, pfBothSides){
   const heading = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
   let basic, hra, lta;
   if(heading.flat){ basic = rate; hra = 0; lta = 0; }
@@ -18813,33 +18835,17 @@ function ctcCalcBreakdown_(rate, headingKey, pfType, otherAllowances, bonus, pfB
   const gross = basic + hra + lta;
   const pfWage = PF_RULES.wageComponents.reduce((t, k) => t + ({ basic, hra, lta }[k] || 0), 0);
   // calculatePfFor already checks heading.pf itself and returns PF_ZERO when
-  // it doesn't apply — no need to gate the call here too.
-  // A hypothetical hire (the CTC Calculator's own use, emp omitted) is still
-  // assumed PF-eligible with no prior UAN and Form 11 not yet submitted — the
-  // same synthetic stand-in this function has always used, so passing no
-  // `emp` reproduces today's CTC Calculator exactly. A real employee (the
-  // Employee Salary Calculator's own use) carries their ACTUAL eligibility —
-  // pfEligible, hasPriorUan, form11Submitted, esiDisabled,
-  // esiCoveredAtPeriodStart, esiEligible, ptPaidThisYear, and their real id
-  // (which is what decides the two HR-confirmed uncapped-PF exceptions) —
-  // into the exact same calculatePfFor/computeEsi/monthlyPtFor calls the
-  // Salary Sheet itself uses, per pfConfigStatus's own note on when passing
-  // a raw emp (not resolved as of a specific past month) is correct: a
-  // right-now/hypothetical calculation, exactly what this is. salaryHeading
-  // and pfContributionType are always taken from this form's own selection,
-  // even when a real employee is tied in — so exploring "what if we moved
-  // them to a different heading" never reads their record as if that change
-  // had already happened.
-  const probe = emp
-    ? Object.assign({}, emp, { salaryHeading: headingKey, pfContributionType: pfType })
-    : { salaryHeading: headingKey, pfEligible: 'yes', pfContributionType: pfType,
-        hasPriorUan: 'no', form11Submitted: 'no' };
-  const pf = calculatePfFor(probe, pfWage);
+  // it doesn't apply — no need to gate the call here too. This is always a
+  // hypothetical, not-yet-hired figure — assumed PF-eligible with no prior
+  // UAN and Form 11 not yet submitted — shared by both the CTC Calculator
+  // and the Rate of Pay/Take Home Salary Calculators, none of which are
+  // tied to any real employee record.
+  const pf = calculatePfFor({ salaryHeading: headingKey, pfEligible: 'yes', pfContributionType: pfType,
+                               hasPriorUan: 'no', form11Submitted: 'no' }, pfWage);
   const esi = heading.esi
-    ? computeEsi(gross, { isDisabled: probe.esiDisabled === 'yes', coveredAtPeriodStart: probe.esiCoveredAtPeriodStart === 'yes',
-                           eligible: probe.esiEligible !== 'no', asOf: todayStr() })
+    ? computeEsi(gross, { isDisabled: false, coveredAtPeriodStart: false, eligible: true, asOf: todayStr() })
     : { covered: false, employee: 0, employer: 0 };
-  const pt = heading.pt ? monthlyPtFor(gross, probe.ptPaidThisYear || 0) : 0;
+  const pt = heading.pt ? monthlyPtFor(gross, 0) : 0;
   // Employer's PF share (EPF+EPS+admin+EDLI) is still paid either way — it's
   // statutory. This toggle only controls whether it's counted into the CTC
   // figure shown here, matching the two ways companies structure a CTC
@@ -18861,11 +18867,11 @@ function ctcCalcBreakdown_(rate, headingKey, pfType, otherAllowances, bonus, pfB
 // of Pay too, and a plain bisection finds the answer reliably without
 // needing a closed-form inverse of rules that already live in
 // calculatePfFor/computeEsi/monthlyPtFor.
-function ctcCalcSolveRate_(target, headingKey, pfType, otherAllowances, bonus, targetFn, pfBothSides, emp){
+function ctcCalcSolveRate_(target, headingKey, pfType, otherAllowances, bonus, targetFn, pfBothSides){
   let lo = 0, hi = 3000000; // generous enough for any realistic Rate of Pay
   for(let i = 0; i < 60; i++){
     const mid = (lo + hi) / 2;
-    const value = targetFn(ctcCalcBreakdown_(mid, headingKey, pfType, otherAllowances, bonus, pfBothSides, emp));
+    const value = targetFn(ctcCalcBreakdown_(mid, headingKey, pfType, otherAllowances, bonus, pfBothSides));
     if(value < target) lo = mid; else hi = mid;
   }
   return (lo + hi) / 2;
@@ -18921,96 +18927,108 @@ function renderCtcCalculator(){
   `;
 }
 
-// ---- Employee Salary Calculator ----
-// The CTC Calculator's own tool answers "what would hiring this person cost
-// and pay out" for someone who doesn't exist in the system yet. This one
-// answers a narrower, different question for someone who — usually — does:
-// "what Rate of Pay gets them the Take Home we've agreed, or what Take Home
-// does this Rate of Pay actually work out to" — the two figures HR quotes
-// and pays, not a CTC letter. It reuses ctcCalcBreakdown_/ctcCalcSolveRate_
-// exactly as they are (see that function's own comment on the optional emp
-// parameter) rather than a second copy of the PF/ESI/PT wiring, so both
-// tools can never disagree about what a given Rate of Pay actually costs.
-function openSalaryCalculatorCard(){
-  openGeneratorCard('genSecSalaryCalculator');
-  const sel = document.getElementById('salCalcHeading');
+// ---- Rate of Pay Calculator / Take Home Salary Calculator ----
+// Two purpose-built tools for a new employee (never tied to any employee
+// record — same as the CTC Calculator, and deliberately no employee picker),
+// one figure known at a time instead of one combined tool switching between
+// them: enter a Rate of Pay here and see what it actually pays out, or enter
+// an agreed Take Home there and see what Rate of Pay produces it. Both reuse
+// ctcCalcBreakdown_/ctcCalcSolveRate_ exactly as they are — the same
+// Salary Heading split and PF/ESI/PT rules the Salary Sheet and CTC
+// Calculator use — so none of the three tools can ever disagree about what a
+// given Rate of Pay actually costs or pays out.
+//
+// Take Home = Rate of Pay − employee PF − employee ESI − PT, and — only when
+// the employer's PF share is also being deducted from Take Home (the "both
+// sides" toggle) — the employer's own PF share on top. That toggle is the
+// one formula genuinely new to these two tools: the CTC Calculator's own
+// Take Home never subtracts employer PF, since there it only ever decides
+// whether that share is ADDED to the CTC figure, not taken out of Take Home.
+// This is specifically for an agreed Take Home that must stay the same once
+// PF is introduced or already applies.
+function salCalcTakeHomeOf_(b, pfBothSides){
+  return b.netMonthly - (pfBothSides ? b.employerPf : 0);
+}
+
+function openRateCalculatorCard(){
+  openGeneratorCard('genSecRateCalculator');
+  const sel = document.getElementById('rateCalcHeading');
   if(sel && !sel.options.length){
     sel.innerHTML = SALARY_HEADING_ORDER.map(k => `<option value="${k}">${escapeHtml(SALARY_HEADINGS[k].label)}</option>`).join('');
   }
-  populateDashEmpSelect_('salCalcEmp');
-  updateSalCalcPfTypeVisibility_();
-  updateSalCalcAmountLabel_();
+  updateRateCalcPfTypeVisibility_();
 }
-function updateSalCalcPfTypeVisibility_(){
-  const heading = SALARY_HEADINGS[(document.getElementById('salCalcHeading') || {}).value] || SALARY_HEADINGS.managerial;
-  const wrap = document.getElementById('salCalcPfTypeWrap');
+function updateRateCalcPfTypeVisibility_(){
+  const heading = SALARY_HEADINGS[(document.getElementById('rateCalcHeading') || {}).value] || SALARY_HEADINGS.managerial;
+  const wrap = document.getElementById('rateCalcPfTypeWrap');
   if(wrap) wrap.classList.toggle('hidden', !heading.pf);
 }
-function updateSalCalcAmountLabel_(){
-  const mode = (document.getElementById('salCalcMode') || {}).value;
-  const label = document.getElementById('salCalcAmountLabel');
-  if(label) label.textContent = mode === 'rate' ? 'Rate of Pay (monthly)' : 'Take Home Salary (monthly)';
-}
-// Tying an employee in pre-fills their CURRENT Salary Heading — currentRatePay
-// already resolves salary-head history and increment effective dates exactly
-// as Record Increment and every payroll screen do, so this is never a stale
-// or superseded heading — and PF contribution type, while leaving both
-// editable: HR exploring "what if we changed their heading/PF type" is
-// exactly the what-if use this tool exists for. PF eligibility, ESI
-// eligibility/coverage and PT-already-used-this-year are NOT shown as
-// separate fields — they are read straight from the employee's own record at
-// calculate time (see ctcCalcBreakdown_'s emp parameter), the same
-// employee-specific rules the actual Salary Sheet enforces, not something
-// this form should let anyone silently override.
-async function applySalCalcEmployee_(){
-  const empId = document.getElementById('salCalcEmp').value;
-  const hint = document.getElementById('salCalcEmpHint');
-  const headingSel = document.getElementById('salCalcHeading');
-  if(!empId){
-    if(hint) hint.textContent = '';
-    return;
-  }
-  const emp = (await getEmployees()).find(e => e.id === empId);
-  if(!emp || !headingSel) return;
-  const cur = currentRatePay(emp);
-  headingSel.value = cur.salaryHeading;
-  updateSalCalcPfTypeVisibility_();
-  if(hint){
-    const hist = salaryHistoryOf(emp).slice().sort((a, b) => (a.from || '').localeCompare(b.from || ''));
-    const latest = hist[hist.length - 1];
-    hint.textContent = 'Current Salary Heading: ' + ((SALARY_HEADINGS[cur.salaryHeading] || {}).label || cur.salaryHeading) +
-      (latest && latest.from ? ' (effective since ' + fmtDateIN(latest.from) + ')' : '') +
-      '. PF/ESI eligibility and PT already used this year are read from their record.';
-  }
-}
-async function renderSalaryCalculator(){
-  const box = document.getElementById('salCalcBox');
-  const empId = document.getElementById('salCalcEmp').value;
-  const emp = empId ? (await getEmployees()).find(e => e.id === empId) : null;
-  const headingKey = document.getElementById('salCalcHeading').value;
+function renderRateCalculator(){
+  const box = document.getElementById('rateCalcBox');
+  const headingKey = document.getElementById('rateCalcHeading').value;
   const heading = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
-  const pfType = document.getElementById('salCalcPfType').value;
-  const pfBothSides = document.getElementById('salCalcPfBoth').value === 'yes';
-  const mode = document.getElementById('salCalcMode').value;
-  const amount = Number(document.getElementById('salCalcAmount').value) || 0;
+  const pfType = document.getElementById('rateCalcPfType').value;
+  const pfBothSides = document.getElementById('rateCalcPfBoth').value === 'yes';
+  const rate = Number(document.getElementById('rateCalcAmount').value) || 0;
 
-  if(!amount){
-    box.innerHTML = '<div class="empty">Enter a Rate of Pay or Take Home amount to calculate.</div>';
+  if(!rate){
+    box.innerHTML = '<div class="empty">Enter a Rate of Pay to calculate.</div>';
     return;
   }
 
-  // Take Home = Rate of Pay − employee PF − employee ESI − PT, and — only
-  // when the employer's PF share is being deducted from Take Home too — the
-  // employer's own PF share on top. This is the one formula genuinely new to
-  // this tool (the CTC Calculator's own Take Home never subtracts employer
-  // PF, since there it only ever decides whether that share is ADDED to the
-  // CTC figure, not taken out of Take Home) — everything feeding it (pf, esi,
-  // pt, employerPf) still comes from the shared, unmodified ctcCalcBreakdown_.
-  const takeHomeOf = b => b.netMonthly - (pfBothSides ? b.employerPf : 0);
-  const rate = mode === 'rate' ? amount
-    : ctcCalcSolveRate_(amount, headingKey, pfType, 0, 0, takeHomeOf, pfBothSides, emp);
-  const b = ctcCalcBreakdown_(rate, headingKey, pfType, 0, 0, pfBothSides, emp);
-  const takeHome = takeHomeOf(b);
+  const b = ctcCalcBreakdown_(rate, headingKey, pfType, 0, 0, pfBothSides);
+  const takeHome = salCalcTakeHomeOf_(b, pfBothSides);
+  const money = rupees;
+
+  box.innerHTML = `
+    ${hrCard('<strong>Result</strong>',
+      hrRow('RATE OF PAY', '<strong style="font-size:16px;">' + money(b.gross) + '</strong>') +
+      hrRow('TAKE HOME SALARY', '<strong style="font-size:16px;">' + money(takeHome) + '</strong>'),
+      'sal-grand-card')}
+    ${hrCard('<strong>Rate of Pay breakdown</strong>',
+      hrRow('Basic', money(b.basic)) +
+      (heading.flat ? '' : hrRow('HRA', money(b.hra))) +
+      (heading.flat || !heading.ltaPct ? '' : hrRow('LTA', money(b.lta))) +
+      `<div class="hr-sheet-net"><span>Rate of Pay</span><span>${money(b.gross)}</span></div>`)}
+    ${hrCard('<strong>Deductions (monthly)</strong>',
+      hrRow('PF — employee', b.pf.applicable ? money(b.pf.employee) : '—') +
+      hrRow('ESI — employee', heading.esi ? (b.esi.covered ? money(b.esi.employee) : '—') : '—') +
+      hrRow('PT', heading.pt ? money(b.pt) : '—') +
+      (pfBothSides ? hrRow('PF — employer share (absorbed into Take Home)', b.pf.applicable ? money(b.employerPf) : '—') : '') +
+      `<div class="hr-sheet-net"><span>Take Home Salary</span><span>${money(takeHome)}</span></div>`)}
+  `;
+}
+
+function openTakeHomeCalculatorCard(){
+  openGeneratorCard('genSecTakeHomeCalculator');
+  const sel = document.getElementById('takeHomeCalcHeading');
+  if(sel && !sel.options.length){
+    sel.innerHTML = SALARY_HEADING_ORDER.map(k => `<option value="${k}">${escapeHtml(SALARY_HEADINGS[k].label)}</option>`).join('');
+  }
+  updateTakeHomeCalcPfTypeVisibility_();
+}
+function updateTakeHomeCalcPfTypeVisibility_(){
+  const heading = SALARY_HEADINGS[(document.getElementById('takeHomeCalcHeading') || {}).value] || SALARY_HEADINGS.managerial;
+  const wrap = document.getElementById('takeHomeCalcPfTypeWrap');
+  if(wrap) wrap.classList.toggle('hidden', !heading.pf);
+}
+function renderTakeHomeCalculator(){
+  const box = document.getElementById('takeHomeCalcBox');
+  const headingKey = document.getElementById('takeHomeCalcHeading').value;
+  const heading = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
+  const pfType = document.getElementById('takeHomeCalcPfType').value;
+  const pfBothSides = document.getElementById('takeHomeCalcPfBoth').value === 'yes';
+  const takeHomeTarget = Number(document.getElementById('takeHomeCalcAmount').value) || 0;
+
+  if(!takeHomeTarget){
+    box.innerHTML = '<div class="empty">Enter a Take Home Salary to calculate.</div>';
+    return;
+  }
+
+  const rate = ctcCalcSolveRate_(takeHomeTarget, headingKey, pfType, 0, 0,
+    b => salCalcTakeHomeOf_(b, pfBothSides), pfBothSides);
+  const b = ctcCalcBreakdown_(rate, headingKey, pfType, 0, 0, pfBothSides);
+  const takeHome = salCalcTakeHomeOf_(b, pfBothSides);
   const money = rupees;
 
   box.innerHTML = `
@@ -21095,12 +21113,13 @@ function clearGeneratorEmployeeFields(){
 // Documents used to be one more card wrapping seven sections together
 // (Payroll, Apprentice, Holiday List upload, Company Profile, Important
 // Documents, Uniform/ID, Handbook) — they're peers here now, not nested
-// under it, so this list has fifteen entries where the old card grid had
+// under it, so this list has sixteen entries where the old card grid had
 // eight, and there is no "genSecOfficeDocuments" any more.
 const GENERATOR_SECTIONS = ['genSecRoleReports','genSecLetters','genSecChecklists',
   'genSecHolidayList','genSecLeaveEncashment','genSecLetterhead',
   'genSecPayrollDocs','genSecApprenticeDocs','genSecHolidayUpload','genSecCompanyProfile',
-  'genSecImportantDocs','genSecUniformId','genSecHandbook','genSecCtcCalculator','genSecSalaryCalculator'];
+  'genSecImportantDocs','genSecUniformId','genSecHandbook','genSecCtcCalculator',
+  'genSecRateCalculator','genSecTakeHomeCalculator'];
 // Syncs every header's .active class, chevron and aria-expanded to whichever
 // one section (if any) is actually open — called after every open/collapse
 // rather than toggled by hand at each call site, so it can never drift out
