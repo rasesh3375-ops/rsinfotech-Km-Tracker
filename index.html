@@ -8840,6 +8840,16 @@ function kmtFindOwnScrollTarget_(el, deltaY){
   return null;
 }
 document.addEventListener('wheel', e => {
+  // A trackpad pinch (Mac, or a Windows precision touchpad) and a literal
+  // Ctrl+scroll both reach JS as a wheel event with ctrlKey set — that is
+  // the browser's own native page-zoom gesture, not a scroll, on every
+  // desktop browser. The scroll-takeover fallback below must never treat
+  // one as a missed scroll tick and hijack it: doing so would both break
+  // pinch/Ctrl+scroll zoom and fire window.scrollBy() on a gesture that was
+  // never asking to scroll at all. Checked first, before either the native-
+  // broken-detection probe or the confirmed-broken hijack path, so it holds
+  // regardless of which state this session is in.
+  if(e.ctrlKey || e.metaKey) return;
   if(kmtWheelNativeBroken_ === false) return; // confirmed working here — never touch native scroll
   if(kmtFindOwnScrollTarget_(e.target, e.deltaY)) return; // a nested area owns this tick, not the whole page
   const pageHeight = document.documentElement.scrollHeight;
