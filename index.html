@@ -8879,29 +8879,75 @@ if(!window.KMT_ZOOM_ARMED_){
     kmtApplyZoom_(kmtZoomLevel_ - e.deltaY * 0.01, false);
   }, { passive:false });
 
-  // Two-finger touch pinch (phone, tablet, Windows touchscreen). touch-action
-  // on <html>/<body> (see CSS) already tells the browser not to attempt its
-  // own native pinch-zoom or double-tap-zoom here at all, so there is no
-  // native gesture left to fight — this is the only thing handling a
-  // two-finger touch gesture. A single finger is deliberately left
-  // completely alone (no listener even inspects touches.length === 1): that
-  // is what keeps ordinary one-finger scrolling working exactly as before.
+  // Two-finger touch pinch (phone, tablet, Windows touchscreen). A single
+  // finger is deliberately left completely alone — nothing below acts on
+  // touches.length === 1, and nothing below ever calls preventDefault for
+  // it — which is what keeps ordinary one-finger scrolling working exactly
+  // as before.
+  //
+  // Why touchstart is NOT passive, and preventDefaults on the second
+  // finger: this was the "zooms sometimes, not others" bug. touch-action
+  // on <html>/<body> disables the browser's own pinch-zoom, but still
+  // permits panning (pan-x pan-y) — so a two-finger drag is something the
+  // browser is free to claim as a two-finger SCROLL instead. Which one won
+  // came down to timing: land both fingers together and the pinch handler
+  // got there first, land one and then the other (the far more common way
+  // people actually pinch) and the scroller had already claimed the
+  // gesture, after which preventDefault on touchmove is ignored and no
+  // amount of finger movement zoomed anything. preventDefault right at
+  // touchstart, the moment a second finger arrives, claims the gesture
+  // up front and settles it deterministically instead of by race.
   let kmtPinchStartDist_ = null, kmtPinchStartZoom_ = 1;
   const kmtTouchDist_ = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  function kmtBeginPinch_(touches){
+    const d = kmtTouchDist_(touches);
+    if(d < 1) return false;            // both fingers on the same spot — nothing to measure yet
+    kmtPinchStartDist_ = d;
+    kmtPinchStartZoom_ = kmtZoomLevel_;
+    return true;
+  }
   document.addEventListener('touchstart', e => {
-    if(e.touches.length === 2){
-      kmtPinchStartDist_ = kmtTouchDist_(e.touches);
-      kmtPinchStartZoom_ = kmtZoomLevel_;
-    }
-  }, { passive:true });
+    if(e.touches.length !== 2) return;
+    if(e.cancelable) e.preventDefault();
+    kmtBeginPinch_(e.touches);
+  }, { passive:false });
   document.addEventListener('touchmove', e => {
-    if(e.touches.length === 2 && kmtPinchStartDist_){
-      e.preventDefault();
-      kmtApplyZoom_(kmtPinchStartZoom_ * (kmtTouchDist_(e.touches) / kmtPinchStartDist_), false);
-    }
+    if(e.touches.length !== 2) return;
+    // Self-starting rather than giving up when no start distance was
+    // captured: a touchstart can be missed entirely (it fired while the
+    // fingers were still coincident, a third finger came and went, the
+    // gesture began life as a scroll). Beginning the pinch here instead of
+    // returning means a gesture already in progress still zooms, rather
+    // than staying dead until every finger lifts and the user tries again.
+    if(kmtPinchStartDist_ === null && !kmtBeginPinch_(e.touches)) return;
+    if(e.cancelable) e.preventDefault();
+    kmtApplyZoom_(kmtPinchStartZoom_ * (kmtTouchDist_(e.touches) / kmtPinchStartDist_), false);
   }, { passive:false });
   document.addEventListener('touchend', e => { if(e.touches.length < 2) kmtPinchStartDist_ = null; }, { passive:true });
   document.addEventListener('touchcancel', () => { kmtPinchStartDist_ = null; }, { passive:true });
+
+  // iOS Safari emits its own proprietary gesture events for a pinch,
+  // carrying the scale factor directly. Deliberately a fallback, not the
+  // primary path: whenever the touch handlers above already claimed the
+  // gesture (kmtPinchStartDist_ is set) these bail out, so the two can
+  // never both apply and double-zoom. They earn their place on the runs
+  // where WebKit decided to report the pinch only as a gesture event and
+  // the touch path never saw a clean two-finger sequence at all — the
+  // other half of the same intermittency.
+  let kmtGestureStartZoom_ = 1;
+  document.addEventListener('gesturestart', e => {
+    if(kmtPinchStartDist_ !== null) return;
+    if(e.cancelable) e.preventDefault();
+    kmtGestureStartZoom_ = kmtZoomLevel_;
+  }, { passive:false });
+  document.addEventListener('gesturechange', e => {
+    if(kmtPinchStartDist_ !== null) return;
+    if(e.cancelable) e.preventDefault();
+    if(e.scale > 0) kmtApplyZoom_(kmtGestureStartZoom_ * e.scale, false);
+  }, { passive:false });
+  document.addEventListener('gestureend', e => {
+    if(e.cancelable) e.preventDefault();
+  }, { passive:false });
 }
 
 function kmtLockBodyScroll(owner){
