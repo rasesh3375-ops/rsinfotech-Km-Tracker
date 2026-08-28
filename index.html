@@ -141,7 +141,13 @@
      the backend before it can restore it — so a stray thumb swipe dropped
      people back at the login screen mid-task. Scrolling inside the page is
      unaffected; only the overscroll gesture is swallowed. */
-  html{overscroll-behavior-y:contain;overflow-x:hidden;}
+  /* touch-action:pan-x pan-y — one-finger panning stays native (that's the
+     "pan-x pan-y"), but the browser's own pinch-zoom and double-tap-zoom are
+     told not to start here at all. The two-finger touch handler further
+     down in the JS (search kmtApplyZoom_) is the only thing left to handle
+     a two-finger gesture, so there is no native zoom left to race or
+     double-fire against it. */
+  html{overscroll-behavior-y:contain;overflow-x:hidden;touch-action:pan-x pan-y;}
 
   /* overflow-x:hidden on top of that: with no explicit horizontal bound, iOS
      Safari lets the whole page rubber-band sideways the moment ANY element
@@ -155,6 +161,7 @@
     margin:0;
     overscroll-behavior-y:contain;
     overflow-x:hidden;
+    touch-action:pan-x pan-y;
     background:var(--cream);
     color:var(--navy);
     min-height:100vh;
@@ -8724,6 +8731,109 @@ if(!window.KMT_NUDGE_LISTENERS_ARMED_){
   }, { passive:true });
   document.addEventListener('touchcancel', () => { kmtPinchInProgress_ = false; }, { passive:true });
 }
+
+// ---- Universal pinch/trackpad/keyboard zoom ----
+// Built on the CSS `zoom` property, deliberately not `transform: scale()`.
+// `transform` on an ancestor becomes the containing block for every
+// `position:fixed` descendant, per spec — and this app leans hard on fixed
+// positioning for the top bar, every modal and every overlay, each already
+// carrying its own hard-won iOS-specific handling (see resettleFixedOverlays_
+// and everything around it, just above). Wrapping the app in a scaled
+// transform would silently break every one of those the moment zoom left
+// 100%. `zoom` doesn't create a new containing block — WebKit/Chromium use
+// it internally for their own native page zoom — so a fixed header or modal
+// stays exactly where it belongs at any zoom level, and nothing needs to
+// know zoom exists. Applied to <html> itself, the same element that ships
+// the app's one real breakpoint media queries key off, so zooming in/out
+// reflows the page the same way an actual narrower/wider viewport would,
+// not a distorted scale of a fixed-size snapshot.
+if(!window.KMT_ZOOM_ARMED_){
+  window.KMT_ZOOM_ARMED_ = true;
+  const KMT_ZOOM_MIN = 0.5, KMT_ZOOM_MAX = 2.0, KMT_ZOOM_STEP = 0.1;
+  let kmtZoomLevel_ = 1;
+
+  // smooth:true (keyboard/trackpad-step changes, a handful of discrete jumps)
+  // gets a brief eased transition so a step doesn't read as a jump-cut.
+  // smooth:false (live touch-pinch, and continuous trackpad pinch deltas)
+  // applies immediately — a transition there would make the zoom visibly
+  // lag behind where the fingers actually are, which is the "lag" this was
+  // explicitly asked to avoid, not the smoothness it was asked for.
+  function kmtApplyZoom_(level, smooth){
+    const clamped = Math.min(KMT_ZOOM_MAX, Math.max(KMT_ZOOM_MIN, level));
+    if(clamped === kmtZoomLevel_) return;
+    kmtZoomLevel_ = clamped;
+    const root = document.documentElement;
+    root.style.transition = smooth ? 'zoom .12s ease-out' : 'none';
+    root.style.zoom = kmtZoomLevel_;
+    try{ localStorage.setItem('kmt_zoom_level', String(kmtZoomLevel_)); }catch(e){}
+  }
+  function kmtResetZoom_(){ kmtApplyZoom_(1, true); }
+
+  // Restore whatever this device was last left at, once, before anything
+  // else below can move it — a fresh reload landing back at a zoomed-in
+  // view someone deliberately set is the same continuity the rest of the
+  // app already gives scroll position and open sections.
+  (function kmtRestoreZoom_(){
+    let saved = 1;
+    try{ saved = parseFloat(localStorage.getItem('kmt_zoom_level')); }catch(e){}
+    if(!(saved >= KMT_ZOOM_MIN && saved <= KMT_ZOOM_MAX)) saved = 1;
+    kmtZoomLevel_ = 0; // force kmtApplyZoom_'s no-op-on-unchanged guard to still apply it once
+    kmtApplyZoom_(saved, false);
+  })();
+
+  // Ctrl/Cmd + (zoom in), Ctrl/Cmd - (zoom out), Ctrl/Cmd 0 (reset) — the
+  // same three shortcuts every browser already binds to its own native
+  // page zoom; preventDefault here means these three keys drive this zoom
+  // instead, everywhere in the app, not just where focus happens to sit.
+  // '=' alongside '+': the physical key is the same on a US layout, and an
+  // unshifted Ctrl+= is the common real-world way people actually press
+  // "zoom in" without needing to also hold Shift.
+  document.addEventListener('keydown', e => {
+    if(!(e.ctrlKey || e.metaKey)) return;
+    if(e.key === '+' || e.key === '='){ e.preventDefault(); kmtApplyZoom_(kmtZoomLevel_ + KMT_ZOOM_STEP, true); }
+    else if(e.key === '-' || e.key === '_'){ e.preventDefault(); kmtApplyZoom_(kmtZoomLevel_ - KMT_ZOOM_STEP, true); }
+    else if(e.key === '0'){ e.preventDefault(); kmtResetZoom_(); }
+  }, { passive:false });
+
+  // Trackpad pinch (Mac, and a Windows precision touchpad) and a literal
+  // Ctrl+scroll both arrive here as a wheel event with ctrlKey set — the
+  // browser's own native-zoom trigger, now taken over by this instead so it
+  // drives the same zoom level as everything else. preventDefault stops the
+  // browser's own native zoom from ALSO firing on top of this one — without
+  // it, the page would zoom twice, fighting itself, once natively and once
+  // here. deltaY's sign already matches "pinch out / scroll up == zoom in"
+  // on every browser that sends this gesture as a wheel event.
+  document.addEventListener('wheel', e => {
+    if(!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    kmtApplyZoom_(kmtZoomLevel_ - e.deltaY * 0.01, false);
+  }, { passive:false });
+
+  // Two-finger touch pinch (phone, tablet, Windows touchscreen). touch-action
+  // on <html>/<body> (see CSS) already tells the browser not to attempt its
+  // own native pinch-zoom or double-tap-zoom here at all, so there is no
+  // native gesture left to fight — this is the only thing handling a
+  // two-finger touch gesture. A single finger is deliberately left
+  // completely alone (no listener even inspects touches.length === 1): that
+  // is what keeps ordinary one-finger scrolling working exactly as before.
+  let kmtPinchStartDist_ = null, kmtPinchStartZoom_ = 1;
+  const kmtTouchDist_ = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  document.addEventListener('touchstart', e => {
+    if(e.touches.length === 2){
+      kmtPinchStartDist_ = kmtTouchDist_(e.touches);
+      kmtPinchStartZoom_ = kmtZoomLevel_;
+    }
+  }, { passive:true });
+  document.addEventListener('touchmove', e => {
+    if(e.touches.length === 2 && kmtPinchStartDist_){
+      e.preventDefault();
+      kmtApplyZoom_(kmtPinchStartZoom_ * (kmtTouchDist_(e.touches) / kmtPinchStartDist_), false);
+    }
+  }, { passive:false });
+  document.addEventListener('touchend', e => { if(e.touches.length < 2) kmtPinchStartDist_ = null; }, { passive:true });
+  document.addEventListener('touchcancel', () => { kmtPinchStartDist_ = null; }, { passive:true });
+}
+
 function kmtLockBodyScroll(owner){
   const wasEmpty = !kmtBodyLockOwners.size;
   kmtBodyLockOwners.add(owner);
