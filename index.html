@@ -7681,16 +7681,28 @@ function computeAttendanceSummary(att, employee, dateList, holidayMap){
 // cell — a dozen staff across a 31-day month meant ~370 cells and ~4,000 option
 // strings on every single month change. Built once per combination and reused.
 const attCodeOptionCache = new Map();
-function attCodeOptions(isResident, selectedCode){
-  const key = (isResident ? 'r|' : 'n|') + (selectedCode || '');
+// isPh — this date is a declared holiday from the Holiday List, so the 'H'
+// option reads PH instead. The stored code is still 'H': a declared holiday
+// and a Sunday week-off are the same thing to every calculation (both paid,
+// neither deducted), and inventing a second stored code would mean touching
+// every switch, report and saved record for a labelling difference. Only
+// what the cell READS changes, so HR can tell at a glance which H is a
+// declared Paid Holiday and which is the weekly off.
+function attCodeOptions(isResident, selectedCode, isPh){
+  const key = (isResident ? 'r|' : 'n|') + (isPh ? 'ph|' : '') + (selectedCode || '');
   let html = attCodeOptionCache.get(key);
   if(html === undefined){
     html = (selectedCode ? '' : '<option value="" selected></option>') +
       ATT_CODES.filter(c => !(isResident && c === 'SHORT'))
-        .map(c => `<option value="${c}"${c === selectedCode ? ' selected' : ''}>${c}</option>`).join('');
+        .map(c => `<option value="${c}"${c === selectedCode ? ' selected' : ''}>${attCodeText_(c, isPh)}</option>`).join('');
     attCodeOptionCache.set(key, html);
   }
   return html;
+}
+// The letters shown in an attendance cell. Only 'H' varies, and only by
+// whether the date is a declared holiday rather than a Sunday.
+function attCodeText_(code, isPh){
+  return (isPh && code === 'H') ? 'PH' : code;
 }
 
 // Only the cell's current code is put in the markup. The full list is ~4,000
@@ -7699,15 +7711,18 @@ function attCodeOptions(isResident, selectedCode){
 // phone. The rest arrives two ways, so a dropdown is never caught short:
 // on touch or focus, before the picker can open, and otherwise in small
 // batches once the sheet is on screen.
-function attCodeSelectedOnly(selectedCode){
+function attCodeSelectedOnly(selectedCode, isPh){
   return selectedCode
-    ? `<option value="${selectedCode}" selected>${selectedCode}</option>`
+    ? `<option value="${selectedCode}" selected>${attCodeText_(selectedCode, isPh)}</option>`
     : '<option value="" selected></option>';
 }
 function fillAttCodes(sel){
   if(!sel || sel.dataset.full === '1') return;
   const current = sel.value;
-  sel.innerHTML = attCodeOptions(sel.dataset.res === '1', current);
+  // data-ph is set by the grid on declared-holiday dates, so the expanded
+  // list keeps calling it PH rather than reverting to a bare H the moment
+  // the cell is touched.
+  sel.innerHTML = attCodeOptions(sel.dataset.res === '1', current, sel.dataset.ph === '1');
   sel.value = current;               // innerHTML resets it; put it back
   sel.dataset.full = '1';
 }
@@ -7992,8 +8007,13 @@ async function renderAttendanceSheet(){
       // or leave code already saved for the date, not just on a day that
       // was never marked at all.
       const defaultCode = resolvedAttendanceCode_(att, dateStr, holidayMap);
-      dayCodes.push(defaultCode || '');
-      const options = attCodeSelectedOnly(defaultCode);
+      // A declared holiday reads PH; a Sunday keeps reading H. Sundays that
+      // happen to also be on the Holiday List stay H, matching the
+      // Consultant Report, which counts them as Week Off and never lists
+      // them as PH — so the two screens tell the same story.
+      const isPhDay = !!holidayMap[dateStr] && new Date(dateStr + 'T00:00:00').getDay() !== 0;
+      dayCodes.push(attCodeText_(defaultCode, isPhDay) || '');
+      const options = attCodeSelectedOnly(defaultCode, isPhDay);
       const lateMark = entry && entry.lateFlag ? '<br><span class="att-late">late</span>' : '';
       const dirty = pendingAttendance[emp.id + '|' + dateStr] ? ' att-dirty' : '';
       // The in-time, and a way to enter one. Filling a month by hand leaves no
@@ -8007,7 +8027,7 @@ async function renderAttendanceSheet(){
       // a table <td> on a normal screen or a small labelled box in the
       // compact view's expandable day grid. Editing works identically either
       // way; only the container changes.
-      const core = `<select class="att-code code-${defaultCode||''}${dirty}" data-res="${isResident?1:0}"` +
+      const core = `<select class="att-code code-${defaultCode||''}${dirty}" data-res="${isResident?1:0}" data-ph="${isPhDay?1:0}"` +
         ` onpointerdown="fillAttCodes(this)" onfocus="fillAttCodes(this)"` +
         ` onchange="handleAttendanceCellChange('${emp.id}','${dateStr}',this)">${options}</select>${lateMark}${timeChip}`;
       return isCompact
