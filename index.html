@@ -19171,14 +19171,21 @@ function ctcCalcBreakdown_(rate, headingKey, pfType, otherAllowances, bonus, pfB
   const employerPf = pf.applicable ? (pf.employerEpf + pf.employerEps + pf.admin + pf.edli) : 0;
   const employerMonthly = (pfBothSides ? employerPf : 0) + (esi.covered ? esi.employer : 0);
   const netMonthly = gross - (pf.applicable ? pf.employee : 0) - (esi.covered ? esi.employee : 0) - pt;
-  // Annual, like the Eligible Bonus alongside it — a bonus is paid once a
-  // year, so it belongs in the annual CTC and not in the monthly one. Take
-  // Home is untouched by it: a bonus is paid on top of the salary, never
-  // withheld from it, and nothing is ever deducted from a Diwali bonus
-  // (see CLAUDE.md).
+  // The bonus is earned across the year and paid once, so it sits inside
+  // BOTH CTC figures: one twelfth of it in the monthly CTC, all of it in
+  // the annual. That way it is inside whichever of the two is being stated
+  // — state an annual CTC and the bonus is within it, state a monthly CTC
+  // and it is within that too — instead of only ever landing in the annual
+  // one. The annual total is identical either way it is arranged
+  // (monthlyCtc × 12 recovers the whole bonus), so this changes what a
+  // stated MONTHLY CTC resolves to, and nothing else.
+  //
+  // Take Home is untouched by it regardless: a bonus is paid on top of the
+  // salary, never withheld from it, and nothing is ever deducted from a
+  // Diwali bonus (see CLAUDE.md).
   const diwaliBonus = includeDiwali ? diwaliBonusForRate_(rate, headingKey) : 0;
-  const monthlyCtc = gross + employerMonthly + otherAllowances;
-  const annualCtc = monthlyCtc * 12 + bonus + diwaliBonus;
+  const monthlyCtc = gross + employerMonthly + otherAllowances + diwaliBonus / 12;
+  const annualCtc = monthlyCtc * 12 + bonus;
   return { basic, hra, lta, gross, pf, esi, pt, employerPf, employerMonthly, netMonthly, monthlyCtc, annualCtc, diwaliBonus };
 }
 
@@ -19245,12 +19252,14 @@ function renderCtcCalculator(){
         b.pf.applicable ? money(b.employerPf) : '—') +
       hrRow('ESI — employer', heading.esi ? (b.esi.covered ? money(b.esi.employer) : '—') : '—') +
       hrRow('Other Allowances', money(otherAllowances)) +
+      (includeDiwali ? hrRow('Diwali Bonus — monthly share (1/12)', money(b.diwaliBonus / 12)) : '') +
       `<div class="hr-sheet-net"><span>Monthly CTC</span><span>${money(b.monthlyCtc)}</span></div>`)}
     ${hrCard('<strong>Annual CTC</strong>',
       hrRow('Monthly CTC × 12', money(b.monthlyCtc * 12)) +
       hrRow('Eligible Bonus', money(bonus)) +
-      (includeDiwali ? hrRow('Diwali Bonus (one month\'s Rate of Pay)', money(b.diwaliBonus)) : '') +
-      `<div class="hr-sheet-net"><span>Annual CTC</span><span>${money(b.annualCtc)}</span></div>`)}
+      `<div class="hr-sheet-net"><span>Annual CTC</span><span>${money(b.annualCtc)}</span></div>` +
+      (includeDiwali ? '<p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Includes the ' + money(b.diwaliBonus) +
+        ' Diwali Bonus — one twelfth of it is already in the Monthly CTC above, so it is inside both figures and counted once.</p>' : ''))}
   `;
 }
 
