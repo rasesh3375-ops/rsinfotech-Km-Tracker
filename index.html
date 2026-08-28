@@ -7177,6 +7177,18 @@ const ATT_CODE_LABELS = { P:'Present', A:'Absent', H:'Paid Holiday', EL:'EL', SL
 // on a declared holiday keeps their real attendance, not a relabel to
 // "holiday" that would hide it.
 const HOLIDAY_OVERRIDE_CODES = new Set(['A','LP','EL','SL','HEL','HSL','HLP']);
+// The month the Paid Holiday override starts applying from, and a hard wall
+// in front of everything before it: a month that has already been worked,
+// paid and reported to the consultant must keep reading exactly as it did,
+// whatever is added to the Holiday List afterwards.
+//
+// Deliberately a FIXED date, not "whatever month it is today". A rolling
+// cutoff would quietly un-apply the rule from each month as it slid into
+// the past — August's figures would change the moment September began,
+// which is the very thing this constant exists to prevent. Set to the month
+// the rule went live and left alone; moving it is a decision, not a side
+// effect of the calendar turning.
+const PH_RULE_EFFECTIVE_FROM = '2026-08-01';
 
 // ---- salary sheet headings ----
 // Each heading defines how Rate of Pay splits into Basic/HRA/LTA. 'flat' means
@@ -11377,11 +11389,19 @@ async function renderConsultantReport(){
   // W.OFF is the Sundays in the month; PH is declared holidays that don't already
   // fall on a Sunday (otherwise the same day would be counted twice).
   let weekOff = 0, publicHolidays = 0;
+  // The declared holidays themselves, not just how many — the consultant
+  // needs to see WHICH dates were paid holidays to reconcile the payable
+  // days against their own calendar. Straight from the Holiday List, the
+  // single source of truth for them.
+  const phDates = [];
   dateList.forEach(dateStr => {
     // 'T00:00:00' — local midnight, not UTC (see computeAttendanceSummary).
     const isSunday = new Date(dateStr + 'T00:00:00').getDay() === 0;
     if(isSunday) weekOff++;
-    else if(holidayMap[dateStr]) publicHolidays++;
+    else if(holidayMap[dateStr]){
+      publicHolidays++;
+      phDates.push({ date: dateStr, name: holidayMap[dateStr] });
+    }
   });
   const workingDays = monthDays - weekOff;
 
@@ -11476,6 +11496,14 @@ async function renderConsultantReport(){
     <div class="sal-sheet-wrap print-isolate" id="consultantReportPrintArea">
       ${reportLogoHeader('Consultant Report — ' + monthLabel(monthVal))}
       ${tableInner}
+      ${phDates.length ? `<div style="margin:14px 0 0;">
+        <div style="font-size:13px;font-weight:700;color:var(--navy);margin:0 0 6px;">PH – Paid Holiday</div>
+        <table class="sal-table" style="font-size:11.5px;">
+          <tr><th>Date</th><th>Day</th><th>Holiday</th><th>Treatment</th></tr>
+          ${phDates.map(h => `<tr><td>${fmtDateIN(h.date)}</td><td>${new Date(h.date + 'T00:00:00').toLocaleDateString('en-IN', { weekday:'long' })}</td><td>${escapeHtml(h.name)}</td><td>PH – Paid Holiday</td></tr>`).join('')}
+        </table>
+        <p style="font-size:11px;color:var(--muted);margin:6px 0 0;">Declared holidays taken from the Holiday List. Each is paid in full — counted in Payable Days, with no salary or attendance-day deduction for any employee. Sundays are shown separately as Week Off and are not repeated here.</p>
+      </div>` : ''}
       <p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">${rows.length} employees · ${monthDays} days · ${workingDays} working, ${weekOff} week-off, ${publicHolidays} public holiday${publicHolidays === 1 ? '' : 's'}.</p>
     </div>`;
 
@@ -19667,9 +19695,21 @@ function resolvedAttendanceCode_(att, dateStr, holidayMap){
     // past day defaults to absent" rule below, before anyone added it) must
     // not keep charging it as absence or leave once it is one. See
     // HOLIDAY_OVERRIDE_CODES for exactly which codes this applies to.
-    if(isHoliday && HOLIDAY_OVERRIDE_CODES.has(entry.code)) return 'H';
+    //
+    // Only from PH_RULE_EFFECTIVE_FROM onward. Overriding a code that is
+    // already on file is the one genuinely NEW behaviour here, and letting
+    // it reach backwards would silently restate months that have already
+    // been paid and filed — a closed month's Salary Sheet, payslips and
+    // Consultant Report would all start reading differently than when they
+    // were issued, purely because a holiday was added to the list later.
+    // Before that date a saved code is returned exactly as stored, which is
+    // precisely what this function did before the rule existed.
+    if(isHoliday && dateStr >= PH_RULE_EFFECTIVE_FROM && HOLIDAY_OVERRIDE_CODES.has(entry.code)) return 'H';
     return entry.code;
   }
+  // An UNMARKED day on a declared holiday has always resolved to 'H', in
+  // every month — that predates this rule and is not gated by it, so
+  // historical months keep behaving as they always have.
   if(isHoliday) return 'H';
   if(new Date(dateStr + 'T00:00:00').getDay() === 0) return 'H';
   return dateStr <= todayStr() ? 'A' : null;
