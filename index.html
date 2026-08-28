@@ -867,11 +867,11 @@
   .modal-box{background:var(--paper);border-radius:14px;max-width:520px;width:100%;padding:22px;margin:20px 0 40px;}
 
   /* ---- Zoom inside position:fixed overlays ----
-     A `zoom` on <html> does not reach position:fixed descendants on
-     WebKit/iOS — they are sized and positioned against the viewport and
-     escape it entirely — which is why the page behind zoomed fine while an
-     open Add Employee modal, the fullscreen report viewer and global search
-     all stayed stubbornly at 100%.
+     The app's zoom is carried by <body> (see kmtApplyZoom_). A `zoom` does
+     not reach position:fixed descendants on WebKit/iOS — they are sized and
+     positioned against the viewport and escape it entirely — which is why
+     the page behind zoomed fine while an open Add Employee modal, the
+     fullscreen report viewer and global search all stayed at 100%.
      Applied to the CONTENT box inside each overlay, never to the fixed
      element itself: the overlay keeps its exact inset:0 viewport size, so
      nothing can overflow the screen or overlap anything, and its own
@@ -890,8 +890,10 @@
   /* Only once actually zoomed. At 100% the deliberate overflow-x:hidden
      above stays exactly as it was (it is the anti-rubber-band fix, see its
      own comment); zoomed in, a box wider than the screen has to be
-     reachable rather than silently clipped. */
+     reachable rather than silently clipped — on the page itself just as
+     much as inside a modal. */
   html.kmt-zoomed .modal-overlay{overflow-x:auto;}
+  html.kmt-zoomed, html.kmt-zoomed body{overflow-x:auto;}
   .modal-box h2{margin:0 0 6px;font-size:19px;}
   /* Title bar that stays put. The overlay is the scrolling element, so sticky
      children of the box pin against it without the box having to become its own
@@ -8789,6 +8791,14 @@ if(!window.KMT_ZOOM_ARMED_){
   // zoom, and whatever the browser actually did is the answer. Returns null
   // (rather than caching a wrong guess) if <body> doesn't exist yet — the
   // very first call can happen at parse time, restoring a saved level.
+  // <body>, not <html>, is the element that carries the zoom. `zoom` on a
+  // normal block element is the oldest, best-supported form of this
+  // property in every engine; on the ROOT element WebKit has long-standing
+  // quirks where it interacts with viewport and scroll metrics instead of
+  // simply scaling. Nothing else needs to know: --kmt-fixed-zoom and the
+  // .kmt-zoomed class still live on <html> so the stylesheet's :root-level
+  // custom property and html.kmt-zoomed selectors keep working unchanged.
+  const kmtZoomSurface_ = () => document.body || document.documentElement;
   let kmtFixedZoomInherits_ = null;
   function kmtFixedInheritsZoom_(){
     if(kmtFixedZoomInherits_ !== null) return kmtFixedZoomInherits_;
@@ -8796,11 +8806,11 @@ if(!window.KMT_ZOOM_ARMED_){
     const probe = document.createElement('div');
     probe.style.cssText = 'position:fixed;top:0;left:0;width:100px;height:1px;opacity:0;pointer-events:none;';
     document.body.appendChild(probe);
-    const root = document.documentElement;
-    const before = root.style.zoom;
-    root.style.zoom = '2';
+    const surface = kmtZoomSurface_();
+    const before = surface.style.zoom;
+    surface.style.zoom = '2';
     const measured = probe.getBoundingClientRect().width;
-    root.style.zoom = before;
+    surface.style.zoom = before;
     probe.remove();
     kmtFixedZoomInherits_ = measured > 150; // ~200 if it scaled, ~100 if it didn't
     return kmtFixedZoomInherits_;
@@ -8817,18 +8827,27 @@ if(!window.KMT_ZOOM_ARMED_){
   // the same number (the first post-DOMContentLoaded re-apply is exactly
   // that), and writing an identical style value is a no-op in the browser
   // anyway.
+  let kmtZoomSaveTimer_ = null;
   function kmtApplyZoom_(level, smooth){
     kmtZoomLevel_ = Math.min(KMT_ZOOM_MAX, Math.max(KMT_ZOOM_MIN, level));
     const root = document.documentElement;
-    root.style.transition = smooth ? 'zoom .12s ease-out' : 'none';
-    root.style.zoom = kmtZoomLevel_;
+    const surface = kmtZoomSurface_();
+    surface.style.transition = smooth ? 'zoom .12s ease-out' : 'none';
+    surface.style.zoom = kmtZoomLevel_;
     // Where fixed descendants are NOT scaled by the line above, each
     // overlay's own content box carries the zoom itself — see the
     // --kmt-fixed-zoom rule in the stylesheet.
     root.style.setProperty('--kmt-fixed-zoom',
       kmtFixedInheritsZoom_() === false ? String(kmtZoomLevel_) : '1');
     root.classList.toggle('kmt-zoomed', kmtZoomLevel_ !== 1);
-    try{ localStorage.setItem('kmt_zoom_level', String(kmtZoomLevel_)); }catch(e){}
+    // Debounced, deliberately not written on every call: a live pinch runs
+    // this once per frame, and a synchronous localStorage write per frame
+    // is on its own enough to make the zoom visibly stutter on a phone —
+    // the exact "lag" this was asked not to have.
+    clearTimeout(kmtZoomSaveTimer_);
+    kmtZoomSaveTimer_ = setTimeout(() => {
+      try{ localStorage.setItem('kmt_zoom_level', String(kmtZoomLevel_)); }catch(e){}
+    }, 250);
   }
   function kmtResetZoom_(){ kmtApplyZoom_(1, true); }
 
