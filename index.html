@@ -3568,7 +3568,28 @@ let sessionRole = localStorage.getItem('kmt_session_role') || null;
 const HR_SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 function hrSessionExpired_(){
   const startedAt = Number(localStorage.getItem('kmt_hr_session_started_at') || 0);
-  return !startedAt || (Date.now() - startedAt) > HR_SESSION_MAX_AGE_MS;
+  // A missing timestamp does not mean the session actually started 24
+  // hours ago — it means this one auxiliary key didn't come back from
+  // storage, while kmt_session_token/kmt_session_role sitting right next
+  // to it did (setSession always writes all three together, so losing
+  // only this one is exactly the kind of partial storage eviction some
+  // browsers do under memory/storage pressure — reported as HR having to
+  // log back in within minutes of reopening the app, far short of the
+  // real 24-hour window). Treating "missing" the same as "definitely
+  // expired" force-logged HR out of a session the real, authoritative
+  // check would still have accepted: the backend enforces the same
+  // 24-hour HR_SESSION_LIFETIME_MS on the token itself, independent of
+  // this client-side clock. Healing it here — stamp it now, trust the
+  // session for this one open — costs nothing: if the token genuinely is
+  // old, the first backend call in enterHrMain's warm-up sequence still
+  // rejects it with 'unauthorized' and onSessionExpired() catches that
+  // properly, this time with its usual "session has expired" message
+  // instead of a silent, unexplained trip back to the login screen.
+  if(!startedAt){
+    localStorage.setItem('kmt_hr_session_started_at', String(Date.now()));
+    return false;
+  }
+  return (Date.now() - startedAt) > HR_SESSION_MAX_AGE_MS;
 }
 function setSession(token, role){
   sessionToken = token; sessionRole = role;
@@ -6991,7 +7012,18 @@ function validateIfsc(ifsc, bankName){
 }
 
 const ATT_CODES = ['P','A','H','EL','SL','LP','HEL','HSL','HLP','SHORT'];
-const ATT_CODE_LABELS = { P:'Present', A:'Absent', H:'Holiday', EL:'EL', SL:'SL', LP:'LP (unpaid)', HEL:'Half EL', HSL:'Half SL', HLP:'Half LP', SHORT:'Short leave' };
+const ATT_CODE_LABELS = { P:'Present', A:'Absent', H:'Paid Holiday', EL:'EL', SL:'SL', LP:'LP (unpaid)', HEL:'Half EL', HSL:'Half SL', HLP:'Half LP', SHORT:'Short leave' };
+// A day the Holiday section declares takes precedence over whatever this
+// code already was — Absent (marked, or defaulted, before the holiday was
+// declared), Leave Without Pay, or paid leave nobody needed to spend on a
+// day there was no work to attend. resolvedAttendanceCode_ is the one place
+// this override happens, so the Attendance Sheet grid, the Salary Sheet and
+// every other report that reads a day's code through it agree by
+// construction — see that function's own comment. Present and Short Leave
+// are deliberately NOT in this set: someone who actually came in and worked
+// on a declared holiday keeps their real attendance, not a relabel to
+// "holiday" that would hide it.
+const HOLIDAY_OVERRIDE_CODES = new Set(['A','LP','EL','SL','HEL','HSL','HLP']);
 
 // ---- salary sheet headings ----
 // Each heading defines how Rate of Pay splits into Basic/HRA/LTA. 'flat' means
@@ -7453,13 +7485,12 @@ function renderHeadingExplainer(){
 function computeAttendanceSummary(att, employee, dateList, holidayMap){
   let present=0, absent=0, elUsed=0, slUsed=0, lpDays=0, halfDays=0, shortCount=0, lateCount=0, holidays=0;
   dateList.forEach(dateStr => {
-    // 'T00:00:00' with no offset parses as local midnight, not UTC — bare
-    // new Date(dateStr) parses as UTC midnight (see CLAUDE.md), which shifts
-    // the apparent day of week in any timezone behind UTC and would mark the
-    // wrong day as Sunday here. Same fix already used in sandwichDaysFor.
-    const dow = new Date(dateStr + 'T00:00:00').getDay();
+    // resolvedAttendanceCode_ is the one place a day's code is resolved from
+    // what's saved, the Holiday section, and the weekday — every caller
+    // (this summary, the Attendance Sheet grid, the Consultant Report) reads
+    // the same answer instead of each keeping its own copy of that logic.
     const entry = att[dateStr];
-    const code = entry ? entry.code : (holidayMap[dateStr] ? 'H' : (dow === 0 ? 'H' : null));
+    const code = resolvedAttendanceCode_(att, dateStr, holidayMap);
     if(entry && entry.lateFlag) lateCount++;
     switch(code){
       case 'P': present += 1; break;
@@ -7774,18 +7805,6 @@ async function renderAttendanceSheet(){
   const attByEmp = await getAttendanceRange(employees.map(e => e.id), attFetchFrom, attFetchTo);
   const mergedAttByEmp = mergedAttByEmpWithPending_(employees, attByEmp);
   attSheetRenderCtx_ = { employees, dateList, holidayMap, attByEmp };
-  // Everything about a day that does not depend on who is being drawn — the
-  // weekday, whether it is a holiday, whether it has happened yet. Worked out
-  // once instead of once per employee per day, which for a dozen staff was
-  // ~370 Date objects and ~370 calls to todayStr() every time a month changed.
-  const today = todayStr();
-  const dayMeta = dateList.map(dateStr => ({
-    dateStr,
-    // 'T00:00:00' — local midnight, not UTC (see computeAttendanceSummary).
-    isSunday: new Date(dateStr + 'T00:00:00').getDay() === 0,
-    isHoliday: !!holidayMap[dateStr],
-    isPast: dateStr <= today
-  }));
   for(let i=0; i<employees.length; i++){
     const emp = employees[i];
     // Straight from the batch above, already merged with any unsaved
@@ -7801,10 +7820,13 @@ async function renderAttendanceSheet(){
     const isResident = emp.employeeType === 'resident';
     const summary = computeAttendanceSummary(att, emp, dateList, holidayMap);
     const dayCodes = [];
-    const dayCells = dayMeta.map(meta => {
-      const dateStr = meta.dateStr;
+    const dayCells = dateList.map(dateStr => {
       const entry = att[dateStr];
-      const defaultCode = entry ? entry.code : (meta.isHoliday ? 'H' : (meta.isSunday ? 'H' : (meta.isPast ? 'A' : '')));
+      // Same resolution computeAttendanceSummary uses (resolvedAttendanceCode_)
+      // — a declared holiday shows as Paid Holiday here even over an Absent
+      // or leave code already saved for the date, not just on a day that
+      // was never marked at all.
+      const defaultCode = resolvedAttendanceCode_(att, dateStr, holidayMap);
       dayCodes.push(defaultCode || '');
       const options = attCodeSelectedOnly(defaultCode);
       const lateMark = entry && entry.lateFlag ? '<br><span class="att-late">late</span>' : '';
@@ -10717,10 +10739,10 @@ function consultantDays(n){
 function consultantDayCounts(att, dateList, holidayMap){
   let present = 0, el = 0, sl = 0, absent = 0;
   dateList.forEach(dateStr => {
-    // 'T00:00:00' — local midnight, not UTC (see computeAttendanceSummary).
-    const dow = new Date(dateStr + 'T00:00:00').getDay();
-    const entry = att[dateStr];
-    const code = entry ? entry.code : (holidayMap[dateStr] ? 'H' : (dow === 0 ? 'H' : null));
+    // Same resolution computeAttendanceSummary and the Attendance Sheet use
+    // (resolvedAttendanceCode_) — a declared holiday counts as one here too,
+    // even over an Absent or leave code already saved for the date.
+    const code = resolvedAttendanceCode_(att, dateStr, holidayMap);
     switch(code){
       case 'P': case 'SHORT': present += 1; break;
       case 'EL': el += 1; break;
@@ -18957,8 +18979,18 @@ async function populateAttendanceUserSelect(){
 // running totals, not the individual day.
 function resolvedAttendanceCode_(att, dateStr, holidayMap){
   const entry = (att || {})[dateStr];
-  if(entry) return entry.code;
-  if(holidayMap && holidayMap[dateStr]) return 'H';
+  const isHoliday = !!(holidayMap && holidayMap[dateStr]);
+  if(entry){
+    // The Holiday section is the single source of truth for which days are
+    // paid holidays — a code already on file for this date (saved before
+    // the holiday was declared, or bulk-filled as Absent by the "unmarked
+    // past day defaults to absent" rule below, before anyone added it) must
+    // not keep charging it as absence or leave once it is one. See
+    // HOLIDAY_OVERRIDE_CODES for exactly which codes this applies to.
+    if(isHoliday && HOLIDAY_OVERRIDE_CODES.has(entry.code)) return 'H';
+    return entry.code;
+  }
+  if(isHoliday) return 'H';
   if(new Date(dateStr + 'T00:00:00').getDay() === 0) return 'H';
   return dateStr <= todayStr() ? 'A' : null;
 }
