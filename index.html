@@ -18940,14 +18940,24 @@ function renderCtcCalculator(){
 //
 // Take Home = Rate of Pay − employee PF − employee ESI − PT, and — only when
 // the employer's PF share is also being deducted from Take Home (the "both
-// sides" toggle) — the employer's own PF share on top. That toggle is the
-// one formula genuinely new to these two tools: the CTC Calculator's own
-// Take Home never subtracts employer PF, since there it only ever decides
-// whether that share is ADDED to the CTC figure, not taken out of Take Home.
-// This is specifically for an agreed Take Home that must stay the same once
-// PF is introduced or already applies.
+// sides" toggle) — the employer's own PF retirement contribution on top.
+// That toggle is the one formula genuinely new to these two tools: the CTC
+// Calculator's own Take Home never subtracts employer PF, since there it
+// only ever decides whether that share is ADDED to the CTC figure, not
+// taken out of Take Home. This is specifically for an agreed Take Home that
+// must stay the same once PF is introduced or already applies.
+//
+// Only Employer EPF + Employer EPS — the actual retirement contribution —
+// is ever absorbed this way, never EDLI or PF Admin Charges. Those two are a
+// separate, small statutory employer cost (group insurance + an
+// administrative fee, together 1% of wage), not part of anyone's retirement
+// savings and never something a Take Home figure is negotiated around — the
+// employer bears them regardless of this toggle. b.employerPf (the CTC
+// Calculator's own figure, unchanged) still includes both; this deliberately
+// reads employerEpf/employerEps off b.pf directly instead.
 function salCalcTakeHomeOf_(b, pfBothSides){
-  return b.netMonthly - (pfBothSides ? b.employerPf : 0);
+  const employerRetirement = b.pf.applicable ? (b.pf.employerEpf + b.pf.employerEps) : 0;
+  return b.netMonthly - (pfBothSides ? employerRetirement : 0);
 }
 
 function openRateCalculatorCard(){
@@ -18994,7 +19004,7 @@ function renderRateCalculator(){
       hrRow('PF — employee', b.pf.applicable ? money(b.pf.employee) : '—') +
       hrRow('ESI — employee', heading.esi ? (b.esi.covered ? money(b.esi.employee) : '—') : '—') +
       hrRow('PT', heading.pt ? money(b.pt) : '—') +
-      (pfBothSides ? hrRow('PF — employer share (absorbed into Take Home)', b.pf.applicable ? money(b.employerPf) : '—') : '') +
+      (pfBothSides ? hrRow('PF — employer EPF/EPS (absorbed into Take Home)', b.pf.applicable ? money(b.pf.employerEpf + b.pf.employerEps) : '—') : '') +
       `<div class="hr-sheet-net"><span>Take Home Salary</span><span>${money(takeHome)}</span></div>`)}
   `;
 }
@@ -19045,7 +19055,7 @@ function renderTakeHomeCalculator(){
       hrRow('PF — employee', b.pf.applicable ? money(b.pf.employee) : '—') +
       hrRow('ESI — employee', heading.esi ? (b.esi.covered ? money(b.esi.employee) : '—') : '—') +
       hrRow('PT', heading.pt ? money(b.pt) : '—') +
-      (pfBothSides ? hrRow('PF — employer share (absorbed into Take Home)', b.pf.applicable ? money(b.employerPf) : '—') : '') +
+      (pfBothSides ? hrRow('PF — employer EPF/EPS (absorbed into Take Home)', b.pf.applicable ? money(b.pf.employerEpf + b.pf.employerEps) : '—') : '') +
       `<div class="hr-sheet-net"><span>Take Home Salary</span><span>${money(takeHome)}</span></div>`)}
   `;
 }
