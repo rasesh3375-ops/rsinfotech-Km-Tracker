@@ -3299,6 +3299,11 @@
             <option value="percent">Percentage (12%)</option>
             <option value="fixed">Fixed ₹1,800</option>
           </select>
+          <label class="field" style="margin-top:12px;">Employer's PF share added to CTC?</label>
+          <select class="field-input" id="rateCalcPfInCtc" onchange="clearSalCalcBox_('rateCalcBox')">
+            <option value="yes">Yes — both sides (employee + employer PF count towards CTC)</option>
+            <option value="no">No — employee side only (employer PF kept off the CTC figure)</option>
+          </select>
         </div>
 
         <label class="field" style="margin-top:12px;">Rate of Pay (monthly)</label>
@@ -3325,6 +3330,11 @@
             <option value="percent">Percentage (12%)</option>
             <option value="fixed">Fixed ₹1,800</option>
           </select>
+          <label class="field" style="margin-top:12px;">Employer's PF share added to CTC?</label>
+          <select class="field-input" id="takeHomeCalcPfInCtc" onchange="clearSalCalcBox_('takeHomeCalcBox')">
+            <option value="yes">Yes — both sides (employee + employer PF count towards CTC)</option>
+            <option value="no">No — employee side only (employer PF kept off the CTC figure)</option>
+          </select>
         </div>
 
         <label class="field" style="margin-top:12px;">Take Home Salary (monthly)</label>
@@ -3350,6 +3360,11 @@
           <select class="field-input" id="ctcSalCalcPfType" onchange="clearSalCalcBox_('ctcSalCalcBox')">
             <option value="percent">Percentage (12%)</option>
             <option value="fixed">Fixed ₹1,800</option>
+          </select>
+          <label class="field" style="margin-top:12px;">Employer's PF share added to CTC?</label>
+          <select class="field-input" id="ctcSalCalcPfInCtc" onchange="clearSalCalcBox_('ctcSalCalcBox')">
+            <option value="yes">Yes — both sides (employee + employer PF count towards CTC)</option>
+            <option value="no">No — employee side only (employer PF kept off the CTC figure)</option>
           </select>
         </div>
 
@@ -19239,11 +19254,21 @@ function salCalcTakeHomeOf_(b){
 // on top for them. Same EPF+EPS-only reading of the employer's PF (never
 // EDLI or PF Admin Charges — see the note in the stylesheet), plus Employer
 // ESI where the heading has ESI and it's covered.
+//
+// includeEmployerPf mirrors the CTC Calculator for Employer's own
+// "Employer's PF share added to CTC?" question, and only ever changes the
+// CTC figure — never Rate of Pay, and never Take Home, which stay bridged
+// by employee-side deductions alone (see salCalcTakeHomeOf_). The employer
+// still pays that share either way; this is purely which of the two ways a
+// company states a CTC. Employer ESI is deliberately NOT under the same
+// switch, matching the CTC Calculator for Employer exactly: the question
+// asked is about PF.
 // Diwali Bonus is a manually entered, per-employee figure
 // (diwaliBonusAmount) with no formula of its own — nothing to include here
 // for a hypothetical, not-yet-hired candidate.
-function salCalcCtcOf_(b){
-  const employerRetirement = b.pf.applicable ? (b.pf.employerEpf + b.pf.employerEps) : 0;
+function salCalcCtcOf_(b, includeEmployerPf){
+  const employerRetirement = (includeEmployerPf !== false && b.pf.applicable)
+    ? (b.pf.employerEpf + b.pf.employerEps) : 0;
   const employerEsi = b.esi.covered ? b.esi.employer : 0;
   return b.gross + employerRetirement + employerEsi;
 }
@@ -19280,6 +19305,7 @@ function renderRateCalculator(){
   const headingKey = document.getElementById('rateCalcHeading').value;
   const heading = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
   const pfType = document.getElementById('rateCalcPfType').value;
+  const pfInCtc = document.getElementById('rateCalcPfInCtc').value === 'yes';
   const rate = Number(document.getElementById('rateCalcAmount').value) || 0;
 
   if(!rate){
@@ -19293,7 +19319,7 @@ function renderRateCalculator(){
   // setting that means something here.
   const b = ctcCalcBreakdown_(rate, headingKey, pfType, 0, 0, false);
   const takeHome = salCalcTakeHomeOf_(b);
-  const ctc = salCalcCtcOf_(b);
+  const ctc = salCalcCtcOf_(b, pfInCtc);
   const money = rupees;
 
   box.innerHTML = `
@@ -19312,12 +19338,7 @@ function renderRateCalculator(){
       hrRow('ESI — employee', heading.esi ? (b.esi.covered ? money(b.esi.employee) : '—') : '—') +
       hrRow('PT', heading.pt ? money(b.pt) : '—') +
       `<div class="hr-sheet-net"><span>Take Home Salary</span><span>${money(takeHome)}</span></div>`)}
-    ${hrCard('<strong>CTC (monthly)</strong>',
-      hrRow('Rate of Pay', money(b.gross)) +
-      hrRow('PF — employer EPF/EPS', b.pf.applicable ? money(b.pf.employerEpf + b.pf.employerEps) : '—') +
-      hrRow('ESI — employer', heading.esi ? (b.esi.covered ? money(b.esi.employer) : '—') : '—') +
-      `<div class="hr-sheet-net"><span>CTC</span><span>${money(ctc)}</span></div>` +
-      '<p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Without EDLI, PF Admin Charges or Diwali Bonus — EDLI and Admin Charges are a separate, small statutory employer cost, and Diwali Bonus is a manually entered figure with no formula of its own.</p>')}
+    ${salCalcCtcCard_(b, heading, ctc, pfInCtc)}
   `;
 }
 
@@ -19339,6 +19360,7 @@ function renderTakeHomeCalculator(){
   const headingKey = document.getElementById('takeHomeCalcHeading').value;
   const heading = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
   const pfType = document.getElementById('takeHomeCalcPfType').value;
+  const pfInCtc = document.getElementById('takeHomeCalcPfInCtc').value === 'yes';
   const takeHomeTarget = Number(document.getElementById('takeHomeCalcAmount').value) || 0;
 
   if(!takeHomeTarget){
@@ -19352,7 +19374,7 @@ function renderTakeHomeCalculator(){
     salCalcTakeHomeOf_, false);
   const b = ctcCalcBreakdown_(rate, headingKey, pfType, 0, 0, false);
   const takeHome = salCalcTakeHomeOf_(b);
-  const ctc = salCalcCtcOf_(b);
+  const ctc = salCalcCtcOf_(b, pfInCtc);
   const money = rupees;
 
   box.innerHTML = `
@@ -19371,13 +19393,24 @@ function renderTakeHomeCalculator(){
       hrRow('ESI — employee', heading.esi ? (b.esi.covered ? money(b.esi.employee) : '—') : '—') +
       hrRow('PT', heading.pt ? money(b.pt) : '—') +
       `<div class="hr-sheet-net"><span>Take Home Salary</span><span>${money(takeHome)}</span></div>`)}
-    ${hrCard('<strong>CTC (monthly)</strong>',
-      hrRow('Rate of Pay', money(b.gross)) +
-      hrRow('PF — employer EPF/EPS', b.pf.applicable ? money(b.pf.employerEpf + b.pf.employerEps) : '—') +
-      hrRow('ESI — employer', heading.esi ? (b.esi.covered ? money(b.esi.employer) : '—') : '—') +
-      `<div class="hr-sheet-net"><span>CTC</span><span>${money(ctc)}</span></div>` +
-      '<p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Without EDLI, PF Admin Charges or Diwali Bonus — EDLI and Admin Charges are a separate, small statutory employer cost, and Diwali Bonus is a manually entered figure with no formula of its own.</p>')}
+    ${salCalcCtcCard_(b, heading, ctc, pfInCtc)}
   `;
+}
+
+// The CTC breakdown card, shared by all three calculators so they cannot
+// drift apart. When the employer's PF share is kept off the CTC figure the
+// row still shows what the employer actually pays, labelled so it is clear
+// it is not in the total — same wording the CTC Calculator for Employer
+// already uses for that case.
+function salCalcCtcCard_(b, heading, ctc, pfInCtc){
+  const money = rupees;
+  return hrCard('<strong>CTC (monthly)</strong>',
+    hrRow('Rate of Pay', money(b.gross)) +
+    hrRow(pfInCtc ? 'PF — employer EPF/EPS' : 'PF — employer EPF/EPS (paid, not counted in CTC)',
+      b.pf.applicable ? money(b.pf.employerEpf + b.pf.employerEps) : '—') +
+    hrRow('ESI — employer', heading.esi ? (b.esi.covered ? money(b.esi.employer) : '—') : '—') +
+    `<div class="hr-sheet-net"><span>CTC</span><span>${money(ctc)}</span></div>` +
+    '<p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Without EDLI, PF Admin Charges or Diwali Bonus — EDLI and Admin Charges are a separate, small statutory employer cost, and Diwali Bonus is a manually entered figure with no formula of its own.</p>');
 }
 
 // The third direction of the same one relationship: enter the monthly CTC
@@ -19403,6 +19436,7 @@ function renderCtcToSalaryCalculator(){
   const headingKey = document.getElementById('ctcSalCalcHeading').value;
   const heading = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
   const pfType = document.getElementById('ctcSalCalcPfType').value;
+  const pfInCtc = document.getElementById('ctcSalCalcPfInCtc').value === 'yes';
   const ctcTarget = Number(document.getElementById('ctcSalCalcAmount').value) || 0;
 
   if(!ctcTarget){
@@ -19410,10 +19444,15 @@ function renderCtcToSalaryCalculator(){
     return;
   }
 
-  const rate = ctcCalcSolveRate_(ctcTarget, headingKey, pfType, 0, 0, salCalcCtcOf_, false);
+  // On this tab the toggle changes the answer, not just the last line: the
+  // same CTC figure means a different Rate of Pay depending on whether the
+  // employer's PF share is counted inside it, so it has to steer the solve
+  // as well as the display.
+  const ctcOf = b => salCalcCtcOf_(b, pfInCtc);
+  const rate = ctcCalcSolveRate_(ctcTarget, headingKey, pfType, 0, 0, ctcOf, false);
   const b = ctcCalcBreakdown_(rate, headingKey, pfType, 0, 0, false);
   const takeHome = salCalcTakeHomeOf_(b);
-  const ctc = salCalcCtcOf_(b);
+  const ctc = ctcOf(b);
   const money = rupees;
 
   // CTC is very slightly non-monotonic in Rate of Pay for an ESI heading:
@@ -19442,12 +19481,7 @@ function renderCtcToSalaryCalculator(){
       hrRow('ESI — employee', heading.esi ? (b.esi.covered ? money(b.esi.employee) : '—') : '—') +
       hrRow('PT', heading.pt ? money(b.pt) : '—') +
       `<div class="hr-sheet-net"><span>Take Home Salary</span><span>${money(takeHome)}</span></div>`)}
-    ${hrCard('<strong>CTC (monthly)</strong>',
-      hrRow('Rate of Pay', money(b.gross)) +
-      hrRow('PF — employer EPF/EPS', b.pf.applicable ? money(b.pf.employerEpf + b.pf.employerEps) : '—') +
-      hrRow('ESI — employer', heading.esi ? (b.esi.covered ? money(b.esi.employer) : '—') : '—') +
-      `<div class="hr-sheet-net"><span>CTC</span><span>${money(ctc)}</span></div>` +
-      '<p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Without EDLI, PF Admin Charges or Diwali Bonus — EDLI and Admin Charges are a separate, small statutory employer cost, and Diwali Bonus is a manually entered figure with no formula of its own.</p>')}
+    ${salCalcCtcCard_(b, heading, ctc, pfInCtc)}
   `;
 }
 
