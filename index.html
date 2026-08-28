@@ -18959,6 +18959,25 @@ function salCalcTakeHomeOf_(b, pfBothSides){
   const employerRetirement = b.pf.applicable ? (b.pf.employerEpf + b.pf.employerEps) : 0;
   return b.netMonthly - (pfBothSides ? employerRetirement : 0);
 }
+// CTC here — unlike the CTC Calculator's own monthlyCtc/annualCtc, which
+// the "both sides" toggle there decides to include or exclude — is always
+// the FULL cost to company, independent of these two tabs' own "both sides"
+// toggle: that toggle only ever decides whether Take Home absorbs the
+// employer's PF share, a Take-Home-negotiation question, not a "does the
+// employer really pay this" one. The employer's PF and ESI contributions
+// are statutory and paid either way, so CTC always includes them, and
+// changing whether a candidate's Take Home is quoted net-of-employer-PF
+// must never make the actual cost to the company look smaller. Same
+// EPF+EPS-only reading as salCalcTakeHomeOf_ (never EDLI or PF Admin
+// Charges), plus Employer ESI where the heading has ESI and it's covered.
+// Diwali Bonus is a manually entered, per-employee figure
+// (diwaliBonusAmount) with no formula of its own — nothing to include here
+// for a hypothetical, not-yet-hired candidate.
+function salCalcCtcOf_(b){
+  const employerRetirement = b.pf.applicable ? (b.pf.employerEpf + b.pf.employerEps) : 0;
+  const employerEsi = b.esi.covered ? b.esi.employer : 0;
+  return b.gross + employerRetirement + employerEsi;
+}
 // Changing Salary Heading, PF Contribution, the "both sides" toggle, or the
 // amount does NOT recalculate on its own — Calculate has to be pressed
 // again, same as the CTC Calculator. Left alone, the result panel below
@@ -19002,12 +19021,14 @@ function renderRateCalculator(){
 
   const b = ctcCalcBreakdown_(rate, headingKey, pfType, 0, 0, pfBothSides);
   const takeHome = salCalcTakeHomeOf_(b, pfBothSides);
+  const ctc = salCalcCtcOf_(b);
   const money = rupees;
 
   box.innerHTML = `
     ${hrCard('<strong>Result</strong>',
       hrRow('RATE OF PAY', '<strong style="font-size:16px;">' + money(b.gross) + '</strong>') +
-      hrRow('TAKE HOME SALARY', '<strong style="font-size:16px;">' + money(takeHome) + '</strong>'),
+      hrRow('TAKE HOME SALARY', '<strong style="font-size:16px;">' + money(takeHome) + '</strong>') +
+      hrRow('CTC (monthly)', '<strong style="font-size:16px;">' + money(ctc) + '</strong>'),
       'sal-grand-card')}
     ${hrCard('<strong>Rate of Pay breakdown</strong>',
       hrRow('Basic', money(b.basic)) +
@@ -19020,6 +19041,12 @@ function renderRateCalculator(){
       hrRow('PT', heading.pt ? money(b.pt) : '—') +
       (pfBothSides ? hrRow('PF — employer EPF/EPS (absorbed into Take Home)', b.pf.applicable ? money(b.pf.employerEpf + b.pf.employerEps) : '—') : '') +
       `<div class="hr-sheet-net"><span>Take Home Salary</span><span>${money(takeHome)}</span></div>`)}
+    ${hrCard('<strong>CTC (monthly)</strong>',
+      hrRow('Rate of Pay', money(b.gross)) +
+      hrRow('PF — employer EPF/EPS', b.pf.applicable ? money(b.pf.employerEpf + b.pf.employerEps) : '—') +
+      hrRow('ESI — employer', heading.esi ? (b.esi.covered ? money(b.esi.employer) : '—') : '—') +
+      `<div class="hr-sheet-net"><span>CTC</span><span>${money(ctc)}</span></div>` +
+      '<p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Without EDLI, PF Admin Charges or Diwali Bonus — EDLI and Admin Charges are a separate, small statutory employer cost, and Diwali Bonus is a manually entered figure with no formula of its own.</p>')}
   `;
 }
 
@@ -19053,12 +19080,14 @@ function renderTakeHomeCalculator(){
     b => salCalcTakeHomeOf_(b, pfBothSides), pfBothSides);
   const b = ctcCalcBreakdown_(rate, headingKey, pfType, 0, 0, pfBothSides);
   const takeHome = salCalcTakeHomeOf_(b, pfBothSides);
+  const ctc = salCalcCtcOf_(b);
   const money = rupees;
 
   box.innerHTML = `
     ${hrCard('<strong>Result</strong>',
       hrRow('RATE OF PAY', '<strong style="font-size:16px;">' + money(b.gross) + '</strong>') +
-      hrRow('TAKE HOME SALARY', '<strong style="font-size:16px;">' + money(takeHome) + '</strong>'),
+      hrRow('TAKE HOME SALARY', '<strong style="font-size:16px;">' + money(takeHome) + '</strong>') +
+      hrRow('CTC (monthly)', '<strong style="font-size:16px;">' + money(ctc) + '</strong>'),
       'sal-grand-card')}
     ${hrCard('<strong>Rate of Pay breakdown</strong>',
       hrRow('Basic', money(b.basic)) +
@@ -19071,6 +19100,12 @@ function renderTakeHomeCalculator(){
       hrRow('PT', heading.pt ? money(b.pt) : '—') +
       (pfBothSides ? hrRow('PF — employer EPF/EPS (absorbed into Take Home)', b.pf.applicable ? money(b.pf.employerEpf + b.pf.employerEps) : '—') : '') +
       `<div class="hr-sheet-net"><span>Take Home Salary</span><span>${money(takeHome)}</span></div>`)}
+    ${hrCard('<strong>CTC (monthly)</strong>',
+      hrRow('Rate of Pay', money(b.gross)) +
+      hrRow('PF — employer EPF/EPS', b.pf.applicable ? money(b.pf.employerEpf + b.pf.employerEps) : '—') +
+      hrRow('ESI — employer', heading.esi ? (b.esi.covered ? money(b.esi.employer) : '—') : '—') +
+      `<div class="hr-sheet-net"><span>CTC</span><span>${money(ctc)}</span></div>` +
+      '<p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Without EDLI, PF Admin Charges or Diwali Bonus — EDLI and Admin Charges are a separate, small statutory employer cost, and Diwali Bonus is a manually entered figure with no formula of its own.</p>')}
   `;
 }
 
