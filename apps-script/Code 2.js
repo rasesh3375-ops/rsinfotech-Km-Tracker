@@ -1337,6 +1337,146 @@ function sendDailyDigestEmail() {
     todayLog.length + ' activity log entr(y/ies).');
 }
 
+// ===== Monthly increment reminder =====
+// "Whose increment is coming up next month", emailed on the 30th so there is
+// a full month's notice to agree the figures and prepare the letters.
+//
+// One-time setup: open this project in the Apps Script editor, pick
+// createIncrementReminderTrigger from the function dropdown and press Run.
+// That is the only step. Re-running it is safe — it clears its own previous
+// trigger first, so it can never end up sending twice.
+// removeIncrementReminderTrigger undoes it.
+//
+// The trigger runs DAILY and the function returns immediately unless today
+// is the send day. That is deliberate rather than lazy: Apps Script's
+// onMonthDay(30) simply never fires in February, so one month would be
+// silently skipped every year. isIncrementReminderSendDay_ sends on the
+// 30th, or on the last day of the month when the month is shorter than
+// that — one email a month, every month, February included.
+var INCREMENT_REMINDER_EMAIL = 'rasesh@rsinfotech.net';
+var INCREMENT_REMINDER_DAY = 30;
+var INCREMENT_REMINDER_HOUR = 10; // 10 AM IST
+
+function createIncrementReminderTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'sendIncrementReminderEmail') {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+  ScriptApp.newTrigger('sendIncrementReminderEmail')
+    .timeBased()
+    .everyDays(1)
+    .atHour(INCREMENT_REMINDER_HOUR)
+    .inTimezone('Asia/Kolkata')
+    .create();
+  Logger.log('Increment reminder trigger created — sendIncrementReminderEmail now runs daily around ' +
+    INCREMENT_REMINDER_HOUR + ':00 IST and emails only on day ' + INCREMENT_REMINDER_DAY +
+    ' (or the last day of a shorter month).');
+}
+
+// Undoes createIncrementReminderTrigger — stops the monthly email without
+// touching the daily digest or anything else. Run from the editor the same way.
+function removeIncrementReminderTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var removed = 0;
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'sendIncrementReminderEmail') {
+      ScriptApp.deleteTrigger(triggers[i]);
+      removed++;
+    }
+  }
+  Logger.log('Removed ' + removed + ' increment reminder trigger(s).');
+}
+
+// The 30th, or the last day of the month when the month is shorter than that.
+// m is 1-based; new Date(y, m, 0) is the last day of month m.
+function isIncrementReminderSendDay_(y, m, d) {
+  var lastDay = new Date(y, m, 0).getDate();
+  return d === Math.min(INCREMENT_REMINDER_DAY, lastDay);
+}
+
+// 'YYYY-MM' of the month after the one given, rolling the year over in December.
+function nextMonthYm_(y, m) {
+  var ny = m === 12 ? y + 1 : y;
+  var nm = m === 12 ? 1 : m + 1;
+  return ny + '-' + (nm < 10 ? '0' + nm : String(nm));
+}
+
+// The function the trigger calls. Also safe to run by hand from the editor at
+// any time to see the email immediately — pass true to skip the day check.
+function sendIncrementReminderEmail(force) {
+  var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+  var y = Number(istToday.slice(0, 4));
+  var m = Number(istToday.slice(5, 7));
+  var d = Number(istToday.slice(8, 10));
+  if (force !== true && !isIncrementReminderSendDay_(y, m, d)) return;
+
+  var targetYm = nextMonthYm_(y, m);
+  var sheet = getSheet_();
+  var employees = allEmployeesFromRows_(sheet.getDataRange().getValues());
+
+  var due = employees.filter(function (e) {
+    if (!e || e.employmentStatus === 'left') return false;
+    if (!e.nextIncrement) return false;
+    if (String(e.nextIncrement).slice(0, 7) !== targetYm) return false;
+    // Already dealt with through Record Increment — the same "Done" test the
+    // employee's own screen uses: a salary history entry effective on or
+    // after the due date means the increment has been recorded, so there is
+    // nothing left to chase and it is left off the list.
+    var latestFrom = '';
+    var hist = (e.salaryHistory && e.salaryHistory.length) ? e.salaryHistory : [];
+    for (var i = 0; i < hist.length; i++) {
+      if (hist[i] && hist[i].from && hist[i].from > latestFrom) latestFrom = hist[i].from;
+    }
+    return !(latestFrom && latestFrom >= e.nextIncrement);
+  }).sort(function (a, b) {
+    return String(a.nextIncrement).localeCompare(String(b.nextIncrement));
+  });
+
+  var esc = function (s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  };
+  // dd/mm/yyyy, the same way every date is written everywhere else in the app.
+  var niceDate = function (iso) {
+    var p = String(iso).split('-');
+    return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : String(iso);
+  };
+  var monthName = Utilities.formatDate(
+    new Date(Number(targetYm.slice(0, 4)), Number(targetYm.slice(5, 7)) - 1, 1),
+    'Asia/Kolkata', 'MMMM yyyy');
+
+  var subject = 'R.S. Infotech — Increments due in ' + monthName + ' (' + due.length + ')';
+  var html, plain;
+  if (!due.length) {
+    html = '<p>No increments are due in ' + esc(monthName) + '.</p>';
+    plain = 'No increments are due in ' + monthName + '.';
+  } else {
+    html = '<p>' + due.length + ' increment' + (due.length === 1 ? ' is' : 's are') +
+      ' due in <strong>' + esc(monthName) + '</strong>:</p>' +
+      '<table cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;' +
+      'font-family:Arial,sans-serif;font-size:13px;">' +
+      '<tr><th align="left">Employee</th><th align="left">Designation</th>' +
+      '<th align="left">Increment due</th></tr>' +
+      due.map(function (e) {
+        return '<tr><td>' + esc(e.name || e.id) + '</td><td>' + esc(e.designation || '') +
+          '</td><td>' + esc(niceDate(e.nextIncrement)) + '</td></tr>';
+      }).join('') +
+      '</table>' +
+      '<p style="color:#666;font-size:12px;">Anyone whose increment has already been recorded ' +
+      'through Record Increment is left off this list.</p>';
+    plain = due.length + ' increment(s) due in ' + monthName + ':\n\n' +
+      due.map(function (e) {
+        return '  ' + (e.name || e.id) + ' — ' + (e.designation || '') +
+          ' — due ' + niceDate(e.nextIncrement);
+      }).join('\n');
+  }
+
+  MailApp.sendEmail({ to: INCREMENT_REMINDER_EMAIL, subject: subject, body: plain, htmlBody: html });
+  Logger.log('Increment reminder sent to ' + INCREMENT_REMINDER_EMAIL + ' — ' + due.length +
+    ' due in ' + monthName + '.');
+}
+
 // One-off, run once from this editor (function dropdown -> restorePayrollDocsPf202526
 // -> Run), same as organiseDriveByYear/migrateAttendanceToFY. Not called by the web app.
 //
