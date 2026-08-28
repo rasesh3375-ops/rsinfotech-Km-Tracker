@@ -2839,6 +2839,12 @@
                 <span class="gen-accordion-desc">Enter a new employee's agreed Take Home Salary and see the Rate of Pay it needs.</span></span>
               <span class="gen-accordion-chevron">▼</span>
             </button>
+            <button type="button" class="gen-accordion-header" data-target="genSecCtcToSalaryCalculator" onclick="openCtcToSalaryCalculatorCard()" aria-expanded="false">
+              <span class="gen-accordion-num">17</span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Monthly CTC Calculator</strong>
+                <span class="gen-accordion-desc">Enter a new employee's monthly CTC and see the Rate of Pay and Take Home Salary it works out to.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
+            </button>
           </div>
         </div>
 
@@ -3328,6 +3334,32 @@
         <button class="btn full" onclick="withBusy(this,'Calculating…',renderTakeHomeCalculator)">Calculate</button>
         <div style="height:14px"></div>
         <div id="takeHomeCalcBox"></div>
+      </section>
+      </div>
+
+      <div id="genSecCtcToSalaryCalculator" class="hidden gen-accordion-body">
+      <section class="block">
+        <h2 style="margin:0 0 4px;">Monthly CTC Calculator</h2>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">For a new employee — enter a monthly CTC and see the Rate of Pay and Take Home Salary it works out to, using the same Salary Heading split and PF/ESI/PT rules as the other two calculators. Not tied to any employee record; nothing here is saved.</p>
+
+        <label class="field">Salary Heading</label>
+        <select class="field-input" id="ctcSalCalcHeading" onchange="updateCtcSalCalcPfTypeVisibility_();clearSalCalcBox_('ctcSalCalcBox')"></select>
+
+        <div id="ctcSalCalcPfTypeWrap" style="margin-top:12px;">
+          <label class="field">PF Contribution</label>
+          <select class="field-input" id="ctcSalCalcPfType" onchange="clearSalCalcBox_('ctcSalCalcBox')">
+            <option value="percent">Percentage (12%)</option>
+            <option value="fixed">Fixed ₹1,800</option>
+          </select>
+        </div>
+
+        <label class="field" style="margin-top:12px;">CTC (monthly)</label>
+        <input class="field-input" type="number" id="ctcSalCalcAmount" placeholder="e.g. 33800" oninput="clearSalCalcBox_('ctcSalCalcBox')">
+
+        <div style="height:14px"></div>
+        <button class="btn full" onclick="withBusy(this,'Calculating…',renderCtcToSalaryCalculator)">Calculate</button>
+        <div style="height:14px"></div>
+        <div id="ctcSalCalcBox"></div>
       </section>
       </div>
 
@@ -19348,6 +19380,77 @@ function renderTakeHomeCalculator(){
   `;
 }
 
+// The third direction of the same one relationship: enter the monthly CTC
+// and get back the Rate of Pay and Take Home Salary it works out to.
+// Identical arithmetic to the other two tabs — same ctcCalcBreakdown_, same
+// salCalcTakeHomeOf_, same salCalcCtcOf_ — only which of the three figures
+// is the known one changes, so all three tabs always agree.
+function openCtcToSalaryCalculatorCard(){
+  openGeneratorCard('genSecCtcToSalaryCalculator');
+  const sel = document.getElementById('ctcSalCalcHeading');
+  if(sel && !sel.options.length){
+    sel.innerHTML = SALARY_HEADING_ORDER.map(k => `<option value="${k}">${escapeHtml(SALARY_HEADINGS[k].label)}</option>`).join('');
+  }
+  updateCtcSalCalcPfTypeVisibility_();
+}
+function updateCtcSalCalcPfTypeVisibility_(){
+  const heading = SALARY_HEADINGS[(document.getElementById('ctcSalCalcHeading') || {}).value] || SALARY_HEADINGS.managerial;
+  const wrap = document.getElementById('ctcSalCalcPfTypeWrap');
+  if(wrap) wrap.classList.toggle('hidden', !heading.pf);
+}
+function renderCtcToSalaryCalculator(){
+  const box = document.getElementById('ctcSalCalcBox');
+  const headingKey = document.getElementById('ctcSalCalcHeading').value;
+  const heading = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
+  const pfType = document.getElementById('ctcSalCalcPfType').value;
+  const ctcTarget = Number(document.getElementById('ctcSalCalcAmount').value) || 0;
+
+  if(!ctcTarget){
+    box.innerHTML = '<div class="empty">Enter a monthly CTC to calculate.</div>';
+    return;
+  }
+
+  const rate = ctcCalcSolveRate_(ctcTarget, headingKey, pfType, 0, 0, salCalcCtcOf_, false);
+  const b = ctcCalcBreakdown_(rate, headingKey, pfType, 0, 0, false);
+  const takeHome = salCalcTakeHomeOf_(b);
+  const ctc = salCalcCtcOf_(b);
+  const money = rupees;
+
+  // CTC is very slightly non-monotonic in Rate of Pay for an ESI heading:
+  // crossing the ESI ceiling drops the employer's ESI share to nil, so a
+  // narrow band of CTC figures just under that boundary cannot be produced
+  // by ANY Rate of Pay. Rather than silently returning the nearest solvable
+  // answer as if it were the one asked for — on a screen whose whole job is
+  // to be exact — this says so and shows what was actually reached.
+  const missedBy = Math.abs(ctc - ctcTarget);
+  const unreachable = missedBy > 1 ? `<p style="font-size:11.5px;margin:8px 0 0;" class="pol-warn">No Rate of Pay produces a CTC of exactly ${money(ctcTarget)} on this heading — crossing the ESI ceiling removes the employer's ESI share, so a narrow band of CTC figures just below it cannot occur. The closest reachable CTC is ${money(ctc)}, shown above.</p>` : '';
+
+  box.innerHTML = `
+    ${hrCard('<strong>Result</strong>',
+      hrRow('RATE OF PAY', '<strong style="font-size:16px;">' + money(b.gross) + '</strong>') +
+      hrRow('TAKE HOME SALARY', '<strong style="font-size:16px;">' + money(takeHome) + '</strong>') +
+      hrRow('CTC (monthly)', '<strong style="font-size:16px;">' + money(ctc) + '</strong>'),
+      'sal-grand-card')}
+    ${unreachable}
+    ${hrCard('<strong>Rate of Pay breakdown</strong>',
+      hrRow('Basic', money(b.basic)) +
+      (heading.flat ? '' : hrRow('HRA', money(b.hra))) +
+      (heading.flat || !heading.ltaPct ? '' : hrRow('LTA', money(b.lta))) +
+      `<div class="hr-sheet-net"><span>Rate of Pay</span><span>${money(b.gross)}</span></div>`)}
+    ${hrCard('<strong>Deductions (monthly)</strong>',
+      hrRow('PF — employee', b.pf.applicable ? money(b.pf.employee) : '—') +
+      hrRow('ESI — employee', heading.esi ? (b.esi.covered ? money(b.esi.employee) : '—') : '—') +
+      hrRow('PT', heading.pt ? money(b.pt) : '—') +
+      `<div class="hr-sheet-net"><span>Take Home Salary</span><span>${money(takeHome)}</span></div>`)}
+    ${hrCard('<strong>CTC (monthly)</strong>',
+      hrRow('Rate of Pay', money(b.gross)) +
+      hrRow('PF — employer EPF/EPS', b.pf.applicable ? money(b.pf.employerEpf + b.pf.employerEps) : '—') +
+      hrRow('ESI — employer', heading.esi ? (b.esi.covered ? money(b.esi.employer) : '—') : '—') +
+      `<div class="hr-sheet-net"><span>CTC</span><span>${money(ctc)}</span></div>` +
+      '<p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Without EDLI, PF Admin Charges or Diwali Bonus — EDLI and Admin Charges are a separate, small statutory employer cost, and Diwali Bonus is a manually entered figure with no formula of its own.</p>')}
+  `;
+}
+
 // ---- bulk employee import ----
 async function saveCompanyProfileFromForm(){
   const msg = document.getElementById('coMsg');
@@ -21411,13 +21514,13 @@ function clearGeneratorEmployeeFields(){
 // Documents used to be one more card wrapping seven sections together
 // (Payroll, Apprentice, Holiday List upload, Company Profile, Important
 // Documents, Uniform/ID, Handbook) — they're peers here now, not nested
-// under it, so this list has sixteen entries where the old card grid had
+// under it, so this list has seventeen entries where the old card grid had
 // eight, and there is no "genSecOfficeDocuments" any more.
 const GENERATOR_SECTIONS = ['genSecRoleReports','genSecLetters','genSecChecklists',
   'genSecHolidayList','genSecLeaveEncashment','genSecLetterhead',
   'genSecPayrollDocs','genSecApprenticeDocs','genSecHolidayUpload','genSecCompanyProfile',
   'genSecImportantDocs','genSecUniformId','genSecHandbook','genSecCtcCalculator',
-  'genSecRateCalculator','genSecTakeHomeCalculator'];
+  'genSecRateCalculator','genSecTakeHomeCalculator','genSecCtcToSalaryCalculator'];
 // Syncs every header's .active class, chevron and aria-expanded to whichever
 // one section (if any) is actually open — called after every open/collapse
 // rather than toggled by hand at each call site, so it can never drift out
