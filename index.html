@@ -3249,23 +3249,23 @@
         <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">For a new employee — enter a Rate of Pay and see the exact Take Home Salary it produces, using the same Salary Heading split and PF/ESI/PT rules the Salary Sheet uses. Not tied to any employee record; nothing here is saved.</p>
 
         <label class="field">Salary Heading</label>
-        <select class="field-input" id="rateCalcHeading" onchange="updateRateCalcPfTypeVisibility_()"></select>
+        <select class="field-input" id="rateCalcHeading" onchange="updateRateCalcPfTypeVisibility_();clearSalCalcBox_('rateCalcBox')"></select>
 
         <div id="rateCalcPfTypeWrap" style="margin-top:12px;">
           <label class="field">PF Contribution</label>
-          <select class="field-input" id="rateCalcPfType">
+          <select class="field-input" id="rateCalcPfType" onchange="clearSalCalcBox_('rateCalcBox')">
             <option value="percent">Percentage (12%)</option>
             <option value="fixed">Fixed ₹1,800</option>
           </select>
           <label class="field" style="margin-top:12px;">Employer's PF share deducted from Take Home?</label>
-          <select class="field-input" id="rateCalcPfBoth">
+          <select class="field-input" id="rateCalcPfBoth" onchange="clearSalCalcBox_('rateCalcBox')">
             <option value="no">No — employee side only (standard: Take Home is Rate of Pay minus the employee's own PF/ESI/PT)</option>
             <option value="yes">Yes — both sides (Take Home must also absorb the employer's PF share)</option>
           </select>
         </div>
 
         <label class="field" style="margin-top:12px;">Rate of Pay (monthly)</label>
-        <input class="field-input" type="number" id="rateCalcAmount" placeholder="e.g. 30000">
+        <input class="field-input" type="number" id="rateCalcAmount" placeholder="e.g. 30000" oninput="clearSalCalcBox_('rateCalcBox')">
 
         <div style="height:14px"></div>
         <button class="btn full" onclick="withBusy(this,'Calculating…',renderRateCalculator)">Calculate</button>
@@ -3280,23 +3280,23 @@
         <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">For a new employee — enter an agreed Take Home Salary and see the Rate of Pay it needs, using the same Salary Heading split and PF/ESI/PT rules the Salary Sheet uses. Not tied to any employee record; nothing here is saved.</p>
 
         <label class="field">Salary Heading</label>
-        <select class="field-input" id="takeHomeCalcHeading" onchange="updateTakeHomeCalcPfTypeVisibility_()"></select>
+        <select class="field-input" id="takeHomeCalcHeading" onchange="updateTakeHomeCalcPfTypeVisibility_();clearSalCalcBox_('takeHomeCalcBox')"></select>
 
         <div id="takeHomeCalcPfTypeWrap" style="margin-top:12px;">
           <label class="field">PF Contribution</label>
-          <select class="field-input" id="takeHomeCalcPfType">
+          <select class="field-input" id="takeHomeCalcPfType" onchange="clearSalCalcBox_('takeHomeCalcBox')">
             <option value="percent">Percentage (12%)</option>
             <option value="fixed">Fixed ₹1,800</option>
           </select>
           <label class="field" style="margin-top:12px;">Employer's PF share deducted from Take Home?</label>
-          <select class="field-input" id="takeHomeCalcPfBoth">
+          <select class="field-input" id="takeHomeCalcPfBoth" onchange="clearSalCalcBox_('takeHomeCalcBox')">
             <option value="no">No — employee side only (standard: Take Home is Rate of Pay minus the employee's own PF/ESI/PT)</option>
             <option value="yes">Yes — both sides (an agreed Take Home must also absorb the employer's PF share — e.g. a Take Home agreed before PF applied)</option>
           </select>
         </div>
 
         <label class="field" style="margin-top:12px;">Take Home Salary (monthly)</label>
-        <input class="field-input" type="number" id="takeHomeCalcAmount" placeholder="e.g. 30000">
+        <input class="field-input" type="number" id="takeHomeCalcAmount" placeholder="e.g. 30000" oninput="clearSalCalcBox_('takeHomeCalcBox')">
 
         <div style="height:14px"></div>
         <button class="btn full" onclick="withBusy(this,'Calculating…',renderTakeHomeCalculator)">Calculate</button>
@@ -18958,6 +18958,20 @@ function renderCtcCalculator(){
 function salCalcTakeHomeOf_(b, pfBothSides){
   const employerRetirement = b.pf.applicable ? (b.pf.employerEpf + b.pf.employerEps) : 0;
   return b.netMonthly - (pfBothSides ? employerRetirement : 0);
+}
+// Changing Salary Heading, PF Contribution, the "both sides" toggle, or the
+// amount does NOT recalculate on its own — Calculate has to be pressed
+// again, same as the CTC Calculator. Left alone, the result panel below
+// would keep showing the answer for whatever was selected the LAST time
+// Calculate ran, which reads as if the still-visible number reflects the
+// now-different dropdowns — reported as PF Contribution switched to Fixed
+// ₹1,800 but the employer figure still showing the Percentage-type amount,
+// because Calculate had not been pressed again since the switch. Clearing
+// the panel the moment any input changes makes that state impossible to
+// misread: a number on screen always matches what is currently selected.
+function clearSalCalcBox_(boxId){
+  const box = document.getElementById(boxId);
+  if(box) box.innerHTML = '<div class="empty">Inputs changed — press Calculate to see the updated result.</div>';
 }
 
 function openRateCalculatorCard(){
