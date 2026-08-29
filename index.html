@@ -14289,7 +14289,11 @@ async function buildHrDashboardHome(box){
   // KPI fill themselves in when the reads land.
   dashIncrementRows = buildIncrementRows(onRoll);
   renderIncrementWidget();
-  loadDashboardAbsentToday(onRoll);
+  // Not awaited, so nothing downstream catches a throw from it. Anything that
+  // escapes is logged rather than vanishing — an unhandled rejection here is
+  // invisible on screen and leaves half the dashboard on its placeholders,
+  // which is exactly how the absent count sat on "—" without a clue why.
+  loadDashboardAbsentToday(onRoll).catch(e => console.error('Absent-today load failed', e));
 }
 
 // ---- absent today ----
@@ -14407,10 +14411,19 @@ async function loadDashboardAbsentToday(onRoll){
   // side of the month to judge a Sunday/holiday sitting right at the 1st or
   // last of it. See the identical comment on the Attendance Sheet's own
   // fetch, which had the same gap.
-  const byId = await Promise.race([
-    getAttendanceRange(onRoll.map(e => e.id), shiftDateStr(monthStart, -1), shiftDateStr(monthEnd, 1)),
-    new Promise(r => setTimeout(() => r({}), ms))
-  ]);
+  // Through read(), which catches. The race used to be built inline here with
+  // no catch on the fetch, so a REJECTED attendance read — a backend hiccup, a
+  // dropped connection — rejected the race, threw out of this function, and
+  // took everything after it with it: the caller does not await this, so the
+  // throw went nowhere and simply stopped. Both KPI numbers sat on their "—"
+  // placeholder and Policy Alerts sat on "Checking policy…" indefinitely, with
+  // no error on screen to explain why. The timeout alone never covered that;
+  // it only handles a read that is slow, not one that fails.
+  //
+  // read() was written for exactly this and then not used — it was declared a
+  // few lines above and called nowhere.
+  const byId = (await read(getAttendanceRange(onRoll.map(e => e.id),
+    shiftDateStr(monthStart, -1), shiftDateStr(monthEnd, 1)))) || {};
   const atts = onRoll.map(e => byId[e.id] || null);
   if(token !== dashAbsentRender) return;
 
@@ -14455,11 +14468,21 @@ async function loadDashboardAbsentToday(onRoll){
   if(openPanel && !openPanel.classList.contains('hidden')) renderAbsentPanel();
   const openLeave = document.getElementById('dashLeavePanel');
   if(openLeave && !openLeave.classList.contains('hidden')) renderLeavePanel();
+  // Nobody could be checked at all — the read failed or timed out. "0" would be
+  // a lie in that case, and the more useful lie is none: the placeholder stays
+  // and the tooltip says why, rather than reporting a clean day that nobody
+  // actually verified.
+  const nothingRead = onRoll.length > 0 && unread === onRoll.length;
   const leaveCountEl = document.getElementById('dashLeaveCount');
-  if(leaveCountEl) leaveCountEl.textContent = dashLeaveList.length;
+  if(leaveCountEl){
+    leaveCountEl.textContent = nothingRead ? '—' : dashLeaveList.length;
+    leaveCountEl.title = nothingRead ? 'Attendance did not load — tap to retry.' : '';
+  }
   if(countEl){
-    countEl.textContent = absent;
-    if(unread) countEl.title = unread + ' employee(s) could not be checked — attendance did not load.';
+    countEl.textContent = nothingRead ? '—' : absent;
+    countEl.title = nothingRead
+      ? 'Attendance did not load — tap to retry.'
+      : (unread ? unread + ' employee(s) could not be checked — attendance did not load.' : '');
   }
   const holidayMap = await getHolidayMap_local();
   renderPolicyAlerts(onRoll, byId, holidayMap);
