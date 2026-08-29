@@ -16634,7 +16634,49 @@ function renderDocInViewer_(box, data, label, retryOnclick){
 // https://drive.google.com/file/d/<id>/view. HR-only on the backend —
 // every one of these belongs to one specific employee or is HR's own
 // office paperwork, unlike the employee handbook below.
-async function viewEmployeeDocument(driveUrl, label){
+// Google's own preview page for a Drive file, the standard embeddable one.
+// Loading it costs this app's backend nothing at all: the browser fetches it
+// straight from Google, so none of the read-whole-file, base64-encode,
+// relay-through-Apps-Script work below happens.
+//
+// It shows the document only to a browser already signed in to a Google account
+// that can read the file, which is why the file's sharing is NOT changed — the
+// documents stay exactly as private as they were. For the audience that matters
+// that is the right trade: every document opened through here belongs to one
+// employee and is HR-only on the backend, and HR is the account that owns the
+// Drive. Anyone else sees Google's own sign-in page inside the frame instead of
+// the document, which is why the slower path stays one click away below.
+//
+// There is no way to tell from here which of the two they got — the frame is
+// another origin and its contents cannot be read — so the fallback is offered
+// plainly rather than guessed at.
+function driveEmbedUrl_(fileId){
+  return 'https://drive.google.com/file/d/' + encodeURIComponent(fileId) + '/preview';
+}
+
+function renderDrivePreview_(box, fileId, label, safeUrl, safeLabel){
+  box.innerHTML = `<div style="padding:16px;display:flex;flex-direction:column;gap:10px;height:100%;box-sizing:border-box;">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <a class="btn ghost" href="https://drive.google.com/file/d/${encodeURIComponent(fileId)}/view" target="_blank" rel="noopener">Open in Drive</a>
+      <button class="btn ghost" onclick="viewEmployeeDocumentViaBackend_('${safeUrl}','${safeLabel}')">Not showing? Load it here instead</button>
+    </div>
+    <div style="flex:1;min-height:70vh;">
+      <iframe src="${driveEmbedUrl_(fileId)}" title="${escapeHtml(label)}"
+        style="width:100%;height:100%;min-height:70vh;border:1px solid var(--line);border-radius:8px;background:#fff;"
+        allow="autoplay"></iframe>
+    </div>
+    <p style="font-size:11.5px;color:var(--muted);margin:0;">Loaded straight from Google Drive. If this area shows a Google sign-in
+      or "request access" instead of the document, use "Load it here instead" — that reads it through the app and works without
+      being signed in to Google.</p>
+  </div>`;
+}
+
+// The original path, kept whole: the backend reads the file with its own Drive
+// access and hands the bytes back over the session already in use, so it needs
+// no Google account on this end. Slower — the file is base64-encoded and
+// relayed through Apps Script, which adds a third to its size — but it is what
+// makes a document openable by someone who is not signed in to Drive at all.
+async function viewEmployeeDocumentViaBackend_(driveUrl, label){
   const m = /\/d\/([^/]+)/.exec(driveUrl || '');
   const box = document.getElementById('docViewerRoot');
   if(!m || !box){ alert('Could not open that document.'); return; }
@@ -16649,6 +16691,9 @@ async function viewEmployeeDocument(driveUrl, label){
   // puts it back.
   box.classList.remove('hidden');
   box.innerHTML = '<div class="empty">Opening ' + escapeHtml(label) + '…</div>';
+  // Reached either directly or from the preview's fallback button, in which
+  // case the viewer is already open — openFullscreenView on the box that is
+  // already showing is a no-op, so this is safe both ways.
   openFullscreenView(label, 'docViewerRoot');
   try{
     // A raised budget AND a raised per-attempt cap, not just more retries —
@@ -16665,13 +16710,27 @@ async function viewEmployeeDocument(driveUrl, label){
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'getDriveFile', token: sessionToken, fileId: m[1] })
     }, 2, 42000, 20000);
-    renderDocInViewer_(box, await res.json(), label, 'viewEmployeeDocument(\'' + safeUrl + '\',\'' + safeLabel + '\')');
+    renderDocInViewer_(box, await res.json(), label, 'viewEmployeeDocumentViaBackend_(\'' + safeUrl + '\',\'' + safeLabel + '\')');
   }catch(e){
-    // A retry button rather than only the message — closing and reopening
-    // the viewer was the only way to try again before this.
+    // Retries the slow path, not the preview — somebody who pressed the
+    // fallback button has already established the preview was not working for
+    // them, and sending them back round to it would be a loop.
     box.innerHTML = '<div class="empty pol-warn">Could not open that document — check your connection and try again.' +
-      '<div style="margin-top:10px;"><button class="btn ghost" onclick="viewEmployeeDocument(\'' + safeUrl + '\',\'' + safeLabel + '\')">Try again</button></div></div>';
+      '<div style="margin-top:10px;"><button class="btn ghost" onclick="viewEmployeeDocumentViaBackend_(\'' + safeUrl + '\',\'' + safeLabel + '\')">Try again</button></div></div>';
   }
+}
+
+// What every document card actually calls. Draws Google's own preview, which
+// needs no round trip through this app's backend at all, and offers the slower
+// backend read beside it for anyone the preview cannot serve.
+function viewEmployeeDocument(driveUrl, label){
+  const m = /\/d\/([^/]+)/.exec(driveUrl || '');
+  const box = document.getElementById('docViewerRoot');
+  if(!m || !box){ alert('Could not open that document.'); return; }
+  box.classList.remove('hidden');
+  openFullscreenView(label, 'docViewerRoot');
+  renderDrivePreview_(box, m[1], label || 'Document',
+    escapeJsAttr_(driveUrl || ''), escapeJsAttr_(label || 'Document'));
 }
 
 // The one Drive-backed document engineers may read the actual content of,
