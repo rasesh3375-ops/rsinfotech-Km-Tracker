@@ -1237,6 +1237,46 @@
   .report-logo-company{font-family:Georgia, serif;font-size:16px;font-weight:700;color:var(--navy);}
   .report-logo-title{font-size:12.5px;color:var(--navy);font-weight:600;}
   .report-logo-date{font-size:11px;color:var(--muted);}
+
+  /* ===== Printed checklists (Generator > Checklists, rows 04 and 05) =====
+     These are the one thing in the app whose whole purpose is the paper that
+     comes out of the printer, so they are sized to A4 rather than to the
+     screen. The onboarding list is 31 items plus a section heading, which at
+     the screen's usual report type ran to a second sheet carrying four rows
+     and a signature line — two sheets per new joiner, most of the second one
+     blank. Tightened to fit one A4 page: smaller type, tighter cell padding,
+     a smaller logo, and rows that refuse to split across a page boundary so
+     that a longer list breaks between items rather than through one. */
+  .checklist-print{background:#fff;}
+  .checklist-print .report-logo-header{padding-bottom:8px;margin-bottom:10px;}
+  .checklist-print .report-logo-header img{width:34px;height:34px;}
+  @media print{
+    /* The global @page (see .rpt-wrap above) is A4 with no margin, so the
+       breathing room a printer needs has to come from padding here — most
+       printers cannot lay ink into the outer few millimetres anyway, and
+       without this the tick column ran off the edge of the sheet. */
+    .checklist-print{padding:9mm 8mm;font-size:9pt;}
+    .checklist-print table{font-size:9pt;}
+    .checklist-print th,.checklist-print td{padding:2.6px 6px;}
+    .checklist-print tr{break-inside:avoid;page-break-inside:avoid;}
+    .checklist-print .report-logo-company{font-size:13pt;}
+    .checklist-print .report-logo-title{font-size:10pt;}
+    .checklist-print .report-logo-date{font-size:8pt;}
+    /* For the length of the print, everything else is display:none rather
+       than merely invisible. .print-isolate hides the rest of the app with
+       visibility:hidden, which leaves every one of those elements holding
+       its place in the layout — so a checklist that fits comfortably on one
+       sheet came out of the printer as three: the list, then two blank pages
+       made of the app's own leftover height. The other reports never showed
+       this because they print from full screen, where there is barely any
+       page left underneath to take up room. Measured in real Chromium, which
+       is the only thing that paginates — see the A4 page-count check.
+       position:static so a longer list still breaks onto a second page
+       properly instead of being clipped, which is what pinning it would do. */
+    html.printing-checklist body > *{display:none !important;}
+    html.printing-checklist body > .checklist-print{
+      display:block !important;position:static !important;width:auto !important;}
+  }
   .bonus-callout{background:#FDECC8;border:1px solid var(--amber);border-radius:8px;padding:12px 14px;font-size:13.5px;font-weight:700;color:var(--amber-dark);margin-bottom:8px;}
   /* Save and Cancel pinned to the foot of the screen for the same reason —
      on a form this long they were a scroll away from wherever you were. */
@@ -2950,7 +2990,6 @@
           <div id="checklistPickerList"></div>
           <div id="joiningKitBox" class="hidden" style="margin-top:14px;"></div>
           <div id="printChecklistBox" class="hidden" style="margin-top:14px;"></div>
-          <div id="printChecklistPrintHost" class="hidden"></div>
         </section>
         </div>
 
@@ -22293,6 +22332,7 @@ async function openPrintChecklist_(key){
   if(!cfg || !host) return;
   const kit = document.getElementById('joiningKitBox');
   if(kit) kit.classList.add('hidden');
+  closePrintChecklistFullscreen_();
   host.classList.remove('hidden');
   // Leavers are included on purpose, and not only for the exit list: the whole
   // point of this is filing paperwork for people already gone as well as
@@ -22307,7 +22347,13 @@ async function openPrintChecklist_(key){
     <label class="field">Employee</label>
     <select class="field-input" id="printChecklistEmp_${cfg.key}">${opts}</select>
     <div style="height:10px"></div>
-    <button class="btn full" onclick="printChecklistForm_('${cfg.key}')">🖨 Print blank checklist</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn ghost" style="flex:1;min-width:110px;" onclick="viewPrintChecklist_('${cfg.key}')">👁 View</button>
+      <button class="btn ghost" style="flex:1;min-width:110px;" onclick="printChecklistForm_('${cfg.key}')">🖨 Print</button>
+      <button class="btn ghost" style="flex:1;min-width:110px;" onclick="withBusy(this,'Preparing…',() => whatsappPrintChecklist_('${cfg.key}'))">📱 WhatsApp</button>
+    </div>
+    <p style="font-size:11.5px;color:var(--muted);margin:8px 0 0;">Prints on one A4 sheet, sized to fit the page.</p>
+    <div id="printChecklistPreview_${cfg.key}"></div>
     <div style="height:16px"></div>
     <div style="border-top:1px solid var(--line);padding-top:14px;">
       <strong style="font-size:13px;">Upload the filled and signed copy</strong>
@@ -22330,20 +22376,24 @@ async function openPrintChecklist_(key){
 function closePrintChecklist_(){
   const host = document.getElementById('printChecklistBox');
   if(!host) return;
+  closePrintChecklistFullscreen_();
   host.classList.add('hidden');
   host.innerHTML = '';
 }
+// A preview opened full screen has been moved out of the panel and into the
+// overlay, so clearing the panel's innerHTML no longer reaches it — it would
+// be left on screen with the panel that owns it gone. Called before anything
+// that rebuilds or empties the panel.
+function closePrintChecklistFullscreen_(){
+  if(PRINT_CHECKLISTS_.some(c => fullscreenActiveId === 'printChecklistPreview_' + c.key)) closeFullscreenView();
+}
 
-// The blank form itself. Printed through the same .print-isolate mechanism
-// every report uses, so it picks up the app's print stylesheet rather than
-// needing one of its own.
-function printChecklistForm_(key){
-  const cfg = printChecklistOf_(key);
-  const host = document.getElementById('printChecklistPrintHost');
-  if(!cfg || !host) return;
-  const sel = document.getElementById('printChecklistEmp_' + cfg.key);
-  const empName = sel && sel.selectedIndex >= 0
-    ? sel.options[sel.selectedIndex].textContent.replace(/ \(left\)$/, '') : '';
+// The blank form itself. Built once here and used by all four things HR can
+// do with it — look at it, print it, save it as a PDF, send it on WhatsApp.
+// A second copy for the screen would be a second thing to keep in step with
+// the item list, and the whole point of the printed sheet is that what is on
+// screen and what comes out of the printer are the same document.
+function printChecklistFormHtml_(cfg, empName){
   let n = 0;
   const rows = cfg.items.map(item => {
     if(typeof item !== 'string'){
@@ -22353,9 +22403,7 @@ function printChecklistForm_(key){
     return `<tr><td style="text-align:center;">${n}</td><td>${escapeHtml(item)}</td>
       <td style="width:70px;"></td><td style="width:170px;"></td></tr>`;
   }).join('');
-  host.classList.remove('hidden');
-  host.innerHTML = `<div class="print-isolate" id="printChecklistArea">
-    ${reportLogoHeader(cfg.printTitle)}
+  return `${reportLogoHeader(cfg.printTitle)}
     <p style="margin:0 0 10px;font-size:13px;">
       <strong>Name:</strong> ${empName ? escapeHtml(empName) : '____________________________'}
       &nbsp;&nbsp;&nbsp; <strong>Date:</strong> ______________</p>
@@ -22365,13 +22413,80 @@ function printChecklistForm_(key){
     </table>
     <p style="margin:22px 0 0;font-size:13px;">
       <strong>Checked by:</strong> ____________________________
-      &nbsp;&nbsp;&nbsp;&nbsp; <strong>Signature:</strong> ____________________________</p>
-  </div>`;
-  window.print();
-  // Cleared after printing so the blank form is not left sitting under the
-  // panel on screen — print() blocks until the dialog is dismissed.
-  host.innerHTML = '';
-  host.classList.add('hidden');
+      &nbsp;&nbsp;&nbsp;&nbsp; <strong>Signature:</strong> ____________________________</p>`;
+}
+
+// The name on the sheet, from whoever is selected. Blank falls back to a
+// ruled line so a spare copy can still be printed and filled in by hand.
+function printChecklistEmpName_(key){
+  const sel = document.getElementById('printChecklistEmp_' + key);
+  return sel && sel.selectedIndex >= 0
+    ? sel.options[sel.selectedIndex].textContent.replace(/ \(left\)$/, '') : '';
+}
+
+// Renders the blank form on screen, inside the panel, and hands the same
+// markup to the app's own share machinery so WhatsApp/Email/PDF attach the
+// real branded A4 sheet rather than a text summary. Returns the box id so
+// the callers below can act on it.
+//
+// Printing goes through here too rather than building its own throwaway
+// copy: .print-isolate absolutely positions every match at the top-left of
+// the page, so two of them on screen at once — the preview and a hidden
+// print host — would print stacked on top of each other.
+function viewPrintChecklist_(key){
+  const cfg = printChecklistOf_(key);
+  const boxId = 'printChecklistPreview_' + key;
+  const box = document.getElementById(boxId);
+  if(!cfg || !box) return null;
+  const empName = printChecklistEmpName_(key);
+  const title = cfg.label + (empName ? ' — ' + empName : '');
+  box.innerHTML = reportActionBar(title, boxId, `closePrintChecklistPreview_('${key}')`) +
+    `<div class="print-isolate checklist-print" id="printChecklistArea">
+      ${printChecklistFormHtml_(cfg, empName)}
+    </div>
+    <div style="height:10px"></div>
+    <button class="btn full" onclick="printChecklistForm_('${key}')">🖨 Print this sheet</button>`;
+  // The plain-text fallback for a device with no share sheet: a wa.me link
+  // can only carry text, so it names the checklist and who it is for rather
+  // than sending nothing at all. sourceId is what turns it into a real PDF
+  // wherever the device can attach one.
+  stashReportShare(title, cfg.label.replace(/[^\w .-]/g, '_') + '.pdf',
+    cfg.items.filter(i => typeof i === 'string').map((it, i) => (i + 1) + '. ' + it).join('\n'),
+    'text/plain', null, boxId);
+  box.scrollIntoView({ behavior:'smooth', block:'nearest' });
+  return boxId;
+}
+function closePrintChecklistPreview_(key){
+  if(fullscreenActiveId === 'printChecklistPreview_' + key) closeFullscreenView();
+  const box = document.getElementById('printChecklistPreview_' + key);
+  if(box) box.innerHTML = '';
+  // Deliberately not clearReportBox()/kmtBack() — this preview sits inside
+  // the Checklists panel rather than being a report screen of its own, so
+  // going back a level would close the panel it lives in.
+}
+
+// Moved to be a direct child of <body> for the duration of the print, so the
+// rule above ("hide every other top-level element") has something to keep —
+// nested three levels inside the Generator panel, hiding its own ancestors
+// would have hidden the sheet along with them. Put straight back afterwards;
+// print() blocks until the dialog is dismissed.
+function printChecklistForm_(key){
+  if(!viewPrintChecklist_(key)) return;
+  const area = document.getElementById('printChecklistArea');
+  if(!area){ window.print(); return; }
+  const parent = area.parentNode, next = area.nextSibling;
+  document.body.appendChild(area);
+  document.documentElement.classList.add('printing-checklist');
+  try{ window.print(); }
+  finally{
+    document.documentElement.classList.remove('printing-checklist');
+    parent.insertBefore(area, next);
+  }
+}
+
+async function whatsappPrintChecklist_(key){
+  if(!viewPrintChecklist_(key)) return;
+  await shareCurrentReport('whatsapp');
 }
 
 async function uploadPrintChecklistDoc_(key){
