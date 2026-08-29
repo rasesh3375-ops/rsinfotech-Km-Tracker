@@ -9287,9 +9287,21 @@ function openFullscreenView(title, sourceId){
   // to begin with) has nothing to return to, so a stale value from an
   // earlier trip is cleared here rather than carried into a close it has
   // nothing to do with.
-  fullscreenReturnTo_ = (sourceId === 'docViewerRoot' && fullscreenActiveId === 'payrollDocsRoot')
-    ? { title: 'Payroll Documents', sourceId: 'payrollDocsRoot' }
-    : null;
+  // Re-opening the box that is ALREADY showing is a re-render, not a
+  // transition, so it must leave the way back exactly as it was. The document
+  // viewer does re-open itself in place — pressing "Load it here instead" on
+  // the Drive preview redraws the same #docViewerRoot through
+  // viewEmployeeDocumentViaBackend_ — and because that call arrives with
+  // fullscreenActiveId already 'docViewerRoot', the ternary below saw "not
+  // opened from payrollDocsRoot" and nulled the return target that the FIRST
+  // open had correctly set. Closing the viewer then had nothing to go back to
+  // and fell through to the route underneath, which is why viewing a payroll
+  // document and closing it landed on the Dashboard instead of back in Browse.
+  if(fullscreenActiveId !== sourceId){
+    fullscreenReturnTo_ = (sourceId === 'docViewerRoot' && fullscreenActiveId === 'payrollDocsRoot')
+      ? { title: 'Payroll Documents', sourceId: 'payrollDocsRoot' }
+      : null;
+  }
   if(fullscreenActiveId && fullscreenActiveId !== sourceId) closeFullscreenView();
   // Only remember where this box truly lives the first time it's moved.
   // Calling this again for the SAME box while it is already inside
@@ -16739,8 +16751,10 @@ async function viewEmployeeDocumentViaBackend_(driveUrl, label){
   box.classList.remove('hidden');
   box.innerHTML = '<div class="empty">Opening ' + escapeHtml(label) + '…</div>';
   // Reached either directly or from the preview's fallback button, in which
-  // case the viewer is already open — openFullscreenView on the box that is
-  // already showing is a no-op, so this is safe both ways.
+  // case the viewer is already the open full-screen box. That second call is
+  // not a no-op — it re-runs openFullscreenView's own bookkeeping — but that
+  // function now recognises a re-open of the box already showing and leaves
+  // the return target alone. See the comment there.
   openFullscreenView(label, 'docViewerRoot');
   try{
     // A raised budget AND a raised per-attempt cap, not just more retries —
