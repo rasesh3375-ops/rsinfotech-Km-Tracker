@@ -2529,6 +2529,8 @@ function sendAllEmailsNow() {
   run('Loan & Advance Report', function () { sendLoanAdvanceReportEmail(true); });
   run('Monthly Leave Detail Report', function () { sendLeaveDetailReportEmail(true); });
   run('Consultant Report', function () { sendConsultantReportEmail(true); });
+  run('Salary advance alert (normally silent unless one was recorded)',
+    function () { sendSalaryAdvanceAlertEmail(true); });
 
   Logger.log('Sent every email now to ' + DAILY_DIGEST_EMAIL + ':\n' + results.join('\n'));
 }
@@ -2545,7 +2547,8 @@ function listReminderTriggers() {
     ['sendMonthlyReportsEmail', 'Report pack — 1st'],
     ['sendLoanAdvanceReportEmail', 'Loan & Advance Report — 1st'],
     ['sendLeaveDetailReportEmail', 'Monthly Leave Detail Report — 1st'],
-    ['sendConsultantReportEmail', 'Consultant Report — 2nd']
+    ['sendConsultantReportEmail', 'Consultant Report — 2nd'],
+    ['sendSalaryAdvanceAlertEmail', 'Salary advance taken — same evening']
   ];
   var installed = {};
   var triggers = ScriptApp.getProjectTriggers();
@@ -2570,4 +2573,181 @@ function listReminderTriggers() {
   }
   Logger.log('Scheduled email triggers — ' + (expected.length - missing) + ' of ' + expected.length +
     ' installed' + (missing ? ', ' + missing + ' MISSING' : '') + ':\n' + lines.join('\n'));
+}
+
+// ===== Salary advance taken today, emailed the same evening =====
+//
+// Money left the company today and payroll will recover it later. This says so
+// on the day, while it can still be questioned, instead of it surfacing weeks
+// later as a deduction on a salary sheet.
+//
+// It reads emp.advanceHistory, whose entries index.html now stamps with
+// `addedOn` — the day the figure was keyed in. That stamp had to be added for
+// this to be possible at all: an advance entry carries `month`, which is the
+// payroll month the money is recovered FROM and is routinely not today, so
+// before the stamp nothing on the record said when an advance was actually
+// taken. Both ways of recording one — the Dashboard shortcut and the employee's
+// own record — set it, and collectAdvanceRows carries it through a later save.
+//
+// Entries made before the stamp existed simply never match today's date, so
+// there is nothing to migrate and no risk of old advances being announced as
+// new ones.
+//
+// Unlike the monthly report emails, this one stays SILENT when there is nothing
+// to report. Those are reports whose absence would hide a problem; this is an
+// alert about an event that most days does not happen, and a daily "no advances
+// today" would train whoever reads it to stop looking. Silence here means
+// nobody took an advance.
+var SALARY_ADVANCE_ALERT_EMAIL = 'rasesh@rsinfotech.net';
+var SALARY_ADVANCE_ALERT_HOUR = 20; // 8 PM IST, an hour before the daily digest
+
+function createSalaryAdvanceAlertTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'sendSalaryAdvanceAlertEmail') {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+  ScriptApp.newTrigger('sendSalaryAdvanceAlertEmail')
+    .timeBased()
+    .everyDays(1)
+    .atHour(SALARY_ADVANCE_ALERT_HOUR)
+    .inTimezone('Asia/Kolkata')
+    .create();
+  Logger.log('Salary advance alert trigger created — sendSalaryAdvanceAlertEmail now runs daily around ' +
+    SALARY_ADVANCE_ALERT_HOUR + ':00 IST and emails only on a day an advance was recorded.');
+}
+
+// Undoes createSalaryAdvanceAlertTrigger — stops this alert without touching
+// any of the others.
+function removeSalaryAdvanceAlertTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var removed = 0;
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'sendSalaryAdvanceAlertEmail') {
+      ScriptApp.deleteTrigger(triggers[i]);
+      removed++;
+    }
+  }
+  Logger.log('Removed ' + removed + ' salary advance alert trigger(s).');
+}
+
+// Whole rupees, grouped the Indian way — 1,50,000 not 150,000. Every amount in
+// this project is whole rupees with no paise, so this rounds rather than
+// pretending to a precision the rest of the app does not carry.
+function rupeesIn_(n) {
+  var v = Math.round(Number(n) || 0);
+  var neg = v < 0;
+  var s = String(Math.abs(v));
+  var last3 = s.length > 3 ? s.slice(-3) : s;
+  var rest = s.length > 3 ? s.slice(0, -3) : '';
+  if (rest) last3 = rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + last3;
+  return (neg ? '-₹' : '₹') + last3;
+}
+
+// force=true sends even when nothing was recorded, so a test run visibly
+// produces an email rather than looking like a failure.
+function sendSalaryAdvanceAlertEmail(force) {
+  var today = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+  var rows = getSheet_().getDataRange().getValues();
+  var employees = allEmployeesFromRows_(rows);
+
+  var taken = [];
+  employees.forEach(function (e) {
+    if (!e) return;
+    var hist = e.advanceHistory;
+    if (!hist || !hist.length) return;
+    hist.forEach(function (h) {
+      if (!h || h.addedOn !== today) return;
+      var amount = Number(h.advance) || 0;
+      if (amount <= 0) return;
+      taken.push({
+        name: e.name || e.id,
+        id: e.id || '',
+        designation: e.designation || '',
+        amount: amount,
+        // A month is required for the advance ever to be recovered, so an entry
+        // saved without one is a mistake worth showing rather than hiding.
+        month: h.month || '',
+        left: e.employmentStatus === 'left'
+      });
+    });
+  });
+
+  if (!taken.length && !force) {
+    Logger.log('Salary advance alert — nothing recorded on ' + today + ', no email sent.');
+    return;
+  }
+
+  taken.sort(function (a, b) { return b.amount - a.amount; });
+  var total = 0;
+  taken.forEach(function (t) { total += t.amount; });
+
+  var esc = function (s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  };
+  var dateDisp = today.slice(8, 10) + '/' + today.slice(5, 7) + '/' + today.slice(0, 4);
+  var monthDisp = function (ym) {
+    if (!ym) return 'no month set';
+    var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
+    return LEAVE_DETAIL_MONTH_NAMES[m - 1] + ' ' + y;
+  };
+
+  var subject, html, plain;
+  if (!taken.length) {
+    subject = 'R.S. Infotech — No salary advance recorded — ' + dateDisp;
+    var none = 'No salary advance was recorded on ' + dateDisp + '.';
+    var quiet = 'On an ordinary day this email is not sent at all — it only goes out when ' +
+      'an advance is recorded. You are seeing it because it was run by hand.';
+    html = '<p>' + esc(none) + '</p><p>' + esc(quiet) + '</p>';
+    plain = none + '\n\n' + quiet + '\n';
+  } else {
+    subject = 'R.S. Infotech — Salary advance ' + dateDisp + ' — ' + rupeesIn_(total) +
+      (taken.length === 1 ? ' to ' + taken[0].name : ' to ' + taken.length + ' people');
+    var lead = taken.length === 1
+      ? 'One salary advance was recorded today, ' + dateDisp + '.'
+      : taken.length + ' salary advances were recorded today, ' + dateDisp +
+        ', totalling ' + rupeesIn_(total) + '.';
+    // Said plainly because the two dates in this email mean different things and
+    // are routinely different months.
+    var note = 'Recovered from the payroll month shown against each — that is the month the ' +
+      'deduction appears on, not today. Nothing is deducted until that month’s Salary Sheet runs.';
+
+    html = '<p style="font-size:15px;"><strong>' + esc(lead) + '</strong></p><p>' + esc(note) + '</p>' +
+      '<table cellpadding="7" cellspacing="0" border="1" style="border-collapse:collapse;' +
+      'font-family:Arial,sans-serif;font-size:13px;">' +
+      '<tr><th align="left">Employee</th><th align="left">Amount</th><th align="left">Recovered from</th></tr>';
+    plain = lead + '\n\n' + note + '\n\n';
+    taken.forEach(function (t) {
+      var who = t.name + (t.designation ? ' (' + t.designation + ')' : '') +
+        (t.left ? ' — MARKED AS LEFT' : '');
+      html += '<tr><td>' + esc(who) + '</td><td align="right"><strong>' + esc(rupeesIn_(t.amount)) +
+        '</strong></td><td>' + esc(monthDisp(t.month)) + '</td></tr>';
+      plain += '  ' + who + '\n' +
+        '    Amount        : ' + rupeesIn_(t.amount) + '\n' +
+        '    Recovered from: ' + monthDisp(t.month) + '\n';
+    });
+    if (taken.length > 1) {
+      html += '<tr><td><strong>Total</strong></td><td align="right"><strong>' + esc(rupeesIn_(total)) +
+        '</strong></td><td></td></tr>';
+      plain += '\n  Total: ' + rupeesIn_(total) + '\n';
+    }
+    html += '</table>';
+    var anyNoMonth = taken.some(function (t) { return !t.month; });
+    if (anyNoMonth) {
+      var warn = 'One or more entries have no payroll month set, so nothing will be recovered for them ' +
+        'until a month is chosen on the employee’s record.';
+      html += '<p style="color:#B00020;"><strong>' + esc(warn) + '</strong></p>';
+      plain += '\n' + warn + '\n';
+    }
+  }
+
+  MailApp.sendEmail({
+    to: SALARY_ADVANCE_ALERT_EMAIL,
+    subject: subject,
+    body: plain,
+    htmlBody: html
+  });
+  Logger.log('Salary advance alert for ' + dateDisp + ' sent to ' + SALARY_ADVANCE_ALERT_EMAIL +
+    ' — ' + taken.length + ' advance(s), ' + rupeesIn_(total) + '.');
 }
