@@ -14198,7 +14198,7 @@ async function buildHrDashboardHome(box){
       ${kpi('🗓️','Attendance Sheet', '', 'Mark and review attendance', 'green', null, 'attendance')}
       ${kpi('💳','Employee Loan & EMI', '', 'Add a loan straight from here', 'indigo', null, 'loans')}
       ${kpi('💵','Salary Advance Payment', '', 'Add this month\'s advance', 'amber', null, 'advpay')}
-      ${kpi('🚫','Absent Today', '—', 'Tap to see who', 'red', 'dashAbsentCount', null, 'toggleAbsentPanel()')}
+      ${kpi('🚫','Absent Today', '—', 'Not at work, leave included — tap to see who', 'red', 'dashAbsentCount', null, 'toggleAbsentPanel()')}
       ${kpi('🌴','On Leave Today', '—', 'Approved leave — tap to see who', 'green', 'dashLeaveCount', null, 'toggleLeavePanel()')}
       ${kpi('📄','Documents Expiring', expiring.length, 'Within 30 days — tap to open', 'amber', null, 'expiry')}
     </div>
@@ -14371,11 +14371,14 @@ function renderAbsentPanel(){
     <div class="card-head"><h3>Absent today — ${fmtDateIN(todayStr())}</h3>
       <button class="linkbtn" style="padding:0" onclick="hrNavigate('attendance')">Attendance sheet</button></div>
     ${dashAbsentList.length
-      ? dashAbsentList.sort((a, b) => a.name.localeCompare(b.name)).map(a => `
+      ? '<p class="dash-muted" style="margin:0 0 8px;">Everybody not at work today, approved leave included. The tag says which.</p>' +
+        dashAbsentList.sort((a, b) => a.name.localeCompare(b.name)).map(a => `
           <div class="legend-row"><span><strong>${escapeHtml(a.name)}</strong>
             <span class="inc-sub">${escapeHtml(a.dept)}</span></span>
-            <span class="feed-tag" style="background:#FBE3E0;color:#B23A32;">${escapeHtml(a.label)}</span></div>`).join('')
-      : '<p class="dash-muted">Nobody is marked absent today.</p>'}
+            <span class="feed-tag" style="${a.approved
+              ? 'background:#E3F2E6;color:#2E6B3A;'
+              : 'background:#FBE3E0;color:#B23A32;'}">${escapeHtml(a.label)}</span></div>`).join('')
+      : '<p class="dash-muted">Everybody is at work today.</p>'}
     ${note}
   </div>`;
 }
@@ -14424,11 +14427,26 @@ async function loadDashboardAbsentToday(onRoll){
     if(!att){ unread++; return; }
     const entry = att[today];
     const label = entry && ABSENT_TODAY_CODES[entry.code];
-    if(label){ absent++; dashAbsentList.push({ name: e.name || e.id, dept: e.department || '—', label }); }
-    // Approved leave is not absence — somebody on sanctioned EL is accounted
-    // for, and lumping them in with the unexplained absences is what made the
-    // absent count something nobody trusted.
     const onLeave = entry && ON_LEAVE_TODAY_CODES[entry.code];
+    // "Absent today" counts everybody who is NOT AT WORK, approved leave
+    // included. It used to count only the unexplained absences, on the
+    // reasoning that sanctioned EL is accounted for and lumping the two
+    // together made the number less meaningful — but HR read the card the
+    // other way round and it misled them: the dashboard said nobody was
+    // absent on a day somebody was on EL and plainly not in the office.
+    // Whoever is looking at this card wants to know who is not here, and the
+    // reason is a detail on the row, not a reason to leave the person off it.
+    //
+    // The distinction is not lost, it moves: each row carries its own reason
+    // and approved leave is tagged differently from an unexplained absence,
+    // and the separate On Leave Today card still answers "who is on sanctioned
+    // leave" on its own. Nothing about pay changes here — EL and SL remain
+    // paid, and computeSalaryForEmployee is untouched.
+    if(label || onLeave){
+      absent++;
+      dashAbsentList.push({ name: e.name || e.id, dept: e.department || '—',
+                            label: label || onLeave, approved: !!onLeave });
+    }
     if(onLeave) dashLeaveList.push({ name: e.name || e.id, dept: e.department || '—', label: onLeave });
   });
   dashAbsentUnread = unread;
