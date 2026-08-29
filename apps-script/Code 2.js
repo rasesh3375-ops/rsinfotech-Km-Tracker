@@ -2488,3 +2488,86 @@ function restorePayrollDocsPf202526() {
   Logger.log(summary.join('\n'));
 }
 
+
+// ===== Send every email now, for testing =====
+//
+// Run this from the editor's function dropdown to receive all seven emails
+// immediately, whatever today's date is.
+//
+// It exists because the Run button calls a function with NO arguments. Picking
+// sendMonthlyReportsEmail from the dropdown therefore passes force = undefined,
+// its date check sees a day that is not the 1st, and it returns silently having
+// sent nothing — which looks exactly like a broken email. There is nowhere in
+// that UI to type the argument, so a wrapper that passes it is the only way to
+// test these by hand.
+//
+// The dated emails send the month they would normally send: on any day in
+// September that is August, because they always report the month just gone.
+// The birthday email is the one that can still legitimately send nothing — it
+// has nothing to force, and only writes when somebody's birthday really is
+// tomorrow.
+//
+// This sends real email to the real address. It is a test entry point, never
+// something to put on a trigger.
+function sendAllEmailsNow() {
+  var results = [];
+  var run = function (label, fn) {
+    try {
+      fn();
+      results.push('  OK      ' + label);
+    } catch (err) {
+      // One failure must not stop the rest — the point of running this is to
+      // find out which of the seven work, not to stop at the first that does not.
+      results.push('  FAILED  ' + label + ' — ' + (err && err.message ? err.message : err));
+    }
+  };
+
+  run('Daily HR Digest', function () { sendDailyDigestEmail(); });
+  run('Increments due next month', function () { sendIncrementReminderEmail(true); });
+  run('Birthday reminder (sends only if a birthday is tomorrow)', function () { sendBirthdayReminderEmail(); });
+  run('Monthly report pack', function () { sendMonthlyReportsEmail(true); });
+  run('Loan & Advance Report', function () { sendLoanAdvanceReportEmail(true); });
+  run('Monthly Leave Detail Report', function () { sendLeaveDetailReportEmail(true); });
+  run('Consultant Report', function () { sendConsultantReportEmail(true); });
+
+  Logger.log('Sent every email now to ' + DAILY_DIGEST_EMAIL + ':\n' + results.join('\n'));
+}
+
+// Prints which of the seven scheduled emails actually have a trigger installed.
+// The Triggers page in the sidebar says the same thing, but this reads the list
+// against the seven expected handlers and names any that are missing, which the
+// page cannot do.
+function listReminderTriggers() {
+  var expected = [
+    ['sendDailyDigestEmail', 'Daily HR Digest — every day'],
+    ['sendIncrementReminderEmail', 'Increments due next month — 30th'],
+    ['sendBirthdayReminderEmail', 'Birthday reminder — day before'],
+    ['sendMonthlyReportsEmail', 'Report pack — 1st'],
+    ['sendLoanAdvanceReportEmail', 'Loan & Advance Report — 1st'],
+    ['sendLeaveDetailReportEmail', 'Monthly Leave Detail Report — 1st'],
+    ['sendConsultantReportEmail', 'Consultant Report — 2nd']
+  ];
+  var installed = {};
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    var fn = triggers[i].getHandlerFunction();
+    installed[fn] = (installed[fn] || 0) + 1;
+  }
+  var lines = [], missing = 0;
+  for (var e = 0; e < expected.length; e++) {
+    var name = expected[e][0];
+    var count = installed[name] || 0;
+    if (!count) missing++;
+    lines.push('  ' + (count ? 'INSTALLED' : 'MISSING  ') + '  ' + expected[e][1] +
+      '  (' + name + ')' + (count > 1 ? '  — ' + count + ' copies, run its remove trigger then its create trigger' : ''));
+  }
+  // Anything on a trigger that is not one of the seven is worth seeing too —
+  // a hand-made trigger from the Add Trigger button would show up here.
+  for (var k in installed) {
+    var known = false;
+    for (var x = 0; x < expected.length; x++) if (expected[x][0] === k) known = true;
+    if (!known) lines.push('  OTHER      ' + k + '  (not one of the seven — added by hand?)');
+  }
+  Logger.log('Scheduled email triggers — ' + (expected.length - missing) + ' of ' + expected.length +
+    ' installed' + (missing ? ', ' + missing + ' MISSING' : '') + ':\n' + lines.join('\n'));
+}
