@@ -2949,6 +2949,8 @@
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Joining checklist, items issued at joining, and the exit checklist — same lists that were under "Choose a letter" before, kept together here since they're not letters.</p>
           <div id="checklistPickerList"></div>
           <div id="joiningKitBox" class="hidden" style="margin-top:14px;"></div>
+          <div id="printChecklistBox" class="hidden" style="margin-top:14px;"></div>
+          <div id="printChecklistPrintHost" class="hidden"></div>
         </section>
         </div>
 
@@ -4157,6 +4159,7 @@ const LONG_READ_TTL_MS = {
   holidays: 600000,               // 10 minutes
   office_payroll_docs: 600000,
   office_apprentice_docs: 600000,
+  office_checklist_docs: 600000,
   company_profile: 900000,        // 15 minutes
   employee_handbook: 900000,
   resident_policy_text: 900000,
@@ -4657,6 +4660,17 @@ async function saveHolidays(list){
 async function getPayrollDocs(){
   const v = await safeGet('office_payroll_docs', true);
   return v ? JSON.parse(v) : [];
+}
+// The filled-in, signed scans of the two printed checklists. One flat list,
+// the same shape and the same reasoning as the apprentice documents above: the
+// file itself lives in Drive and this keeps only the link, the employee it
+// belongs to and when it was filed.
+async function getChecklistDocs(){
+  const v = await safeGet('office_checklist_docs', true);
+  return v ? JSON.parse(v) : [];
+}
+async function saveChecklistDocs(list){
+  await safeSet('office_checklist_docs', JSON.stringify(list), true);
 }
 async function getApprenticeDocs(){
   const v = await safeGet('office_apprentice_docs', true);
@@ -22173,8 +22187,282 @@ async function refreshChecklistPickerCounts(employees){
     </div>
     <div class="letter-choice" onclick="openChecklistPicker('exit')">
       <span class="num">03</span> Exit Checklist <span style="margin-left:auto;color:var(--muted);font-weight:400;font-size:12px;">${employees.length} employees${exitDone ? ', ' + exitDone + ' complete' : ''}</span>
-    </div>`;
+    </div>` + printChecklistRowsHtml_(await getChecklistDocs());
 }
+
+// Rows 04 and 05: the two printed-and-signed checklists. Their count is how
+// many people have a scan on file, not how many items are ticked — nothing is
+// ticked in the app for these, the paper is the record.
+function printChecklistRowsHtml_(docs){
+  return PRINT_CHECKLISTS_.map((cfg, i) => {
+    const mine = (docs || []).filter(d => d.checklist === cfg.key);
+    const people = new Set(mine.map(d => d.employeeId)).size;
+    const num = String(4 + i).padStart(2, '0');
+    return `<div class="letter-choice" onclick="openPrintChecklist_('${cfg.key}')">
+      <span class="num">${num}</span> ${escapeHtml(cfg.label)} <span style="margin-left:auto;color:var(--muted);font-weight:400;font-size:12px;">print &amp; upload${people ? ' — ' + people + ' employee(s) on file' : ''}</span>
+    </div>`;
+  }).join('');
+}
+// ---- Printed checklists ----
+// The two lists HR fills in on paper: printed blank with the employee's name
+// on it, completed and signed by hand, then scanned back in against that same
+// employee.
+//
+// Deliberately NOT the tickable kind. Joining Checklist and Exit Checklist
+// above are ticked in the app and stored on the employee record; these two are
+// signed paper, and the signature is the point — so nothing here records which
+// items were done. What gets kept is the scan, and the scan is the record.
+//
+// Items are transcribed from the sheets HR supplied, in their order and
+// numbering. Obvious spelling slips in the source are corrected — WhatsApp,
+// experience, Relieving, Signature — since this is printed and handed round;
+// no item's meaning is changed and none is added or dropped. An entry with a
+// `heading` is a section break in the original, not a numbered item.
+const PRINT_CHECKLISTS_ = [
+  {
+    key: 'onboarding',
+    label: 'New Employee Onboarding Checklist',
+    printTitle: 'Management Checklist Of New Candidate',
+    folder: 'New Employee Onboarding Checklist',
+    items: [
+      'Candidate Application Form',
+      'New Employee Joining Form',
+      'Resume',
+      'Offer Letter',
+      { heading: 'Documents (As Per Below Details)' },
+      'Aadhar Card',
+      'Pan Card',
+      'Photo',
+      'Education Certificate',
+      'Address Proof',
+      'Bank Details',
+      'Sim Card Allocate',
+      'Appointment Letter',
+      'WhatsApp Application Download',
+      'WhatsApp — added to Attendance Group',
+      'WhatsApp — groups to be added to',
+      'Tankhwa Patra Application downloaded',
+      'Tankhwa Patra — all information filled in',
+      'P.F. and ESIC U.A.N. Number',
+      'Add Apprentice In Employees',
+      'Policies to explain of company',
+      'Job Profile explained',
+      'W.C. / Accident Policy',
+      'PF Form 11',
+      '2 Year Bond signed',
+      'Last job experience letter & salary slip',
+      'Background check',
+      'Collection of Last Employment Experience Letter & Salary Slip',
+      'Own Vehicle Verification (check if vehicle odometer is working)',
+      'Medical Fitness Certificate',
+      'Medical Insurance / Ayushman Card availability',
+      'Welcome message in WhatsApp Application'
+    ]
+  },
+  {
+    key: 'exit',
+    label: 'Management Checklist for Exit Employee',
+    printTitle: 'Management Checklist of Relieving Employees',
+    folder: 'Management Checklist for Exit Employee',
+    items: [
+      'Notice Period',
+      'Exit WhatsApp',
+      'Sim Card taken',
+      'I-Card, T-Shirt, Pen Drive, Shoes etc.',
+      'Exit interview / Feedback',
+      'Message dropped in Official Group for relieving',
+      'Relieving letter',
+      'Full and Final letter',
+      'Experience Letter',
+      'Exit PF',
+      'Exit Apprentice',
+      'Exit W/C and Accident Policy',
+      'Remove from all folders to left employees',
+      'Mail to Milap Sir for left employee'
+    ]
+  }
+];
+const printChecklistOf_ = key => PRINT_CHECKLISTS_.find(c => c.key === key);
+
+async function openPrintChecklist_(key){
+  // No switchHrSub('generator') — same reasoning as openJoiningKit: this is
+  // only ever reached from inside the Checklists section, and re-rendering the
+  // tab would close the very card it is opening into.
+  const cfg = printChecklistOf_(key);
+  const host = document.getElementById('printChecklistBox');
+  if(!cfg || !host) return;
+  const kit = document.getElementById('joiningKitBox');
+  if(kit) kit.classList.add('hidden');
+  host.classList.remove('hidden');
+  // Leavers are included on purpose, and not only for the exit list: the whole
+  // point of this is filing paperwork for people already gone as well as
+  // people arriving, so anyone on record has to be selectable.
+  const employees = await getEmployees();
+  const opts = employees.map(e =>
+    `<option value="${escapeHtml(e.id)}">${escapeHtml(e.name || e.id)}${e.employmentStatus === 'left' ? ' (left)' : ''}</option>`).join('');
+  host.innerHTML = `<div class="dash-card">
+    <div class="card-head"><h3>${escapeHtml(cfg.label)}</h3>
+      <button class="linkbtn" style="padding:0" onclick="closePrintChecklist_()">Close</button></div>
+    <p class="card-sub" style="margin:0 0 10px;">Print it blank for the employee, have it filled in and signed on paper, then upload the scan here against that employee. ${cfg.items.filter(i => typeof i === 'string').length} items.</p>
+    <label class="field">Employee</label>
+    <select class="field-input" id="printChecklistEmp_${cfg.key}">${opts}</select>
+    <div style="height:10px"></div>
+    <button class="btn full" onclick="printChecklistForm_('${cfg.key}')">🖨 Print blank checklist</button>
+    <div style="height:16px"></div>
+    <div style="border-top:1px solid var(--line);padding-top:14px;">
+      <strong style="font-size:13px;">Upload the filled and signed copy</strong>
+      <div style="height:8px"></div>
+      <label class="field">Note (optional)</label>
+      <input type="text" id="printChecklistNote_${cfg.key}" placeholder="e.g. signed 12/08/2026, or which manager checked it">
+      <div style="height:10px"></div>
+      <label class="field">File</label>
+      <input type="file" id="printChecklistFile_${cfg.key}" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx">
+      <div style="height:10px"></div>
+      <button class="btn full" onclick="withBusy(this,'Uploading…',() => uploadPrintChecklistDoc_('${cfg.key}'))">Upload signed checklist</button>
+      <div class="msg" id="printChecklistMsg_${cfg.key}"></div>
+    </div>
+    <div style="height:14px"></div>
+    <div id="printChecklistDocs_${cfg.key}"></div>
+  </div>`;
+  await renderPrintChecklistDocs_(cfg.key);
+  host.scrollIntoView({ behavior:'smooth', block:'nearest' });
+}
+function closePrintChecklist_(){
+  const host = document.getElementById('printChecklistBox');
+  if(!host) return;
+  host.classList.add('hidden');
+  host.innerHTML = '';
+}
+
+// The blank form itself. Printed through the same .print-isolate mechanism
+// every report uses, so it picks up the app's print stylesheet rather than
+// needing one of its own.
+function printChecklistForm_(key){
+  const cfg = printChecklistOf_(key);
+  const host = document.getElementById('printChecklistPrintHost');
+  if(!cfg || !host) return;
+  const sel = document.getElementById('printChecklistEmp_' + cfg.key);
+  const empName = sel && sel.selectedIndex >= 0
+    ? sel.options[sel.selectedIndex].textContent.replace(/ \(left\)$/, '') : '';
+  let n = 0;
+  const rows = cfg.items.map(item => {
+    if(typeof item !== 'string'){
+      return `<tr><td colspan="4" style="font-weight:600;background:#F2F4F7;">${escapeHtml(item.heading)}</td></tr>`;
+    }
+    n += 1;
+    return `<tr><td style="text-align:center;">${n}</td><td>${escapeHtml(item)}</td>
+      <td style="width:70px;"></td><td style="width:170px;"></td></tr>`;
+  }).join('');
+  host.classList.remove('hidden');
+  host.innerHTML = `<div class="print-isolate" id="printChecklistArea">
+    ${reportLogoHeader(cfg.printTitle)}
+    <p style="margin:0 0 10px;font-size:13px;">
+      <strong>Name:</strong> ${empName ? escapeHtml(empName) : '____________________________'}
+      &nbsp;&nbsp;&nbsp; <strong>Date:</strong> ______________</p>
+    <table class="sal-table" style="width:100%;font-size:12px;">
+      <tr><th style="width:50px;">Sr. No.</th><th>Checklist item</th><th>Status</th><th>Remarks</th></tr>
+      ${rows}
+    </table>
+    <p style="margin:22px 0 0;font-size:13px;">
+      <strong>Checked by:</strong> ____________________________
+      &nbsp;&nbsp;&nbsp;&nbsp; <strong>Signature:</strong> ____________________________</p>
+  </div>`;
+  window.print();
+  // Cleared after printing so the blank form is not left sitting under the
+  // panel on screen — print() blocks until the dialog is dismissed.
+  host.innerHTML = '';
+  host.classList.add('hidden');
+}
+
+async function uploadPrintChecklistDoc_(key){
+  const cfg = printChecklistOf_(key);
+  if(!cfg) return;
+  const msg = document.getElementById('printChecklistMsg_' + cfg.key);
+  const fileInput = document.getElementById('printChecklistFile_' + cfg.key);
+  const file = fileInput && fileInput.files[0];
+  if(!file){
+    msg.textContent = 'Choose the scanned file to upload.';
+    msg.classList.add('error');
+    return;
+  }
+  const empId = document.getElementById('printChecklistEmp_' + cfg.key).value;
+  const employees = await getEmployees();
+  const emp = employees.find(e => e.id === empId);
+  if(!emp){
+    msg.textContent = 'Choose an employee first.';
+    msg.classList.add('error');
+    return;
+  }
+  const note = (document.getElementById('printChecklistNote_' + cfg.key).value || '').trim();
+  msg.textContent = 'Uploading…';
+  msg.classList.remove('error');
+  const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
+  const fileName = `${emp.name} - ${cfg.label}${ext}`;
+  const url = await uploadDocumentToDrive(
+    hrYearPath('', 'Office Documents', 'Checklists', cfg.folder), fileName, file);
+  if(!url){
+    msg.textContent = 'Upload failed — check your connection and try again.';
+    msg.classList.add('error');
+    return;
+  }
+  const list = await getChecklistDocs();
+  list.unshift({ id: randomHex(6), checklist: cfg.key, checklistLabel: cfg.label,
+                 employeeId: empId, employeeName: emp.name || empId,
+                 note, fileName, url, uploadedAt: new Date().toISOString() });
+  await saveChecklistDocs(list);
+  await addActivityLog('Uploaded ' + cfg.label + ' for ' + (emp.name || empId));
+  // Re-fetched by id — a reference held across the await above can be stale if
+  // the panel re-rendered meanwhile. Same reasoning as uploadApprenticeDoc.
+  const fileNow = document.getElementById('printChecklistFile_' + cfg.key) || fileInput;
+  const msgNow = document.getElementById('printChecklistMsg_' + cfg.key) || msg;
+  const noteNow = document.getElementById('printChecklistNote_' + cfg.key);
+  fileNow.value = '';
+  if(noteNow) noteNow.value = '';
+  msgNow.textContent = 'Uploaded for ' + (emp.name || empId) + '.';
+  msgNow.classList.remove('error');
+  await renderPrintChecklistDocs_(cfg.key);
+  await refreshChecklistPickerCounts();
+}
+
+async function renderPrintChecklistDocs_(key){
+  const cfg = printChecklistOf_(key);
+  const box = document.getElementById('printChecklistDocs_' + key);
+  if(!cfg || !box) return;
+  const all = await getChecklistDocs();
+  const mine = all.filter(d => d.checklist === cfg.key);
+  if(!mine.length){
+    box.innerHTML = '<div class="empty">Nothing uploaded for this checklist yet.</div>';
+    return;
+  }
+  // Grouped by employee, because the question this list answers is "has this
+  // person's checklist been done", not "what was filed on Tuesday".
+  const byEmp = {};
+  mine.forEach(d => {
+    const k = d.employeeName || d.employeeId || '—';
+    (byEmp[k] = byEmp[k] || []).push(d);
+  });
+  box.innerHTML = `<strong style="font-size:13px;">Uploaded (${mine.length})</strong><div style="height:8px"></div>` +
+    Object.keys(byEmp).sort((a, b) => a.localeCompare(b)).map(name => `
+      <div class="emp-row">
+        <div class="head"><strong>${escapeHtml(name)}</strong><span class="id">${byEmp[name].length} file(s)</span></div>
+        ${byEmp[name].map(d => `
+          <div class="sub" style="margin-top:4px;">${escapeHtml(d.fileName)}${d.note ? ' · ' + escapeHtml(d.note) : ''}${d.uploadedAt ? ' · ' + fmtDateIN(d.uploadedAt.slice(0,10)) : ''}</div>
+          <div class="actions">
+            <button type="button" class="btn ghost" onclick="viewEmployeeDocument('${escapeJsAttr_(d.url||'')}','${escapeJsAttr_(d.fileName||cfg.label)}')">Open</button>
+            <button type="button" class="btn ghost" onclick="deletePrintChecklistDoc_('${d.id}','${cfg.key}')">Remove</button>
+          </div>`).join('')}
+      </div>`).join('');
+}
+
+async function deletePrintChecklistDoc_(id, key){
+  if(!confirm('Remove this from the list? The file stays in Drive as an archive — this only removes it from this list.')) return;
+  let list = await getChecklistDocs();
+  list = list.filter(d => d.id !== id);
+  await saveChecklistDocs(list);
+  await renderPrintChecklistDocs_(key);
+  await refreshChecklistPickerCounts();
+}
+
 async function renderGeneratorTab(){
   // Runs on every visit to the Generator tab, including a jumpToGenerator()
   // from elsewhere in the app — reset to the landing grid first; a caller
