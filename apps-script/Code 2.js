@@ -18,10 +18,29 @@ function getSheet_() {
   return sheet;
 }
 
+// Reads column A ONLY, not the whole sheet.
+//
+// This is the hottest function in the backend — every get, every set, every
+// delete and the login path all start here, 17 call sites in all — and it used
+// to call getDataRange().getValues(), which pulls every cell of every row
+// across the wire into script memory. Column B is where the app keeps its JSON:
+// an employee record, a year of one person's attendance, the whole payroll
+// document tracker, the activity log. A single one of those cells runs to tens
+// of thousands of characters, and the sheet holds one per employee per year
+// plus the rest. All of it was being fetched and materialised to compare a key
+// string in column A, and then thrown away.
+//
+// Reading one narrow column instead cuts what a save transfers by orders of
+// magnitude, and the cost stops growing as the data does — which is why saving
+// had been getting slower over time rather than being slow from the start.
+//
+// The contract is unchanged: 1-based row number, or -1.
 function findRow_(sheet, key) {
-  const data = sheet.getDataRange().getValues();
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][0] === key) return i + 1;
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return -1;
+  const keys = sheet.getRange(1, 1, lastRow, 1).getValues();
+  for (let i = 1; i < keys.length; i++) {
+    if (keys[i][0] === key) return i + 1;
   }
   return -1;
 }
@@ -157,8 +176,48 @@ function getSessionSheet_() {
 // (a Drive share, an HR account compromise) used to get a live bearer token
 // good for 30 days; now they get a hash that's useless for calling the API.
 // The plaintext token still goes to the client once, at login, same as before.
+// Drops rows whose expiry has already passed.
+//
+// Nothing ever removed them. A row was appended on every login and only ever
+// deleted by an explicit logout, so the SESSIONS sheet grew by a row per login
+// forever — HR's daily logins plus every engineer's — while validateSession_
+// reads the whole sheet and scans it linearly on EVERY request. That is a cost
+// every save and every page load pays, and it climbs steadily the longer the
+// app is in use, which is exactly the shape of "it used to be quicker".
+//
+// Only already-expired rows go. validateSession_ rejects those anyway, so
+// removing them cannot log anybody out — a live session is never touched.
+//
+// The kept rows are written back BEFORE the tail is cleared, deliberately. The
+// other order leaves a window where a failure mid-way loses every session and
+// signs everyone out at once. This order's worst case is stale rows left at the
+// bottom, which are expired, harmless, and cleared on the next login.
+function purgeExpiredSessions_(sheet) {
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return 0;
+  const now = Date.now();
+  const keep = [data[0]];
+  for (let i = 1; i < data.length; i++) {
+    if (Number(data[i][3]) >= now) keep.push(data[i]);
+  }
+  const removed = data.length - keep.length;
+  if (!removed) return 0;
+  sheet.getRange(1, 1, keep.length, 4).setValues(keep);
+  sheet.getRange(keep.length + 1, 1, data.length - keep.length, 4).clearContent();
+  return removed;
+}
+
+// Purges on login rather than on every request: logging in is rare, the person
+// is already waiting on a round trip, and it keeps the cost off the save path
+// that this is meant to make faster.
 function createSession_(role, username, ttlMs) {
   const sheet = getSessionSheet_();
+  try {
+    purgeExpiredSessions_(sheet);
+  } catch (err) {
+    // Housekeeping must never stop somebody logging in.
+    Logger.log('Session purge skipped: ' + err);
+  }
   const token = Utilities.getUuid() + '-' + Utilities.getUuid();
   const expiresAt = Date.now() + (ttlMs || SESSION_LIFETIME_MS);
   sheet.appendRow([sha256Hex_(token), role, username, expiresAt]);
@@ -1077,9 +1136,17 @@ function doPost(e) {
       const sheet = getSheet_();
       const row = findRow_(sheet, body.key);
       if (row === -1) sheet.appendRow([body.key, body.value]);
-      else if (!isStaleEmployeeWrite_(body.key, body.value, sheet.getRange(row, 2).getValue()) &&
-               !isStalePayrollDocsWrite_(body.key, body.value, sheet.getRange(row, 2).getValue())) {
-        sheet.getRange(row, 2).setValue(body.value);
+      else {
+        // Read the existing cell ONCE. Both staleness guards want the same
+        // value, and each getValue() is its own round trip to the Sheets
+        // service — on an employee record or a payroll-document tracker that is
+        // the same tens of thousands of characters fetched twice, on the save
+        // path, for no gain.
+        const existing = sheet.getRange(row, 2).getValue();
+        if (!isStaleEmployeeWrite_(body.key, body.value, existing) &&
+            !isStalePayrollDocsWrite_(body.key, body.value, existing)) {
+          sheet.getRange(row, 2).setValue(body.value);
+        }
       }
     } else if (body.action === 'delete') {
       const sheet = getSheet_();
@@ -2961,4 +3028,113 @@ function sendMonthlyAdvanceSummaryEmail(force) {
   Logger.log('Monthly advance summary for ' + monthLabel + ' sent to ' + ADVANCE_SUMMARY_EMAIL +
     ' — ' + paidOut.length + ' paid out (' + rupeesIn_(paidTotal) + '), ' +
     recovered.length + ' recovered (' + rupeesIn_(recoveredTotal) + ').');
+}
+
+// ===== Performance diagnosis =====
+//
+// Run from the editor and read the log. It measures the real sheet rather than
+// guessing: how many rows, how much text, which keys are the heavy ones, how
+// many stale sessions have piled up, and how long the operations on the save
+// path actually take against this data.
+//
+// Everything here is read-only — it changes nothing and is safe to run at any
+// time, including while HR is working.
+function diagnosePerformance() {
+  var out = [];
+  var t0 = Date.now();
+
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  out.push('Opened spreadsheet in ' + (Date.now() - t0) + ' ms');
+
+  // ---- The KV sheet: rows, total size, and the worst offenders ----
+  var sheet = ss.getSheetByName(SHEET_NAME);
+  var tRead = Date.now();
+  var data = sheet.getDataRange().getValues();
+  var fullReadMs = Date.now() - tRead;
+
+  var totalChars = 0, sizes = [];
+  for (var i = 1; i < data.length; i++) {
+    var len = String(data[i][1] == null ? '' : data[i][1]).length;
+    totalChars += len;
+    sizes.push({ key: String(data[i][0]), len: len });
+  }
+  sizes.sort(function (a, b) { return b.len - a.len; });
+
+  out.push('');
+  out.push('KV sheet');
+  out.push('  Rows                : ' + (data.length - 1));
+  out.push('  Total value size    : ' + Math.round(totalChars / 1024) + ' KB');
+  out.push('  Whole-sheet read    : ' + fullReadMs + ' ms   <- what findRow_ used to cost, per call');
+
+  var tCol = Date.now();
+  var lastRow = sheet.getLastRow();
+  sheet.getRange(1, 1, lastRow, 1).getValues();
+  var colReadMs = Date.now() - tCol;
+  out.push('  Key-column read     : ' + colReadMs + ' ms   <- what findRow_ costs now');
+  if (fullReadMs > 0) {
+    out.push('  Saved per lookup    : ' + (fullReadMs - colReadMs) + ' ms (' +
+      Math.round((1 - (colReadMs / fullReadMs)) * 100) + '% less)');
+  }
+
+  out.push('');
+  out.push('  Ten largest values:');
+  for (var s = 0; s < Math.min(10, sizes.length); s++) {
+    out.push('    ' + (Math.round(sizes[s].len / 1024) + ' KB').padStart(8) + '  ' + sizes[s].key);
+  }
+  // The one hard ceiling in this design, worth seeing before it is hit rather
+  // than when a save starts failing: a Sheets cell holds 50,000 characters.
+  var nearLimit = sizes.filter(function (x) { return x.len > 40000; });
+  if (nearLimit.length) {
+    out.push('');
+    out.push('  WARNING — ' + nearLimit.length + ' value(s) are over 40,000 of the 50,000');
+    out.push('  characters a cell can hold. These will start failing to save:');
+    nearLimit.forEach(function (x) { out.push('    ' + x.len + '  ' + x.key); });
+  }
+
+  // ---- The SESSIONS sheet: the cost every single request pays ----
+  var sess = ss.getSheetByName(SESSION_SHEET_NAME);
+  if (sess) {
+    var tSess = Date.now();
+    var sdata = sess.getDataRange().getValues();
+    var sessReadMs = Date.now() - tSess;
+    var now = Date.now(), live = 0, expired = 0;
+    for (var j = 1; j < sdata.length; j++) {
+      if (Number(sdata[j][3]) >= now) live++; else expired++;
+    }
+    out.push('');
+    out.push('SESSIONS sheet   (read and scanned on EVERY request)');
+    out.push('  Rows                : ' + (sdata.length - 1));
+    out.push('  Live                : ' + live);
+    out.push('  Expired, removable  : ' + expired);
+    out.push('  Read time           : ' + sessReadMs + ' ms');
+    if (expired > 50) {
+      out.push('  These are cleared on the next login, or run purgeExpiredSessionsNow.');
+    }
+  }
+
+  // ---- What a single save costs end to end ----
+  var probeKey = 'hr_password';
+  var tFind = Date.now();
+  var rowFound = findRow_(sheet, probeKey);
+  var findMs = Date.now() - tFind;
+  out.push('');
+  out.push('Save path');
+  out.push('  findRow_ (one key)  : ' + findMs + ' ms');
+  if (rowFound !== -1) {
+    var tCell = Date.now();
+    sheet.getRange(rowFound, 2).getValue();
+    out.push('  read one cell       : ' + (Date.now() - tCell) + ' ms');
+  }
+  out.push('');
+  out.push('Total diagnosis time  : ' + (Date.now() - t0) + ' ms');
+
+  Logger.log(out.join('\n'));
+}
+
+// Clears expired sessions immediately instead of waiting for the next login.
+// Safe at any time: an expired session is already refused, so nobody is signed
+// out by this.
+function purgeExpiredSessionsNow() {
+  var removed = purgeExpiredSessions_(getSessionSheet_());
+  Logger.log('Removed ' + removed + ' expired session row(s).');
 }
