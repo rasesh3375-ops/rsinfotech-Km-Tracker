@@ -1609,7 +1609,7 @@ function sendBirthdayReminderEmail() {
 // This ATTACHES the CSVs the app already filed in Drive. It does not compute a
 // single figure of its own, and it must never be changed to.
 //
-// Every number in these five reports comes out of index.html —
+// Every number in these six reports comes out of index.html —
 // computeSalaryForEmployee, calculatePfFor, computeEsi, monthlyPtFor, the
 // attendance resolver, sandwich leave, loan and advance recovery. Working any
 // of that out a second time here would be a second copy of the payroll
@@ -1687,7 +1687,7 @@ function findFolderPath_(pathParts) {
 
 // Where each report of the pack files itself, mirroring index.html's own
 // hrYearPath(monthVal + '-01', ...) calls exactly — Salary Sheet, Final Salary
-// Sheet and Attendance Sheet under Dashboard, PF and ESI under Reports. The
+// Sheet and Attendance Sheet under Dashboard, PF, ESI and PT under Reports. The
 // year folder is the financial year the month BELONGS to, not the one it was
 // generated in, which is why March files land in the year that is closing.
 function monthlyReportSpecs_(ym) {
@@ -1724,7 +1724,14 @@ function monthlyReportSpecs_(ym) {
     { label: 'ESI Return',
       path: reports.concat(['ESI']),
       files: ['ESI Return - ' + ym + '.csv'],
-      where: 'Reports > ESI' }
+      where: 'Reports > ESI' },
+    // Filed as "PT Report", not "PT Return" like its PF and ESI neighbours —
+    // renderStatutoryReport builds the name from the label it is called with,
+    // and the PT screen passes 'PT Report'.
+    { label: 'PT Report',
+      path: reports.concat(['PT Report']),
+      files: ['PT Report - ' + ym + '.csv'],
+      where: 'Reports > PT Report' }
   ];
 }
 
@@ -2119,13 +2126,13 @@ function sendLeaveDetailReportEmail(force) {
     ' — ' + (file ? 'attached' : 'not generated') + '.');
 }
 
-// ===== Consultant Report, emailed separately on the 4th =====
+// ===== Consultant Report, emailed separately on the 2nd =====
 //
-// The 4th rather than the 1st, which is what was asked for and is also the
-// better day for this one: it leaves three days after month end for the last of
-// the attendance and payroll corrections to be made, and every report email
-// here attaches the copy the app filed when HR last opened it. Sending later
-// makes it likelier that copy is the final one.
+// The 2nd rather than the 1st, which is what was asked for. It leaves a day
+// after month end for the last attendance and payroll corrections to be made,
+// and every report email here attaches the copy the app filed when HR last
+// opened the report, so a later send makes it likelier that copy is the final
+// one.
 //
 // Two files, not one. The Consultant Report and the Consultant Final Summary
 // Report are a matched pair for the same reader — the per-employee detail and
@@ -2133,8 +2140,8 @@ function sendLeaveDetailReportEmail(force) {
 // generally asks for the other. Both are attached when both exist; drop the
 // summary from CONSULTANT_REPORT_SPECS_ if only the detail is wanted.
 var CONSULTANT_REPORT_EMAIL = 'rasesh@rsinfotech.net';
-var CONSULTANT_REPORT_DAY = 4;
-var CONSULTANT_REPORT_HOUR = 8; // 8 AM IST on the 4th
+var CONSULTANT_REPORT_DAY = 2;
+var CONSULTANT_REPORT_HOUR = 8; // 8 AM IST on the 2nd
 
 function createConsultantReportTrigger() {
   var triggers = ScriptApp.getProjectTriggers();
