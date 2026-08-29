@@ -13849,7 +13849,14 @@ async function addAdvanceFromDashboard(){
   // a figure already on file for the same month is a real change to what
   // gets recovered, so it is confirmed rather than silently overwritten.
   if(existing && !confirm('An entry for ' + month + ' already exists (' + rupees(existing.advance) + '). Replace it with ' + rupees(amount) + '?')) return;
-  emp.advanceHistory = hist.filter(h => h.month !== month).concat([{ month, advance: amount }]);
+  // addedOn is the day the figure was entered, which is not the same thing as
+  // `month` — that is the payroll month the advance is recovered from, and it
+  // is routinely a month other than today. Nothing else on the record carries
+  // the day it was keyed in, so the evening alert has no way to tell what was
+  // taken today without it. Replacing an existing month's figure counts as
+  // entered today, because that is when the amount was decided.
+  emp.advanceHistory = hist.filter(h => h.month !== month)
+    .concat([{ month, advance: amount, addedOn: todayStr() }]);
   await saveOneEmployee_(emp);
   invalidateDashboardSnapshot();
   await addActivityLog('Added a Salary Advance Payment of ' + rupees(amount) + ' for ' + emp.name + ' (' + month + ') from the Dashboard shortcut');
@@ -17138,7 +17145,11 @@ function syncAdvanceRow(i){
 
 function addAdvanceRow(){
   if(!Array.isArray(editingEmployeeDraft.advanceHistory)) editingEmployeeDraft.advanceHistory = [];
-  editingEmployeeDraft.advanceHistory.push({ month:'', advance:0 });
+  // Stamped here as well as in the Dashboard shortcut, so an advance entered
+  // on the employee's own record reaches the evening alert too — the two are
+  // the only ways one gets recorded, and an alert that saw only one of them
+  // would be worse than none.
+  editingEmployeeDraft.advanceHistory.push({ month:'', advance:0, addedOn: todayStr() });
   renderAdvanceRows();
 }
 
@@ -17170,10 +17181,17 @@ function collectAdvanceRows(){
     const advance = Number((document.getElementById('adv_amount_' + i) || {}).value) || 0;
     // Carried through unedited — see syncAdvanceRow's comment.
     const advanceTemp = Number(r.advanceTemp) || 0;
+    // Carried through for the same reason, and it matters more than it looks:
+    // this function REBUILDS every entry from the form rather than editing it
+    // in place, so a field not named here is dropped the next time anyone opens
+    // the employee and saves. Losing addedOn would silently un-date advances
+    // that the Dashboard shortcut had stamped, and the evening alert would go
+    // quiet for reasons nobody could see.
+    const addedOn = r.addedOn || '';
     if(!month && !advanceTemp && !advance) return;
     const existingIdx = out.findIndex(o => o.month === month);
-    if(existingIdx !== -1) out[existingIdx] = { month, advanceTemp, advance };
-    else out.push({ month, advanceTemp, advance });
+    if(existingIdx !== -1) out[existingIdx] = { month, advanceTemp, advance, addedOn };
+    else out.push({ month, advanceTemp, advance, addedOn });
   });
   return out;
 }
