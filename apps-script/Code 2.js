@@ -1293,17 +1293,33 @@ function sendDailyDigestEmail() {
     return names.length ? names.map(esc).join(', ') : 'None';
   };
 
+  // Every section heading, from one place, so they cannot drift apart — the
+  // whole point of the change was that each head reads the same and stands out
+  // from the names underneath it.
+  //
+  // The size and weight are stated inline rather than left to <h3>. A bare <h3>
+  // is sized by whatever is reading the mail, and Gmail and Outlook both
+  // restyle it: the headings ended up barely larger than the body text, which
+  // is what made "Absent today" hard to pick out at a glance. An explicit
+  // font-size on the element itself is the only thing every client honours.
+  var sectionHeading_ = function (text) {
+    return '<h3 style="margin:22px 0 8px;font-family:Arial,sans-serif;font-size:19px;' +
+      'font-weight:bold;color:#16213E;border-bottom:1px solid #E3E6EC;padding-bottom:5px;">' +
+      esc(text) + '</h3>';
+  };
+
   var html =
     '<div style="font-family:Arial,sans-serif;color:#16213E;font-size:14px;line-height:1.6;">' +
-    '<h2 style="margin:0 0 4px;">R.S. Infotech — Daily HR Digest</h2>' +
+    '<h2 style="margin:0 0 4px;font-size:23px;font-weight:bold;color:#16213E;">' +
+    'R.S. Infotech — Daily HR Digest</h2>' +
     '<p style="margin:0 0 18px;color:#5A6270;">' + esc(niceDate) + '</p>' +
-    '<h3 style="margin:0 0 6px;">Absent today (' + absent.length + ' of ' + active.length + ')</h3>' +
+    sectionHeading_('Absent today (' + absent.length + ' of ' + active.length + ')') +
     '<p style="margin:0 0 16px;">' + listOrNone(absent) + '</p>' +
     (notMarked.length
-      ? '<h3 style="margin:0 0 6px;">Attendance not marked yet (' + notMarked.length + ')</h3>' +
+      ? sectionHeading_('Attendance not marked yet (' + notMarked.length + ')') +
         '<p style="margin:0 0 16px;">' + listOrNone(notMarked) + '</p>'
       : '') +
-    '<h3 style="margin:0 0 6px;">Activity log (' + todayLog.length + ')</h3>' +
+    sectionHeading_('Activity log (' + todayLog.length + ')') +
     (todayLog.length
       ? '<ul style="margin:0 0 16px;padding-left:18px;">' +
         todayLog.map(function (l) {
@@ -1316,10 +1332,21 @@ function sendDailyDigestEmail() {
     DAILY_DIGEST_HOUR + ':00 IST. Manage this from the Apps Script project — see createDailyDigestTrigger / removeDailyDigestTrigger.</p>' +
     '</div>';
 
+  // The plain-text copy gets the same treatment in the only way plain text can:
+  // the heading on its own line, in capitals, underlined. Some phone clients and
+  // every "show original" view read this version, and a heading run into the
+  // names after a colon is exactly as hard to scan there.
+  var plainHeading_ = function (text) {
+    return text.toUpperCase() + '\n' + new Array(text.length + 1).join('-') + '\n';
+  };
   var plain = 'R.S. Infotech — Daily HR Digest — ' + niceDate + '\n\n' +
-    'Absent today (' + absent.length + ' of ' + active.length + '): ' + listOrNone(absent) + '\n\n' +
-    (notMarked.length ? 'Attendance not marked yet (' + notMarked.length + '): ' + listOrNone(notMarked) + '\n\n' : '') +
-    'Activity log (' + todayLog.length + '):\n' +
+    plainHeading_('Absent today (' + absent.length + ' of ' + active.length + ')') +
+    listOrNone(absent) + '\n\n' +
+    (notMarked.length
+      ? plainHeading_('Attendance not marked yet (' + notMarked.length + ')') +
+        listOrNone(notMarked) + '\n\n'
+      : '') +
+    plainHeading_('Activity log (' + todayLog.length + ')') +
     (todayLog.length
       ? todayLog.map(function (l) {
           var time = Utilities.formatDate(new Date(l.ts), 'Asia/Kolkata', 'HH:mm');
