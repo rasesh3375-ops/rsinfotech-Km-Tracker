@@ -1296,6 +1296,21 @@ var DAILY_DIGEST_EMAIL = 'rasesh@rsinfotech.net';
 var DAILY_DIGEST_HOUR = 21; // 9 PM. Apps Script fires a daily trigger sometime
                              // within the chosen hour, not to the exact minute.
 
+// Who counts as not at work, and why. These two maps mirror
+// ABSENT_TODAY_CODES and ON_LEAVE_TODAY_CODES in index.html and have to stay
+// in step with them: the digest and the Dashboard's Absent Today card answer
+// the same question a few hours apart, and an evening email disagreeing with
+// what HR saw on screen all day is worse than either being wrong on its own.
+//
+// "Absent" here means not at work, approved leave included. The digest used to
+// count only code 'A' — narrower even than the Dashboard, which at least
+// counted unpaid leave — so a day somebody was on EL, or on leave without pay,
+// reported nobody absent at all. The reason travels with each name instead of
+// deciding whether the name appears.
+var DIGEST_ABSENT_CODES = { A: 'Absent', LP: 'Leave without pay', HLP: 'Half day (LP)' };
+var DIGEST_ON_LEAVE_CODES = { EL: 'Earned Leave', SL: 'Sick Leave',
+                              HEL: 'Half day — EL', HSL: 'Half day — SL' };
+
 function createDailyDigestTrigger() {
   var triggers = ScriptApp.getProjectTriggers();
   for (var i = 0; i < triggers.length; i++) {
@@ -1356,7 +1371,10 @@ function sendDailyDigestEmail() {
     var att = mergedAttendanceForId_(map, e.id, [fyLabel]);
     var rec = att[today];
     var code = rec && rec.code;
-    if (code === 'A') absent.push(e.name || e.id);
+    var why = DIGEST_ABSENT_CODES[code] || DIGEST_ON_LEAVE_CODES[code];
+    // Each name carries the reason it is on the list, so "3 absent" can be
+    // read without opening the app to find out which of them were on leave.
+    if (why) absent.push((e.name || e.id) + ' — ' + why);
     else if (!code) notMarked.push(e.name || e.id);
   });
 
@@ -1405,7 +1423,14 @@ function sendDailyDigestEmail() {
     'R.S. Infotech — Daily HR Digest</h2>' +
     '<p style="margin:0 0 18px;color:#5A6270;">' + esc(niceDate) + '</p>' +
     sectionHeading_('Absent today (' + absent.length + ' of ' + active.length + ')') +
-    '<p style="margin:0 0 16px;">' + listOrNone(absent) + '</p>' +
+    // One per line rather than a comma-separated run: every name now carries
+    // its reason, and "Asha Patel — Earned Leave, Ravi Shah — Absent" run
+    // together reads as one muddle.
+    (absent.length
+      ? '<p style="margin:0 0 6px;color:#5A6270;font-size:12px;">Everybody not at work, approved leave included.</p>' +
+        '<ul style="margin:0 0 16px;padding-left:18px;">' +
+        absent.map(function (line) { return '<li>' + esc(line) + '</li>'; }).join('') + '</ul>'
+      : '<p style="margin:0 0 16px;">Everybody is at work today.</p>') +
     (notMarked.length
       ? sectionHeading_('Attendance not marked yet (' + notMarked.length + ')') +
         '<p style="margin:0 0 16px;">' + listOrNone(notMarked) + '</p>'
@@ -1432,7 +1457,10 @@ function sendDailyDigestEmail() {
   };
   var plain = 'R.S. Infotech — Daily HR Digest — ' + niceDate + '\n\n' +
     plainHeading_('Absent today (' + absent.length + ' of ' + active.length + ')') +
-    listOrNone(absent) + '\n\n' +
+    (absent.length
+      ? 'Everybody not at work, approved leave included.\n' +
+        absent.map(function (line) { return '  ' + line; }).join('\n')
+      : 'Everybody is at work today.') + '\n\n' +
     (notMarked.length
       ? plainHeading_('Attendance not marked yet (' + notMarked.length + ')') +
         listOrNone(notMarked) + '\n\n'
