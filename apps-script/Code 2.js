@@ -192,14 +192,38 @@ function getSessionSheet_() {
 // other order leaves a window where a failure mid-way loses every session and
 // signs everyone out at once. This order's worst case is stale rows left at the
 // bottom, which are expired, harmless, and cleared on the next login.
+// How many live sessions one person keeps. Enough for a phone, a tablet and a
+// desktop with room to spare; past that they are logins nobody is using.
+const MAX_SESSIONS_PER_USER = 5;
+
 function purgeExpiredSessions_(sheet) {
   const data = sheet.getDataRange().getValues();
   if (data.length < 2) return 0;
   const now = Date.now();
-  const keep = [data[0]];
+
+  // Newest first, so capping below keeps the most recent logins and drops the
+  // oldest — the ones least likely to be a device anybody is still holding.
+  const live = [];
   for (let i = 1; i < data.length; i++) {
-    if (Number(data[i][3]) >= now) keep.push(data[i]);
+    if (Number(data[i][3]) >= now) live.push(data[i]);
   }
+  live.sort(function (a, b) { return Number(b[3]) - Number(a[3]); });
+
+  // Expiry alone was not the problem. On the real sheet 322 of 330 rows were
+  // LIVE — an engineer session lasts 30 days and every login appends another
+  // row, so someone logging in daily carries thirty live tokens at once. That
+  // is what validateSession_ reads and scans on EVERY request, and it grows
+  // with every login ever made. Capping per person bounds it, and it is the
+  // better security answer too: 322 outstanding bearer tokens on a payroll
+  // system is a lot of keys to have lying around for no benefit.
+  const perUser = {};
+  const keep = [data[0]];
+  for (let i = 0; i < live.length; i++) {
+    const who = String(live[i][1]) + ' ' + String(live[i][2]); // role + username
+    perUser[who] = (perUser[who] || 0) + 1;
+    if (perUser[who] <= MAX_SESSIONS_PER_USER) keep.push(live[i]);
+  }
+
   const removed = data.length - keep.length;
   if (!removed) return 0;
   sheet.getRange(1, 1, keep.length, 4).setValues(keep);
@@ -3081,14 +3105,32 @@ function diagnosePerformance() {
   for (var s = 0; s < Math.min(10, sizes.length); s++) {
     out.push('    ' + (Math.round(sizes[s].len / 1024) + ' KB').padStart(8) + '  ' + sizes[s].key);
   }
-  // The one hard ceiling in this design, worth seeing before it is hit rather
-  // than when a save starts failing: a Sheets cell holds 50,000 characters.
-  var nearLimit = sizes.filter(function (x) { return x.len > 40000; });
+  // The one hard ceiling in this design: a Sheets cell holds 50,000 characters.
+  // Only worth warning about for a key the app still WRITES — a dead key cannot
+  // grow, so reporting it as "about to fail to save" is a false alarm.
+  // DEAD_KEYS are ones nothing reads or writes any more; they still cost on
+  // every whole-sheet read, which is why they are reported separately.
+  var DEAD_KEYS = { 'employees': 'replaced by the employee:<id> keys at migration' };
+  var nearLimit = sizes.filter(function (x) { return x.len > 40000 && !DEAD_KEYS[x.key]; });
   if (nearLimit.length) {
     out.push('');
-    out.push('  WARNING — ' + nearLimit.length + ' value(s) are over 40,000 of the 50,000');
-    out.push('  characters a cell can hold. These will start failing to save:');
+    out.push('  WARNING — ' + nearLimit.length + ' live value(s) are over 40,000 of the');
+    out.push('  50,000 characters a cell can hold. These will start failing to save:');
     nearLimit.forEach(function (x) { out.push('    ' + x.len + '  ' + x.key); });
+  }
+  var dead = sizes.filter(function (x) { return DEAD_KEYS[x.key]; });
+  if (dead.length) {
+    var deadChars = 0;
+    dead.forEach(function (x) { deadChars += x.len; });
+    out.push('');
+    out.push('  Dead weight — ' + Math.round(deadChars / 1024) + ' KB (' +
+      Math.round(deadChars / totalChars * 100) + '% of the sheet) nothing reads or writes.');
+    out.push('  Costs nothing on a save, but is carried by every whole-sheet read:');
+    dead.forEach(function (x) {
+      out.push('    ' + (Math.round(x.len / 1024) + ' KB').padStart(8) + '  ' + x.key +
+        '  — ' + DEAD_KEYS[x.key]);
+    });
+    out.push('  Remove with removeLegacyEmployeesKey (checks first, keeps a backup).');
   }
 
   // ---- The SESSIONS sheet: the cost every single request pays ----
@@ -3131,10 +3173,52 @@ function diagnosePerformance() {
   Logger.log(out.join('\n'));
 }
 
-// Clears expired sessions immediately instead of waiting for the next login.
-// Safe at any time: an expired session is already refused, so nobody is signed
-// out by this.
+// Prunes the SESSIONS sheet immediately instead of waiting for the next login:
+// every expired row, plus any login beyond the newest MAX_SESSIONS_PER_USER a
+// person holds. Expired rows are already refused, so those cost nobody
+// anything; someone over the cap on a device they have not used lately signs in
+// again once. Run it now to get the benefit without waiting.
 function purgeExpiredSessionsNow() {
   var removed = purgeExpiredSessions_(getSessionSheet_());
-  Logger.log('Removed ' + removed + ' expired session row(s).');
+  Logger.log('Removed ' + removed + ' session row(s) — expired, plus any past the newest ' +
+    MAX_SESSIONS_PER_USER + ' per person.');
+}
+
+// Removes the pre-migration `employees` row: one 40 KB blob holding every
+// employee record, from before they were split into employee:<id> keys.
+//
+// Nothing reads it — index.html intercepts a read of 'employees' and serves it
+// from the per-record keys instead — and nothing writes it, so it is stale the
+// moment any employee is edited. It still gets fetched by every whole-sheet
+// read in the backend: getAllEmployees, setMany, the attendance range reads,
+// the digest and every report email.
+//
+// Refuses to run unless the per-record keys are actually there and at least as
+// numerous, so it cannot delete the only copy of anything, and writes what it
+// removed to a `employees_backup_removed` row rather than dropping it outright.
+function removeLegacyEmployeesKey() {
+  var sheet = getSheet_();
+  var rows = sheet.getDataRange().getValues();
+  var legacyRow = -1, legacyValue = '', perRecord = 0;
+  for (var i = 1; i < rows.length; i++) {
+    var k = String(rows[i][0]);
+    if (k === 'employees') { legacyRow = i + 1; legacyValue = String(rows[i][1] || ''); }
+    else if (k.indexOf('employee:') === 0) perRecord++;
+  }
+  if (legacyRow === -1) { Logger.log('No legacy `employees` row — nothing to do.'); return; }
+
+  var legacyCount = 0;
+  try { legacyCount = (JSON.parse(legacyValue) || []).length; } catch (e) { legacyCount = -1; }
+  if (perRecord === 0 || (legacyCount > 0 && perRecord < legacyCount)) {
+    Logger.log('REFUSED — the legacy row holds ' + legacyCount + ' employee(s) but only ' +
+      perRecord + ' employee:<id> key(s) exist. Run migrateEmployeesToPerRecordKeys first.');
+    return;
+  }
+  saveFile_(['HR Management'], 'employees-legacy-backup-' +
+    Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd') + '.json',
+    legacyValue, 'application/json');
+  sheet.deleteRow(legacyRow);
+  Logger.log('Removed the legacy `employees` row (' + Math.round(legacyValue.length / 1024) +
+    ' KB, ' + legacyCount + ' record(s)); ' + perRecord + ' employee:<id> keys remain. ' +
+    'A copy was saved to Drive under HR Management.');
 }
