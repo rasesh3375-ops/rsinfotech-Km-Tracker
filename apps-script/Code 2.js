@@ -2531,6 +2531,7 @@ function sendAllEmailsNow() {
   run('Consultant Report', function () { sendConsultantReportEmail(true); });
   run('Salary advance alert (normally silent unless one was recorded)',
     function () { sendSalaryAdvanceAlertEmail(true); });
+  run('Salary advances for the month', function () { sendMonthlyAdvanceSummaryEmail(true); });
 
   Logger.log('Sent every email now to ' + DAILY_DIGEST_EMAIL + ':\n' + results.join('\n'));
 }
@@ -2548,7 +2549,8 @@ function listReminderTriggers() {
     ['sendLoanAdvanceReportEmail', 'Loan & Advance Report — 1st'],
     ['sendLeaveDetailReportEmail', 'Monthly Leave Detail Report — 1st'],
     ['sendConsultantReportEmail', 'Consultant Report — 2nd'],
-    ['sendSalaryAdvanceAlertEmail', 'Salary advance taken — same evening']
+    ['sendSalaryAdvanceAlertEmail', 'Salary advance taken — same evening'],
+    ['sendMonthlyAdvanceSummaryEmail', 'Salary advances for the month — last day']
   ];
   var installed = {};
   var triggers = ScriptApp.getProjectTriggers();
@@ -2750,4 +2752,213 @@ function sendSalaryAdvanceAlertEmail(force) {
   });
   Logger.log('Salary advance alert for ' + dateDisp + ' sent to ' + SALARY_ADVANCE_ALERT_EMAIL +
     ' — ' + taken.length + ' advance(s), ' + rupeesIn_(total) + '.');
+}
+
+// ===== Every salary advance of the month, on the month's last day =====
+//
+// The month-end companion to the same-evening alert above: one email listing
+// every advance of the month with the name, the amount and a total.
+//
+// It reports the month that is ENDING, not the previous one. Every other
+// monthly email here runs on the 1st or 2nd and looks back a month; this one
+// runs on the last day, so "this month" is the month it is about. Getting that
+// backwards would report a month already covered and miss the one just closed.
+//
+// Two sections, because an advance has two months attached and they are
+// routinely different: one is entered in August and recovered from September or
+// October. Only showing one grouping would be misleading whichever was chosen —
+// "what did we pay out this month" and "what comes off this month's payroll"
+// are both real questions, and neither answers the other.
+//
+//   Paid out this month   — entries stamped addedOn within the month. This is
+//                           the roll-up of the daily alerts: cash that left.
+//   Recovered this month  — entries whose `month` is this month. This is what
+//                           the Salary Sheet actually deducts.
+//
+// One caveat that matters for the first few months: `addedOn` only started
+// being recorded when the same-evening alert was added, so "Paid out this
+// month" is complete only from that point on. "Recovered this month" reads
+// `month`, which has always been stored, so it is correct for any month
+// including past ones. The email says so itself when it finds undated entries.
+//
+// Unlike the daily alert, this always sends, even with nothing to report. That
+// alert is about an event most days do not have, where a daily "nothing today"
+// would train the reader to stop looking. This is a month-end report, and "no
+// advances were paid this month" is a fact worth confirming.
+var ADVANCE_SUMMARY_EMAIL = 'rasesh@rsinfotech.net';
+var ADVANCE_SUMMARY_HOUR = 20; // 8 PM IST on the last day of the month
+
+function createAdvanceSummaryTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'sendMonthlyAdvanceSummaryEmail') {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+  ScriptApp.newTrigger('sendMonthlyAdvanceSummaryEmail')
+    .timeBased()
+    .everyDays(1)
+    .atHour(ADVANCE_SUMMARY_HOUR)
+    .inTimezone('Asia/Kolkata')
+    .create();
+  Logger.log('Monthly advance summary trigger created — sendMonthlyAdvanceSummaryEmail now runs daily ' +
+    'around ' + ADVANCE_SUMMARY_HOUR + ':00 IST and emails only on the last day of the month.');
+}
+
+// Undoes createAdvanceSummaryTrigger — stops this summary without touching the
+// same-evening alert or anything else.
+function removeAdvanceSummaryTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var removed = 0;
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'sendMonthlyAdvanceSummaryEmail') {
+      ScriptApp.deleteTrigger(triggers[i]);
+      removed++;
+    }
+  }
+  Logger.log('Removed ' + removed + ' monthly advance summary trigger(s).');
+}
+
+// True on the final day of whatever month it is — 28, 29, 30 or 31 as the month
+// and the leap year decide. new Date(y, m, 0) is the last day of month m, m
+// being 1-based here.
+function isLastDayOfMonth_(y, m, d) {
+  return d === new Date(y, m, 0).getDate();
+}
+
+// force=true sends regardless of the date, for testing from the editor.
+function sendMonthlyAdvanceSummaryEmail(force) {
+  var today = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+  var y = Number(today.slice(0, 4)), m = Number(today.slice(5, 7)), d = Number(today.slice(8, 10));
+  if (!force && !isLastDayOfMonth_(y, m, d)) return;
+
+  var ym = today.slice(0, 7);
+  var monthLabel = LEAVE_DETAIL_MONTH_NAMES[m - 1] + ' ' + y;
+  var rows = getSheet_().getDataRange().getValues();
+  var employees = allEmployeesFromRows_(rows);
+
+  var paidOut = [], recovered = [], undatedInMonth = 0;
+  employees.forEach(function (e) {
+    if (!e || !e.advanceHistory || !e.advanceHistory.length) return;
+    e.advanceHistory.forEach(function (h) {
+      if (!h) return;
+      var amount = Number(h.advance) || 0;
+      if (amount <= 0) return;
+      var who = {
+        name: e.name || e.id,
+        designation: e.designation || '',
+        amount: amount,
+        month: h.month || '',
+        addedOn: h.addedOn || '',
+        left: e.employmentStatus === 'left'
+      };
+      if (h.addedOn && String(h.addedOn).slice(0, 7) === ym) paidOut.push(who);
+      if (h.month === ym) {
+        recovered.push(who);
+        // An entry recovered this month that carries no addedOn predates the
+        // stamp — worth counting so the email can say why the two sections may
+        // not line up, rather than leaving it looking like a discrepancy.
+        if (!h.addedOn) undatedInMonth++;
+      }
+    });
+  });
+
+  var byAmount = function (a, b) { return b.amount - a.amount; };
+  paidOut.sort(byAmount);
+  recovered.sort(byAmount);
+  var sum = function (list) {
+    var t = 0;
+    list.forEach(function (x) { t += x.amount; });
+    return t;
+  };
+  var paidTotal = sum(paidOut), recoveredTotal = sum(recovered);
+
+  var esc = function (s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  };
+  var monthDisp = function (v) {
+    if (!v) return 'no month set';
+    return LEAVE_DETAIL_MONTH_NAMES[Number(v.slice(5, 7)) - 1] + ' ' + Number(v.slice(0, 4));
+  };
+  var dayDisp = function (v) {
+    return v ? v.slice(8, 10) + '/' + v.slice(5, 7) + '/' + v.slice(0, 4) : 'not recorded';
+  };
+
+  var heading = function (text) {
+    return '<h3 style="margin:22px 0 8px;font-family:Arial,sans-serif;font-size:19px;font-weight:bold;' +
+      'color:#16213E;border-bottom:1px solid #E3E6EC;padding-bottom:5px;">' + esc(text) + '</h3>';
+  };
+  var plainHeading = function (text) {
+    return '\n' + text.toUpperCase() + '\n' + new Array(text.length + 1).join('-') + '\n';
+  };
+
+  // Each section names the column that is NOT its own grouping — the paid-out
+  // list shows which month each will be recovered from, the recovered list
+  // shows the day each was taken — so a figure can be traced from either side.
+  var section = function (title, list, total, otherLabel, otherOf, emptyText) {
+    var h = heading(title + ' (' + list.length + ')');
+    var p = plainHeading(title + ' (' + list.length + ')');
+    if (!list.length) {
+      return { html: h + '<p style="margin:0 0 16px;color:#5A6270;">' + esc(emptyText) + '</p>',
+               plain: p + emptyText + '\n' };
+    }
+    h += '<table cellpadding="7" cellspacing="0" border="1" style="border-collapse:collapse;' +
+      'font-family:Arial,sans-serif;font-size:13px;margin:0 0 8px;">' +
+      '<tr><th align="left">Employee</th><th align="left">Amount</th><th align="left">' +
+      esc(otherLabel) + '</th></tr>';
+    list.forEach(function (x) {
+      var who = x.name + (x.designation ? ' (' + x.designation + ')' : '') +
+        (x.left ? ' — MARKED AS LEFT' : '');
+      h += '<tr><td>' + esc(who) + '</td><td align="right"><strong>' + esc(rupeesIn_(x.amount)) +
+        '</strong></td><td>' + esc(otherOf(x)) + '</td></tr>';
+      p += '  ' + who + '\n    Amount: ' + rupeesIn_(x.amount) +
+        '\n    ' + otherLabel + ': ' + otherOf(x) + '\n';
+    });
+    h += '<tr><td><strong>Total</strong></td><td align="right"><strong>' + esc(rupeesIn_(total)) +
+      '</strong></td><td></td></tr></table>';
+    p += '\n  Total: ' + rupeesIn_(total) + '\n';
+    return { html: h, plain: p };
+  };
+
+  var paidSection = section('Paid out in ' + monthLabel, paidOut, paidTotal,
+    'Recovered from', function (x) { return monthDisp(x.month); },
+    'No salary advance was paid out this month.');
+  var recSection = section('Recovered from ' + monthLabel + ' payroll', recovered, recoveredTotal,
+    'Taken on', function (x) { return dayDisp(x.addedOn); },
+    'Nothing is being recovered from this month’s payroll.');
+
+  var subject = 'R.S. Infotech — Salary advances ' + monthLabel + ' — ' +
+    rupeesIn_(paidTotal) + ' paid out, ' + rupeesIn_(recoveredTotal) + ' recovered';
+
+  var intro = 'Every salary advance on record for ' + monthLabel + '.';
+  var note = 'The same advance appears in both lists only when it was taken and recovered in the ' +
+    'same month. One entered this month for a later month’s payroll appears above but not below.';
+
+  var html = '<div style="font-family:Arial,sans-serif;color:#16213E;font-size:14px;line-height:1.6;">' +
+    '<h2 style="margin:0 0 4px;font-size:23px;font-weight:bold;color:#16213E;">' +
+    'R.S. Infotech — Salary advances</h2>' +
+    '<p style="margin:0 0 18px;color:#5A6270;">' + esc(monthLabel) + '</p>' +
+    '<p>' + esc(intro) + '</p><p>' + esc(note) + '</p>' +
+    paidSection.html + recSection.html;
+  var plain = 'R.S. Infotech — Salary advances — ' + monthLabel + '\n\n' + intro + '\n\n' + note + '\n' +
+    paidSection.plain + recSection.plain;
+
+  if (undatedInMonth) {
+    var why = undatedInMonth + ' of the entries recovered this month were recorded before the app ' +
+      'started stamping the day an advance is taken, so they cannot appear in the paid-out list above. ' +
+      'That is expected for older entries and resolves itself as new advances are recorded.';
+    html += '<p style="margin:16px 0 0;font-size:12px;color:#5A6270;">' + esc(why) + '</p>';
+    plain += '\n' + why + '\n';
+  }
+  html += '</div>';
+
+  MailApp.sendEmail({
+    to: ADVANCE_SUMMARY_EMAIL,
+    subject: subject,
+    body: plain,
+    htmlBody: html
+  });
+  Logger.log('Monthly advance summary for ' + monthLabel + ' sent to ' + ADVANCE_SUMMARY_EMAIL +
+    ' — ' + paidOut.length + ' paid out (' + rupeesIn_(paidTotal) + '), ' +
+    recovered.length + ' recovered (' + rupeesIn_(recoveredTotal) + ').');
 }
