@@ -2369,7 +2369,7 @@
             </button>
             <button type="button" class="gen-accordion-header" data-target="rptSecMonthlyLeave" onclick="openReportsCard('rptSecMonthlyLeave')" aria-expanded="false">
               <span class="gen-accordion-num"></span>
-              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Yearly Leave Report</strong>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Yearly Total Leave Report</strong>
                 <span class="gen-accordion-desc">EL + SL + LP days per employee, month by month across the financial year.</span></span>
               <span class="gen-accordion-chevron">▼</span>
             </button>
@@ -2476,13 +2476,13 @@
 
         <div id="rptSecMonthlyLeave" class="hidden gen-accordion-body">
         <section class="block">
-          <h2 style="margin:0 0 4px;">Yearly Leave Report</h2>
+          <h2 style="margin:0 0 4px;">Yearly Total Leave Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Every employee's leave days (EL + SL + LP, half-days counted as 0.5) broken down month by month across the financial year — April through March — so you can see each person's full-year leave pattern at a glance.</p>
           <p id="cardStat_monthlyLeave" class="gen-card-stat"></p>
           <label class="field">Financial year</label>
           <select class="field-input" id="leaveReportStartYear"></select>
           <div style="height:14px"></div>
-          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building report…',renderMonthlyLeaveReport)">Generate yearly leave report</button>
+          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building report…',renderMonthlyLeaveReport)">Generate yearly total leave report</button>
           <div style="height:14px"></div>
           <div id="monthlyLeaveReportBox"></div>
         </section>
@@ -20395,7 +20395,7 @@ async function renderMonthlyLeaveReport(){
     ? `<div class="hr-sheet-cards">${cardsHtml}</div>`
     : `<table class="sal-table"><tr>${header.map(h=>`<th>${h}</th>`).join('')}</tr>${tableRows}</table>`;
 
-  const reportTitle = 'Yearly Leave Report — FY ' + startYear + '-' + String(startYear+1).slice(2);
+  const reportTitle = 'Yearly Total Leave Report — FY ' + startYear + '-' + String(startYear+1).slice(2);
   box.innerHTML = `${reportActionBar(reportTitle, 'monthlyLeaveReportBox')}
     <div class="sal-sheet-wrap print-isolate" id="leaveReportPrintArea">
       ${reportLogoHeader(reportTitle)}
@@ -20406,7 +20406,7 @@ async function renderMonthlyLeaveReport(){
   const csvHeader = header;
   const csvRows = rows.map(r => [r.name, ...r.monthTotals, r.yearTotal]);
   {
-    const fileName = `Yearly Leave Report - FY ${fyOfStartYear(startYear).label}.csv`;
+    const fileName = `Yearly Total Leave Report - FY ${fyOfStartYear(startYear).label}.csv`;
     const content = toCsv(csvHeader, csvRows);
     // Filed under the financial year the report covers. The Drive folder keeps
     // its old "Monthly Leave Report" name even though the report is now called
