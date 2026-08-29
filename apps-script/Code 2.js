@@ -1477,6 +1477,133 @@ function sendIncrementReminderEmail(force) {
     ' due in ' + monthName + '.');
 }
 
+// ===== Birthday reminder, one day ahead =====
+// Goes to HR, not to the employee: the subject carries the employee's own
+// name and date, which is what someone ARRANGING the wish needs and not what
+// the person having the birthday would be sent. Nothing here emails staff
+// directly — no employee address is read or used. To turn this into a
+// message to the employee instead, that is a deliberate change of recipient,
+// not a setting.
+//
+// One-time setup: open this project in the Apps Script editor, pick
+// createBirthdayReminderTrigger from the function dropdown and press Run.
+// Re-running it is safe — it clears its own previous trigger first.
+// removeBirthdayReminderTrigger undoes it, without touching the other two
+// scheduled emails.
+//
+// One email per person, not one listing everybody: the subject line has to
+// name the individual, so two birthdays on the same day are two emails.
+var BIRTHDAY_REMINDER_EMAIL = 'rasesh@rsinfotech.net';
+var BIRTHDAY_REMINDER_HOUR = 9; // 9 AM IST, the day before
+
+function createBirthdayReminderTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'sendBirthdayReminderEmail') {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+  ScriptApp.newTrigger('sendBirthdayReminderEmail')
+    .timeBased()
+    .everyDays(1)
+    .atHour(BIRTHDAY_REMINDER_HOUR)
+    .inTimezone('Asia/Kolkata')
+    .create();
+  Logger.log('Birthday reminder trigger created — sendBirthdayReminderEmail now runs daily around ' +
+    BIRTHDAY_REMINDER_HOUR + ':00 IST and emails about tomorrow\'s birthdays.');
+}
+
+function removeBirthdayReminderTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var removed = 0;
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'sendBirthdayReminderEmail') {
+      ScriptApp.deleteTrigger(triggers[i]);
+      removed++;
+    }
+  }
+  Logger.log('Removed ' + removed + ' birthday reminder trigger(s).');
+}
+
+// Tomorrow, in IST, as {y, m, d} with m 1-based. Built from the IST date
+// string rather than the server's own clock, and through a Date so the
+// month and year roll over on their own at the 31st and at 31 December.
+function tomorrowIstParts_() {
+  var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+  var t = new Date(Number(istToday.slice(0, 4)), Number(istToday.slice(5, 7)) - 1,
+                   Number(istToday.slice(8, 10)) + 1);
+  return { y: t.getFullYear(), m: t.getMonth() + 1, d: t.getDate(), date: t };
+}
+
+// The function the trigger calls. Safe to run by hand from the editor to see
+// what would go out for tomorrow.
+function sendBirthdayReminderEmail() {
+  var tm = tomorrowIstParts_();
+  var mm = tm.m < 10 ? '0' + tm.m : String(tm.m);
+  var dd = tm.d < 10 ? '0' + tm.d : String(tm.d);
+  var target = mm + '-' + dd;
+
+  // Someone born on 29 February has no birthday at all in a common year.
+  // Rather than skip them three years in four, they are wished on the 28th
+  // in those years — so the reminder still goes out the day before.
+  var isLeap = new Date(tm.y, 1, 29).getDate() === 29;
+  var alsoFeb29 = !isLeap && target === '02-28';
+
+  var sheet = getSheet_();
+  var employees = allEmployeesFromRows_(sheet.getDataRange().getValues());
+  var birthdays = employees.filter(function (e) {
+    if (!e || e.employmentStatus === 'left') return false;
+    if (!e.dob || String(e.dob).length < 10) return false;
+    var md = String(e.dob).slice(5, 10);
+    return md === target || (alsoFeb29 && md === '02-29');
+  });
+
+  var esc = function (s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  };
+  var dateDisp = dd + '/' + mm + '/' + tm.y;                 // dd/mm/yyyy, as everywhere else
+  var weekday = Utilities.formatDate(tm.date, 'Asia/Kolkata', 'EEEE');
+
+  birthdays.forEach(function (e) {
+    var name = e.name || e.id;
+    var role = [e.designation, e.department].filter(function (x) { return !!x; }).join(', ');
+    // Only when the year on file is a real one — a dob stored with a
+    // placeholder year would otherwise announce a nonsense age.
+    var birthYear = Number(String(e.dob).slice(0, 4));
+    var turning = (birthYear > 1900 && birthYear < tm.y) ? (tm.y - birthYear) : null;
+
+    var subject = 'R.S. Infotech — Upcoming birthday: ' + name + ' — ' + dateDisp;
+    var line = name + (role ? ' (' + role + ')' : '') +
+      (turning ? ' turns ' + turning : ' has a birthday') +
+      ' tomorrow, ' + weekday + ' ' + dateDisp + '.';
+
+    var html = '<p>' + esc(line) + '</p>' +
+      '<p>Sent a day ahead so there is time to arrange a card, a message or a note to the team.</p>' +
+      '<table cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;' +
+      'font-family:Arial,sans-serif;font-size:13px;">' +
+      '<tr><td><strong>Employee</strong></td><td>' + esc(name) + '</td></tr>' +
+      '<tr><td><strong>Employee ID</strong></td><td>' + esc(e.id || '') + '</td></tr>' +
+      (e.designation ? '<tr><td><strong>Designation</strong></td><td>' + esc(e.designation) + '</td></tr>' : '') +
+      (e.department ? '<tr><td><strong>Department</strong></td><td>' + esc(e.department) + '</td></tr>' : '') +
+      '<tr><td><strong>Birthday</strong></td><td>' + esc(weekday + ' ' + dateDisp) + '</td></tr>' +
+      (turning ? '<tr><td><strong>Turning</strong></td><td>' + turning + '</td></tr>' : '') +
+      '</table>';
+    var plain = line + '\n\n' +
+      'Sent a day ahead so there is time to arrange a card, a message or a note to the team.\n\n' +
+      '  Employee   : ' + name + '\n' +
+      '  Employee ID: ' + (e.id || '') + '\n' +
+      (e.designation ? '  Designation: ' + e.designation + '\n' : '') +
+      (e.department ? '  Department : ' + e.department + '\n' : '') +
+      '  Birthday   : ' + weekday + ' ' + dateDisp + '\n' +
+      (turning ? '  Turning    : ' + turning + '\n' : '');
+
+    MailApp.sendEmail({ to: BIRTHDAY_REMINDER_EMAIL, subject: subject, body: plain, htmlBody: html });
+  });
+
+  Logger.log('Birthday reminder — ' + birthdays.length + ' birthday(ies) tomorrow (' + dateDisp +
+    '), ' + birthdays.length + ' email(s) sent to ' + BIRTHDAY_REMINDER_EMAIL + '.');
+}
+
 // One-off, run once from this editor (function dropdown -> restorePayrollDocsPf202526
 // -> Run), same as organiseDriveByYear/migrateAttendanceToFY. Not called by the web app.
 //
