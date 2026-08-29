@@ -1841,6 +1841,167 @@ function sendMonthlyReportsEmail(force) {
     ' — ' + found.length + ' attached, ' + missing.length + ' missing.');
 }
 
+// ===== Loan & Advance Report, emailed separately on the 1st =====
+//
+// Its own email rather than a sixth attachment on the pack above, because it is
+// a different kind of thing and reads wrongly filed next to the other five.
+// Those are five views of one closed month; this is a running position that
+// belongs to no month at all.
+//
+// The Loan & Advance Report is a snapshot of the day it is run, not of a chosen
+// month — index.html files it as "Loan & Advance Report - <today>.csv" with the
+// RUN date in the name, and every run leaves a new file rather than replacing
+// the last one. So there is no such thing as "last month's" copy to fetch: what
+// exists is however many snapshots HR happened to take. This attaches the most
+// recent one and says, plainly and in the subject, what date it is a snapshot
+// of and how many days stale that makes it.
+//
+// That date matters more here than anywhere else in these emails. A loan
+// balance moves with every month's EMI, so a snapshot taken mid-August is not
+// the 1 September position — the balances are a month behind and the report
+// looks perfectly valid while being wrong for the day it arrives. Saying the
+// snapshot date is what stops it being read as current. As everywhere else in
+// these emails, nothing is recalculated here: loansOf, loanScheduleThrough and
+// loanEmiRateAsOf live in index.html and stay the only place that arithmetic
+// happens.
+var LOAN_REPORT_EMAIL = 'rasesh@rsinfotech.net';
+var LOAN_REPORT_HOUR = 8; // 8 AM IST on the 1st, alongside the report pack
+
+function createLoanReportTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'sendLoanAdvanceReportEmail') {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+  ScriptApp.newTrigger('sendLoanAdvanceReportEmail')
+    .timeBased()
+    .everyDays(1)
+    .atHour(LOAN_REPORT_HOUR)
+    .inTimezone('Asia/Kolkata')
+    .create();
+  Logger.log('Loan & Advance report trigger created — sendLoanAdvanceReportEmail now runs daily around ' +
+    LOAN_REPORT_HOUR + ':00 IST and emails only on the 1st.');
+}
+
+// Undoes createLoanReportTrigger — stops this email without touching the
+// monthly pack, the daily digest, the increment reminder or the birthday one.
+function removeLoanReportTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var removed = 0;
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'sendLoanAdvanceReportEmail') {
+      ScriptApp.deleteTrigger(triggers[i]);
+      removed++;
+    }
+  }
+  Logger.log('Removed ' + removed + ' loan & advance report trigger(s).');
+}
+
+// The most recent snapshot across the financial years given, judged by the date
+// in the FILENAME rather than the file's Drive timestamp: the name carries the
+// day the position was taken, which is the date that means something here, and
+// the two can differ if a file is ever moved or re-filed.
+//
+// Two years are searched, not one, because of the April boundary. This runs on
+// the 1st, and on 1 April the newest snapshot was almost certainly taken on 31
+// March — which sits in the year that just closed, while today's year folder is
+// brand new and quite possibly empty. Looking only at today's year would report
+// nothing available on exactly the morning the year-end position matters most.
+function newestLoanAdvanceReport_(fyLabels) {
+  var seen = {}, best = null;
+  for (var i = 0; i < fyLabels.length; i++) {
+    if (seen[fyLabels[i]]) continue;
+    seen[fyLabels[i]] = true;
+    var folder = findFolderPath_(['HR Management', fyLabels[i], 'Reports', 'Loan & Advance Report']);
+    if (!folder) continue;
+    var files = folder.getFiles();
+    while (files.hasNext()) {
+      var f = files.next();
+      var m = /(\d{4}-\d{2}-\d{2})\.csv$/.exec(f.getName());
+      if (!m) continue;
+      if (!best || m[1] > best.date) best = { file: f, date: m[1] };
+    }
+  }
+  return best;
+}
+
+// Whole days between two 'YYYY-MM-DD' strings. Built from the parts rather than
+// Date.parse because a date-only string parses as UTC midnight, which lands on
+// the wrong day in IST — the same trap CLAUDE.md flags for financial years.
+function daysBetweenYmd_(fromYmd, toYmd) {
+  var a = new Date(Number(fromYmd.slice(0, 4)), Number(fromYmd.slice(5, 7)) - 1, Number(fromYmd.slice(8, 10)));
+  var b = new Date(Number(toYmd.slice(0, 4)), Number(toYmd.slice(5, 7)) - 1, Number(toYmd.slice(8, 10)));
+  return Math.round((b.getTime() - a.getTime()) / 86400000);
+}
+
+// force=true sends regardless of the date, for testing from the editor.
+function sendLoanAdvanceReportEmail(force) {
+  var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+  if (!force && Number(istToday.slice(8, 10)) !== 1) return;
+
+  var y = Number(istToday.slice(0, 4)), m = Number(istToday.slice(5, 7));
+  var prevM = m === 1 ? 12 : m - 1, prevY = m === 1 ? y - 1 : y;
+  var thisFy = fyLabelFor_(y, m), prevFy = fyLabelFor_(prevY, prevM);
+  var esc = function (s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  };
+  var disp = function (ymd) { return ymd.slice(8, 10) + '/' + ymd.slice(5, 7) + '/' + ymd.slice(0, 4); };
+
+  var hit = newestLoanAdvanceReport_([thisFy, prevFy]);
+  var todayDisp = disp(istToday);
+
+  var subject, plain, html, attachments = [];
+  if (hit) {
+    var age = daysBetweenYmd_(hit.date, istToday);
+    var snapDisp = disp(hit.date);
+    var ageText = age <= 0 ? 'taken today'
+      : age === 1 ? 'taken yesterday'
+      : 'taken ' + age + ' days ago';
+    subject = 'R.S. Infotech — Loan & Advance Report — position as at ' + snapDisp +
+      (age > 7 ? ' (' + age + ' days old)' : '');
+    attachments.push(hit.file.getBlob());
+
+    var lead = 'Attached is the Loan & Advance Report as it stood on ' + snapDisp + ', ' + ageText + '.';
+    // The whole point of this email: a loan balance is only true for the day it
+    // was taken, and an old snapshot reads as current unless it is labelled.
+    var freshness = age > 0
+      ? 'Balances move with each month’s EMI, so this is the position on ' + snapDisp +
+        ', not on ' + todayDisp + '. Open the Loan & Advance Report in the app for a current one — ' +
+        'it files its own copy, and the next run of this email will pick that up instead.'
+      : 'This is today’s position.';
+
+    html = '<p>' + esc(lead) + '</p><p>' + esc(freshness) + '</p>' +
+      '<table cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;' +
+      'font-family:Arial,sans-serif;font-size:13px;">' +
+      '<tr><td><strong>Position as at</strong></td><td>' + esc(snapDisp) + '</td></tr>' +
+      '<tr><td><strong>Age</strong></td><td>' + esc(ageText) + '</td></tr>' +
+      '<tr><td><strong>File</strong></td><td>' + esc(hit.file.getName()) + '</td></tr>' +
+      '</table>';
+    plain = lead + '\n\n' + freshness + '\n\n' +
+      '  Position as at: ' + snapDisp + '\n' +
+      '  Age           : ' + ageText + '\n' +
+      '  File          : ' + hit.file.getName() + '\n';
+  } else {
+    subject = 'R.S. Infotech — Loan & Advance Report — none available';
+    var none = 'The Loan & Advance Report has never been generated, so there is nothing to attach.';
+    var fix = 'Open Reports > Loan & Advance Report in the app once; it files its own copy in Drive, ' +
+      'and the next run of this email will attach it.';
+    html = '<p>' + esc(none) + '</p><p>' + esc(fix) + '</p>';
+    plain = none + '\n\n' + fix + '\n';
+  }
+
+  MailApp.sendEmail({
+    to: LOAN_REPORT_EMAIL,
+    subject: subject,
+    body: plain,
+    htmlBody: html,
+    attachments: attachments
+  });
+  Logger.log('Loan & Advance report email sent to ' + LOAN_REPORT_EMAIL + ' — ' +
+    (hit ? 'snapshot ' + hit.date : 'none available') + '.');
+}
+
 // One-off, run once from this editor (function dropdown -> restorePayrollDocsPf202526
 // -> Run), same as organiseDriveByYear/migrateAttendanceToFY. Not called by the web app.
 //
