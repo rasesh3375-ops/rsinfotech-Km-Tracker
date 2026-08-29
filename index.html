@@ -8710,7 +8710,16 @@ function discardAttendanceChanges(){
 // in rupees, not paise, and a figure like ₹33,333.33 on screen only invited
 // the question of where the 33 paise went. CSV exports round the same way;
 // see the R()/Math.round() calls next to each csvRows.push.
-function fmtMoney(n){ return Math.round(Number(n) || 0).toLocaleString('en-IN'); }
+// `|| 0` also catches NaN, so a missing figure reads ₹0 rather than "NaN".
+// The `+ 0` is what stops "₹-0": Math.round returns negative zero for
+// anything in (-0.5, 0], and toLocaleString is the one place that shows the
+// sign — String(-0) and JSON.stringify(-0) both give "0", which is why the
+// CSV exports never had this and only the screen did. Adding zero turns -0
+// into 0 and leaves every other value alone, so a real negative still keeps
+// its minus. Reached whenever a figure lands a hair below zero through
+// floating point: an employee absent the whole month has a gross of exactly
+// nothing, computed as a sum of percentages that do not quite cancel.
+function fmtMoney(n){ return (Math.round(Number(n) || 0) + 0).toLocaleString('en-IN'); }
 // The ₹-prefixed form used in report tables — one function instead of the same
 // one-line arrow copy-pasted into five different report renderers.
 function rupees(n){ return '₹' + fmtMoney(n); }
