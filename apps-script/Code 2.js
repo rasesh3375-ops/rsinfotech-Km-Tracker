@@ -2119,6 +2119,161 @@ function sendLeaveDetailReportEmail(force) {
     ' — ' + (file ? 'attached' : 'not generated') + '.');
 }
 
+// ===== Consultant Report, emailed separately on the 4th =====
+//
+// The 4th rather than the 1st, which is what was asked for and is also the
+// better day for this one: it leaves three days after month end for the last of
+// the attendance and payroll corrections to be made, and every report email
+// here attaches the copy the app filed when HR last opened it. Sending later
+// makes it likelier that copy is the final one.
+//
+// Two files, not one. The Consultant Report and the Consultant Final Summary
+// Report are a matched pair for the same reader — the per-employee detail and
+// the totals that summarise it — and a consultant sent one without the other
+// generally asks for the other. Both are attached when both exist; drop the
+// summary from CONSULTANT_REPORT_SPECS_ if only the detail is wanted.
+var CONSULTANT_REPORT_EMAIL = 'rasesh@rsinfotech.net';
+var CONSULTANT_REPORT_DAY = 4;
+var CONSULTANT_REPORT_HOUR = 8; // 8 AM IST on the 4th
+
+function createConsultantReportTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'sendConsultantReportEmail') {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+  ScriptApp.newTrigger('sendConsultantReportEmail')
+    .timeBased()
+    .everyDays(1)
+    .atHour(CONSULTANT_REPORT_HOUR)
+    .inTimezone('Asia/Kolkata')
+    .create();
+  Logger.log('Consultant report trigger created — sendConsultantReportEmail now runs daily around ' +
+    CONSULTANT_REPORT_HOUR + ':00 IST and emails only on day ' + CONSULTANT_REPORT_DAY + '.');
+}
+
+// Undoes createConsultantReportTrigger — stops this email without touching any
+// of the others.
+function removeConsultantReportTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var removed = 0;
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'sendConsultantReportEmail') {
+      ScriptApp.deleteTrigger(triggers[i]);
+      removed++;
+    }
+  }
+  Logger.log('Removed ' + removed + ' consultant report trigger(s).');
+}
+
+// Both consultant reports use the numeric month in their filenames, the same
+// form as the Salary Sheet and unlike the Monthly Leave Detail Report, which
+// spells the month out.
+function consultantReportSpecs_(ym) {
+  var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
+  var reports = ['HR Management', fyLabelFor_(y, m), 'Reports'];
+  return [
+    { label: 'Consultant Report',
+      path: reports.concat(['Consultant Report']),
+      files: ['Consultant Report - ' + ym + '.csv'],
+      where: 'Reports > Consultant Report' },
+    { label: 'Consultant Final Summary Report',
+      path: reports.concat(['Consultant Final Summary Report']),
+      files: ['Consultant Final Summary Report - ' + ym + '.csv'],
+      where: 'Reports > Consultant Final Summary Report' }
+  ];
+}
+
+// force=true sends regardless of the date, for testing from the editor.
+function sendConsultantReportEmail(force) {
+  var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+  if (!force && Number(istToday.slice(8, 10)) !== CONSULTANT_REPORT_DAY) return;
+
+  var ym = prevMonthYmIst_();
+  var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
+  var monthLabel = LEAVE_DETAIL_MONTH_NAMES[m - 1] + ' ' + y;
+  var esc = function (s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  };
+
+  var specs = consultantReportSpecs_(ym);
+  var attachments = [], found = [], missing = [];
+  for (var i = 0; i < specs.length; i++) {
+    var spec = specs[i];
+    var folder = findFolderPath_(spec.path);
+    var file = folder ? newestFileNamed_(folder, spec.files) : null;
+    if (file) {
+      attachments.push(file.getBlob());
+      found.push({ label: spec.label, file: file.getName(), where: spec.where,
+        updated: Utilities.formatDate(file.getLastUpdated(), 'Asia/Kolkata', 'dd/MM/yyyy HH:mm') });
+    } else {
+      missing.push({ label: spec.label, where: spec.where });
+    }
+  }
+
+  var subject = 'R.S. Infotech — Consultant Report — ' + monthLabel +
+    (missing.length ? ' (' + found.length + ' of ' + specs.length + ')' : '');
+
+  var intro = found.length
+    ? 'Attached ' + (found.length === 1 ? 'is the consultant report' : 'are the consultant reports') +
+      ' for ' + monthLabel + '.'
+    : 'The consultant reports have not been generated for ' + monthLabel + ', so there is nothing to attach.';
+  var caveat = 'Each file is the copy written when that report was last opened in the app — the ' +
+    '"generated" time below is when its figures were last worked out. Reopen a report in the app ' +
+    'if anything has changed since.';
+  var howTo = 'To produce a missing report, open it once in the app for ' + monthLabel +
+    '; it files its own copy in Drive, and the next run of this email will pick it up.';
+
+  var html = '<p>' + esc(intro) + '</p>';
+  if (found.length) {
+    html += '<p>' + esc(caveat) + '</p>' +
+      '<table cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;' +
+      'font-family:Arial,sans-serif;font-size:13px;">' +
+      '<tr><th align="left">Report</th><th align="left">File</th><th align="left">Generated</th></tr>';
+    for (var a = 0; a < found.length; a++) {
+      html += '<tr><td>' + esc(found[a].label) + '</td><td>' + esc(found[a].file) +
+        '</td><td>' + esc(found[a].updated) + '</td></tr>';
+    }
+    html += '</table>';
+  }
+  if (missing.length) {
+    html += '<p><strong>Not attached — never generated for ' + esc(monthLabel) + ':</strong></p><ul>';
+    for (var b = 0; b < missing.length; b++) {
+      html += '<li>' + esc(missing[b].label) + ' <span style="color:#666">(' + esc(missing[b].where) + ')</span></li>';
+    }
+    html += '</ul><p>' + esc(howTo) + '</p>';
+  }
+
+  var plain = intro + '\n\n';
+  if (found.length) {
+    plain += caveat + '\n\n';
+    for (var c = 0; c < found.length; c++) {
+      plain += '  ' + found[c].label + '\n' +
+        '    File     : ' + found[c].file + '\n' +
+        '    Generated: ' + found[c].updated + '\n';
+    }
+    plain += '\n';
+  }
+  if (missing.length) {
+    plain += 'Not attached — never generated for ' + monthLabel + ':\n';
+    for (var d = 0; d < missing.length; d++) {
+      plain += '  - ' + missing[d].label + ' (' + missing[d].where + ')\n';
+    }
+    plain += '\n' + howTo + '\n';
+  }
+
+  MailApp.sendEmail({
+    to: CONSULTANT_REPORT_EMAIL,
+    subject: subject,
+    body: plain,
+    htmlBody: html,
+    attachments: attachments
+  });
+  Logger.log('Consultant report email for ' + monthLabel + ' sent to ' + CONSULTANT_REPORT_EMAIL +
+    ' — ' + found.length + ' attached, ' + missing.length + ' missing.');
+}
+
 // One-off, run once from this editor (function dropdown -> restorePayrollDocsPf202526
 // -> Run), same as organiseDriveByYear/migrateAttendanceToFY. Not called by the web app.
 //
