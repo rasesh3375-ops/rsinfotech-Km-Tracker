@@ -11947,7 +11947,7 @@ async function renderSalaryComparisonReport(){
   // figure at the bottom. Everything here reads off computeSalaryForEmployee's
   // own return object — the one central per-employee calculation every other
   // report already uses — never re-derives PF/ESI/PT/loan figures by hand.
-  const mkAgg = () => ({ gross:0, pf:0, esi:0, pt:0, loanEmi:0, advance:0, advanceTemp:0,
+  const mkAgg = () => ({ gross:0, rate:0, pf:0, esi:0, pt:0, loanEmi:0, advance:0, advanceTemp:0,
     retention:0, leaveDaysCount:0, leaveAmount:0, continuingRate:0 });
   const prevAgg = mkAgg(), currAgg = mkAgg();
   let newEmpPrevCount=0, newEmpPrevAmt=0, newEmpCurrCount=0, newEmpCurrAmt=0;
@@ -11955,7 +11955,7 @@ async function renderSalaryComparisonReport(){
   const newEmpPrevNames=[], newEmpCurrNames=[], leftPrevNames=[], leftCurrNames=[];
 
   let prevTotal = 0, currTotal = 0;
-  const joined = [], leavers = [], changed = [];
+  const joined = [], leavers = [], changed = [], rateChanged = [];
   for(const emp of employees){
     const inPrev = employedInMonth_(emp, prev);
     const inCurr = employedInMonth_(emp, curr);
@@ -11972,6 +11972,13 @@ async function renderSalaryComparisonReport(){
 
     const addToAgg = (agg, s) => {
       agg.gross += s.gross;
+      // The contracted Rate of Pay as it stood that month — computeSalary-
+      // ForEmployee gets it from ratePayAsOf, so an increment recorded since
+      // does not move a month already paid. Not reduced for leave and not
+      // pro-rated for a part month, which is the point: this is the figure
+      // HR agreed with the employee, and the one place in this report where
+      // attendance cannot move the number.
+      agg.rate += s.rate;
       // PF and ESI are shown as employee + employer combined — pfGrandTotal
       // already is that (see calculatePfFor); ESI has no single combined
       // field returned, so the two sides are added here instead of inside
@@ -12007,8 +12014,18 @@ async function renderSalaryComparisonReport(){
     if(sPrev && sCurr){
       prevAgg.continuingRate += sPrev.rate;
       currAgg.continuingRate += sCurr.rate;
+      // Whose Rate of Pay actually moved, employee by employee. The "Salary
+      // changed" list below is on net salary, which moves for a day's
+      // absence, a loan instalment or an advance recovery just as readily as
+      // for a real increment — so it cannot answer "who got a raise, and how
+      // much". This can: only continuing staff are considered, because a
+      // joiner or a leaver has no previous or next rate to be compared with.
+      if(Math.round((sCurr.rate - sPrev.rate) * 100) !== 0){
+        rateChanged.push({ emp, amount: sCurr.rate - sPrev.rate, from: sPrev.rate, to: sCurr.rate });
+      }
     }
   }
+  rateChanged.sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
   const difference = currTotal - prevTotal;
   const isCompact = isCompactSheetView();
 
@@ -12075,6 +12092,10 @@ async function renderSalaryComparisonReport(){
   const namesLine = names => names.length ? `<br><span style="font-weight:400;font-size:11px;color:var(--muted);">${names.map(escapeHtml).join(', ')}</span>` : '';
   const catRowsHtml = [
     catRow('Gross Salary (all on-roll employees)', money(prevAgg.gross), money(currAgg.gross), Math.round(prevAgg.gross), Math.round(currAgg.gross)),
+    // Directly under Gross on purpose: the same population, before attendance
+    // touches it. Gross moving while this holds still means the month was
+    // about leave; this moving means somebody's pay was actually changed.
+    catRow('Rate of Pay (all on-roll employees)', money(prevAgg.rate), money(currAgg.rate), Math.round(prevAgg.rate), Math.round(currAgg.rate)),
     catRow('New Employees',
       newEmpPrevCount + ' · ' + money(newEmpPrevAmt) + namesLine(newEmpPrevNames),
       newEmpCurrCount + ' · ' + money(newEmpCurrAmt) + namesLine(newEmpCurrNames),
@@ -12106,6 +12127,39 @@ async function renderSalaryComparisonReport(){
         <tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total — Net Salary Payable</strong></td><td class="num"><strong>₹${fmtMoney(prevTotal)}</strong></td><td class="num"><strong>₹${fmtMoney(currTotal)}</strong></td></tr>
         <tr class="sal-grandtotal"><td class="sal-name"><strong>Difference</strong></td><td class="num" colspan="2"><strong>${fmtSigned_(difference)}</strong></td></tr>
       </table>`;
+  // Rate of Pay, employee by employee — its own section rather than another
+  // group() in "Why the salary differs", because that list's subtotals have
+  // to keep adding up to the net-salary difference exactly (see `reconciled`)
+  // and a rate change is not a net-salary change: an increment mid-way
+  // through a month of unpaid leave can raise the rate and still lower the
+  // pay. Kept separate so neither figure has to be fudged to agree with the
+  // other.
+  const rateTotalPrev = rateChanged.reduce((t, i) => t + i.from, 0);
+  const rateTotalCurr = rateChanged.reduce((t, i) => t + i.to, 0);
+  const csvRateRows = rateChanged.map(i =>
+    [i.emp.name, Math.round(i.from), Math.round(i.to), Math.round(i.amount)]);
+  const rateInner = !rateChanged.length
+    ? `<div class="empty">No Rate of Pay changed between ${prev.label} and ${curr.label}.</div>`
+    : (isCompact
+      ? `<div class="hr-sheet-cards">${rateChanged.map(i => hrCard(
+          `<strong>${escapeHtml(i.emp.name)}</strong>`,
+          hrRow(prev.label, '₹' + fmtMoney(i.from)) + hrRow(curr.label, '₹' + fmtMoney(i.to)) +
+          `<div class="hr-sheet-net"><span>Change</span><span>${fmtSigned_(i.amount)}</span></div>`)).join('')
+        }${hrCard('<strong>Total</strong>',
+          hrRow(prev.label, '₹' + fmtMoney(rateTotalPrev)) + hrRow(curr.label, '₹' + fmtMoney(rateTotalCurr)) +
+          `<div class="hr-sheet-net"><span>Change</span><span>${fmtSigned_(rateTotalCurr - rateTotalPrev)}</span></div>`,
+          'sal-grand-card')}</div>`
+      : `<table class="sal-table">
+          <tr><th>Employee</th><th class="num">${prev.label}</th><th class="num">${curr.label}</th><th class="num">Change</th></tr>
+          ${rateChanged.map(i => `<tr><td class="sal-name">${escapeHtml(i.emp.name)}</td>
+            <td class="num">₹${fmtMoney(i.from)}</td><td class="num">₹${fmtMoney(i.to)}</td>
+            <td class="num">${fmtSigned_(i.amount)}</td></tr>`).join('')}
+          <tr class="sal-grandtotal"><td class="sal-name"><strong>Total</strong></td>
+            <td class="num"><strong>₹${fmtMoney(rateTotalPrev)}</strong></td>
+            <td class="num"><strong>₹${fmtMoney(rateTotalCurr)}</strong></td>
+            <td class="num"><strong>${fmtSigned_(rateTotalCurr - rateTotalPrev)}</strong></td></tr>
+        </table>`);
+
   const reasonsInner = isCompact ? (nothingChanged
       ? `<div class="empty">Nothing changed between ${prev.label} and ${curr.label}.</div>`
       : `<div class="hr-sheet-cards">${rowsHtml}${hrCard('<strong>Grand Total</strong>', hrRow('Effect on total', fmtSigned_(difference)), 'sal-grand-card')}</div>`)
@@ -12120,21 +12174,32 @@ async function renderSalaryComparisonReport(){
       ${reportLogoHeader('Month-wise Salary Comparison — ' + curr.label)}
       <h2 style="font-size:15px;margin:0 0 8px;">Category Breakdown — ${prev.label} vs ${curr.label}</h2>
       ${summaryInner}
+      <h2 style="font-size:15px;margin:18px 0 8px;">Rate of Pay changed — continuing staff</h2>
+      ${rateInner}
       <h2 style="font-size:15px;margin:18px 0 8px;">Why the salary differs</h2>
       ${reasonsInner}
       <p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">
-        ${joined.length} joined · ${leavers.length} left · ${changed.length} changed.
+        ${joined.length} joined · ${leavers.length} left · ${changed.length} changed ·
+        ${rateChanged.length} Rate of Pay changed.
         ${reconciled ? 'Reasons add up to the difference exactly.' : '⚠ Reasons do not add up to the difference — please report this.'}
+        Rate of Pay is the contracted figure for the month, before leave and
+        without pro-rating a part month, so it does not add up to the net
+        difference and is not meant to.
       </p>
     </div>`;
 
-  const csvHead = ['Category', prev.label, curr.label];
+  const csvHead = ['Category', prev.label, curr.label, 'Change'];
   const csvAll = [['Category Breakdown', '', '']].concat(csvCatRows, [
     ['Grand Total — Net Salary Payable', Math.round(prevTotal), Math.round(currTotal)],
     ['Difference', '', Math.round(difference)],
     ['', '', ''],
-    ['Why the salary differs', '', '']
-  ]).concat(csvRows, [['Grand Total', '', Math.round(difference)]]);
+    ['Rate of Pay changed — continuing staff', '', '']
+  ]).concat(
+    csvRateRows.length ? csvRateRows.concat([['Total', Math.round(rateTotalPrev),
+      Math.round(rateTotalCurr), Math.round(rateTotalCurr - rateTotalPrev)]])
+                       : [['No Rate of Pay changed', '', '']],
+    [['', '', ''], ['Why the salary differs', '', '']],
+    csvRows, [['Grand Total', '', Math.round(difference)]]);
   {
     const fileName = `Month-wise Salary Comparison - ${monthVal}.csv`;
     const content = toCsv(csvHead, csvAll);
