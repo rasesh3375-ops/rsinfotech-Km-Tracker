@@ -1250,6 +1250,20 @@
   .checklist-print{background:#fff;}
   .checklist-print .report-logo-header{padding-bottom:8px;margin-bottom:10px;}
   .checklist-print .report-logo-header img{width:34px;height:34px;}
+  /* Its own table rather than .sal-table's. That one is built for the Salary
+     Sheet's money columns — text-align:right and white-space:nowrap — which
+     on a checklist right-aligned every item against the tick column and,
+     because the longest items cannot wrap, pushed the table wider than the
+     screen so Status and Remarks fell off the right-hand edge on a phone.
+     table-layout:fixed with percentage columns means the sheet is exactly as
+     wide as whatever it is put in, at any screen size and on paper. */
+  table.checklist-table{border-collapse:collapse;width:100%;font-size:12px;table-layout:fixed;}
+  table.checklist-table th,table.checklist-table td{border:1px solid var(--line);
+    padding:5px 7px;text-align:left;vertical-align:top;overflow-wrap:anywhere;}
+  table.checklist-table th{background:var(--navy);color:#fff;font-size:10.5px;
+    text-transform:uppercase;letter-spacing:.3px;text-align:center;}
+  table.checklist-table td.cl-sr{text-align:center;}
+  table.checklist-table tr.cl-heading td{font-weight:700;background:#F2F4F7;}
   @media print{
     /* The global @page (see .rpt-wrap above) is A4 with no margin, so the
        breathing room a printer needs has to come from padding here — most
@@ -22397,18 +22411,18 @@ function printChecklistFormHtml_(cfg, empName){
   let n = 0;
   const rows = cfg.items.map(item => {
     if(typeof item !== 'string'){
-      return `<tr><td colspan="4" style="font-weight:600;background:#F2F4F7;">${escapeHtml(item.heading)}</td></tr>`;
+      return `<tr class="cl-heading"><td colspan="4">${escapeHtml(item.heading)}</td></tr>`;
     }
     n += 1;
-    return `<tr><td style="text-align:center;">${n}</td><td>${escapeHtml(item)}</td>
-      <td style="width:70px;"></td><td style="width:170px;"></td></tr>`;
+    return `<tr><td class="cl-sr">${n}</td><td>${escapeHtml(item)}</td><td></td><td></td></tr>`;
   }).join('');
   return `${reportLogoHeader(cfg.printTitle)}
     <p style="margin:0 0 10px;font-size:13px;">
       <strong>Name:</strong> ${empName ? escapeHtml(empName) : '____________________________'}
       &nbsp;&nbsp;&nbsp; <strong>Date:</strong> ______________</p>
-    <table class="sal-table" style="width:100%;font-size:12px;">
-      <tr><th style="width:50px;">Sr. No.</th><th>Checklist item</th><th>Status</th><th>Remarks</th></tr>
+    <table class="checklist-table">
+      <colgroup><col style="width:9%"><col style="width:55%"><col style="width:14%"><col style="width:22%"></colgroup>
+      <tr><th>Sr. No.</th><th>Checklist item</th><th>Status</th><th>Remarks</th></tr>
       ${rows}
     </table>
     <p style="margin:22px 0 0;font-size:13px;">
@@ -22453,7 +22467,11 @@ function viewPrintChecklist_(key){
   stashReportShare(title, cfg.label.replace(/[^\w .-]/g, '_') + '.pdf',
     cfg.items.filter(i => typeof i === 'string').map((it, i) => (i + 1) + '. ' + it).join('\n'),
     'text/plain', null, boxId);
-  box.scrollIntoView({ behavior:'smooth', block:'nearest' });
+  // Straight to full screen, the same as every report in the app. Left inline
+  // it renders in the Generator's own content column beside the sidebar, so
+  // on a phone turned sideways the sheet used half the screen and the rest
+  // was margin — reported from an iPhone in landscape.
+  openFullscreenView(title, boxId);
   return boxId;
 }
 function closePrintChecklistPreview_(key){
