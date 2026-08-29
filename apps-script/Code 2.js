@@ -1604,6 +1604,243 @@ function sendBirthdayReminderEmail() {
     '), ' + birthdays.length + ' email(s) sent to ' + BIRTHDAY_REMINDER_EMAIL + '.');
 }
 
+// ===== Monthly report pack, emailed on the 1st for the month just ended =====
+//
+// This ATTACHES the CSVs the app already filed in Drive. It does not compute a
+// single figure of its own, and it must never be changed to.
+//
+// Every number in these five reports comes out of index.html —
+// computeSalaryForEmployee, calculatePfFor, computeEsi, monthlyPtFor, the
+// attendance resolver, sandwich leave, loan and advance recovery. Working any
+// of that out a second time here would be a second copy of the payroll
+// arithmetic, which is the one thing this project has been bitten by
+// repeatedly: three separate times HR reported the Add Employee form
+// disagreeing with the Salary Sheet, and every time the cause was a screen
+// that had grown its own copy of the sum. A fourth copy, in a different
+// language, that nobody looks at because it arrives by email, would be the
+// worst version of that bug — the figures would drift and the drift would be
+// invisible until somebody's bank transfer was wrong.
+//
+// So the deal is: whatever HR saw on screen is exactly what gets attached,
+// byte for byte, because it IS the file the report wrote when HR opened it.
+// The consequence is that a report nobody opened for that month has no file to
+// attach, and the email says so by name instead of quietly arriving one
+// attachment short. Each attachment is also stamped with the date its Drive
+// copy was last written, so a copy generated mid-month — before attendance was
+// finished — is visible as stale rather than trusted silently.
+var MONTHLY_REPORTS_EMAIL = 'rasesh@rsinfotech.net';
+var MONTHLY_REPORTS_HOUR = 8; // 8 AM IST on the 1st
+
+function createMonthlyReportsTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'sendMonthlyReportsEmail') {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+  ScriptApp.newTrigger('sendMonthlyReportsEmail')
+    .timeBased()
+    .everyDays(1)
+    .atHour(MONTHLY_REPORTS_HOUR)
+    .inTimezone('Asia/Kolkata')
+    .create();
+  Logger.log('Monthly report pack trigger created — sendMonthlyReportsEmail now runs daily around ' +
+    MONTHLY_REPORTS_HOUR + ':00 IST and emails only on the 1st.');
+}
+
+// Undoes createMonthlyReportsTrigger — stops the monthly pack without touching
+// the daily digest, the increment reminder or the birthday reminder.
+function removeMonthlyReportsTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var removed = 0;
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'sendMonthlyReportsEmail') {
+      ScriptApp.deleteTrigger(triggers[i]);
+      removed++;
+    }
+  }
+  Logger.log('Removed ' + removed + ' monthly report pack trigger(s).');
+}
+
+// 'YYYY-MM' of the month before today, in IST, rolling the year back in January.
+function prevMonthYmIst_() {
+  var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+  var y = Number(istToday.slice(0, 4));
+  var m = Number(istToday.slice(5, 7)) - 1;
+  if (m === 0) { m = 12; y -= 1; }
+  return y + '-' + ('0' + m).slice(-2);
+}
+
+// Walks the folder path WITHOUT creating anything, unlike getOrCreateFolderPath_.
+// This job runs every month whether or not HR opened a report, and a creating
+// walk would leave a trail of empty folders behind for months that were never
+// generated. Returns null the moment a segment is missing.
+function findFolderPath_(pathParts) {
+  var folder = DriveApp.getFolderById(ROOT_FOLDER_ID);
+  for (var i = 0; i < pathParts.length; i++) {
+    var it = folder.getFoldersByName(pathParts[i]);
+    if (!it.hasNext()) return null;
+    folder = it.next();
+  }
+  return folder;
+}
+
+// Where each report of the pack files itself, mirroring index.html's own
+// hrYearPath(monthVal + '-01', ...) calls exactly — Salary Sheet, Final Salary
+// Sheet and Attendance Sheet under Dashboard, PF and ESI under Reports. The
+// year folder is the financial year the month BELONGS to, not the one it was
+// generated in, which is why March files land in the year that is closing.
+function monthlyReportSpecs_(ym) {
+  var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
+  var fy = fyLabelFor_(y, m);
+  var dashboard = ['HR Management', fy, 'Dashboard'];
+  var reports = ['HR Management', fy, 'Reports'];
+  return [
+    { label: 'Salary Sheet',
+      path: dashboard.concat(['Salary Sheet']),
+      files: ['Salary Sheet - ' + ym + '.csv'],
+      where: 'Dashboard > Salary Sheet' },
+    // Two names, because this report was renamed. Months generated since the
+    // rename are filed as "Final Salary Sheet for Accountant - <ym>.csv";
+    // months generated before it are still sitting in the same folder under the
+    // old "Final Salary Sheet - <ym>.csv", and August 2026 is one of them. The
+    // folder deliberately kept its old name so nothing was orphaned by the
+    // rename (see index.html's own note at the Final Salary Sheet stash), so
+    // accepting both names here is what makes those earlier months attachable
+    // instead of being reported missing when the file is right there.
+    { label: 'Final Salary Sheet for Accountant',
+      path: dashboard.concat(['Final Salary Sheet']),
+      files: ['Final Salary Sheet for Accountant - ' + ym + '.csv',
+              'Final Salary Sheet - ' + ym + '.csv'],
+      where: 'Dashboard > Final Salary Sheet' },
+    { label: 'Attendance Sheet',
+      path: dashboard.concat(['Attendance Sheet']),
+      files: ['Attendance Sheet - ' + ym + '.csv'],
+      where: 'Dashboard > Attendance Sheet' },
+    { label: 'PF Return',
+      path: reports.concat(['PF']),
+      files: ['PF Return - ' + ym + '.csv'],
+      where: 'Reports > PF' },
+    { label: 'ESI Return',
+      path: reports.concat(['ESI']),
+      files: ['ESI Return - ' + ym + '.csv'],
+      where: 'Reports > ESI' }
+  ];
+}
+
+// The newest file matching any of the accepted names. Two reasons it is not a
+// simple single lookup: a report that has been renamed has copies under both
+// names (see Final Salary Sheet above), and a folder can in principle hold more
+// than one file of the same name. saveFile_ trashes same-named files before
+// writing, so the duplicate case is rare — taking the most recently written is
+// simply the right answer whenever it happens.
+function newestFileNamed_(folder, fileNames) {
+  var names = Array.isArray(fileNames) ? fileNames : [fileNames];
+  var best = null;
+  for (var n = 0; n < names.length; n++) {
+    var it = folder.getFilesByName(names[n]);
+    while (it.hasNext()) {
+      var f = it.next();
+      if (!best || f.getLastUpdated().getTime() > best.getLastUpdated().getTime()) best = f;
+    }
+  }
+  return best;
+}
+
+// force=true sends regardless of the date, for testing from the editor.
+function sendMonthlyReportsEmail(force) {
+  var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+  if (!force && Number(istToday.slice(8, 10)) !== 1) return;
+
+  var ym = prevMonthYmIst_();
+  var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
+  var monthLabel = Utilities.formatDate(new Date(y, m - 1, 1), 'Asia/Kolkata', 'MMMM yyyy');
+  var esc = function (s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  };
+
+  var specs = monthlyReportSpecs_(ym);
+  var attachments = [], found = [], missing = [];
+  for (var i = 0; i < specs.length; i++) {
+    var spec = specs[i];
+    var folder = findFolderPath_(spec.path);
+    var file = folder ? newestFileNamed_(folder, spec.files) : null;
+    if (file) {
+      attachments.push(file.getBlob());
+      // file.getName(), not spec.files[0] — the name actually attached is the
+      // one worth showing, so a month still filed under a report's old name
+      // reads as what it is instead of as the new name it does not have.
+      found.push({ label: spec.label, file: file.getName(), where: spec.where,
+        updated: Utilities.formatDate(file.getLastUpdated(), 'Asia/Kolkata', 'dd/MM/yyyy HH:mm') });
+    } else {
+      missing.push({ label: spec.label, where: spec.where });
+    }
+  }
+
+  var subject = 'R.S. Infotech — ' + monthLabel + ' reports (' + found.length + ' of ' +
+    specs.length + ')' + (missing.length ? ' — ' + missing.length + ' missing' : '');
+
+  var intro = found.length
+    ? 'Attached are the ' + monthLabel + ' reports as they were last generated in the app.'
+    : 'None of the ' + monthLabel + ' reports have been generated yet, so there is nothing to attach.';
+  // Said plainly because it decides whether the attachment can be trusted: the
+  // Drive copy is written when HR opens the report, so its date is the date the
+  // figures were last worked out, not the date this email went out.
+  var caveat = 'Each file is the copy written when that report was last opened in the app — the ' +
+    '"generated" time below is when its figures were last worked out. Reopen a report in the app ' +
+    'if anything has changed since.';
+  var howTo = 'To produce a missing report, open it once in the app for ' + monthLabel +
+    '; it files its own copy in Drive, and the next run of this email will pick it up.';
+
+  var html = '<p>' + esc(intro) + '</p>';
+  if (found.length) {
+    html += '<p>' + esc(caveat) + '</p>' +
+      '<table cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;' +
+      'font-family:Arial,sans-serif;font-size:13px;">' +
+      '<tr><th align="left">Report</th><th align="left">File</th><th align="left">Generated</th></tr>';
+    for (var a = 0; a < found.length; a++) {
+      html += '<tr><td>' + esc(found[a].label) + '</td><td>' + esc(found[a].file) +
+        '</td><td>' + esc(found[a].updated) + '</td></tr>';
+    }
+    html += '</table>';
+  }
+  if (missing.length) {
+    html += '<p><strong>Not attached — never generated for ' + esc(monthLabel) + ':</strong></p><ul>';
+    for (var b = 0; b < missing.length; b++) {
+      html += '<li>' + esc(missing[b].label) + ' <span style="color:#666">(' + esc(missing[b].where) + ')</span></li>';
+    }
+    html += '</ul><p>' + esc(howTo) + '</p>';
+  }
+
+  var plain = intro + '\n\n';
+  if (found.length) {
+    plain += caveat + '\n\n';
+    for (var c = 0; c < found.length; c++) {
+      plain += '  ' + found[c].label + '\n' +
+        '    File     : ' + found[c].file + '\n' +
+        '    Generated: ' + found[c].updated + '\n';
+    }
+    plain += '\n';
+  }
+  if (missing.length) {
+    plain += 'Not attached — never generated for ' + monthLabel + ':\n';
+    for (var d = 0; d < missing.length; d++) {
+      plain += '  - ' + missing[d].label + ' (' + missing[d].where + ')\n';
+    }
+    plain += '\n' + howTo + '\n';
+  }
+
+  MailApp.sendEmail({
+    to: MONTHLY_REPORTS_EMAIL,
+    subject: subject,
+    body: plain,
+    htmlBody: html,
+    attachments: attachments
+  });
+  Logger.log('Monthly report pack for ' + monthLabel + ' sent to ' + MONTHLY_REPORTS_EMAIL +
+    ' — ' + found.length + ' attached, ' + missing.length + ' missing.');
+}
+
 // One-off, run once from this editor (function dropdown -> restorePayrollDocsPf202526
 // -> Run), same as organiseDriveByYear/migrateAttendanceToFY. Not called by the web app.
 //
