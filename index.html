@@ -2369,7 +2369,7 @@
             </button>
             <button type="button" class="gen-accordion-header" data-target="rptSecMonthlyLeave" onclick="openReportsCard('rptSecMonthlyLeave')" aria-expanded="false">
               <span class="gen-accordion-num"></span>
-              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Monthly Leave Report</strong>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Yearly Leave Report</strong>
                 <span class="gen-accordion-desc">EL + SL + LP days per employee, month by month across the financial year.</span></span>
               <span class="gen-accordion-chevron">▼</span>
             </button>
@@ -2476,13 +2476,13 @@
 
         <div id="rptSecMonthlyLeave" class="hidden gen-accordion-body">
         <section class="block">
-          <h2 style="margin:0 0 4px;">Monthly Leave Report</h2>
+          <h2 style="margin:0 0 4px;">Yearly Leave Report</h2>
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Every employee's leave days (EL + SL + LP, half-days counted as 0.5) broken down month by month across the financial year — April through March — so you can see each person's full-year leave pattern at a glance.</p>
           <p id="cardStat_monthlyLeave" class="gen-card-stat"></p>
-          <label class="field">Financial year starting April of</label>
-          <input type="number" id="leaveReportStartYear" placeholder="e.g. 2026 for FY 2026-27" />
+          <label class="field">Financial year</label>
+          <select class="field-input" id="leaveReportStartYear"></select>
           <div style="height:14px"></div>
-          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building report…',renderMonthlyLeaveReport)">Generate monthly leave report</button>
+          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building report…',renderMonthlyLeaveReport)">Generate yearly leave report</button>
           <div style="height:14px"></div>
           <div id="monthlyLeaveReportBox"></div>
         </section>
@@ -3649,6 +3649,33 @@ function autoDefaultMonthYearSelects_(scopeEl){
     const yearId = monthSel.id.slice(0, -'MonthSel'.length) + 'YearSel';
     if(document.getElementById(yearId)) populateMonthYearSelects(monthSel.id, yearId);
   });
+}
+// The financial-year dropdown, filled the same way and for the same reason as
+// populateMonthYearSelects above: a picker that opens empty is a picker HR has
+// to guess at. Options read "2026-27" rather than a bare number, because that
+// is the year as the rest of the app names it — a plain 2027 in a spinner box
+// gave no clue whether it meant FY 2026-27 or FY 2027-28.
+//
+// Same window as the month/year pair: two years back, one forward. Anything
+// older is a closed year nobody reports on from here, and a free-typed number
+// could reach a year with no attendance at all and produce an empty report
+// that looked like a bug.
+function populateFyYearSelect(selId){
+  const sel = document.getElementById(selId);
+  if(!sel || sel.options.length) return;
+  const currentFy = getCurrentFYStartYear();
+  const years = [];
+  for(let y = currentFy - 2; y <= currentFy + 1; y++) years.push(y);
+  sel.innerHTML = years.map(y =>
+    `<option value="${y}">${financialYearLabel(y + '-04-01')}</option>`).join('');
+  sel.value = String(currentFy);
+}
+// The financial-year twin of autoDefaultMonthYearSelects_, found by the same
+// id-suffix convention. It matches only <select>, so the cards still using a
+// typed number input for their own start year are left exactly as they are.
+function autoDefaultFyYearSelects_(scopeEl){
+  if(!scopeEl) return;
+  scopeEl.querySelectorAll('select[id$="StartYear"]').forEach(sel => populateFyYearSelect(sel.id));
 }
 function getMonthYearValue(monthSelId, yearSelId){
   const month = Number(document.getElementById(monthSelId).value);
@@ -20308,8 +20335,11 @@ const FY_MONTH_LABELS = ['Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec','
 async function renderMonthlyLeaveReport(){
   const box = document.getElementById('monthlyLeaveReportBox');
   const yearInput = document.getElementById('leaveReportStartYear');
-  if(!yearInput.value) yearInput.value = getCurrentFYStartYear();
-  const startYear = parseInt(yearInput.value, 10);
+  // A <select> always reports a value once it has options, so this only still
+  // matters for the one case the dropdown cannot cover: Generate pressed before
+  // the card's options were filled in.
+  if(!yearInput.value) populateFyYearSelect('leaveReportStartYear');
+  const startYear = parseInt(yearInput.value, 10) || getCurrentFYStartYear();
 
   const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
   if(!employees.length){
@@ -20365,7 +20395,7 @@ async function renderMonthlyLeaveReport(){
     ? `<div class="hr-sheet-cards">${cardsHtml}</div>`
     : `<table class="sal-table"><tr>${header.map(h=>`<th>${h}</th>`).join('')}</tr>${tableRows}</table>`;
 
-  const reportTitle = 'Monthly Leave Report — FY ' + startYear + '-' + String(startYear+1).slice(2);
+  const reportTitle = 'Yearly Leave Report — FY ' + startYear + '-' + String(startYear+1).slice(2);
   box.innerHTML = `${reportActionBar(reportTitle, 'monthlyLeaveReportBox')}
     <div class="sal-sheet-wrap print-isolate" id="leaveReportPrintArea">
       ${reportLogoHeader(reportTitle)}
@@ -20376,9 +20406,12 @@ async function renderMonthlyLeaveReport(){
   const csvHeader = header;
   const csvRows = rows.map(r => [r.name, ...r.monthTotals, r.yearTotal]);
   {
-    const fileName = `Monthly Leave Report - FY ${fyOfStartYear(startYear).label}.csv`;
+    const fileName = `Yearly Leave Report - FY ${fyOfStartYear(startYear).label}.csv`;
     const content = toCsv(csvHeader, csvRows);
-    // Filed under the financial year the report covers.
+    // Filed under the financial year the report covers. The Drive folder keeps
+    // its old "Monthly Leave Report" name even though the report is now called
+    // Yearly — the same choice the Final Salary Sheet rename made, so the years
+    // already filed there are not orphaned from the ones filed after it.
     queueFileToDrive(hrYearPath(fyOfStartYear(startYear).from, 'Reports', 'Monthly Leave Report'), fileName, content, 'text/csv');
     stashReportShare(reportTitle, fileName, content, 'text/csv',
       'HR Management > ' + fyOfStartYear(startYear).label + ' > Reports > Monthly Leave Report', 'monthlyLeaveReportBox');
@@ -21766,6 +21799,7 @@ function openGeneratorCard(sectionId){
   if(!alreadyOpen){
     document.getElementById(sectionId).classList.remove('hidden');
     autoDefaultMonthYearSelects_(document.getElementById(sectionId));
+    autoDefaultFyYearSelects_(document.getElementById(sectionId));
   }
   updateAccordionHeaders_();
   kmtCommitArrival();
@@ -21814,6 +21848,7 @@ function openReportsCard(sectionId){
   if(!alreadyOpen){
     document.getElementById(sectionId).classList.remove('hidden');
     autoDefaultMonthYearSelects_(document.getElementById(sectionId));
+    autoDefaultFyYearSelects_(document.getElementById(sectionId));
   }
   updateAccordionHeaders_();
   kmtCommitArrival();
