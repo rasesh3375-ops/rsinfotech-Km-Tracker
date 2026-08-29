@@ -2379,6 +2379,12 @@
                 <span class="gen-accordion-desc">Late coming, EL/PL, SL, half days and short leaves for one month — highest in red.</span></span>
               <span class="gen-accordion-chevron">▼</span>
             </button>
+            <button type="button" class="gen-accordion-header" data-target="rptSecElSlStatus" onclick="openReportsCard('rptSecElSlStatus')" aria-expanded="false">
+              <span class="gen-accordion-num"></span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">EL SL Current Status</strong>
+                <span class="gen-accordion-desc">Opening, used and closing EL and SL for every employee, month by month across the year.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
+            </button>
             <button type="button" class="gen-accordion-header" data-target="rptSecConsultant" onclick="openReportsCard('rptSecConsultant')" aria-expanded="false">
               <span class="gen-accordion-num"></span>
               <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Consultant Report</strong>
@@ -2500,6 +2506,20 @@
           <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building report…',renderMonthlyLeaveDetailReport)">Generate monthly leave detail report</button>
           <div style="height:14px"></div>
           <div id="monthlyLeaveDetailReportBox"></div>
+        </section>
+        </div>
+
+        <div id="rptSecElSlStatus" class="hidden gen-accordion-body">
+        <section class="block">
+          <h2 style="margin:0 0 4px;">EL SL Current Status</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Every employee's Earned Leave and Sick Leave balance, month by month across the financial year — opening, used and closing for each. Each month's closing carries into the next as its opening, and March's closing is the balance left at year end.</p>
+          <p id="cardStat_elSlStatus" class="gen-card-stat"></p>
+          <label class="field">Financial year</label>
+          <select class="field-input" id="elSlStatusStartYear"></select>
+          <div style="height:14px"></div>
+          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building report…',renderElSlStatusReport)">Generate EL SL current status</button>
+          <div style="height:14px"></div>
+          <div id="elSlStatusReportBox"></div>
         </section>
         </div>
 
@@ -20417,6 +20437,176 @@ async function renderMonthlyLeaveReport(){
       'HR Management > ' + fyOfStartYear(startYear).label + ' > Reports > Monthly Leave Report', 'monthlyLeaveReportBox');
   }
   openFullscreenView(reportTitle, 'monthlyLeaveReportBox');
+}
+
+// ---- EL SL Current Status ----
+// Every employee's EL and SL balance walked month by month across the year:
+// opening, used, closing, with each month's closing becoming the next month's
+// opening.
+//
+// It works out no leave of its own. The days used in a month come from
+// leaveUsedThisFinancialYear, the one function that decides what counts as EL
+// or SL (EL/SL a full day, HEL/HSL a half) and the same one the Salary Sheet,
+// the role report and the leave-request screen all read — called once per month
+// with that month's range instead of once for the year. The opening balances
+// are emp.elOpening and emp.slOpening, the same two fields Employee Master
+// edits and the EL/SL rollover writes.
+//
+// What it deliberately does NOT do is add EL earned during the year into the
+// running balance. Under LEAVE_POLICY.privilegeLeave.usableInFirstYear what is
+// earned in a year is not usable until the next one — elFyRows carries it as
+// nextOpening rather than spending it — so adding it here would show HR a
+// balance the policy does not let anyone take, and would disagree with the EL
+// Calculation Sheet on the same employee.
+//
+// A balance is allowed to go negative and is not floored at nil. Leave taken
+// beyond what was available is a real thing that happened and the sheet has to
+// show it; hiding it behind a zero would leave a figure the payroll already
+// treated as unpaid looking as though nothing was wrong.
+async function elSlStatusRows(employees, startYear){
+  const fy = fyOfStartYear(startYear);
+  // One request for everyone's attendance before the loop, the same priming
+  // elFyRows does — otherwise this is one round trip per employee.
+  await getAttendanceMany(employees.map(e => e.id));
+  const rows = [];
+  for(const emp of employees){
+    const att = await getAttendance(emp.id);
+    // Nothing is counted before the LATEST of: the year starting, the employee
+    // joining, and the month their opening balance was set from. Joining in
+    // September means April to August are not zero-balance months for them,
+    // they are months this person was not here for — shown as blank rather
+    // than as a balance that was never theirs.
+    const openingFrom = emp.leaveOpeningFrom
+      ? (String(emp.leaveOpeningFrom).length === 7 ? emp.leaveOpeningFrom + '-01' : emp.leaveOpeningFrom)
+      : fy.from;
+    const from = [fy.from, emp.doj || fy.from, openingFrom].sort().pop();
+
+    let elBal = Number(emp.elOpening) || 0;
+    let slBal = Number(emp.slOpening) || 0;
+    const months = [];
+    FY_MONTH_ORDER.forEach(m => {
+      const y = m >= 4 ? startYear : startYear + 1;
+      const ym = y + '-' + String(m).padStart(2, '0');
+      const mStart = ym + '-01';
+      const mEnd = ym + '-' + String(new Date(y, m, 0).getDate()).padStart(2, '0');
+      if(mEnd < from){ months.push({ ym, y, m, active:false }); return; }
+      // Range starts at whichever is later, so the month somebody joins counts
+      // only from their joining date rather than from the 1st.
+      const used = leaveUsedThisFinancialYear(att, mEnd, mStart > from ? mStart : from);
+      const elOpen = elBal, slOpen = slBal;
+      elBal = elOpen - used.el;
+      slBal = slOpen - used.sl;
+      months.push({ ym, y, m, active:true, elOpen, elUsed:used.el, elClose:elBal,
+                    slOpen, slUsed:used.sl, slClose:slBal });
+    });
+    const active = months.filter(x => x.active);
+    rows.push({ emp, id: emp.id, name: emp.name,
+                startedFrom: from,
+                openEl: Number(emp.elOpening) || 0, openSl: Number(emp.slOpening) || 0,
+                elTaken: active.reduce((n, x) => n + x.elUsed, 0),
+                slTaken: active.reduce((n, x) => n + x.slUsed, 0),
+                months, finalEl: elBal, finalSl: slBal });
+  }
+  return rows;
+}
+
+// Half days are real here — HEL and HSL are worth 0.5 — so a whole number must
+// not be dressed up as "1.0" nor a half swallowed into "1".
+function fmtLeaveDays_(n){
+  const v = Number(n) || 0;
+  return v % 1 ? v.toFixed(1) : String(v);
+}
+
+async function renderElSlStatusReport(){
+  const box = document.getElementById('elSlStatusReportBox');
+  const yearSel = document.getElementById('elSlStatusStartYear');
+  if(!yearSel.value) populateFyYearSelect('elSlStatusStartYear');
+  const startYear = parseInt(yearSel.value, 10) || getCurrentFYStartYear();
+  const fy = fyOfStartYear(startYear);
+
+  const employees = (await getEmployees()).filter(e => e.employmentStatus !== 'left');
+  if(!employees.length){
+    box.innerHTML = '<div class="empty">Add employees in Employee Master first.</div>';
+    return;
+  }
+  const rows = await elSlStatusRows(employees, startYear);
+  const isCompact = isCompactSheetView();
+  const d = fmtLeaveDays_;
+  const monthLabelOf = x => MONTH_NAMES[x.m - 1] + ' ' + x.y;
+  // Negative means leave taken beyond the balance — coloured so it is not read
+  // as an ordinary figure.
+  const num = v => `<td class="num"${Number(v) < 0 ? ' style="color:var(--danger,#B00020);font-weight:600;"' : ''}>${d(v)}</td>`;
+
+  // Year-end position for everybody, first, because "what is each person left
+  // with" is the question this report is opened to answer.
+  const summaryHead = `<tr><th>Employee</th><th class="num">EL opening</th><th class="num">EL used</th>
+      <th class="num">EL balance</th><th class="num">SL opening</th><th class="num">SL used</th>
+      <th class="num">SL balance</th></tr>`;
+  const summaryBody = rows.map(r => `<tr><td class="sal-name">${escapeHtml(r.name)}</td>` +
+    `<td class="num">${d(r.openEl)}</td><td class="num">${d(r.elTaken)}</td>${num(r.finalEl)}` +
+    `<td class="num">${d(r.openSl)}</td><td class="num">${d(r.slTaken)}</td>${num(r.finalSl)}</tr>`).join('');
+  const summaryCards = rows.map(r => hrCard(`<strong>${escapeHtml(r.name)}</strong>`,
+    hrRow('EL opening', d(r.openEl)) + hrRow('EL used', d(r.elTaken)) +
+    hrRow('EL balance', d(r.finalEl)) + hrRow('SL opening', d(r.openSl)) +
+    hrRow('SL used', d(r.slTaken)) + hrRow('SL balance', d(r.finalSl)))).join('');
+  const summary = isCompact
+    ? `<div class="hr-sheet-cards">${summaryCards}</div>`
+    : `<div class="sal-sheet-wrap"><table class="sal-table">${summaryHead}${summaryBody}</table></div>`;
+
+  // Then the month-by-month working for each person, so any figure above can
+  // be traced to the month it moved in.
+  const perEmployee = rows.map(r => {
+    const head = `<tr><th>Month</th><th class="num">EL opening</th><th class="num">EL used</th>
+        <th class="num">EL closing</th><th class="num">SL opening</th><th class="num">SL used</th>
+        <th class="num">SL closing</th></tr>`;
+    const body = r.months.map(x => x.active
+      ? `<tr><td>${monthLabelOf(x)}</td><td class="num">${d(x.elOpen)}</td><td class="num">${d(x.elUsed)}</td>` +
+        `${num(x.elClose)}<td class="num">${d(x.slOpen)}</td><td class="num">${d(x.slUsed)}</td>${num(x.slClose)}</tr>`
+      : `<tr class="dash-muted"><td>${monthLabelOf(x)}</td><td colspan="6" style="color:var(--muted);">Not on roll</td></tr>`
+    ).join('');
+    const cards = r.months.map(x => hrCard(`<strong>${monthLabelOf(x)}</strong>`,
+      x.active
+        ? hrRow('EL opening', d(x.elOpen)) + hrRow('EL used', d(x.elUsed)) + hrRow('EL closing', d(x.elClose)) +
+          hrRow('SL opening', d(x.slOpen)) + hrRow('SL used', d(x.slUsed)) + hrRow('SL closing', d(x.slClose))
+        : hrRow('', 'Not on roll'))).join('');
+    const inner = isCompact
+      ? `<div class="hr-sheet-cards">${cards}</div>`
+      : `<div class="sal-sheet-wrap"><table class="sal-table">${head}${body}</table></div>`;
+    return `<details class="print-open" style="margin:0 0 10px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;">
+      <summary style="cursor:pointer;font-weight:600;">${escapeHtml(r.name)}
+        <span style="font-weight:400;color:var(--muted);font-size:12px;"> — EL ${d(r.finalEl)} · SL ${d(r.finalSl)} left</span></summary>
+      <div style="margin-top:10px;">${inner}</div></details>`;
+  }).join('');
+
+  const reportTitle = 'EL SL Current Status — FY ' + fy.label;
+  box.innerHTML = `${reportActionBar(reportTitle, 'elSlStatusReportBox')}
+    <div class="sal-sheet-wrap print-isolate" id="elSlStatusPrintArea" style="margin-top:12px;">
+      ${reportLogoHeader(reportTitle)}
+      <p style="font-size:11.5px;color:var(--muted);margin:0 0 10px;">Opening balances come from each employee's record. A month's closing balance is its opening less the EL or SL taken that month, and becomes the next month's opening; a month with no leave carries the balance forward unchanged. Half days count as 0.5. EL earned during this year is not included — under the leave policy it becomes usable next year, and the EL Calculation Sheet carries it forward as next year's opening. A negative balance is leave taken beyond what was available, and is shown rather than rounded up to nil.</p>
+      <h3 style="font-size:15px;margin:14px 0 8px;">Balance at ${MONTH_NAMES[2]} ${startYear + 1} year end</h3>
+      ${summary}
+      <h3 style="font-size:15px;margin:18px 0 8px;">Month by month</h3>
+      ${perEmployee}
+    </div>`;
+
+  {
+    const csvHeader = ['Employee','Month','EL Opening','EL Used','EL Closing','SL Opening','SL Used','SL Closing'];
+    const csvRows = [];
+    rows.forEach(r => {
+      r.months.forEach(x => {
+        csvRows.push(x.active
+          ? [r.name, monthLabelOf(x), x.elOpen, x.elUsed, x.elClose, x.slOpen, x.slUsed, x.slClose]
+          : [r.name, monthLabelOf(x), '', '', '', '', '', '']);
+      });
+      csvRows.push([r.name, 'Year end', r.openEl, r.elTaken, r.finalEl, r.openSl, r.slTaken, r.finalSl]);
+    });
+    const fileName = `EL SL Current Status - FY ${fy.label}.csv`;
+    const content = toCsv(csvHeader, csvRows);
+    queueFileToDrive(hrYearPath(fy.from, 'Reports', 'EL SL Current Status'), fileName, content, 'text/csv');
+    stashReportShare(reportTitle, fileName, content, 'text/csv',
+      'HR Management > ' + fy.label + ' > Reports > EL SL Current Status', 'elSlStatusReportBox');
+  }
+  openFullscreenView(reportTitle, 'elSlStatusReportBox');
 }
 
 // ---- leave detail reports: late coming / EL-PL / SL / half day / short leave, broken out per category ----
