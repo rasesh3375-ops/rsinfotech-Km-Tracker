@@ -2002,6 +2002,123 @@ function sendLoanAdvanceReportEmail(force) {
     (hit ? 'snapshot ' + hit.date : 'none available') + '.');
 }
 
+// ===== Monthly Leave Detail Report, emailed separately on the 1st =====
+//
+// Like the report pack this is a closed month's report, so there is a definite
+// "last month's file" to look for — unlike the Loan & Advance Report, which is
+// a running position with no month of its own. Its own email because that is
+// what was asked for, and because leave detail is read by different people than
+// the payroll sheets.
+//
+// The one thing to be careful about is the filename. Every other report is
+// filed with a numeric month — "Salary Sheet - 2026-08.csv" — but this one is
+// named with the month spelled out: "Monthly Leave Detail Report - August
+// 2026.csv", because index.html builds it from MONTH_NAMES rather than the
+// numeric string. Get that wrong and the lookup silently finds nothing.
+var LEAVE_DETAIL_EMAIL = 'rasesh@rsinfotech.net';
+var LEAVE_DETAIL_HOUR = 8; // 8 AM IST on the 1st
+
+// Deliberately a hardcoded list rather than Utilities.formatDate(..., 'MMMM'),
+// which formats in the SCRIPT's locale. These names are not decoration here —
+// they are half of a filename that has to match what index.html wrote, byte for
+// byte, and a script locale that is not English would quietly produce a name
+// that matches no file at all. This mirrors index.html's own MONTH_NAMES.
+var LEAVE_DETAIL_MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+
+function createLeaveDetailReportTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'sendLeaveDetailReportEmail') {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+  ScriptApp.newTrigger('sendLeaveDetailReportEmail')
+    .timeBased()
+    .everyDays(1)
+    .atHour(LEAVE_DETAIL_HOUR)
+    .inTimezone('Asia/Kolkata')
+    .create();
+  Logger.log('Monthly Leave Detail report trigger created — sendLeaveDetailReportEmail now runs daily ' +
+    'around ' + LEAVE_DETAIL_HOUR + ':00 IST and emails only on the 1st.');
+}
+
+// Undoes createLeaveDetailReportTrigger — stops this email without touching any
+// of the others.
+function removeLeaveDetailReportTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var removed = 0;
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'sendLeaveDetailReportEmail') {
+      ScriptApp.deleteTrigger(triggers[i]);
+      removed++;
+    }
+  }
+  Logger.log('Removed ' + removed + ' monthly leave detail report trigger(s).');
+}
+
+// force=true sends regardless of the date, for testing from the editor.
+function sendLeaveDetailReportEmail(force) {
+  var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+  if (!force && Number(istToday.slice(8, 10)) !== 1) return;
+
+  var ym = prevMonthYmIst_();
+  var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
+  var monthLabel = LEAVE_DETAIL_MONTH_NAMES[m - 1] + ' ' + y;
+  var fileName = 'Monthly Leave Detail Report - ' + monthLabel + '.csv';
+  var esc = function (s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  };
+
+  // Filed under the financial year the reported month belongs to, so March
+  // lands in the year that is closing rather than the one just opened.
+  var folder = findFolderPath_(['HR Management', fyLabelFor_(y, m), 'Reports', 'Monthly Leave Detail Report']);
+  var file = folder ? newestFileNamed_(folder, [fileName]) : null;
+
+  var subject, plain, html, attachments = [];
+  if (file) {
+    var updated = Utilities.formatDate(file.getLastUpdated(), 'Asia/Kolkata', 'dd/MM/yyyy HH:mm');
+    attachments.push(file.getBlob());
+    subject = 'R.S. Infotech — Monthly Leave Detail Report — ' + monthLabel;
+    var lead = 'Attached is the Monthly Leave Detail Report for ' + monthLabel + '.';
+    // Same caveat as the report pack, for the same reason: the Drive copy is
+    // written when HR opens the report, so its date is when the figures were
+    // last worked out, not when this email went out. A copy generated before
+    // the month ended is missing the last of the month's leave.
+    var caveat = 'This is the copy written when the report was last opened in the app, on ' + updated +
+      '. Reopen it in the app if any leave has been recorded or corrected since.';
+    html = '<p>' + esc(lead) + '</p><p>' + esc(caveat) + '</p>' +
+      '<table cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;' +
+      'font-family:Arial,sans-serif;font-size:13px;">' +
+      '<tr><td><strong>Month</strong></td><td>' + esc(monthLabel) + '</td></tr>' +
+      '<tr><td><strong>File</strong></td><td>' + esc(file.getName()) + '</td></tr>' +
+      '<tr><td><strong>Generated</strong></td><td>' + esc(updated) + '</td></tr>' +
+      '</table>';
+    plain = lead + '\n\n' + caveat + '\n\n' +
+      '  Month    : ' + monthLabel + '\n' +
+      '  File     : ' + file.getName() + '\n' +
+      '  Generated: ' + updated + '\n';
+  } else {
+    subject = 'R.S. Infotech — Monthly Leave Detail Report — ' + monthLabel + ' not generated';
+    var none = 'The Monthly Leave Detail Report has not been generated for ' + monthLabel +
+      ', so there is nothing to attach.';
+    var fix = 'Open Reports > Monthly Leave Detail Report in the app once for ' + monthLabel +
+      '; it files its own copy in Drive, and the next run of this email will attach it.';
+    html = '<p>' + esc(none) + '</p><p>' + esc(fix) + '</p>';
+    plain = none + '\n\n' + fix + '\n';
+  }
+
+  MailApp.sendEmail({
+    to: LEAVE_DETAIL_EMAIL,
+    subject: subject,
+    body: plain,
+    htmlBody: html,
+    attachments: attachments
+  });
+  Logger.log('Monthly Leave Detail report email for ' + monthLabel + ' sent to ' + LEAVE_DETAIL_EMAIL +
+    ' — ' + (file ? 'attached' : 'not generated') + '.');
+}
+
 // One-off, run once from this editor (function dropdown -> restorePayrollDocsPf202526
 // -> Run), same as organiseDriveByYear/migrateAttendanceToFY. Not called by the web app.
 //
