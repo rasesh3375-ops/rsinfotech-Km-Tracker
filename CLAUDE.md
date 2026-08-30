@@ -28,9 +28,10 @@ or edit and push.
 After **every** edit to `index.html`, run both checks:
 
 ```bash
-node tools/check-syntax.js        # no dependencies
-npm install acorn                 # once, for the second one
+node tools/check-syntax.js          # no dependencies
+npm install acorn                   # once, for the second one
 node tools/check-undeclared.js
+node tools/check-shared-standalone.js   # after touching shared/report-logic.js
 ```
 
 `check-syntax.js` parses the inline scripts. A stray brace means the app does
@@ -109,6 +110,14 @@ Three consequences worth knowing before touching it:
 - **Never copy any of it into `Code 2.js`.** A second copy is exactly the
   drift the file was made to end — the backend fetches, it does not
   reimplement.
+- **It has to work on its own**, and the browser will not tell you when it
+  stops. index.html and this file share one global scope, so a helper left
+  behind in index.html, or a config value mutated there after declaration
+  (`PF_RULES.wageComponents = ['basic']` was exactly this), still resolves in
+  the app and looks fine. Apps Script evaluates only this file, where the same
+  gap is a ReferenceError at 8 AM on the 1st with nobody watching. Run
+  `node tools/check-shared-standalone.js` after touching it — it evaluates the
+  file with nothing but the JavaScript built-ins and runs every report builder.
 - **jsdom does not fetch `<script src>`**, so a harness that loads
   `index.html` raw gets a page with no payroll logic in it. Inline the shared
   file into the HTML string first, the way the browser ends up with it:

@@ -4127,11 +4127,6 @@ function csvEscape(v){
   const s = (v===undefined || v===null) ? '' : String(v);
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
 }
-function toCsv(headerArr, rowsArr){
-  const lines = [headerArr.map(csvEscape).join(',')];
-  rowsArr.forEach(r => lines.push(r.map(csvEscape).join(',')));
-  return lines.join('\n');
-}
 
 let lastBackendError = '';
 async function testBackendConnection(){
@@ -6682,28 +6677,6 @@ function evaluateMonth(emp, days, balances, P){
   return out;
 }
 
-// ---- leave balances ----
-function leaveBalances(emp, used, P){
-  P = P || LEAVE_POLICY;
-  const type = P.sickLeave.perYear[emp.employeeType] !== undefined
-    ? emp.employeeType
-    : (emp.employeeType === 'part' ? 'part' : 'full');
-  const sickTotal = P.sickLeave.perYear[type];
-  const sickLeft = Math.max(0, sickTotal - (used.sick || 0));
-  const plEarned = Math.floor((used.attendanceDays || 0) / P.privilegeLeave.earnedPerAttendanceDays);
-  const plUsable = P.privilegeLeave.usableInFirstYear || !emp.isFirstFinancialYear;
-  return {
-    sickTotal, sickLeft, sickExhausted: sickLeft === 0,
-    plEarned, plUsed: used.pl || 0, plLeft: Math.max(0, plEarned - (used.pl || 0)),
-    plUsable,
-    notes: [].concat(
-      sickLeft === 0 ? ['No Sick Leave balance available — further sick leave becomes Leave Without Pay'] : [],
-      !plUsable ? ['PL earned this year is usable from the next financial year'] : [],
-      (used.plThisMonth || 0) > P.privilegeLeave.maxPerMonth
-        ? ['More than '+P.privilegeLeave.maxPerMonth+' PL this month — the excess is deducted from salary'] : []
-    )
-  };
-}
 
 
 // ---- leave application ----
@@ -6726,69 +6699,6 @@ function validateLeaveApplication(req, ctx, P){
 }
 
 
-// holidayMap is optional — omitting it still catches every Sunday sandwich
-// (which needs no holiday data at all), just not a holiday-adjacent one.
-// Every caller that has a holidayMap handy passes it; computeSalaryForEmployee
-// always has one, so the actual Salary Sheet deduction is never affected by
-// this — only how completely a warning panel can explain it in advance.
-function policyRowsFor(employees, attByEmp, dateList, holidayMap){
-  const P = LEAVE_POLICY;
-  return employees.map(emp => {
-    const att = attByEmp[emp.id] || {};
-    let lateCount = 0, shortLeaves = 0, sickUsed = 0, plUsed = 0, lwp = 0, halfDays = 0, attendanceDays = 0;
-    let otMinutes = 0, earlyDays = 0;
-    dateList.forEach(d => {
-      const e = att[d];
-      if(!e) return;
-      const c = e.code;
-      if(c === 'SHORT') shortLeaves++;
-      if(c === 'SL' || c === 'HSL') sickUsed += (c === 'HSL' ? 0.5 : 1);
-      if(c === 'EL' || c === 'HEL') plUsed += (c === 'HEL' ? 0.5 : 1);
-      if(c === 'LP' || c === 'HLP') lwp += (c === 'HLP' ? 0.5 : 1);
-      if(c === 'HEL' || c === 'HSL' || c === 'HLP') halfDays++;
-      if(c === 'P' || c === 'SHORT' || c === 'EL' || c === 'SL') attendanceDays++;
-      if(e.lateFlag) lateCount++;
-      // Judge the day itself whenever both punches exist, so early leaving and
-      // overtime are counted rather than merely storable.
-      if(e.checkinTime && e.checkoutTime){
-        const toMin = t => { const [h,m] = t.split(':').map(Number); return h*60+m; };
-        const day = evaluateAttendanceDay({ inMin: toMin(e.checkinTime), outMin: toMin(e.checkoutTime) });
-        if(day.overtimeMinutes) otMinutes += day.overtimeMinutes;
-        if(day.earlyMinutes) earlyDays++;
-      }
-    });
-    const type = emp.employeeType === 'part' ? 'part' : 'full';
-    const bal = leaveBalances({ employeeType: type, isFirstFinancialYear: !!emp.isFirstFinancialYear },
-                              { sick: sickUsed, pl: plUsed, plThisMonth: plUsed, attendanceDays });
-    const L = P.lateComing, S = P.shortLeave;
-    const warn = [];
-    // The same call the Salary Sheet makes, so the warning and the deduction
-    // are one number seen twice rather than two numbers that might differ.
-    const policyHalf = policyHalfDaysFor(emp, att, dateList);
-    if(lateCount > L.freeInstancesPerMonth){
-      warn.push('Exhausted the ' + L.freeInstancesPerMonth + ' permissible late entries');
-    }
-    policyHalf.reasons.forEach(r => warn.push(r + ' — deducted from this month\u2019s salary'));
-    if(emp.employeeType === 'part' && shortLeaves > 0 && !P.partTime.shortLeaveAllowed)
-      warn.push('Short Leave is not applicable for Part-Time employees');
-    if(bal.sickExhausted) warn.push('Sick Leave exhausted — further sick leave becomes Leave Without Pay');
-    if(plUsed > P.privilegeLeave.maxPerMonth)
-      warn.push('More than ' + P.privilegeLeave.maxPerMonth + ' PL this month — excess deducted from salary');
-    if(!bal.plUsable && bal.plEarned > 0) warn.push('PL earned this year is usable from the next financial year');
-    if(earlyDays) warn.push(earlyDays + ' day(s) left before shift end (' + minToHHMM(P.shift.endMin) + ')');
-    // Sandwich leave applies to Resident Engineers too — confirmed as a
-    // deliberate policy decision, unlike the EL/SL/short-leave/late-coming
-    // rules just above, which stay exempt for them exactly as before. A
-    // Resident's day is still marked A/LP/P through the same Attendance
-    // Sheet everyone else uses, so there is nothing special about how their
-    // sandwich days are found — only whether the exemption applied at all.
-    const sandwichDates = sandwichDaysFor(att, dateList, holidayMap || {});
-    if(sandwichDates.length) warn.push(sandwichDates.length + ' sandwich day(s) (' + sandwichDates.join(', ') +
-      ') — Sunday/holiday between two unpaid-absence days, deducted from this month’s salary');
-    return { emp, lateCount, shortLeaves, sickUsed, plUsed, lwp, halfDays, attendanceDays,
-             otMinutes, earlyDays, bal, warn, policyHalfDays: policyHalf.total, sandwichDays: sandwichDates.length };
-  });
-}
 
 // `precomputed` lets the caller pass rows it has already worked out. The
 // Attendance Sheet needs the same rows for its CSV columns, and computing them
@@ -6935,12 +6845,6 @@ const ATT_CODES = ['P','A','H','EL','SL','LP','HEL','HSL','HLP','SHORT'];
 const ATT_CODE_LABELS = { P:'Present', A:'Absent', H:'Paid Holiday', EL:'EL', SL:'SL', LP:'LP (unpaid)', HEL:'Half EL', HSL:'Half SL', HLP:'Half LP', SHORT:'Short leave' };
 
 
-const SALARY_HEADING_ORDER = ['managerial','senior','junior','apprentice','rsit','contractor'];
-// Which headings are R.S. Infotech's own payroll. The Consultant Report covers
-// these and nothing else — Apprentices, Contractors and R.S.IT Solution are
-// separate books and are not the consultant's to process. Kept here beside the
-// headings so the two are changed together.
-const CONSULTANT_REPORT_HEADINGS = ['managerial','senior','junior'];
 // The categories the Apprentices Act itself recognises — shown only on an
 // apprentice's own record (salaryHeading === 'apprentice'), config so a new
 // category is a one-line edit rather than a form change.
@@ -6948,40 +6852,6 @@ const APPRENTICE_CATEGORIES = ['Graduate Apprentice', 'Technician Apprentice',
   'Technician (Vocational) Apprentice', 'Trade Apprentice', 'Diploma Apprentice'];
 
 
-// Which earnings PF is charged on. Basic only — HRA was in this list until HR
-// confirmed it is a house rent allowance rather than a dearness allowance, and
-// HRA is excluded from PF wages. Listed as config rather than written into the
-// sum, which is why that change was one line here and needed no migration:
-// every employee's PF is worked out from Rate of Pay and their heading at the
-// moment it is shown, so existing staff picked up the new base at once.
-PF_RULES.wageComponents = ['basic'];
-
-// EPF Scheme "excluded employee". All three conditions must hold — any one of
-// them missing and PF is mandatory. The threshold is strictly greater than the
-// ceiling, not equal to it, and it is tested at the wage on joining.
-// Employer-only charges on the PF wage, over and above the 12% share.
-// Confirmed by HR at 0.5% each.
-PF_RULES.adminPct = 0.005;
-PF_RULES.edliPct  = 0.005;
-
-PF_RULES.fixedAmount = 1800;      // the flat option, both sides
-
-// HR-confirmed exception, standing policy: Jalpa Rasesh Doshi (id 31) and
-// Narendrabhai Doshi (id 30). When Actual Percentage is selected for them,
-// Employee PF stays uncapped at 12% of their actual wage — no ₹1,800
-// ceiling, unlike every other employee on Actual Percentage below — and
-// every report shows their Employer PF as one combined figure rather than
-// split into Employer PF/EPF and Pension/EPS columns. Nothing else about
-// them changes: same wage, same exclusions, ordinary Fixed-₹1,800 behaviour
-// if that option is ever picked for them instead. By employee id, not name
-// — a name match is one typo away from silently missing the right person or
-// catching the wrong one in a payroll figure.
-PF_RULES.uncappedPercentIds = ['30', '31'];
-
-PF_RULES.exclusion = {
-  wageAbove: 15000,
-  conditions: ['No prior UAN or EPF account', 'Basic strictly above ₹15,000', 'Form 11 declaration submitted']
-};
 
 
    // nil at or below this gross
@@ -7131,11 +7001,6 @@ function attCodeOptions(isResident, selectedCode, isPh){
     attCodeOptionCache.set(key, html);
   }
   return html;
-}
-// The letters shown in an attendance cell. Only 'H' varies, and only by
-// whether the date is a declared holiday rather than a Sunday.
-function attCodeText_(code, isPh){
-  return (isPh && code === 'H') ? 'PH' : code;
 }
 
 // Only the cell's current code is put in the markup. The full list is ~4,000
@@ -7392,12 +7257,6 @@ async function renderAttendanceSheet(){
     '<th>Present</th><th>Absent</th><th>EL</th><th>SL</th><th>LP</th><th>Half</th><th>Short</th><th>Late</th></tr>';
   // Policy columns follow the day grid, so the export carries the same
   // judgement the on-screen panel shows rather than raw codes alone.
-  const csvHeader = ['S.No','Name', ...dateList.map(d => parseInt(d.slice(8),10)),
-    'Present','Absent','EL','SL','LP','Half','Short','Late',
-    'Employee Type','Late Count','Short Leaves','Half Days','Sick Used','Sick Balance',
-    'PL Earned','PL Used','PL Balance','LWP','Sandwich Days','Attendance Days','Overtime Minutes','Early Leaving Days',
-    'Policy Rule Applied','Violation Reason'];
-  const csvRows = [];
 
   let bodyRows = '';
   // One request for everyone's attendance before the loop — this month only.
@@ -7473,35 +7332,20 @@ async function renderAttendanceSheet(){
       bodyRows += `<tr data-att-row="${emp.id}"><td>${i+1}</td><td class="att-name">${escapeHtml(emp.name)}${isResident?' <span style="color:var(--muted);font-size:10px;">(Resident)</span>':''}</td>${dayCells}` +
         `<td data-att-summary="present">${summary.present}</td><td data-att-summary="absent">${summary.absent}</td><td data-att-summary="elUsed">${summary.elUsed}</td><td data-att-summary="slUsed">${summary.slUsed}</td><td data-att-summary="lpDays">${summary.lpDays}</td><td data-att-summary="halfDays">${summary.halfDays}</td><td data-att-summary="shortCount">${summary.shortCount}</td><td data-att-summary="lateCount">${summary.lateCount}</td></tr>`;
     }
-    csvRows.push([i+1, emp.name, ...dayCodes, summary.present, summary.absent, summary.elUsed, summary.slUsed, summary.lpDays, summary.halfDays, summary.shortCount, summary.lateCount]);
   }
 
-  // Policy position for the month, computed once. It used to run twice — once
-  // inside buildPolicySummary for the panel and again below for the export —
-  // over every employee and every day of the month. Reads mergedAttByEmp, not
-  // the raw attByEmp — see mergedAttByEmpWithPending_'s comment for why:
-  // otherwise an unsaved edit could show correctly in the grid above and
-  // still be missing from both the policy warnings and this CSV.
+  // Both the grid and the policy columns come from attendanceSheetCsv in
+  // shared/report-logic.js — the same function the monthly report-pack email
+  // calls, so the sheet that arrives by email is this sheet.
+  //
+  // mergedAttByEmp, not the raw attByEmp — see mergedAttByEmpWithPending_'s
+  // comment: otherwise an unsaved edit could show correctly in the grid above
+  // and still be missing from both the policy warnings and this CSV.
   const policyRows = policyRowsFor(employees, mergedAttByEmp, dateList, holidayMap);
-
-  // The policy columns are appended before the file is written, not after.
-  // csvHeader has always declared them, but the Drive copy was written first,
-  // so every attendance CSV in Drive carried fourteen header columns with no
-  // data under them while the on-screen export had them filled in.
-  policyRows.forEach((r, i) => {
-    if(!csvRows[i]) return;
-    csvRows[i].push(
-      r.emp.employeeType === 'part' ? 'Part-time' : 'Full-time',
-      r.lateCount, r.shortLeaves, r.halfDays,
-      r.sickUsed, r.bal.sickLeft,
-      r.bal.plEarned, r.plUsed, r.bal.plLeft,
-      r.lwp, r.sandwichDays || 0, r.attendanceDays, r.otMinutes || 0, r.earlyDays || 0,
-      LEAVE_POLICY.version,
-      r.warn.length ? r.warn.join('; ') : 'Within policy'
-    );
-  });
   {
     const fileName = `Attendance Sheet - ${monthVal}.csv`;
+    const attBuilt = attendanceSheetCsv(employees, mergedAttByEmp, dateList, holidayMap);
+    const csvHeader = attBuilt.header, csvRows = attBuilt.rows;
     const content = toCsv(csvHeader, csvRows);
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Attendance Sheet'), fileName, content, 'text/csv');
     stashReportShare('Attendance Sheet — ' + monthLabel(monthVal), fileName, content, 'text/csv',
@@ -9507,10 +9351,9 @@ async function renderSalarySheet(){
 
   // Employer columns follow Net Salary, never inside Total Deduction — they are
   // company cost, not money withheld from the employee.
-  const cols = ['SR NO','Name','Rate of Pay','Leave Days','Policy Half Days','Leave Amount','Basic','HRA','LTA','Gross',
-    'PF','ESI','PT','Advance Temp','Advance','Loan EMI','Retention','Total Deduction','Conveyance','Net Before Direct','Paid Directly','Net Salary',
-    'PEN','Employer PF','PF Admin','EDLI','ESI Employer','Employer Cont.','CTC',
-    'Advance Balance','Loan Balance','Full Day Leave Bal','Half Day Leave Bal'];
+  // Columns and the CSV itself both from shared/report-logic.js, so the file
+  // the monthly email builds is the file this screen files.
+  const cols = SALARY_SHEET_COLS.slice();
   // Everything NOT in this primary set is a secondary column, hidden by
   // default (see .sal-essential in the stylesheet) and reachable with the
   // "Show all columns" toggle below the table — the figures HR asked to see
@@ -9522,10 +9365,6 @@ async function renderSalarySheet(){
   let bodyRows = '';
   let srNo = 1;
   const grand = { rate:0, leaveAmount:0, policyHalfDays:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, loanEmi:0, loanBalance:0, retention:0, totalDeduction:0, conveyance:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0, directPaid:0, netBeforeDirect:0 };
-  const csvRows = [];
-  // Whole rupees in the CSV too, matching what the sheet itself shows — day
-  // counts (leave days, half days, leave balances) are left exactly as they
-  // are, since those are not money.
   const R = v => Math.round(Number(v) || 0);
 
   for(const headingKey of SALARY_HEADING_ORDER){
@@ -9536,7 +9375,6 @@ async function renderSalarySheet(){
     bodyRows += isCompact
       ? `<div class="hr-sheet-card sal-heading-card">${SALARY_HEADINGS[headingKey].label}</div>`
       : `<tr class="sal-heading"><td colspan="${cols.length}">${SALARY_HEADINGS[headingKey].label}</td></tr>`;
-    csvRows.push([SALARY_HEADINGS[headingKey].label]);
     const sub = { rate:0, leaveAmount:0, policyHalfDays:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, loanEmi:0, loanBalance:0, retention:0, totalDeduction:0, conveyance:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0, directPaid:0, netBeforeDirect:0 };
     for(const emp of group){
       const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
@@ -9564,9 +9402,6 @@ async function renderSalarySheet(){
           `<td class="sal-col-2nd">${fmtMoney(s.edli)}</td><td class="sal-col-2nd">${fmtMoney(s.esiEmployer)}</td><td class="sal-col-2nd">${fmtMoney(s.employerCont)}</td><td class="sal-col-2nd">${fmtMoney(s.ctc)}</td>` +
           `<td class="sal-col-2nd">${fmtMoney(s.advanceBalance)}</td><td class="sal-col-2nd">${fmtMoney(s.loanBalance)}</td><td class="sal-col-2nd">${s.fullDayLeaveBal}</td><td class="sal-col-2nd">${s.halfDayLeaveBal}</td></tr>`;
       }
-      csvRows.push([srNo-1, emp.name, R(s.rate), s.leaveDays, s.policyHalfDays, R(s.leaveAmount), R(s.basic), R(s.hra), R(s.lta), R(s.gross), R(s.pf), R(s.esi), R(s.pt), R(s.advanceTemp), R(s.advance), R(s.loanEmi), R(s.retention), R(s.totalDeduction), R(s.conveyance), R(s.netBeforeDirect), R(s.directPaid), R(s.netSalary),
-        R(s.pen), R(s.employerPf), R(s.pfAdmin), R(s.edli), R(s.esiEmployer), R(s.employerCont), R(s.ctc),
-        R(s.advanceBalance), R(s.loanBalance), s.fullDayLeaveBal, s.halfDayLeaveBal]);
       ['rate','leaveAmount','policyHalfDays','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','loanEmi','retention','totalDeduction','conveyance','netSalary','pen','employerPf','pfAdmin','edli','employerCont','ctc','esiEmployer','advanceBalance','loanBalance','directPaid','netBeforeDirect'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; });
     }
     bodyRows += isCompact ? salaryMobileTotalsCard('Subtotal', sub, 'sal-total-card') : `<tr class="sal-subtotal"><td class="sal-sr"></td><td class="sal-name">Subtotal</td><td>${fmtMoney(sub.rate)}</td><td></td><td class="sal-col-2nd">${sub.policyHalfDays || '—'}</td><td class="sal-col-2nd">${fmtMoney(sub.leaveAmount)}</td>` +
@@ -9577,7 +9412,6 @@ async function renderSalarySheet(){
       `<td class="sal-col-2nd">${fmtMoney(sub.pen)}</td><td class="sal-col-2nd">${fmtMoney(sub.employerPf)}</td><td class="sal-col-2nd">${fmtMoney(sub.pfAdmin)}</td>` +
       `<td class="sal-col-2nd">${fmtMoney(sub.edli)}</td><td class="sal-col-2nd">${fmtMoney(sub.esiEmployer)}</td><td class="sal-col-2nd">${fmtMoney(sub.employerCont)}</td><td class="sal-col-2nd">${fmtMoney(sub.ctc)}</td>` +
       `<td class="sal-col-2nd">${fmtMoney(sub.advanceBalance)}</td><td class="sal-col-2nd">${fmtMoney(sub.loanBalance)}</td><td class="sal-col-2nd"></td><td class="sal-col-2nd"></td></tr>`;
-    csvRows.push(['', 'Subtotal', R(sub.rate), '', sub.policyHalfDays, R(sub.leaveAmount), R(sub.basic), R(sub.hra), R(sub.lta), R(sub.gross), R(sub.pf), R(sub.esi), R(sub.pt), R(sub.advanceTemp), R(sub.advance), R(sub.loanEmi), R(sub.retention), R(sub.totalDeduction), R(sub.conveyance), R(sub.netSalary)]);
   }
 
   bodyRows += isCompact ? salaryMobileTotalsCard('Grand Total', grand, 'sal-grand-card') : `<tr class="sal-grandtotal"><td class="sal-sr"></td><td class="sal-name">Grand Total</td><td>${fmtMoney(grand.rate)}</td><td></td><td class="sal-col-2nd">${grand.policyHalfDays || '—'}</td><td class="sal-col-2nd">${fmtMoney(grand.leaveAmount)}</td>` +
@@ -9588,13 +9422,13 @@ async function renderSalarySheet(){
     `<td class="sal-col-2nd">${fmtMoney(grand.pen)}</td><td class="sal-col-2nd">${fmtMoney(grand.employerPf)}</td><td class="sal-col-2nd">${fmtMoney(grand.pfAdmin)}</td>` +
     `<td class="sal-col-2nd">${fmtMoney(grand.edli)}</td><td class="sal-col-2nd">${fmtMoney(grand.esiEmployer)}</td><td class="sal-col-2nd">${fmtMoney(grand.employerCont)}</td><td class="sal-col-2nd">${fmtMoney(grand.ctc)}</td>` +
     `<td class="sal-col-2nd">${fmtMoney(grand.advanceBalance)}</td><td class="sal-col-2nd">${fmtMoney(grand.loanBalance)}</td><td class="sal-col-2nd"></td><td class="sal-col-2nd"></td></tr>`;
-  csvRows.push(['', 'Grand Total', R(grand.rate), '', grand.policyHalfDays, R(grand.leaveAmount), R(grand.basic), R(grand.hra), R(grand.lta), R(grand.gross), R(grand.pf), R(grand.esi), R(grand.pt), R(grand.advanceTemp), R(grand.advance), R(grand.loanEmi), R(grand.retention), R(grand.totalDeduction), R(grand.conveyance), R(grand.netBeforeDirect),
-    R(grand.directPaid), R(grand.netSalary), R(grand.pen), R(grand.employerPf), R(grand.pfAdmin), R(grand.edli), R(grand.esiEmployer), R(grand.employerCont), R(grand.ctc),
-    R(grand.advanceBalance), R(grand.loanBalance), '', '']);
 
   {
     const fileName = `Salary Sheet - ${monthVal}.csv`;
-    const content = toCsv(cols, csvRows);
+    const attForCsv = {};
+    for(const e of employees) attForCsv[e.id] = await getAttendance(e.id);
+    const built = salarySheetCsv(employees, attForCsv, dateList, monthDays, holidayMap);
+    const content = toCsv(built.cols, built.rows);
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Dashboard', 'Salary Sheet'), fileName, content, 'text/csv');
     stashReportShare('Salary Sheet — ' + monthLabel(monthVal), fileName, content, 'text/csv',
       'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Dashboard > Salary Sheet', 'salarySheetBox');
@@ -9685,79 +9519,25 @@ async function renderStatutoryReport(key, label){
   const holidayMap = await getHolidayMap_local();
 
   await getAttendanceMany(employees.map(e => e.id));
-  const rows = [];
-  let grandTotal = 0;
-  // ESI is filed with both shares and the wage they were charged on, so the
-  // return can be checked line by line — an employee-share-only list cannot be
-  // reconciled against the challan.
-  const esiRows = [];
-  const esiTot = { gross:0, employee:0, employer:0, total:0 };
-  const pfRows = [];
-  const pfTot = { wage:0, employee:0, epf:0, eps:0, admin:0, edli:0, total:0 };
-  for(const emp of employees){
-    const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
-    // The heading each employee was under THIS month, same reasoning as the
-    // Salary Sheet — a promotion recorded since must not move which group a
-    // past month's row sits in. Grouped by heading below, same as the Final
-    // Salary Sheet.
-    const headingKey = ratePayAsOf(emp, dateList[0]).salaryHeading || 'managerial';
-    const amount = s[cfg.field];
-    if(amount > 0){
-      rows.push([emp.name, amount, headingKey]);
-      grandTotal += amount;
-    }
-    if(key === 'pf'){
-      const heading = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
-      if(heading.pf){
-        // The Salary Sheet has already run the central calculation for this
-        // employee and month; the report reads its result rather than working
-        // it out again, so the two cannot disagree.
-        const cfg = pfConfigStatus(emp);
-        pfRows.push({ emp, headingKey, wage: s.pfWage, applicable: s.pfApplicable,
-          notConfigured: !cfg.configured,
-          eligible: cfg.configured ? (cfg.eligible ? 'Yes' : 'No') : 'Not configured',
-          pfType: s.pfType === 'fixed' ? 'Fixed ₹' + fmtMoney(PF_RULES.fixedAmount)
-                : s.pfType === 'percent' ? 'Percentage / Actual' : '—',
-          leaveDays: s.leaveDays, leaveAmount: s.leaveAmount,
-          employee: s.pf, epf: s.employerPf, eps: s.pen, admin: s.pfAdmin, edli: s.edli,
-          employeeTotal: s.pfEmployeeTotal, employerTotal: s.pfEmployerTotal,
-          total: s.pfGrandTotal, reason: s.pfReason });
-        // Employees who are not contributing add nothing to any total.
-        if(s.pfApplicable){
-          pfTot.wage += s.pfWage; pfTot.employee += s.pf; pfTot.epf += s.employerPf;
-          pfTot.eps += s.pen; pfTot.admin += s.pfAdmin; pfTot.edli += s.edli;
-          pfTot.total += s.pfGrandTotal;
-        }
-      }
-    }
-    if(key === 'esi'){
-      const heading = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
-      if(!heading.esi) continue;                    // not an ESI establishment heading
-      const r = computeEsi(s.gross, {
-        isDisabled: emp.esiDisabled === 'yes',
-        coveredAtPeriodStart: emp.esiCoveredAtPeriodStart === 'yes',
-        eligible: emp.esiEligible !== 'no',
-        asOf: dateList[0]
-      });
-      esiRows.push({ emp, headingKey, s, r });
-      if(r.covered){
-        esiTot.gross += s.gross; esiTot.employee += r.employee;
-        esiTot.employer += r.employer; esiTot.total += r.total;
-      }
-    }
-  }
+  // Rows collected by statutoryReportData in shared/report-logic.js — the same
+  // function the monthly report-pack email calls, so a PF or ESI return that
+  // arrives by email is the one this screen shows, not a second build of it.
+  const attByEmpId = {};
+  for(const emp of employees) attByEmpId[emp.id] = await getAttendance(emp.id);
+  const data = statutoryReportData(employees, attByEmpId, dateList, monthDays, holidayMap, key);
+  const rows = data.rows, grandTotal = data.grandTotal;
+  const pfRows = data.pfRows, pfTot = data.pfTot;
+  const esiRows = data.esiRows, esiTot = data.esiTot;
 
   if(key === 'pf' && pfRows.length){
     const money = rupees;
     let body = '';
-    const csvBody = [];
     let sr = 0;
     SALARY_HEADING_ORDER.forEach(hk => {
       const group = pfRows.filter(x => x.headingKey === hk);
       if(!group.length) return;
       if(isCompact) body += hrHeadingCard(SALARY_HEADINGS[hk].label);
       else body += `<tr class="sal-heading"><td colspan="13">${escapeHtml(SALARY_HEADINGS[hk].label)}</td></tr>`;
-      csvBody.push([SALARY_HEADINGS[hk].label]);
       group.forEach(x => {
         sr++;
         const status = (x.applicable ? 'Contributing' : (x.notConfigured ? 'Not configured' : 'PF Not Applicable'));
@@ -9795,21 +9575,10 @@ async function renderStatutoryReport(key, label){
           <span class="inc-sub">${escapeHtml(x.reason)}</span></td>
       </tr>`;
         }
-        csvBody.push([sr, x.emp.name, x.emp.id, x.emp.uan || '', x.eligible, x.pfType,
-          Math.round(x.wage + (x.leaveAmount || 0)), x.leaveDays || 0, Math.round(x.leaveAmount || 0), Math.round(x.wage),
-          x.applicable ? Math.round(x.employee) : 0, x.applicable ? Math.round(x.epf) : 0, x.applicable ? Math.round(x.eps) : 0,
-          x.applicable ? Math.round(x.edli) : 0, x.applicable ? Math.round(x.admin) : 0,
-          x.applicable ? Math.round(x.employeeTotal) : 0, x.applicable ? Math.round(x.employerTotal) : 0,
-          x.applicable ? Math.round(x.total) : 0, status, x.reason]);
       });
     });
-    const csv = toCsv(
-      ['SR NO','Employee','Employee Code','UAN','PF Eligible','PF Type','Basic Salary','Leave/LOP Days',
-       'Leave/LOP Deduction','Final Payable Basic','Employee EPF','Employer EPF','Employer EPS (PF Account 10)',
-       'EDLI (PF Account 21)','Admin Charges (PF Account 2)','Employee Total','Employer Total','Grand Total','Status','Rule Applied'],
-      csvBody.concat([['', 'GRAND TOTAL', '', '', '', '', '', '', '', Math.round(pfTot.wage), Math.round(pfTot.employee),
-                  Math.round(pfTot.epf), Math.round(pfTot.eps), Math.round(pfTot.edli), Math.round(pfTot.admin), Math.round(pfTot.employee),
-                  Math.round(pfTot.epf + pfTot.eps + pfTot.edli + pfTot.admin), Math.round(pfTot.total), '', '']]));
+    const pfCsvParts = pfReturnCsv(pfRows, pfTot);
+    const csv = toCsv(pfCsvParts.header, pfCsvParts.rows);
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'PF'), `PF Return - ${monthVal}.csv`, csv, 'text/csv');
     const pfGrandCard = hrCard('<strong>Grand Total</strong>',
       hrRow('Final Payable Basic', money(pfTot.wage)) + hrRow('Employee', money(pfTot.employee)) +
@@ -9859,14 +9628,12 @@ async function renderStatutoryReport(key, label){
     const period = esiContributionPeriod(dateList[0]);
     const money = rupees;
     let body = '';
-    const csvBody = [];
     let sr = 0;
     SALARY_HEADING_ORDER.forEach(hk => {
       const group = esiRows.filter(x => x.headingKey === hk);
       if(!group.length) return;
       if(isCompact) body += hrHeadingCard(SALARY_HEADINGS[hk].label);
       else body += `<tr class="sal-heading"><td colspan="8">${escapeHtml(SALARY_HEADINGS[hk].label)}</td></tr>`;
-      csvBody.push([SALARY_HEADINGS[hk].label]);
       group.forEach(x => {
         sr++;
         const status = x.r.covered ? 'Covered' : 'Exempt';
@@ -9892,14 +9659,10 @@ async function renderStatutoryReport(key, label){
         <td>${status}<span class="inc-sub">${escapeHtml(x.r.reason)}</span></td>
       </tr>`;
         }
-        csvBody.push([sr, x.emp.name, x.emp.esiNumber || '', Math.round(x.s.gross),
-          x.r.covered ? Math.round(x.r.employee) : 0, x.r.covered ? Math.round(x.r.employer) : 0, x.r.covered ? Math.round(x.r.total) : 0,
-          status, x.r.reason]);
       });
     });
-    const csv = toCsv(
-      ['SR NO','Name','ESI Number','Gross Wages','Employee 0.75%','Employer 3.25%','Total','Status','Rule Applied'],
-      csvBody.concat([['', 'TOTAL', '', Math.round(esiTot.gross), Math.round(esiTot.employee), Math.round(esiTot.employer), Math.round(esiTot.total), '', '']]));
+    const esiCsvParts = esiReturnCsv(esiRows, esiTot);
+    const csv = toCsv(esiCsvParts.header, esiCsvParts.rows);
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'ESI'), `ESI Return - ${monthVal}.csv`, csv, 'text/csv');
     const esiGrandCard = hrCard('<strong>Total</strong>',
       hrRow('Gross', money(esiTot.gross)) + hrRow('Employee', money(esiTot.employee)) + hrRow('Employer', money(esiTot.employer)) +
@@ -9937,19 +9700,17 @@ async function renderStatutoryReport(key, label){
   }
 
   let tableRows = '';
-  const csvRows = [];
   SALARY_HEADING_ORDER.forEach(hk => {
     const group = rows.filter(r => r[2] === hk);
     if(!group.length) return;
     if(isCompact) tableRows += hrHeadingCard(SALARY_HEADINGS[hk].label);
     else tableRows += `<tr class="sal-heading"><td colspan="2">${escapeHtml(SALARY_HEADINGS[hk].label)}</td></tr>`;
-    csvRows.push([SALARY_HEADINGS[hk].label]);
     group.forEach(r => {
       if(isCompact) tableRows += hrCard(`<strong>${escapeHtml(r[0])}</strong>`, hrRow(key.toUpperCase() + ' Amount', rupees(r[1])));
       else tableRows += `<tr><td class="sal-name">${r[0]}</td><td class="num">${rupees(r[1])}</td></tr>`;
-      csvRows.push([r[0], Math.round(r[1])]);
     });
   });
+  const statCsvParts = statutoryAmountCsv(rows, grandTotal, key);
   const statInner = isCompact
     ? `<div class="hr-sheet-cards">${tableRows}${hrCard('<strong>Grand Total</strong>', hrRow(key.toUpperCase() + ' Amount', rupees(grandTotal)), 'sal-grand-card')}</div>`
     : `<table class="sal-table"><tr><th>Name</th><th class="num">${key.toUpperCase()} Amount</th></tr>${tableRows}<tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total</strong></td><td class="num"><strong>${rupees(grandTotal)}</strong></td></tr></table>`;
@@ -9959,9 +9720,8 @@ async function renderStatutoryReport(key, label){
       ${statInner}
     </div>`;
 
-  csvRows.push(['Grand Total', Math.round(grandTotal)]);
   const fileName = `${label} - ${monthVal}.csv`;
-  const content = toCsv(['Name', key.toUpperCase() + ' Amount'], csvRows);
+  const content = toCsv(statCsvParts.header, statCsvParts.rows);
   queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', cfg.folder), fileName, content, 'text/csv');
   stashReportShare(label + ' — ' + monthLabel(monthVal), fileName, content, 'text/csv',
     'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > ' + cfg.folder, cfg.box);
@@ -10064,53 +9824,7 @@ async function renderApprenticeSalaryReport(){
   openFullscreenView('Apprentice Salary Report — ' + monthLabel(monthVal), 'apprenticeReportBox');
 }
 
-// ---- Consultant Report ----
-// The monthly sheet the consultant works from. Column order and headings are
-// fixed to match the workbook they send back, so the CSV can be pasted straight
-// into their template — don't reorder these without checking with them first.
-const CONSULTANT_REPORT_COLS = [
-  'SR NO','EC','EmpName','Designation','BirthDate','JoiningDate','PFNo','Uan No','ESINo',
-  'GROSS SALARY(Including PT)','W.DYS','W.OFF','PRESENT DYS','PH','EL','SL',
-  'ABSENT DAYS','PAYABLE DYS','OTHER ALL IF ANY','I.T.','LOAN/ ADVANCE'
-];
 
-// The consultant's sheet writes dates as dd.mm.yyyy, not the ISO form stored here.
-function consultantDate(v){
-  if(!v) return '';
-  const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
-  return m ? `${m[3]}.${m[2]}.${m[1]}` : String(v);
-}
-// Trim trailing zeros so half-days read as 25.5 and whole days as 26, not 26.0
-function consultantDays(n){
-  return String(Math.round((Number(n) || 0) * 100) / 100);
-}
-
-// The consultant's sheet splits days differently from computeAttendanceSummary,
-// which folds EL/SL into `present` because they are paid. Here PRESENT means days
-// actually worked, with leave in its own column — so a full EL day is 0 present +
-// 1 EL, while a half EL day is 0.5 present + 0.5 EL. That distinction is why this
-// counts the raw codes rather than deriving from the summary.
-function consultantDayCounts(att, dateList, holidayMap){
-  let present = 0, el = 0, sl = 0, absent = 0;
-  dateList.forEach(dateStr => {
-    // Same resolution computeAttendanceSummary and the Attendance Sheet use
-    // (resolvedAttendanceCode_) — a declared holiday counts as one here too,
-    // even over an Absent or leave code already saved for the date.
-    const code = resolvedAttendanceCode_(att, dateStr, holidayMap);
-    switch(code){
-      case 'P': case 'SHORT': present += 1; break;
-      case 'EL': el += 1; break;
-      case 'SL': sl += 1; break;
-      case 'HEL': present += 0.5; el += 0.5; break;
-      case 'HSL': present += 0.5; sl += 0.5; break;
-      case 'HLP': present += 0.5; absent += 0.5; break;
-      case 'A': case 'LP': absent += 1; break;
-      case 'H': break; // week-off or declared holiday, counted separately
-      default: if(dateStr <= todayStr()) absent += 1; // unmarked past day, same rule as the Attendance Sheet
-    }
-  });
-  return { present, el, sl, absent };
-}
 
 // The bank payment list. Deliberately narrow — name, bank, account, amount —
 // because a transfer sheet with twenty columns is harder to check than one with
@@ -10132,7 +9846,7 @@ async function renderFinalSalarySheet(){
 
   const money = rupees;
   const isCompact = isCompactSheetView();
-  let bodyRows = '', csvRows = [], sr = 0, grand = 0, grandCount = 0;
+  let bodyRows = '', sr = 0, grand = 0, grandCount = 0;
 
   for(const headingKey of SALARY_HEADING_ORDER){
     // The heading each employee was under THIS month, same reasoning as the
@@ -10154,7 +9868,6 @@ async function renderFinalSalarySheet(){
     let sub = 0;
     if(isCompact) bodyRows += hrHeadingCard(label);
     else bodyRows += `<tr class="sal-heading"><td colspan="6">${escapeHtml(label)}</td></tr>`;
-    csvRows.push([label]);
     rows.forEach(r => {
       sr++; sub += r.net; grand += r.net; grandCount++;
       if(isCompact){
@@ -10170,8 +9883,6 @@ async function renderFinalSalarySheet(){
           <td>${escapeHtml(r.emp.ifsc || '—')}</td>
           <td class="num"><strong>${money(r.net)}</strong></td></tr>`;
       }
-      csvRows.push([sr, r.emp.name, r.emp.bankName || '', r.emp.accountNumber || '',
-                    r.emp.ifsc || '', Math.round(r.net)]);
     });
     if(isCompact){
       bodyRows += hrCard(null, hrRow(label + ' subtotal', rows.length + ' employee(s)') +
@@ -10180,7 +9891,6 @@ async function renderFinalSalarySheet(){
       bodyRows += `<tr class="sal-subtotal"><td></td><td class="sal-name">${escapeHtml(label)} subtotal</td>
         <td colspan="3">${rows.length} employee(s)</td><td class="num">${money(sub)}</td></tr>`;
     }
-    csvRows.push(['', label + ' subtotal', rows.length + ' employee(s)', '', '', Math.round(sub)]);
   }
 
   if(isCompact){
@@ -10190,9 +9900,13 @@ async function renderFinalSalarySheet(){
     bodyRows += `<tr class="sal-grandtotal"><td></td><td class="sal-name">Grand Total</td>
       <td colspan="3">${grandCount} employee(s)</td><td class="num">${money(grand)}</td></tr>`;
   }
-  csvRows.push(['', 'GRAND TOTAL', grandCount + ' employee(s)', '', '', Math.round(grand)]);
-
-  const cols = ['SR NO','Employee Name','Bank Name','Account Number','IFSC','Final Payable Salary'];
+  // The CSV comes from finalSalarySheetCsv in shared/report-logic.js — the
+  // same function the monthly report-pack email calls.
+  const attForCsv = {};
+  for(const e of employees) attForCsv[e.id] = await getAttendance(e.id);
+  const finalBuilt = finalSalarySheetCsv(employees, attForCsv, dateList, monthDays, holidayMap);
+  const csvRows = finalBuilt.rows;
+  const cols = finalBuilt.cols;
   // Display name only — the Drive folder itself stays "Final Salary Sheet" so
   // months already filed there are not orphaned from the ones filed after
   // this rename.
@@ -10345,9 +10059,9 @@ async function renderConsultantReport(){
   // into this sheet, overstating every column and the headcount with it.
   // Judged by the heading each employee was under THIS month, same as the
   // Salary Sheet.
-  const employees = (await getEmployees()).filter(e =>
-    employedDuringPeriod_(e, dateList[0], dateList[dateList.length-1]) &&
-    CONSULTANT_REPORT_HEADINGS.indexOf(ratePayAsOf(e, dateList[0]).salaryHeading) !== -1);
+  // Who the consultant processes, from shared/report-logic.js so the email
+  // covers exactly the same people.
+  const employees = consultantReportEmployees(await getEmployees(), dateList);
   if(!employees.length){
     box.innerHTML = '<div class="empty">Nobody is on the R.S. Infotech payroll headings (' +
       CONSULTANT_REPORT_HEADINGS.map(k => SALARY_HEADINGS[k].label).join(', ') +
@@ -10375,64 +10089,14 @@ async function renderConsultantReport(){
   });
   const workingDays = monthDays - weekOff;
 
-  const rows = [];
-  let sr = 0;
-  // One request for everyone's attendance before the loop; each read below
-  // then comes from the primed cache instead of its own round trip.
+  // Rows from consultantReportRows in shared/report-logic.js — the same
+  // function the monthly Consultant email calls, so the wage register the
+  // consultant receives by email is this one.
   await getAttendanceMany(employees.map(e => e.id));
-  for(const emp of employees){
-    const att = await getAttendance(emp.id);
-    const c = consultantDayCounts(att, dateList, holidayMap);
-    const presentDays = c.present;
-    // A Sunday/holiday bracketed by two unpaid-absence days is charged as an
-    // extra unpaid day on the Salary Sheet (computeSalaryForEmployee) — this
-    // is the same figure, added the same way, so the payable-days count sent
-    // to the consultant cannot overstate what is actually paid. Resident
-    // Engineers ARE subject to sandwich leave (unlike EL/SL/short-leave/
-    // late-coming, which they stay exempt from) — same policy the Salary
-    // Sheet itself now applies.
-    const sandwichDays = sandwichDaysFor(att, dateList, holidayMap).length;
-    const absentDays = c.absent + sandwichDays;
-    // Everything in the month is paid except unpaid absence (A and LP) — EL, SL,
-    // week-offs and public holidays are all paid. Deriving it by subtraction keeps
-    // this inside 0..monthDays even when someone checks in on a Sunday, which
-    // would otherwise be counted twice (once in `present`, once in weekOff).
-    const payableDays = Math.max(0, monthDays - absentDays);
-
-    const loanEmi = computeLoanEmiForMonth(emp, year, month);
-    const consultantYm = year + '-' + String(month).padStart(2, '0');
-    const advance = advanceTempForMonth(emp, consultantYm) + salaryAdvanceForMonth(emp, consultantYm);
-    const deduction = loanEmi + advance;
-    let loanLabel = '';
-    if(loanEmi && advance) loanLabel = 'Loan / Advance';
-    else if(loanEmi) loanLabel = 'Loan';
-    else if(advance) loanLabel = 'Advance';
-
-    sr++;
-    rows.push([
-      sr,
-      emp.id || '',
-      emp.name || '',
-      emp.designation || '',
-      consultantDate(emp.dob),
-      consultantDate(emp.doj),
-      emp.pfNo || '',
-      emp.uan || 'NA',
-      emp.esiNumber || '',
-      Math.round(ratePayAsOf(emp, dateList[0]).ratePay),
-      consultantDays(workingDays),
-      consultantDays(weekOff),
-      consultantDays(presentDays),
-      consultantDays(publicHolidays),
-      consultantDays(c.el),
-      consultantDays(c.sl),
-      consultantDays(absentDays),
-      consultantDays(payableDays),
-      Number(emp.otherAllowances) ? fmtMoney(Number(emp.otherAllowances)) : 'NA',
-      deduction ? Math.round(deduction) : '',
-      loanLabel
-    ]);
-  }
+  const attByEmpId = {};
+  for(const emp of employees) attByEmpId[emp.id] = await getAttendance(emp.id);
+  const consultantBuilt = consultantReportRows(employees, attByEmpId, dateList, monthDays, holidayMap, year, month);
+  const rows = consultantBuilt.rows;
 
   const head = CONSULTANT_REPORT_COLS.map(c => `<th>${c}</th>`).join('');
   const body = rows.map(r => '<tr>' + r.map((cell, i) =>
@@ -10522,9 +10186,9 @@ async function renderConsultantSummaryReport(){
   // matches those checks — only the PT sum, and isCoreHeading below, need
   // to know about the wider population explicitly.
   const PT_REPORT_HEADINGS = CONSULTANT_REPORT_HEADINGS.concat(['rsit']);
-  const employees = (await getEmployees()).filter(e =>
-    employedDuringPeriod_(e, dateList[0], dateList[dateList.length-1]) &&
-    PT_REPORT_HEADINGS.indexOf(ratePayAsOf(e, dateList[0]).salaryHeading) !== -1);
+  // Who is covered, and the totals below, both from shared/report-logic.js —
+  // the same functions the monthly Consultant email calls.
+  const employees = consultantSummaryEmployees(await getEmployees(), dateList);
   if(!employees.length){
     box.innerHTML = '<div class="empty">No employees under ' +
       PT_REPORT_HEADINGS.map(k => SALARY_HEADINGS[k].label).join(', ') +
@@ -10534,66 +10198,13 @@ async function renderConsultantSummaryReport(){
   const holidayMap = await getHolidayMap_local();
   await getAttendanceMany(employees.map(e => e.id));
 
-  const pf = { count:0, wage:0, empEmployee:0, empEmployer:0, admin:0, eps:0, edli:0 };
-  const esiT = { count:0, wage:0, employee:0, employer:0 };
-  const alw = { basic:0, hra:0, conveyance:0, lta:0 };
-  const ded = { pf:0, pt:0, adv:0, loan:0, esi:0 };
-
-  for(const emp of employees){
-    const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
-    const headingKey = ratePayAsOf(emp, dateList[0]).salaryHeading || 'managerial';
-    const heading = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
-
-    // Same two checks renderStatutoryReport already uses for the PF Report —
-    // heading.pf gates whether this heading attracts PF at all, s.pfApplicable
-    // additionally covers an employee-level pfEligible:'no' or a not-yet-
-    // configured contribution type, either of which means nothing to add.
-    if(heading.pf && s.pfApplicable){
-      pf.count++;
-      pf.wage += s.pfWage;
-      pf.empEmployee += s.pf;
-      pf.empEmployer += s.employerPf;
-      pf.admin += s.pfAdmin;
-      pf.eps += s.pen;
-      pf.edli += s.edli;
-    }
-    // Same computeEsi call and .covered check the PF/ESI Report already
-    // makes — "once covered, always covered" for the rest of the
-    // contribution period, not just gross-under-ceiling this one month.
-    if(heading.esi){
-      const r = computeEsi(s.gross, {
-        isDisabled: emp.esiDisabled === 'yes',
-        coveredAtPeriodStart: emp.esiCoveredAtPeriodStart === 'yes',
-        eligible: emp.esiEligible !== 'no',
-        asOf: dateList[0]
-      });
-      if(r.covered){
-        esiT.count++;
-        esiT.wage += s.gross;
-        esiT.employee += r.employee;
-        esiT.employer += r.employer;
-      }
-    }
-
-    // PT counts everyone in the wider population (R.S.IT Solution included) —
-    // everything else here stays scoped to R.S. Infotech's own three headings,
-    // the same population the PF/ESI totals above are already naturally
-    // limited to.
-    ded.pt += s.pt;
-    if(CONSULTANT_REPORT_HEADINGS.indexOf(headingKey) !== -1){
-      alw.basic += s.basic; alw.hra += s.hra; alw.conveyance += s.conveyance; alw.lta += s.lta;
-      ded.pf += s.pf; ded.adv += s.advanceTemp + s.advance; ded.loan += s.loanEmi; ded.esi += s.esi;
-    }
-  }
-
-  const acct1 = pf.empEmployee + pf.empEmployer;
-  const acct22 = 0; // EDLI admin charge — see the function comment above
-  const pfTotal = acct1 + pf.admin + pf.eps + pf.edli + acct22;
-  const esiTotal = esiT.employee + esiT.employer;
-  const alwTotal = alw.basic + alw.hra + alw.conveyance + alw.lta;
-  const lwf = 0; // Labour Welfare Fund — see the function comment above
-  const dedTotal = ded.pf + ded.pt + ded.adv + lwf + ded.loan + ded.esi;
-  const net = alwTotal - dedTotal;
+  const attByEmpId = {};
+  for(const emp of employees) attByEmpId[emp.id] = await getAttendance(emp.id);
+  const T = consultantSummaryTotals(employees, attByEmpId, dateList, monthDays, holidayMap);
+  const pf = T.pf, esiT = T.esiT, alw = T.alw, ded = T.ded;
+  const acct1 = T.acct1, acct22 = T.acct22, lwf = T.lwf;
+  const pfTotal = T.pfTotal, esiTotal = T.esiTotal, alwTotal = T.alwTotal;
+  const dedTotal = T.dedTotal, net = T.net;
 
   const co = await getCompanyProfile();
   const signatory = await getHrSignatory();
@@ -10646,37 +10257,9 @@ async function renderConsultantSummaryReport(){
       ${signOff}
     </div>`;
 
-  const csvHeader = ['Section','Item','Amount'];
-  const csvRows = [
-    ['PF Summary','Total No Of Employees', pf.count],
-    ['PF Summary','Total Wages', Math.round(pf.wage)],
-    ['PF Summary','P.F. Account No 1', Math.round(acct1)],
-    ['PF Summary','P.F. Account No 1 — Employee share', Math.round(pf.empEmployee)],
-    ['PF Summary','P.F. Account No 1 — Employer EPF share', Math.round(pf.empEmployer)],
-    ['PF Summary','P.F. Account No 2', Math.round(pf.admin)],
-    ['PF Summary','P.F. Account No 10', Math.round(pf.eps)],
-    ['PF Summary','P.F. Account No 21', Math.round(pf.edli)],
-    ['PF Summary','P.F. Account No 22', Math.round(acct22)],
-    ['PF Summary','Total P.F.', Math.round(pfTotal)],
-    ['ESI Summary','Total No Of Employees', esiT.count],
-    ['ESI Summary','Total Wage', Math.round(esiT.wage)],
-    ['ESI Summary','Employee Contribution', Math.round(esiT.employee)],
-    ['ESI Summary','Employer Contribution', Math.round(esiT.employer)],
-    ['ESI Summary','Total', Math.round(esiTotal)],
-    ['Allowance','Basic', Math.round(alw.basic)],
-    ['Allowance','HRA', Math.round(alw.hra)],
-    ['Allowance','Conveyance', Math.round(alw.conveyance)],
-    ['Allowance','LTA', Math.round(alw.lta)],
-    ['Allowance','Total', Math.round(alwTotal)],
-    ['Deduction','P.F.', Math.round(ded.pf)],
-    ['Deduction','P.T.', Math.round(ded.pt)],
-    ['Deduction','Advance', Math.round(ded.adv)],
-    ['Deduction','L.W.F. (not tracked)', Math.round(lwf)],
-    ['Deduction','Loan', Math.round(ded.loan)],
-    ['Deduction','E.S.I.', Math.round(ded.esi)],
-    ['Deduction','Total Deduction', Math.round(dedTotal)],
-    ['Net','Net', Math.round(net)]
-  ];
+  const summaryCsv = consultantSummaryCsv(T);
+  const csvHeader = summaryCsv.header;
+  const csvRows = summaryCsv.rows;
   {
     const fileName = `Consultant Final Summary Report - ${monthVal}.csv`;
     const content = toCsv(csvHeader, csvRows);
@@ -10705,24 +10288,6 @@ function monthContext_(year, month){
   };
 }
 
-// Whether an employee counts as on roll for a given past period — true if
-// their tenure overlaps it at all: joined on or before the period ends, and
-// either never left or left on or after the period starts. A plain "not
-// left" filter — which most reports used before this existed — makes a
-// leaver vanish from every report for the months they actually worked,
-// which is backwards for anything about a specific past month or year: HR
-// entering July's data in August for someone who left in July needs them to
-// still show up on July's Salary Sheet, PF/ESI return, Attendance Sheet and
-// every other period report, right up to the month they actually left.
-// Reports about the CURRENT roster (dashboards, the Employee Master list,
-// admin tools that act going forward) are correctly left on the plain
-// "not left" filter — this is only for a report generated for one specific
-// past period.
-function employedDuringPeriod_(emp, startStr, endStr){
-  if(emp.doj && endStr && emp.doj > endStr) return false;
-  if(emp.employmentStatus === 'left' && emp.leftDate && startStr && emp.leftDate < startStr) return false;
-  return true;
-}
 
 // The Salary Sheet simply drops anyone marked left, which would make a leaver
 // vanish from both months and hide the very change this report exists to show.

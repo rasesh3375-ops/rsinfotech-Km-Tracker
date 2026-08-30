@@ -1844,7 +1844,12 @@ function loadSharedReportLogic_(map) {
     'SALARY_HEADINGS', 'PF_RULES', 'ESI_RULES', 'LEAVE_POLICY',
     'leaveWorkingDays', 'applyAlwaysPresentFill', 'leaveDetailRowFor',
     'leaveDetailReportRows', 'leaveDetailCsvHeader', 'leaveDetailCsvRows',
-    'loanLedgerRows', 'loanLedgerCsvHeader', 'loanLedgerCsvRows'];
+    'loanLedgerRows', 'loanLedgerCsvHeader', 'loanLedgerCsvRows',
+    'employedDuringPeriod_', 'salarySheetCsv', 'finalSalarySheetCsv', 'attendanceSheetCsv',
+    'statutoryReportData', 'pfReturnCsv', 'esiReturnCsv', 'statutoryAmountCsv',
+    'policyRowsFor', 'attCodeText_', 'SALARY_HEADING_ORDER',
+    'consultantReportEmployees', 'consultantReportRows',
+    'consultantSummaryEmployees', 'consultantSummaryTotals', 'consultantSummaryCsv'];
   var collect = new Function(body + '\nreturn (function(){ var o = {};' +
     names.map(function (n) { return 'try{ o[' + JSON.stringify(n) + '] = ' + n + '; }catch(e){}'; }).join('') +
     'return o; })();');
@@ -1976,6 +1981,123 @@ function buildLoanAdvanceReport_(snap, y, m) {
   };
 }
 
+// ---- The monthly report pack, all six generated here and now ----
+// One snapshot of the sheet, one load of the shared logic, one set of
+// attendance reads, then six CSVs off the same figures — so the Salary Sheet
+// and the PF return in the same email cannot disagree about anyone's basic.
+function buildMonthlyReportPack_(snap, y, m) {
+  var logic = loadSharedReportLogic_(snap.map);
+  var monthVal = y + '-' + ('0' + m).slice(-2);
+  var monthLabel = LEAVE_DETAIL_MONTH_NAMES[m - 1] + ' ' + y;
+  var dateList = monthDateList_(y, m);
+  var monthDays = dateList.length;
+  var holidayMap = holidayMapFromSheet_(snap.map);
+  var start = dateList[0], end = dateList[dateList.length - 1];
+
+  // Anyone whose tenure overlaps the month, which is what every period report
+  // in the app uses — a leaver still belongs on the months they worked.
+  var employees = snap.employees.filter(function (e) {
+    return logic.employedDuringPeriod_(e, start, end);
+  });
+  var att = attendanceForMonth_(snap.map, employees, y, m, holidayMap, logic);
+
+  var salary = logic.salarySheetCsv(employees, att, dateList, monthDays, holidayMap);
+  var finalSal = logic.finalSalarySheetCsv(employees, att, dateList, monthDays, holidayMap);
+  var attendance = logic.attendanceSheetCsv(employees, att, dateList, holidayMap);
+  var pf = logic.statutoryReportData(employees, att, dateList, monthDays, holidayMap, 'pf');
+  var esi = logic.statutoryReportData(employees, att, dateList, monthDays, holidayMap, 'esi');
+  var pt = logic.statutoryReportData(employees, att, dateList, monthDays, holidayMap, 'pt');
+  var pfCsv = logic.pfReturnCsv(pf.pfRows, pf.pfTot);
+  var esiCsv = logic.esiReturnCsv(esi.esiRows, esi.esiTot);
+  var ptCsv = logic.statutoryAmountCsv(pt.rows, pt.grandTotal, 'pt');
+
+  // The names are the ones the app files under, so an attachment and the Drive
+  // copy of the same report are the same file by name as well as by content.
+  return {
+    monthLabel: monthLabel,
+    employees: employees.length,
+    reports: [
+      { label: 'Salary Sheet', fileName: 'Salary Sheet - ' + monthVal + '.csv',
+        csv: toCsv_(salary.cols, salary.rows) },
+      { label: 'Final Salary Sheet for Accountant',
+        fileName: 'Final Salary Sheet for Accountant - ' + monthVal + '.csv',
+        csv: toCsv_(finalSal.cols, finalSal.rows) },
+      { label: 'Attendance Sheet', fileName: 'Attendance Sheet - ' + monthVal + '.csv',
+        csv: toCsv_(attendance.header, attendance.rows) },
+      { label: 'PF Return', fileName: 'PF Return - ' + monthVal + '.csv',
+        csv: toCsv_(pfCsv.header, pfCsv.rows) },
+      { label: 'ESI Return', fileName: 'ESI Return - ' + monthVal + '.csv',
+        csv: toCsv_(esiCsv.header, esiCsv.rows) },
+      { label: 'PT Report', fileName: 'PT Report - ' + monthVal + '.csv',
+        csv: toCsv_(ptCsv.header, ptCsv.rows) }
+    ]
+  };
+}
+
+// Every report in a pack has to be for the month asked for and have something
+// in it. One bad report fails the whole pack rather than sending five good
+// ones and one that quietly is not what its heading says.
+function validateFreshPack_(pack, expectedMonthLabel) {
+  if (!pack) throw new Error('The pack builder returned nothing.');
+  if (pack.monthLabel !== expectedMonthLabel) {
+    throw new Error('Built for ' + pack.monthLabel + ' but ' + expectedMonthLabel + ' was asked for.');
+  }
+  if (!pack.reports || !pack.reports.length) throw new Error('The pack contains no reports.');
+  for (var i = 0; i < pack.reports.length; i++) {
+    var r = pack.reports[i];
+    if (!r.csv || r.csv.split('\n').length < 2) {
+      throw new Error(r.label + ' generated with no rows in it.');
+    }
+    if (r.fileName.indexOf(monthValOf_(expectedMonthLabel)) === -1) {
+      throw new Error(r.label + ' would be attached as ' + r.fileName + ', which is not ' + expectedMonthLabel + '.');
+    }
+  }
+  return pack;
+}
+
+// 'August 2026' -> '2026-08', for checking a file name against a month label.
+function monthValOf_(monthLabel) {
+  var parts = String(monthLabel).split(' ');
+  var mi = LEAVE_DETAIL_MONTH_NAMES.indexOf(parts[0]);
+  return parts[1] + '-' + ('0' + (mi + 1)).slice(-2);
+}
+
+// ---- Consultant Report and its Final Summary, generated here and now ----
+function buildConsultantPack_(snap, y, m) {
+  var logic = loadSharedReportLogic_(snap.map);
+  var monthVal = y + '-' + ('0' + m).slice(-2);
+  var monthLabel = LEAVE_DETAIL_MONTH_NAMES[m - 1] + ' ' + y;
+  var dateList = monthDateList_(y, m);
+  var monthDays = dateList.length;
+  var holidayMap = holidayMapFromSheet_(snap.map);
+
+  // Two different populations on purpose: the wage register is R.S. Infotech's
+  // own three headings, the summary adds R.S.IT Solution because PT covers it.
+  var detailEmps = logic.consultantReportEmployees(snap.employees, dateList);
+  var summaryEmps = logic.consultantSummaryEmployees(snap.employees, dateList);
+  var everyone = summaryEmps.slice();
+  for (var i = 0; i < detailEmps.length; i++) {
+    if (everyone.indexOf(detailEmps[i]) === -1) everyone.push(detailEmps[i]);
+  }
+  var att = attendanceForMonth_(snap.map, everyone, y, m, holidayMap, logic);
+
+  var detail = logic.consultantReportRows(detailEmps, att, dateList, monthDays, holidayMap, y, m);
+  var totals = logic.consultantSummaryTotals(summaryEmps, att, dateList, monthDays, holidayMap);
+  var summary = logic.consultantSummaryCsv(totals);
+
+  return {
+    monthLabel: monthLabel,
+    employees: detailEmps.length,
+    reports: [
+      { label: 'Consultant Report', fileName: 'Consultant Report - ' + monthVal + '.csv',
+        csv: toCsv_(detail.cols, detail.rows) },
+      { label: 'Consultant Final Summary Report',
+        fileName: 'Consultant Final Summary Report - ' + monthVal + '.csv',
+        csv: toCsv_(summary.header, summary.rows) }
+    ]
+  };
+}
+
 // ---- what every report email checks before it sends anything ----
 // The rules, in one place, so a report added later cannot quietly skip them:
 // the period is the one that was asked for, the figures were built during this
@@ -2052,89 +2174,6 @@ function prevMonthYmIst_() {
   return y + '-' + ('0' + m).slice(-2);
 }
 
-// Walks the folder path WITHOUT creating anything, unlike getOrCreateFolderPath_.
-// This job runs every month whether or not HR opened a report, and a creating
-// walk would leave a trail of empty folders behind for months that were never
-// generated. Returns null the moment a segment is missing.
-function findFolderPath_(pathParts) {
-  var folder = DriveApp.getFolderById(ROOT_FOLDER_ID);
-  for (var i = 0; i < pathParts.length; i++) {
-    var it = folder.getFoldersByName(pathParts[i]);
-    if (!it.hasNext()) return null;
-    folder = it.next();
-  }
-  return folder;
-}
-
-// Where each report of the pack files itself, mirroring index.html's own
-// hrYearPath(monthVal + '-01', ...) calls exactly — Salary Sheet, Final Salary
-// Sheet and Attendance Sheet under Dashboard, PF, ESI and PT under Reports. The
-// year folder is the financial year the month BELONGS to, not the one it was
-// generated in, which is why March files land in the year that is closing.
-function monthlyReportSpecs_(ym) {
-  var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
-  var fy = fyLabelFor_(y, m);
-  var dashboard = ['HR Management', fy, 'Dashboard'];
-  var reports = ['HR Management', fy, 'Reports'];
-  return [
-    { label: 'Salary Sheet',
-      path: dashboard.concat(['Salary Sheet']),
-      files: ['Salary Sheet - ' + ym + '.csv'],
-      where: 'Dashboard > Salary Sheet' },
-    // Two names, because this report was renamed. Months generated since the
-    // rename are filed as "Final Salary Sheet for Accountant - <ym>.csv";
-    // months generated before it are still sitting in the same folder under the
-    // old "Final Salary Sheet - <ym>.csv", and August 2026 is one of them. The
-    // folder deliberately kept its old name so nothing was orphaned by the
-    // rename (see index.html's own note at the Final Salary Sheet stash), so
-    // accepting both names here is what makes those earlier months attachable
-    // instead of being reported missing when the file is right there.
-    { label: 'Final Salary Sheet for Accountant',
-      path: dashboard.concat(['Final Salary Sheet']),
-      files: ['Final Salary Sheet for Accountant - ' + ym + '.csv',
-              'Final Salary Sheet - ' + ym + '.csv'],
-      where: 'Dashboard > Final Salary Sheet' },
-    { label: 'Attendance Sheet',
-      path: dashboard.concat(['Attendance Sheet']),
-      files: ['Attendance Sheet - ' + ym + '.csv'],
-      where: 'Dashboard > Attendance Sheet' },
-    { label: 'PF Return',
-      path: reports.concat(['PF']),
-      files: ['PF Return - ' + ym + '.csv'],
-      where: 'Reports > PF' },
-    { label: 'ESI Return',
-      path: reports.concat(['ESI']),
-      files: ['ESI Return - ' + ym + '.csv'],
-      where: 'Reports > ESI' },
-    // Filed as "PT Report", not "PT Return" like its PF and ESI neighbours —
-    // renderStatutoryReport builds the name from the label it is called with,
-    // and the PT screen passes 'PT Report'.
-    { label: 'PT Report',
-      path: reports.concat(['PT Report']),
-      files: ['PT Report - ' + ym + '.csv'],
-      where: 'Reports > PT Report' }
-  ];
-}
-
-// The newest file matching any of the accepted names. Two reasons it is not a
-// simple single lookup: a report that has been renamed has copies under both
-// names (see Final Salary Sheet above), and a folder can in principle hold more
-// than one file of the same name. saveFile_ trashes same-named files before
-// writing, so the duplicate case is rare — taking the most recently written is
-// simply the right answer whenever it happens.
-function newestFileNamed_(folder, fileNames) {
-  var names = Array.isArray(fileNames) ? fileNames : [fileNames];
-  var best = null;
-  for (var n = 0; n < names.length; n++) {
-    var it = folder.getFilesByName(names[n]);
-    while (it.hasNext()) {
-      var f = it.next();
-      if (!best || f.getLastUpdated().getTime() > best.getLastUpdated().getTime()) best = f;
-    }
-  }
-  return best;
-}
-
 // force=true sends regardless of the date, for testing from the editor.
 function sendMonthlyReportsEmail(force) {
   var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
@@ -2142,80 +2181,58 @@ function sendMonthlyReportsEmail(force) {
 
   var ym = prevMonthYmIst_();
   var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
-  var monthLabel = Utilities.formatDate(new Date(y, m - 1, 1), 'Asia/Kolkata', 'MMMM yyyy');
+  var monthLabel = LEAVE_DETAIL_MONTH_NAMES[m - 1] + ' ' + y;
   var esc = function (s) {
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   };
 
-  var specs = monthlyReportSpecs_(ym);
-  var attachments = [], found = [], missing = [];
-  for (var i = 0; i < specs.length; i++) {
-    var spec = specs[i];
-    var folder = findFolderPath_(spec.path);
-    var file = folder ? newestFileNamed_(folder, spec.files) : null;
-    if (file) {
-      attachments.push(file.getBlob());
-      // file.getName(), not spec.files[0] — the name actually attached is the
-      // one worth showing, so a month still filed under a report's old name
-      // reads as what it is instead of as the new name it does not have.
-      found.push({ label: spec.label, file: file.getName(), where: spec.where,
-        updated: Utilities.formatDate(file.getLastUpdated(), 'Asia/Kolkata', 'dd/MM/yyyy HH:mm') });
-    } else {
-      missing.push({ label: spec.label, where: spec.where });
-    }
+  // All six built here, from the live sheet. This used to walk Drive for
+  // whichever CSV each report had last filed when HR opened it, attach what it
+  // found and list by name what it did not — so the pack was only as complete,
+  // and only as current, as HR's habit of opening reports.
+  var pack = null, failure = null;
+  try {
+    pack = validateFreshPack_(buildMonthlyReportPack_(reportDataSnapshot_(), y, m), monthLabel);
+  } catch (e) {
+    failure = e && e.message ? e.message : String(e);
+    Logger.log('Monthly report pack for ' + monthLabel + ' could not be generated: ' + failure);
   }
 
-  var subject = 'R.S. Infotech — ' + monthLabel + ' reports (' + found.length + ' of ' +
-    specs.length + ')' + (missing.length ? ' — ' + missing.length + ' missing' : '');
-
-  var intro = found.length
-    ? 'Attached are the ' + monthLabel + ' reports as they were last generated in the app.'
-    : 'None of the ' + monthLabel + ' reports have been generated yet, so there is nothing to attach.';
-  // Said plainly because it decides whether the attachment can be trusted: the
-  // Drive copy is written when HR opens the report, so its date is the date the
-  // figures were last worked out, not the date this email went out.
-  var caveat = 'Each file is the copy written when that report was last opened in the app — the ' +
-    '"generated" time below is when its figures were last worked out. Reopen a report in the app ' +
-    'if anything has changed since.';
-  var howTo = 'To produce a missing report, open it once in the app for ' + monthLabel +
-    '; it files its own copy in Drive, and the next run of this email will pick it up.';
-
-  var html = '<p>' + esc(intro) + '</p>';
-  if (found.length) {
-    html += '<p>' + esc(caveat) + '</p>' +
+  var subject, plain, html, attachments = [];
+  if (pack) {
+    for (var i = 0; i < pack.reports.length; i++) {
+      attachments.push(Utilities.newBlob(pack.reports[i].csv, 'text/csv', pack.reports[i].fileName));
+    }
+    subject = 'R.S. Infotech — Monthly Reports — ' + monthLabel;
+    var generatedAt = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd/MM/yyyy HH:mm');
+    var intro = 'Attached are the ' + pack.reports.length + ' monthly reports for ' + monthLabel +
+      ', covering ' + pack.employees + ' employee(s) on roll during that month.';
+    // All six off one set of figures, so the Salary Sheet and the PF return in
+    // this email cannot disagree about anybody's basic.
+    var same = 'All six were generated together at ' + generatedAt + ' from the current records, ' +
+      'off the same salary calculation, so they agree with each other and with what the app shows.';
+    html = '<p>' + esc(intro) + '</p><p>' + esc(same) + '</p>' +
       '<table cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;' +
       'font-family:Arial,sans-serif;font-size:13px;">' +
-      '<tr><th align="left">Report</th><th align="left">File</th><th align="left">Generated</th></tr>';
-    for (var a = 0; a < found.length; a++) {
-      html += '<tr><td>' + esc(found[a].label) + '</td><td>' + esc(found[a].file) +
-        '</td><td>' + esc(found[a].updated) + '</td></tr>';
+      '<tr><th align="left">Report</th><th align="left">File</th><th align="right">Rows</th></tr>';
+    for (var j = 0; j < pack.reports.length; j++) {
+      html += '<tr><td>' + esc(pack.reports[j].label) + '</td><td>' + esc(pack.reports[j].fileName) +
+        '</td><td align="right">' + (pack.reports[j].csv.split('\n').length - 1) + '</td></tr>';
     }
     html += '</table>';
-  }
-  if (missing.length) {
-    html += '<p><strong>Not attached — never generated for ' + esc(monthLabel) + ':</strong></p><ul>';
-    for (var b = 0; b < missing.length; b++) {
-      html += '<li>' + esc(missing[b].label) + ' <span style="color:#666">(' + esc(missing[b].where) + ')</span></li>';
+    plain = intro + '\n\n' + same + '\n\n';
+    for (var k = 0; k < pack.reports.length; k++) {
+      plain += '  ' + pack.reports[k].label + '\n    ' + pack.reports[k].fileName + '\n';
     }
-    html += '</ul><p>' + esc(howTo) + '</p>';
-  }
-
-  var plain = intro + '\n\n';
-  if (found.length) {
-    plain += caveat + '\n\n';
-    for (var c = 0; c < found.length; c++) {
-      plain += '  ' + found[c].label + '\n' +
-        '    File     : ' + found[c].file + '\n' +
-        '    Generated: ' + found[c].updated + '\n';
-    }
-    plain += '\n';
-  }
-  if (missing.length) {
-    plain += 'Not attached — never generated for ' + monthLabel + ':\n';
-    for (var d = 0; d < missing.length; d++) {
-      plain += '  - ' + missing[d].label + ' (' + missing[d].where + ')\n';
-    }
-    plain += '\n' + howTo + '\n';
+  } else {
+    // No partial pack and no older copies. Five right reports and one stale
+    // one is worse than none, because nothing on the email says which is which.
+    subject = 'R.S. Infotech — Monthly Reports — ' + monthLabel + ' could not be generated';
+    var none = 'The monthly reports for ' + monthLabel + ' could not be generated, so nothing is ' +
+      'attached. No older copies have been sent in their place.';
+    var why = 'Reason: ' + failure;
+    html = '<p>' + esc(none) + '</p><p>' + esc(why) + '</p>';
+    plain = none + '\n\n' + why + '\n';
   }
 
   MailApp.sendEmail({
@@ -2226,7 +2243,7 @@ function sendMonthlyReportsEmail(force) {
     attachments: attachments
   });
   Logger.log('Monthly report pack for ' + monthLabel + ' sent to ' + MONTHLY_REPORTS_EMAIL +
-    ' — ' + found.length + ' attached, ' + missing.length + ' missing.');
+    ' — ' + (pack ? pack.reports.length + ' generated fresh and attached' : 'FAILED: ' + failure) + '.');
 }
 
 // ===== Loan & Advance Report, emailed separately on the 1st =====
@@ -2543,24 +2560,6 @@ function removeConsultantReportTrigger() {
   Logger.log('Removed ' + removed + ' consultant report trigger(s).');
 }
 
-// Both consultant reports use the numeric month in their filenames, the same
-// form as the Salary Sheet and unlike the Monthly Leave Detail Report, which
-// spells the month out.
-function consultantReportSpecs_(ym) {
-  var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
-  var reports = ['HR Management', fyLabelFor_(y, m), 'Reports'];
-  return [
-    { label: 'Consultant Report',
-      path: reports.concat(['Consultant Report']),
-      files: ['Consultant Report - ' + ym + '.csv'],
-      where: 'Reports > Consultant Report' },
-    { label: 'Consultant Final Summary Report',
-      path: reports.concat(['Consultant Final Summary Report']),
-      files: ['Consultant Final Summary Report - ' + ym + '.csv'],
-      where: 'Reports > Consultant Final Summary Report' }
-  ];
-}
-
 // force=true sends regardless of the date, for testing from the editor.
 function sendConsultantReportEmail(force) {
   var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
@@ -2573,70 +2572,50 @@ function sendConsultantReportEmail(force) {
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   };
 
-  var specs = consultantReportSpecs_(ym);
-  var attachments = [], found = [], missing = [];
-  for (var i = 0; i < specs.length; i++) {
-    var spec = specs[i];
-    var folder = findFolderPath_(spec.path);
-    var file = folder ? newestFileNamed_(folder, spec.files) : null;
-    if (file) {
-      attachments.push(file.getBlob());
-      found.push({ label: spec.label, file: file.getName(), where: spec.where,
-        updated: Utilities.formatDate(file.getLastUpdated(), 'Asia/Kolkata', 'dd/MM/yyyy HH:mm') });
-    } else {
-      missing.push({ label: spec.label, where: spec.where });
-    }
+  // Both built here from the live sheet. They used to be whatever the app had
+  // last filed in Drive, so the consultant's wage register could be a month
+  // behind the payroll it was supposed to describe.
+  var pack = null, failure = null;
+  try {
+    pack = validateFreshPack_(buildConsultantPack_(reportDataSnapshot_(), y, m), monthLabel);
+  } catch (e) {
+    failure = e && e.message ? e.message : String(e);
+    Logger.log('Consultant reports for ' + monthLabel + ' could not be generated: ' + failure);
   }
 
-  var subject = 'R.S. Infotech — Consultant Report — ' + monthLabel +
-    (missing.length ? ' (' + found.length + ' of ' + specs.length + ')' : '');
-
-  var intro = found.length
-    ? 'Attached ' + (found.length === 1 ? 'is the consultant report' : 'are the consultant reports') +
-      ' for ' + monthLabel + '.'
-    : 'The consultant reports have not been generated for ' + monthLabel + ', so there is nothing to attach.';
-  var caveat = 'Each file is the copy written when that report was last opened in the app — the ' +
-    '"generated" time below is when its figures were last worked out. Reopen a report in the app ' +
-    'if anything has changed since.';
-  var howTo = 'To produce a missing report, open it once in the app for ' + monthLabel +
-    '; it files its own copy in Drive, and the next run of this email will pick it up.';
-
-  var html = '<p>' + esc(intro) + '</p>';
-  if (found.length) {
-    html += '<p>' + esc(caveat) + '</p>' +
+  var subject, plain, html, attachments = [];
+  if (pack) {
+    for (var i = 0; i < pack.reports.length; i++) {
+      attachments.push(Utilities.newBlob(pack.reports[i].csv, 'text/csv', pack.reports[i].fileName));
+    }
+    subject = 'R.S. Infotech — Consultant Reports — ' + monthLabel;
+    var generatedAt = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd/MM/yyyy HH:mm');
+    var intro = 'Attached are the Consultant Report and its Final Summary for ' + monthLabel +
+      ', covering ' + pack.employees + ' employee(s) on the R.S. Infotech payroll headings.';
+    var same = 'Both were generated at ' + generatedAt + ' from the current records, off the same ' +
+      'salary calculation the app uses, so the wage register and the summary agree with each ' +
+      'other and with the Salary Sheet.';
+    html = '<p>' + esc(intro) + '</p><p>' + esc(same) + '</p>' +
       '<table cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;' +
       'font-family:Arial,sans-serif;font-size:13px;">' +
-      '<tr><th align="left">Report</th><th align="left">File</th><th align="left">Generated</th></tr>';
-    for (var a = 0; a < found.length; a++) {
-      html += '<tr><td>' + esc(found[a].label) + '</td><td>' + esc(found[a].file) +
-        '</td><td>' + esc(found[a].updated) + '</td></tr>';
+      '<tr><th align="left">Report</th><th align="left">File</th><th align="right">Rows</th></tr>';
+    for (var j = 0; j < pack.reports.length; j++) {
+      html += '<tr><td>' + esc(pack.reports[j].label) + '</td><td>' + esc(pack.reports[j].fileName) +
+        '</td><td align="right">' + (pack.reports[j].csv.split('\n').length - 1) + '</td></tr>';
     }
     html += '</table>';
-  }
-  if (missing.length) {
-    html += '<p><strong>Not attached — never generated for ' + esc(monthLabel) + ':</strong></p><ul>';
-    for (var b = 0; b < missing.length; b++) {
-      html += '<li>' + esc(missing[b].label) + ' <span style="color:#666">(' + esc(missing[b].where) + ')</span></li>';
+    plain = intro + '\n\n' + same + '\n\n';
+    for (var k = 0; k < pack.reports.length; k++) {
+      plain += '  ' + pack.reports[k].label + '\n    ' + pack.reports[k].fileName + '\n';
     }
-    html += '</ul><p>' + esc(howTo) + '</p>';
-  }
-
-  var plain = intro + '\n\n';
-  if (found.length) {
-    plain += caveat + '\n\n';
-    for (var c = 0; c < found.length; c++) {
-      plain += '  ' + found[c].label + '\n' +
-        '    File     : ' + found[c].file + '\n' +
-        '    Generated: ' + found[c].updated + '\n';
-    }
-    plain += '\n';
-  }
-  if (missing.length) {
-    plain += 'Not attached — never generated for ' + monthLabel + ':\n';
-    for (var d = 0; d < missing.length; d++) {
-      plain += '  - ' + missing[d].label + ' (' + missing[d].where + ')\n';
-    }
-    plain += '\n' + howTo + '\n';
+  } else {
+    subject = 'R.S. Infotech — Consultant Reports — ' + monthLabel + ' could not be generated';
+    var none = 'The Consultant Report and Final Summary for ' + monthLabel + ' could not be ' +
+      'generated, so nothing is attached. No older copies have been sent in their place — a ' +
+      'wage register for the wrong month is worse than none, because it looks right.';
+    var why = 'Reason: ' + failure;
+    html = '<p>' + esc(none) + '</p><p>' + esc(why) + '</p>';
+    plain = none + '\n\n' + why + '\n';
   }
 
   MailApp.sendEmail({
@@ -2646,8 +2625,8 @@ function sendConsultantReportEmail(force) {
     htmlBody: html,
     attachments: attachments
   });
-  Logger.log('Consultant report email for ' + monthLabel + ' sent to ' + CONSULTANT_REPORT_EMAIL +
-    ' — ' + found.length + ' attached, ' + missing.length + ' missing.');
+  Logger.log('Consultant reports for ' + monthLabel + ' sent to ' + CONSULTANT_REPORT_EMAIL +
+    ' — ' + (pack ? pack.reports.length + ' generated fresh and attached' : 'FAILED: ' + failure) + '.');
 }
 
 // One-off, run once from this editor (function dropdown -> restorePayrollDocsPf202526
