@@ -1774,6 +1774,241 @@ function sendBirthdayReminderEmail() {
 // attachment short. Each attachment is also stamped with the date its Drive
 // copy was last written, so a copy generated mid-month — before attendance was
 // finished — is visible as stale rather than trusted silently.
+// ===== Fresh report generation =====
+//
+// Every report email below builds its own figures at the moment it runs. It
+// does NOT attach whatever CSV the app last filed in Drive, which is what
+// these emails used to do and why an emailed report silently depended on
+// somebody having opened it in the app first — a report nobody opened was a
+// month out of date or missing altogether.
+//
+// The calculations are not reimplemented here. shared/report-logic.js on the
+// live site holds the one copy of them; the app loads it with a <script src>
+// and this fetches the same URL and evaluates it, so the figure in an
+// attachment is produced by the same lines as the figure on screen. Copying
+// any of that arithmetic into this file would recreate exactly the drift it
+// was written to end.
+//
+// SHARED_LOGIC_URL only needs filling in to pin a specific address. Left
+// empty, it uses the origin the app records for itself each time HR opens it
+// (see noteSiteOrigin_ in index.html), so this normally configures itself.
+var SHARED_LOGIC_URL = '';
+
+// The evaluated shared logic, for the length of ONE execution only. Deliberately
+// not cached in Script Properties or CacheService between runs: a cached copy
+// is a stale copy, and the whole point of this is that a run uses what is
+// deployed right now.
+var SHARED_LOGIC_ = null;
+
+function sharedLogicUrl_(map) {
+  if (SHARED_LOGIC_URL) return SHARED_LOGIC_URL;
+  var origin = map && map['site_origin'];
+  if (!origin) return '';
+  return String(origin).replace(/\/+$/, '') + '/shared/report-logic.js';
+}
+
+// Fetches shared/report-logic.js and evaluates it into an object holding every
+// function it declares. Throws rather than returning something half-built —
+// every caller treats a failure here as "this report could not be generated",
+// which is reported, never papered over with an older file.
+function loadSharedReportLogic_(map) {
+  if (SHARED_LOGIC_) return SHARED_LOGIC_;
+  var url = sharedLogicUrl_(map);
+  if (!url) {
+    throw new Error('No address for shared/report-logic.js. Open the HR app once so it can ' +
+      'record its own address, or set SHARED_LOGIC_URL at the top of this file to ' +
+      'https://<your site>/shared/report-logic.js');
+  }
+  var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true });
+  var code = res.getResponseCode();
+  if (code !== 200) {
+    throw new Error('Could not fetch ' + url + ' — HTTP ' + code +
+      '. The report figures come from that file, so nothing was generated.');
+  }
+  var body = res.getContentText();
+  // A Vercel error page or an SPA fallback returns 200 with HTML in it. Catch
+  // that here rather than let eval throw something unreadable.
+  if (!body || body.indexOf('computeSalaryFromAttendance') === -1) {
+    throw new Error('The file at ' + url + ' does not look like shared/report-logic.js ' +
+      '(no computeSalaryFromAttendance in it), so nothing was generated.');
+  }
+  var box = {};
+  // Evaluated into a function scope, then the declarations are picked out by
+  // name. eval is the only way Apps Script can run code it fetched, and this
+  // is our own file from our own site over HTTPS.
+  var names = ['computeSalaryFromAttendance', 'computeAttendanceSummary', 'LEAVE_DETAIL_METRICS',
+    'resolvedAttendanceCode_', 'loansOf', 'loanBalanceAfter', 'loanEmiRateAsOf',
+    'computeLoanEmiForMonth', 'loanBalanceAfterMonth', 'advanceBalanceAfterMonth',
+    'salaryAdvanceForMonth', 'advanceTempForMonth', 'diwaliBonusFor', 'monthlyPayFor',
+    'financialYearLabel', 'calculatePfFor', 'computeEsi', 'monthlyPtFor', 'ratePayAsOf',
+    'SALARY_HEADINGS', 'PF_RULES', 'ESI_RULES', 'LEAVE_POLICY',
+    'leaveWorkingDays', 'applyAlwaysPresentFill', 'leaveDetailRowFor',
+    'leaveDetailReportRows', 'leaveDetailCsvHeader', 'leaveDetailCsvRows',
+    'loanLedgerRows', 'loanLedgerCsvHeader', 'loanLedgerCsvRows'];
+  var collect = new Function(body + '\nreturn (function(){ var o = {};' +
+    names.map(function (n) { return 'try{ o[' + JSON.stringify(n) + '] = ' + n + '; }catch(e){}'; }).join('') +
+    'return o; })();');
+  box = collect();
+  var missing = [];
+  for (var i = 0; i < names.length; i++) if (box[names[i]] === undefined) missing.push(names[i]);
+  if (missing.length) {
+    throw new Error('shared/report-logic.js loaded but is missing: ' + missing.join(', ') +
+      '. Nothing was generated rather than guess at the figures.');
+  }
+  SHARED_LOGIC_ = box;
+  return SHARED_LOGIC_;
+}
+
+// The whole sheet as a key/value map plus the employee list, read once and
+// passed around — every report below works from the same snapshot of the
+// live data, taken at email time.
+function reportDataSnapshot_() {
+  var rows = getSheet_().getDataRange().getValues();
+  var map = {};
+  for (var i = 0; i < rows.length; i++) map[rows[i][0]] = rows[i][1];
+  return { map: map, rows: rows, employees: allEmployeesFromRows_(rows) };
+}
+
+// Every date in a month, as the app builds it for a report.
+function monthDateList_(y, m) {
+  var days = new Date(y, m, 0).getDate();
+  var out = [];
+  for (var d = 1; d <= days; d++) {
+    out.push(y + '-' + ('0' + m).slice(-2) + '-' + ('0' + d).slice(-2));
+  }
+  return out;
+}
+
+// The Holiday List as the shared logic expects it: { 'YYYY-MM-DD': true }.
+function holidayMapFromSheet_(map) {
+  var raw = map['holidays'];
+  var out = {};
+  if (!raw) return out;
+  var list = [];
+  try { list = JSON.parse(raw) || []; } catch (e) { return out; }
+  for (var i = 0; i < list.length; i++) {
+    var h = list[i];
+    var d = h && (h.date || h.d || h);
+    if (d) out[String(d)] = true;
+  }
+  return out;
+}
+
+// Whether an employee was on the books during a month — the same test the
+// app's own period reports use, so a leaver still appears in the months they
+// actually worked.
+function employedInMonth_(e, startStr, endStr) {
+  if (!e) return false;
+  if (e.doj && e.doj > endStr) return false;
+  if (e.employmentStatus === 'left' && e.leftDate && e.leftDate < startStr) return false;
+  return true;
+}
+
+// Attendance for a set of employees over one month, shaped exactly as the app
+// shapes it: merged across financial-year keys, then the "Always mark
+// Present" fill applied through the shared function. Anything less and the
+// email would run the same arithmetic over different input.
+function attendanceForMonth_(map, employees, y, m, holidayMap, logic) {
+  var fyLabel = fyLabelFor_(y, m);
+  // A month can only belong to one financial year, but the legacy whole-record
+  // key and the neighbouring year are merged in too, exactly as
+  // getAttendanceAll does for the app.
+  var labels = [fyLabel, fyLabelFor_(m === 1 ? y - 1 : y, m === 1 ? 12 : m - 1)];
+  var byId = {};
+  for (var i = 0; i < employees.length; i++) {
+    byId[employees[i].id] = mergedAttendanceForId_(map, employees[i].id, labels);
+  }
+  var withFrom = employees.filter(function (e) { return e && e.alwaysPresentFrom; });
+  if (withFrom.length) {
+    byId = logic.applyAlwaysPresentFill(byId, withFrom, holidayMap, null, null, todayIso_());
+  }
+  return byId;
+}
+
+// ---- Monthly Leave Detail Report, generated here and now ----
+// Returns the same rows the report screen shows, because it calls the same
+// function. Throws rather than returning something partial: a report that
+// cannot be built is reported as such, never replaced with an older file.
+function buildLeaveDetailReport_(snap, y, m) {
+  var logic = loadSharedReportLogic_(snap.map);
+  var monthLabel = LEAVE_DETAIL_MONTH_NAMES[m - 1] + ' ' + y;
+  // Same roster rule as the report screen: current staff.
+  var employees = snap.employees.filter(function (e) {
+    return e && e.employmentStatus !== 'left';
+  });
+  var dateList = monthDateList_(y, m);
+  var holidayMap = holidayMapFromSheet_(snap.map);
+  var attByEmpId = attendanceForMonth_(snap.map, employees, y, m, holidayMap, logic);
+  var built = logic.leaveDetailReportRows(employees, attByEmpId, dateList, holidayMap);
+  return {
+    monthLabel: monthLabel,
+    fileName: 'Monthly Leave Detail Report - ' + monthLabel + '.csv',
+    header: logic.leaveDetailCsvHeader(),
+    rows: built.rows,
+    onRoll: built.all.length,
+    csv: toCsv_(logic.leaveDetailCsvHeader(), logic.leaveDetailCsvRows(built.rows))
+  };
+}
+
+// ---- Loan & Advance Report, generated here and now ----
+// A running position rather than a closed month: reported as it stands at the
+// END of the month being reported on, which is the moment the payroll for that
+// month was finished.
+function buildLoanAdvanceReport_(snap, y, m) {
+  var logic = loadSharedReportLogic_(snap.map);
+  var monthLabel = LEAVE_DETAIL_MONTH_NAMES[m - 1] + ' ' + y;
+  var employees = snap.employees.filter(function (e) {
+    return e && e.employmentStatus !== 'left';
+  });
+  var ledger = logic.loanLedgerRows(employees, y, m);
+  var outstanding = 0, stalled = 0;
+  for (var i = 0; i < ledger.length; i++) {
+    outstanding += ledger[i].balance;
+    if (ledger[i].stalled) stalled++;
+  }
+  return {
+    monthLabel: monthLabel,
+    fileName: 'Loan & Advance Report - ' + monthLabel + '.csv',
+    rows: ledger,
+    outstanding: Math.round(outstanding),
+    stalled: stalled,
+    csv: toCsv_(logic.loanLedgerCsvHeader(), logic.loanLedgerCsvRows(ledger))
+  };
+}
+
+// ---- what every report email checks before it sends anything ----
+// The rules, in one place, so a report added later cannot quietly skip them:
+// the period is the one that was asked for, the figures were built during this
+// run, the file is named for that same period, and there is something in it.
+// A failure throws, and the caller reports the error instead of attaching an
+// older file.
+function validateFreshReport_(report, expectedMonthLabel, expectedFileName) {
+  if (!report) throw new Error('The report builder returned nothing.');
+  if (report.monthLabel !== expectedMonthLabel) {
+    throw new Error('Built for ' + report.monthLabel + ' but ' + expectedMonthLabel + ' was asked for.');
+  }
+  if (report.fileName !== expectedFileName) {
+    throw new Error('Attachment would be named ' + report.fileName + ', expected ' + expectedFileName + '.');
+  }
+  if (!report.csv || !report.csv.length) throw new Error('The generated report was empty.');
+  var lines = report.csv.split('\n');
+  if (lines.length < 1 || !lines[0]) throw new Error('The generated report has no header row.');
+  if (report.csv.indexOf(expectedMonthLabel) === -1 && report.fileName.indexOf(expectedMonthLabel) === -1) {
+    throw new Error('Neither the file name nor the contents mention ' + expectedMonthLabel + '.');
+  }
+  return report;
+}
+
+function csvEscape_(v) {
+  var s = (v === null || v === undefined) ? '' : String(v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function toCsv_(header, rows) {
+  var out = [header.map(csvEscape_).join(',')];
+  for (var i = 0; i < rows.length; i++) out.push(rows[i].map(csvEscape_).join(','));
+  return out.join('\n');
+}
+
 var MONTHLY_REPORTS_EMAIL = 'rasesh@rsinfotech.net';
 var MONTHLY_REPORTS_HOUR = 8; // 8 AM IST on the 1st
 
@@ -2051,97 +2286,70 @@ function removeLoanReportTrigger() {
   Logger.log('Removed ' + removed + ' loan & advance report trigger(s).');
 }
 
-// The most recent snapshot across the financial years given, judged by the date
-// in the FILENAME rather than the file's Drive timestamp: the name carries the
-// day the position was taken, which is the date that means something here, and
-// the two can differ if a file is ever moved or re-filed.
-//
-// Two years are searched, not one, because of the April boundary. This runs on
-// the 1st, and on 1 April the newest snapshot was almost certainly taken on 31
-// March — which sits in the year that just closed, while today's year folder is
-// brand new and quite possibly empty. Looking only at today's year would report
-// nothing available on exactly the morning the year-end position matters most.
-function newestLoanAdvanceReport_(fyLabels) {
-  var seen = {}, best = null;
-  for (var i = 0; i < fyLabels.length; i++) {
-    if (seen[fyLabels[i]]) continue;
-    seen[fyLabels[i]] = true;
-    var folder = findFolderPath_(['HR Management', fyLabels[i], 'Reports', 'Loan & Advance Report']);
-    if (!folder) continue;
-    var files = folder.getFiles();
-    while (files.hasNext()) {
-      var f = files.next();
-      var m = /(\d{4}-\d{2}-\d{2})\.csv$/.exec(f.getName());
-      if (!m) continue;
-      if (!best || m[1] > best.date) best = { file: f, date: m[1] };
-    }
-  }
-  return best;
-}
-
-// Whole days between two 'YYYY-MM-DD' strings. Built from the parts rather than
-// Date.parse because a date-only string parses as UTC midnight, which lands on
-// the wrong day in IST — the same trap CLAUDE.md flags for financial years.
-function daysBetweenYmd_(fromYmd, toYmd) {
-  var a = new Date(Number(fromYmd.slice(0, 4)), Number(fromYmd.slice(5, 7)) - 1, Number(fromYmd.slice(8, 10)));
-  var b = new Date(Number(toYmd.slice(0, 4)), Number(toYmd.slice(5, 7)) - 1, Number(toYmd.slice(8, 10)));
-  return Math.round((b.getTime() - a.getTime()) / 86400000);
-}
-
 // force=true sends regardless of the date, for testing from the editor.
 function sendLoanAdvanceReportEmail(force) {
   var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
   if (!force && Number(istToday.slice(8, 10)) !== 1) return;
 
-  var y = Number(istToday.slice(0, 4)), m = Number(istToday.slice(5, 7));
-  var prevM = m === 1 ? 12 : m - 1, prevY = m === 1 ? y - 1 : y;
-  var thisFy = fyLabelFor_(y, m), prevFy = fyLabelFor_(prevY, prevM);
+  var ym = prevMonthYmIst_();
+  var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
+  var monthLabel = LEAVE_DETAIL_MONTH_NAMES[m - 1] + ' ' + y;
+  var fileName = 'Loan & Advance Report - ' + monthLabel + '.csv';
   var esc = function (s) {
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   };
-  var disp = function (ymd) { return ymd.slice(8, 10) + '/' + ymd.slice(5, 7) + '/' + ymd.slice(0, 4); };
 
-  var hit = newestLoanAdvanceReport_([thisFy, prevFy]);
-  var todayDisp = disp(istToday);
+  // Worked out here from the live records. This used to hunt Drive for the
+  // newest CSV the app had filed and attach that, labelled with how many days
+  // old it was — because a loan balance is only true for the day it was taken
+  // and an old one reads as current. There is no old one now: it is the
+  // position at the end of the month being reported on, computed at send time.
+  var report = null, failure = null;
+  try {
+    report = validateFreshReport_(buildLoanAdvanceReport_(reportDataSnapshot_(), y, m), monthLabel, fileName);
+  } catch (e) {
+    failure = e && e.message ? e.message : String(e);
+    Logger.log('Loan & Advance Report for ' + monthLabel + ' could not be generated: ' + failure);
+  }
 
   var subject, plain, html, attachments = [];
-  if (hit) {
-    var age = daysBetweenYmd_(hit.date, istToday);
-    var snapDisp = disp(hit.date);
-    var ageText = age <= 0 ? 'taken today'
-      : age === 1 ? 'taken yesterday'
-      : 'taken ' + age + ' days ago';
-    subject = 'R.S. Infotech — Loan & Advance Report — position as at ' + snapDisp +
-      (age > 7 ? ' (' + age + ' days old)' : '');
-    attachments.push(hit.file.getBlob());
-
-    var lead = 'Attached is the Loan & Advance Report as it stood on ' + snapDisp + ', ' + ageText + '.';
-    // The whole point of this email: a loan balance is only true for the day it
-    // was taken, and an old snapshot reads as current unless it is labelled.
-    var freshness = age > 0
-      ? 'Balances move with each month’s EMI, so this is the position on ' + snapDisp +
-        ', not on ' + todayDisp + '. Open the Loan & Advance Report in the app for a current one — ' +
-        'it files its own copy, and the next run of this email will pick that up instead.'
-      : 'This is today’s position.';
-
-    html = '<p>' + esc(lead) + '</p><p>' + esc(freshness) + '</p>' +
+  if (report) {
+    attachments.push(Utilities.newBlob(report.csv, 'text/csv', report.fileName));
+    subject = 'R.S. Infotech — Loan & Advance Report — ' + monthLabel;
+    var generatedAt = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd/MM/yyyy HH:mm');
+    var lead = 'Attached is the Loan & Advance Report for ' + monthLabel + ' — the position as it ' +
+      'stood at the end of that month, once that month\u2019s instalments had come off.';
+    var figures = rupeesIn_(report.outstanding) + ' outstanding across ' + report.rows.length + ' loan(s).';
+    var warn = report.stalled
+      ? report.stalled + ' active loan(s) have no recovery month set, so no instalment is coming off ' +
+        'the Salary Sheet for them. Set one on the employee record to start recovery.'
+      : '';
+    var freshness = 'Generated ' + generatedAt + ' from the current records.';
+    html = '<p>' + esc(lead) + '</p><p>' + esc(figures) + '</p>' +
+      (warn ? '<p style="color:#B00020"><strong>' + esc(warn) + '</strong></p>' : '') +
+      '<p>' + esc(freshness) + '</p>' +
       '<table cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;' +
       'font-family:Arial,sans-serif;font-size:13px;">' +
-      '<tr><td><strong>Position as at</strong></td><td>' + esc(snapDisp) + '</td></tr>' +
-      '<tr><td><strong>Age</strong></td><td>' + esc(ageText) + '</td></tr>' +
-      '<tr><td><strong>File</strong></td><td>' + esc(hit.file.getName()) + '</td></tr>' +
+      '<tr><td><strong>Month</strong></td><td>' + esc(monthLabel) + '</td></tr>' +
+      '<tr><td><strong>File</strong></td><td>' + esc(report.fileName) + '</td></tr>' +
+      '<tr><td><strong>Loans</strong></td><td>' + report.rows.length + '</td></tr>' +
+      '<tr><td><strong>Outstanding</strong></td><td>' + esc(rupeesIn_(report.outstanding)) + '</td></tr>' +
+      '<tr><td><strong>Generated</strong></td><td>' + esc(generatedAt) + '</td></tr>' +
       '</table>';
-    plain = lead + '\n\n' + freshness + '\n\n' +
-      '  Position as at: ' + snapDisp + '\n' +
-      '  Age           : ' + ageText + '\n' +
-      '  File          : ' + hit.file.getName() + '\n';
+    plain = lead + '\n\n' + figures + '\n' + (warn ? warn + '\n' : '') + '\n' + freshness + '\n\n' +
+      '  Month      : ' + monthLabel + '\n' +
+      '  File       : ' + report.fileName + '\n' +
+      '  Loans      : ' + report.rows.length + '\n' +
+      '  Outstanding: ' + rupeesIn_(report.outstanding) + '\n' +
+      '  Generated  : ' + generatedAt + '\n';
   } else {
-    subject = 'R.S. Infotech — Loan & Advance Report — none available';
-    var none = 'The Loan & Advance Report has never been generated, so there is nothing to attach.';
-    var fix = 'Open Reports > Loan & Advance Report in the app once; it files its own copy in Drive, ' +
-      'and the next run of this email will attach it.';
-    html = '<p>' + esc(none) + '</p><p>' + esc(fix) + '</p>';
-    plain = none + '\n\n' + fix + '\n';
+    subject = 'R.S. Infotech — Loan & Advance Report — ' + monthLabel + ' could not be generated';
+    var none = 'The Loan & Advance Report for ' + monthLabel + ' could not be generated, so nothing ' +
+      'is attached. No older snapshot has been sent in its place — an out-of-date loan balance reads ' +
+      'as a current one.';
+    var why = 'Reason: ' + failure;
+    html = '<p>' + esc(none) + '</p><p>' + esc(why) + '</p>';
+    plain = none + '\n\n' + why + '\n';
   }
 
   MailApp.sendEmail({
@@ -2151,8 +2359,8 @@ function sendLoanAdvanceReportEmail(force) {
     htmlBody: html,
     attachments: attachments
   });
-  Logger.log('Loan & Advance report email sent to ' + LOAN_REPORT_EMAIL + ' — ' +
-    (hit ? 'snapshot ' + hit.date : 'none available') + '.');
+  Logger.log('Loan & Advance Report email for ' + monthLabel + ' sent to ' + LOAN_REPORT_EMAIL +
+    ' — ' + (report ? 'generated fresh and attached' : 'FAILED: ' + failure) + '.');
 }
 
 // ===== Monthly Leave Detail Report, emailed separately on the 1st =====
@@ -2223,42 +2431,57 @@ function sendLeaveDetailReportEmail(force) {
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   };
 
-  // Filed under the financial year the reported month belongs to, so March
-  // lands in the year that is closing rather than the one just opened.
-  var folder = findFolderPath_(['HR Management', fyLabelFor_(y, m), 'Reports', 'Monthly Leave Detail Report']);
-  var file = folder ? newestFileNamed_(folder, [fileName]) : null;
+  // Built here, from the live sheet, every time this runs. It used to attach
+  // whichever CSV the app had last filed in Drive, which meant the email was
+  // only as fresh as the last time somebody happened to open the report — and
+  // said nothing at all if nobody ever had.
+  var report = null, failure = null;
+  try {
+    report = validateFreshReport_(buildLeaveDetailReport_(reportDataSnapshot_(), y, m), monthLabel, fileName);
+  } catch (e) {
+    failure = e && e.message ? e.message : String(e);
+    Logger.log('Monthly Leave Detail report for ' + monthLabel + ' could not be generated: ' + failure);
+  }
 
   var subject, plain, html, attachments = [];
-  if (file) {
-    var updated = Utilities.formatDate(file.getLastUpdated(), 'Asia/Kolkata', 'dd/MM/yyyy HH:mm');
-    attachments.push(file.getBlob());
+  if (report) {
+    attachments.push(Utilities.newBlob(report.csv, 'text/csv', report.fileName));
     subject = 'R.S. Infotech — Monthly Leave Detail Report — ' + monthLabel;
+    var generatedAt = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd/MM/yyyy HH:mm');
     var lead = 'Attached is the Monthly Leave Detail Report for ' + monthLabel + '.';
-    // Same caveat as the report pack, for the same reason: the Drive copy is
-    // written when HR opens the report, so its date is when the figures were
-    // last worked out, not when this email went out. A copy generated before
-    // the month ended is missing the last of the month's leave.
-    var caveat = 'This is the copy written when the report was last opened in the app, on ' + updated +
-      '. Reopen it in the app if any leave has been recorded or corrected since.';
-    html = '<p>' + esc(lead) + '</p><p>' + esc(caveat) + '</p>' +
+    var note = report.rows.length
+      ? report.rows.length + ' of ' + report.onRoll + ' on-roll employees had leave, a half day, ' +
+        'short leave or late coming in ' + monthLabel + '. Anyone with a clean month is not listed.'
+      : 'Nobody took any leave, half day, short leave or late coming in ' + monthLabel +
+        ' — all ' + report.onRoll + ' on-roll employees were clear.';
+    // No "reopen it in the app" caveat any more: this was worked out just now
+    // from the live records, so it already includes every correction made up
+    // to this minute.
+    var freshness = 'Generated ' + generatedAt + ' from the current records, so it includes any ' +
+      'leave recorded or corrected since the month ended.';
+    html = '<p>' + esc(lead) + '</p><p>' + esc(note) + '</p><p>' + esc(freshness) + '</p>' +
       '<table cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;' +
       'font-family:Arial,sans-serif;font-size:13px;">' +
       '<tr><td><strong>Month</strong></td><td>' + esc(monthLabel) + '</td></tr>' +
-      '<tr><td><strong>File</strong></td><td>' + esc(file.getName()) + '</td></tr>' +
-      '<tr><td><strong>Generated</strong></td><td>' + esc(updated) + '</td></tr>' +
+      '<tr><td><strong>File</strong></td><td>' + esc(report.fileName) + '</td></tr>' +
+      '<tr><td><strong>Employees listed</strong></td><td>' + report.rows.length + ' of ' + report.onRoll + '</td></tr>' +
+      '<tr><td><strong>Generated</strong></td><td>' + esc(generatedAt) + '</td></tr>' +
       '</table>';
-    plain = lead + '\n\n' + caveat + '\n\n' +
-      '  Month    : ' + monthLabel + '\n' +
-      '  File     : ' + file.getName() + '\n' +
-      '  Generated: ' + updated + '\n';
+    plain = lead + '\n\n' + note + '\n\n' + freshness + '\n\n' +
+      '  Month            : ' + monthLabel + '\n' +
+      '  File             : ' + report.fileName + '\n' +
+      '  Employees listed : ' + report.rows.length + ' of ' + report.onRoll + '\n' +
+      '  Generated        : ' + generatedAt + '\n';
   } else {
-    subject = 'R.S. Infotech — Monthly Leave Detail Report — ' + monthLabel + ' not generated';
-    var none = 'The Monthly Leave Detail Report has not been generated for ' + monthLabel +
-      ', so there is nothing to attach.';
-    var fix = 'Open Reports > Monthly Leave Detail Report in the app once for ' + monthLabel +
-      '; it files its own copy in Drive, and the next run of this email will attach it.';
-    html = '<p>' + esc(none) + '</p><p>' + esc(fix) + '</p>';
-    plain = none + '\n\n' + fix + '\n';
+    // Deliberately no fallback to an older file. Sending last month's figures
+    // under this month's heading is worse than sending nothing, because it
+    // looks right.
+    subject = 'R.S. Infotech — Monthly Leave Detail Report — ' + monthLabel + ' could not be generated';
+    var none = 'The Monthly Leave Detail Report for ' + monthLabel + ' could not be generated, so ' +
+      'nothing is attached. No older report has been sent in its place.';
+    var why = 'Reason: ' + failure;
+    html = '<p>' + esc(none) + '</p><p>' + esc(why) + '</p>';
+    plain = none + '\n\n' + why + '\n';
   }
 
   MailApp.sendEmail({
@@ -2269,7 +2492,7 @@ function sendLeaveDetailReportEmail(force) {
     attachments: attachments
   });
   Logger.log('Monthly Leave Detail report email for ' + monthLabel + ' sent to ' + LEAVE_DETAIL_EMAIL +
-    ' — ' + (file ? 'attached' : 'not generated') + '.');
+    ' — ' + (report ? 'generated fresh and attached' : 'FAILED: ' + failure) + '.');
 }
 
 // ===== Consultant Report, emailed separately on the 2nd =====
