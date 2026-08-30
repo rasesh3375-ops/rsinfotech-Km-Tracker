@@ -11,6 +11,7 @@ elegance and more than speed.
 | Path | What it is |
 |---|---|
 | `index.html` | The entire frontend — markup, CSS and ~12,500 lines of JavaScript in two inline `<script>` blocks. No build step, no framework, no bundler. |
+| `shared/report-logic.js` | The payroll, attendance and leave calculations, loaded by `index.html` with a plain `<script src>` **and fetched by `Code 2.js`** so the scheduled report emails run the same functions. See "One calculation, two callers" below. |
 | `apps-script/Code 2.js` | The backend: a Google Apps Script web app over a Google Sheet, with Drive for file storage. |
 | `apps-script/appsscript.json` | Script manifest. Timezone is `Asia/Kolkata` and must stay that way. |
 | `tools/` | Two checks to run after editing `index.html`. See below. |
@@ -90,6 +91,33 @@ figure on the Add Employee form disagreed with the figure on the Salary Sheet �
 PF eligibility, employer CTC, then loan and advance recoveries. Every time the
 cause was the same: the form had grown its own copy of the arithmetic. If you
 find yourself writing `× 0.12` anywhere outside `calculatePfFor`, stop.
+
+**One calculation, two callers.** The rules above are enforced across the
+browser/Apps-Script boundary by `shared/report-logic.js`. `index.html` loads it
+with `<script src="/shared/report-logic.js">` before its own block; `Code 2.js`
+fetches that same URL from the live site and evaluates it when a report email
+runs. Both then call the identical function over the identical data, so a
+figure in an emailed attachment cannot disagree with the figure on screen.
+
+Three consequences worth knowing before touching it:
+
+- **Nothing in that file may touch the DOM, the network, the session, or be
+  `async`.** Apps Script has none of it. Data is passed in, never read in.
+  `computeSalaryForEmployee` is the pattern: a thin `async` wrapper in
+  `index.html` fetches the attendance, then calls the pure
+  `computeSalaryFromAttendance` that actually does the arithmetic.
+- **Never copy any of it into `Code 2.js`.** A second copy is exactly the
+  drift the file was made to end — the backend fetches, it does not
+  reimplement.
+- **jsdom does not fetch `<script src>`**, so a harness that loads
+  `index.html` raw gets a page with no payroll logic in it. Inline the shared
+  file into the HTML string first, the way the browser ends up with it:
+  ```js
+  html = html.replace('<script src="/shared/report-logic.js"></script>',
+                      '<script>' + fs.readFileSync('shared/report-logic.js','utf8') + '</script>');
+  ```
+  `tools/check-undeclared.js` already reads both files and treats them as one
+  global scope, which is what the browser does — the baseline is still 9.
 
 **Rules live in config, not in code.** `SALARY_HEADINGS`, `PF_RULES`,
 `ESI_RULES`, `LEAVE_POLICY`, `PAYROLL_MASTER`, `LETTER_FIELDS`,

@@ -22,14 +22,23 @@ try {
   process.exit(2);
 }
 
+// shared/report-logic.js is a real <script src> the page loads before its own
+// code, so its declarations are in the same global scope index.html's are.
+// Checked as a block of its own AND its top-level names fed to every other
+// block: without that, moving the payroll calculations out of index.html
+// would have made all seventy of them look undeclared and buried the handful
+// of genuine findings this tool exists for.
+const files = [
+  { name: 'shared/report-logic.js', code: fs.readFileSync(path.join(__dirname, '..', 'shared', 'report-logic.js'), 'utf8'), lineOffset: 0 }
+];
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-const blocks = [];
 const re = /<script(?![^>]*src=)[^>]*>/g;
 let m;
 while ((m = re.exec(html))) {
   const s = m.index + m[0].length, e = html.indexOf('</script>', s);
-  blocks.push({ code: html.slice(s, e), lineOffset: html.slice(0, s).split('\n').length - 1 });
+  files.push({ name: 'index.html', code: html.slice(s, e), lineOffset: html.slice(0, s).split('\n').length - 1 });
 }
+const blocks = files;
 
 const BUILTINS = new Set((
   'window document console Math JSON Date Array Object String Number Boolean RegExp Error TypeError ' +
@@ -126,14 +135,19 @@ function walkScope(node, scopes, fnName, block) {
   }
 }
 
-blocks.forEach(b => {
-  const ast = acorn.parse(b.code, { ecmaVersion: 2022, locations: false });
-  const globals = new Set();
-  collectBodyDecls(ast, globals, true);
-  walkScope(ast, [globals], '(top level)');
+// Every script the page loads shares one global scope, so a name declared in
+// any of them resolves in all of them. Collected across the lot first, then
+// each block is walked against the union — the same thing the browser does.
+const asts = blocks.map(b => acorn.parse(b.code, { ecmaVersion: 2022, locations: false }));
+const globals = new Set();
+asts.forEach(ast => collectBodyDecls(ast, globals, true));
+
+blocks.forEach((b, i) => {
+  walkScope(asts[i], [globals], '(top level)');
   problems.forEach(p => {
     if (p.reported) return;
     p.reported = true;
+    p.file = b.name;
     p.line = b.lineOffset + b.code.slice(0, p.pos).split('\n').length;
   });
 });
@@ -145,5 +159,5 @@ const real = problems.filter(p => {
   seen.add(k);
   return true;
 });
-real.forEach(p => console.log('index.html:' + p.line + '  ' + p.fn + '() reads undeclared `' + p.name + '`'));
+real.forEach(p => console.log((p.file || 'index.html') + ':' + p.line + '  ' + p.fn + '() reads undeclared `' + p.name + '`'));
 console.log('\n' + real.length + ' undeclared identifier(s)');
