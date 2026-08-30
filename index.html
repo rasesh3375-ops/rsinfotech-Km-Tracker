@@ -2551,7 +2551,7 @@
         <div id="rptSecMonthlyLeaveDetail" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">Monthly Leave Detail Report</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Every employee's late coming, EL/PL, SL, half days and short leaves for one month, side by side. Whoever has the highest count in a column is shown in red, so it's easy to see at a glance who to have a word with.</p>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Late coming, EL/PL, SL, full day leave, half days and short leaves for one month, side by side. Only employees who actually took something are listed — anyone with a clean month is left out. Whoever has the highest count in a column is shown in red, so it's easy to see at a glance who to have a word with. Opens on last month, the month the automatic email on the 1st reports.</p>
           <p id="cardStat_monthlyLeaveDetail" class="gen-card-stat"></p>
           <div class="row-inline">
             <div><label class="field">Month</label><select class="field-input" id="leaveDetailMonthSel"></select></div>
@@ -19078,7 +19078,10 @@ async function renderReportsTab(){
   // Monthly Leave Detail Report was missed when the rest of this batch was
   // fixed — its Month/Year pickers had exactly the same bug: empty until
   // "Generate monthly leave detail report" was pressed once on nothing.
-  populateMonthYearSelects('leaveDetailMonthSel', 'leaveDetailYearSel');
+  // Through its own wrapper because this one defaults to last month, and
+  // this is where it is first populated — priming the pickers here is what
+  // made the report's own attempt to default them a no-op.
+  populateLeaveDetailMonthPicker_();
 }
 
 // ---- role report UI ----
@@ -20812,12 +20815,19 @@ async function renderElSlStatusReport(){
 // always read identically. Half Day is one combined count too, regardless of
 // whether it came from a half-EL, half-SL, half-LP or a late-coming
 // escalation, matching how the Attendance Sheet already reports it.
+// Full Day Leave sits next to Half Day on purpose: the two are the whole-day
+// and part-day counterparts of the same question. It is Absent plus Leave
+// Without Pay — the leave the other columns do not already cover, EL/PL and
+// SL having their own. HLP contributes its 0.5 here and still counts as one
+// half-day instance, exactly as HEL and HSL do for EL and SL, so the columns
+// treat a half day the same way whichever kind it is.
 const LEAVE_DETAIL_METRICS = [
-  { key:'lateCount',  label:'Late Coming' },
-  { key:'elUsed',     label:'EL / PL' },
-  { key:'slUsed',     label:'SL' },
-  { key:'halfDays',   label:'Half Day' },
-  { key:'shortCount', label:'Short Leave' }
+  { key:'lateCount',    label:'Late Coming' },
+  { key:'elUsed',       label:'EL / PL' },
+  { key:'slUsed',       label:'SL' },
+  { key:'fullDayLeave', label:'Full Day Leave' },
+  { key:'halfDays',     label:'Half Day' },
+  { key:'shortCount',   label:'Short Leave' }
 ];
 
 // A ruled-off cell, in red and bold when it equals the column's highest value
@@ -20840,9 +20850,44 @@ function leaveDetailRowHtml(label, value, columnMax){
   return hrRow(label, style ? `<span style="${style}">${v}</span>` : (v || '—'));
 }
 
+// Last month, not this one. Every other report here is generated for a month
+// HR has picked; this one is a review of a month that has finished, and the
+// automated email on the 1st attaches whatever copy the app last filed — so
+// opening it on the 1st and getting an empty current month was how a report
+// for the wrong month got written to Drive. Only applied the first time the
+// picker is populated, so a month chosen by hand afterwards still sticks,
+// matching populateMonthYearSelects' own behaviour.
+//
+// Worked out from todayStr() rather than Date arithmetic: a date-only string
+// parses as UTC midnight, and stepping a Date object back a month from the
+// 31st lands on the wrong month entirely.
+function selectPreviousMonth_(monthSelId, yearSelId){
+  const monthSel = document.getElementById(monthSelId), yearSel = document.getElementById(yearSelId);
+  if(!monthSel || !yearSel) return;
+  const [y0, m0] = todayStr().split('-').map(Number);
+  const m = m0 === 1 ? 12 : m0 - 1;
+  const y = m0 === 1 ? y0 - 1 : y0;
+  monthSel.value = String(m);
+  // The year picker holds the financial year's START year — January to March
+  // belong to the FY that opened the previous calendar year.
+  yearSel.value = String(m <= 3 ? y - 1 : y);
+}
+
+// Populates this report's Month/Year pickers and, the first time only, points
+// them at last month. Called from both places that populate them — the
+// Reports tab, which primes every picker so none is ever empty, and the
+// report itself — so whichever runs first sets the default and the second is
+// a no-op that leaves a month chosen by hand alone.
+function populateLeaveDetailMonthPicker_(){
+  const monthSel = document.getElementById('leaveDetailMonthSel');
+  const firstTime = monthSel && !monthSel.options.length;
+  populateMonthYearSelects('leaveDetailMonthSel', 'leaveDetailYearSel');
+  if(firstTime) selectPreviousMonth_('leaveDetailMonthSel', 'leaveDetailYearSel');
+}
+
 async function renderMonthlyLeaveDetailReport(){
   const box = document.getElementById('monthlyLeaveDetailReportBox');
-  populateMonthYearSelects('leaveDetailMonthSel', 'leaveDetailYearSel');
+  populateLeaveDetailMonthPicker_();
   const monthVal = getMonthYearValue('leaveDetailMonthSel', 'leaveDetailYearSel');
   const [year, month] = monthVal.split('-').map(Number);
   const monthDays = new Date(year, month, 0).getDate();
@@ -20857,12 +20902,24 @@ async function renderMonthlyLeaveDetailReport(){
   const holidayMap = await getHolidayMap_local();
   await getAttendanceMany(employees.map(e => e.id));
 
-  const rows = [];
+  const allRows = [];
   for(const emp of employees){
     const att = await getAttendance(emp.id);
     const s = computeAttendanceSummary(att, emp, dateList, holidayMap);
-    rows.push({ name: emp.name, lateCount: s.lateCount, elUsed: s.elUsed, slUsed: s.slUsed, halfDays: s.halfDays, shortCount: s.shortCount });
+    allRows.push({ name: emp.name, lateCount: s.lateCount, elUsed: s.elUsed, slUsed: s.slUsed,
+                   fullDayLeave: s.absent + s.lpDays, halfDays: s.halfDays, shortCount: s.shortCount });
   }
+
+  // Only people who actually took something. A row of dashes tells HR nothing
+  // and, on a roster of forty, buries the handful who did — which is the one
+  // thing this report exists to surface. Anyone with a zero in every column is
+  // left out entirely rather than shown as blank.
+  //
+  // Driven off LEAVE_DETAIL_METRICS rather than a hand-written list of six
+  // fields, so a column added to that config is automatically part of the test
+  // and nobody can be dropped for having activity in a column this forgot.
+  const rows = allRows.filter(r => LEAVE_DETAIL_METRICS.some(m => (r[m.key] || 0) > 0));
+  const excludedCount = allRows.length - rows.length;
 
   const maxes = {};
   LEAVE_DETAIL_METRICS.forEach(m => { maxes[m.key] = rows.reduce((mx, r) => Math.max(mx, r[m.key] || 0), 0); });
@@ -20876,9 +20933,12 @@ async function renderMonthlyLeaveDetailReport(){
     `<strong>${escapeHtml(r.name)}</strong>`,
     LEAVE_DETAIL_METRICS.map(m => leaveDetailRowHtml(m.label, r[m.key], maxes[m.key])).join('')
   )).join('');
-  const tableInner = isCompact
+  // Nobody at all is a real and good answer for a clean month, not an error
+  // and not an empty table with only its headings left on screen.
+  const nothingToReport = `<div class="empty">Nobody took any leave, half day, short leave or late coming in this month — all ${allRows.length} on-roll employee(s) were clear.</div>`;
+  const tableInner = !rows.length ? nothingToReport : (isCompact
     ? `<div class="hr-sheet-cards">${cardsHtml}</div>`
-    : `<table class="sal-table"><tr>${header.map(h=>`<th>${h}</th>`).join('')}</tr>${tableRows}</table>`;
+    : `<table class="sal-table"><tr>${header.map(h=>`<th>${h}</th>`).join('')}</tr>${tableRows}</table>`);
 
   const monthLabel = MONTH_NAMES[month-1] + ' ' + year;
   const reportTitle = 'Monthly Leave Detail Report — ' + monthLabel;
@@ -20887,10 +20947,13 @@ async function renderMonthlyLeaveDetailReport(){
       ${reportLogoHeader(reportTitle)}
       ${tableInner}
     </div>
-    <p style="font-size:11px;color:var(--muted);margin:10px 0;">EL/PL and SL include half-day instances at 0.5; Half Day is the count of half-day instances of any kind. A number shown in red is the highest in that column this month.</p>`;
+    <p style="font-size:11px;color:var(--muted);margin:10px 0;">Showing ${rows.length} of ${allRows.length} on-roll employee(s)${excludedCount ? ' — ' + excludedCount + ' with nothing recorded this month are not listed' : ''}. Full Day Leave is Absent plus Leave Without Pay; EL/PL and SL include half-day instances at 0.5; Half Day is the count of half-day instances of any kind. A number shown in red is the highest in that column this month.</p>`;
 
   const csvHeader = header;
-  const csvRows = rows.map(r => [r.name, r.lateCount, r.elUsed, r.slUsed, r.halfDays, r.shortCount]);
+  // Built from LEAVE_DETAIL_METRICS in the same order as the header above, so
+  // a column added to the config cannot end up with values under the wrong
+  // heading in the file that gets emailed out.
+  const csvRows = rows.map(r => [r.name].concat(LEAVE_DETAIL_METRICS.map(m => r[m.key] || 0)));
   {
     const fileName = `Monthly Leave Detail Report - ${monthLabel}.csv`;
     const content = toCsv(csvHeader, csvRows);
@@ -21846,11 +21909,22 @@ async function viewReport(key, label, monthFilter){
   } else if(key === 'ctc'){
     csvHeader = ['Name','Monthly gross','Annual gross','Diwali bonus','Annual CTC'];
     let ctcCards = '';
+    // What the whole payroll costs, which is the question this report is
+    // usually opened to answer and which HR was adding up by hand. Summed
+    // from the same per-employee figures shown above rather than recomputed,
+    // so the total can never disagree with the rows it is under. Kept in full
+    // precision here and rounded once at the display and CSV boundary, the
+    // same way every other total in the app is.
+    const ctcGrand = { monthlyGross:0, annualGross:0, bonus:0, annualCtc:0 };
     rows = employees.map(e => {
       const monthlyGross = monthlyPayFor(e).ctcGross;
       const annualGross = monthlyGross * 12;
       const bonus = diwaliBonusFor(e);
       const annualCtc = annualGross + bonus;
+      ctcGrand.monthlyGross += monthlyGross;
+      ctcGrand.annualGross += annualGross;
+      ctcGrand.bonus += bonus;
+      ctcGrand.annualCtc += annualCtc;
       csvRows.push([e.name, Math.round(monthlyGross), Math.round(annualGross), Math.round(bonus), Math.round(annualCtc)]);
       if(isCompact){
         ctcCards += hrCard(`<strong>${escapeHtml(e.name)}</strong>`,
@@ -21860,8 +21934,27 @@ async function viewReport(key, label, monthFilter){
       }
       return `<tr><td class="sal-name">${escapeHtml(e.name)}</td><td class="num">${rupees(monthlyGross)}</td><td class="num">${rupees(annualGross)}</td><td class="num">${rupees(bonus)}</td><td class="num">${rupees(annualCtc)}</td></tr>`;
     }).join('');
-    const ctcInner = isCompact ? (ctcCards ? `<div class="hr-sheet-cards">${ctcCards}</div>` : '<div class="empty">No data yet</div>')
-      : `<div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th class="num">Monthly gross</th><th class="num">Annual gross</th><th class="num">Diwali bonus</th><th class="num">Annual CTC</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table></div>`;
+    // Every column totalled, not just Annual CTC — the monthly figure is what
+    // gets checked against the bank, and the bonus total is its own question
+    // every October.
+    if(employees.length){
+      csvRows.push(['Grand Total', Math.round(ctcGrand.monthlyGross), Math.round(ctcGrand.annualGross),
+        Math.round(ctcGrand.bonus), Math.round(ctcGrand.annualCtc)]);
+    }
+    const ctcGrandRow = !employees.length ? '' : (isCompact
+      ? hrCard('<strong>Grand Total</strong>',
+          hrRow('Monthly gross', rupees(ctcGrand.monthlyGross)) +
+          hrRow('Annual gross', rupees(ctcGrand.annualGross)) +
+          hrRow('Diwali bonus', rupees(ctcGrand.bonus)) +
+          `<div class="hr-sheet-net"><span>Annual CTC</span><span>${rupees(ctcGrand.annualCtc)}</span></div>`,
+          'sal-grand-card')
+      : `<tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total</strong></td>` +
+        `<td class="num"><strong>${rupees(ctcGrand.monthlyGross)}</strong></td>` +
+        `<td class="num"><strong>${rupees(ctcGrand.annualGross)}</strong></td>` +
+        `<td class="num"><strong>${rupees(ctcGrand.bonus)}</strong></td>` +
+        `<td class="num"><strong>${rupees(ctcGrand.annualCtc)}</strong></td></tr>`);
+    const ctcInner = isCompact ? (ctcCards ? `<div class="hr-sheet-cards">${ctcCards}${ctcGrandRow}</div>` : '<div class="empty">No data yet</div>')
+      : `<div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th class="num">Monthly gross</th><th class="num">Annual gross</th><th class="num">Diwali bonus</th><th class="num">Annual CTC</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}${ctcGrandRow}</table></div>`;
     box.innerHTML = `${fsBtn}<div class="print-isolate" id="reportPrintArea_ctc" style="margin-top:12px;">${reportLogoHeader(label)}${ctcInner}<p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Annual CTC = (Rate of Pay + Other allowances + Dress allowance + Mobile expense + Conveyance) × 12 + Diwali bonus. Rate of Pay is the whole Basic + HRA + LTA gross. PF, ESI and PT come out of it, so they are not added again. The employer's own PF and ESI are not included here either.</p></div>`;
   } else if(key === 'loan'){
     // One row per loan, not per employee — somebody repaying two shows twice,
