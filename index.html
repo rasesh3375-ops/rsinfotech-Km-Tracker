@@ -21846,11 +21846,22 @@ async function viewReport(key, label, monthFilter){
   } else if(key === 'ctc'){
     csvHeader = ['Name','Monthly gross','Annual gross','Diwali bonus','Annual CTC'];
     let ctcCards = '';
+    // What the whole payroll costs, which is the question this report is
+    // usually opened to answer and which HR was adding up by hand. Summed
+    // from the same per-employee figures shown above rather than recomputed,
+    // so the total can never disagree with the rows it is under. Kept in full
+    // precision here and rounded once at the display and CSV boundary, the
+    // same way every other total in the app is.
+    const ctcGrand = { monthlyGross:0, annualGross:0, bonus:0, annualCtc:0 };
     rows = employees.map(e => {
       const monthlyGross = monthlyPayFor(e).ctcGross;
       const annualGross = monthlyGross * 12;
       const bonus = diwaliBonusFor(e);
       const annualCtc = annualGross + bonus;
+      ctcGrand.monthlyGross += monthlyGross;
+      ctcGrand.annualGross += annualGross;
+      ctcGrand.bonus += bonus;
+      ctcGrand.annualCtc += annualCtc;
       csvRows.push([e.name, Math.round(monthlyGross), Math.round(annualGross), Math.round(bonus), Math.round(annualCtc)]);
       if(isCompact){
         ctcCards += hrCard(`<strong>${escapeHtml(e.name)}</strong>`,
@@ -21860,8 +21871,27 @@ async function viewReport(key, label, monthFilter){
       }
       return `<tr><td class="sal-name">${escapeHtml(e.name)}</td><td class="num">${rupees(monthlyGross)}</td><td class="num">${rupees(annualGross)}</td><td class="num">${rupees(bonus)}</td><td class="num">${rupees(annualCtc)}</td></tr>`;
     }).join('');
-    const ctcInner = isCompact ? (ctcCards ? `<div class="hr-sheet-cards">${ctcCards}</div>` : '<div class="empty">No data yet</div>')
-      : `<div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th class="num">Monthly gross</th><th class="num">Annual gross</th><th class="num">Diwali bonus</th><th class="num">Annual CTC</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}</table></div>`;
+    // Every column totalled, not just Annual CTC — the monthly figure is what
+    // gets checked against the bank, and the bonus total is its own question
+    // every October.
+    if(employees.length){
+      csvRows.push(['Grand Total', Math.round(ctcGrand.monthlyGross), Math.round(ctcGrand.annualGross),
+        Math.round(ctcGrand.bonus), Math.round(ctcGrand.annualCtc)]);
+    }
+    const ctcGrandRow = !employees.length ? '' : (isCompact
+      ? hrCard('<strong>Grand Total</strong>',
+          hrRow('Monthly gross', rupees(ctcGrand.monthlyGross)) +
+          hrRow('Annual gross', rupees(ctcGrand.annualGross)) +
+          hrRow('Diwali bonus', rupees(ctcGrand.bonus)) +
+          `<div class="hr-sheet-net"><span>Annual CTC</span><span>${rupees(ctcGrand.annualCtc)}</span></div>`,
+          'sal-grand-card')
+      : `<tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total</strong></td>` +
+        `<td class="num"><strong>${rupees(ctcGrand.monthlyGross)}</strong></td>` +
+        `<td class="num"><strong>${rupees(ctcGrand.annualGross)}</strong></td>` +
+        `<td class="num"><strong>${rupees(ctcGrand.bonus)}</strong></td>` +
+        `<td class="num"><strong>${rupees(ctcGrand.annualCtc)}</strong></td></tr>`);
+    const ctcInner = isCompact ? (ctcCards ? `<div class="hr-sheet-cards">${ctcCards}${ctcGrandRow}</div>` : '<div class="empty">No data yet</div>')
+      : `<div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th class="num">Monthly gross</th><th class="num">Annual gross</th><th class="num">Diwali bonus</th><th class="num">Annual CTC</th></tr>${rows || '<tr><td colspan="5" class="empty">No data yet</td></tr>'}${ctcGrandRow}</table></div>`;
     box.innerHTML = `${fsBtn}<div class="print-isolate" id="reportPrintArea_ctc" style="margin-top:12px;">${reportLogoHeader(label)}${ctcInner}<p style="font-size:11px;color:var(--muted);margin:8px 0 0;">Annual CTC = (Rate of Pay + Other allowances + Dress allowance + Mobile expense + Conveyance) × 12 + Diwali bonus. Rate of Pay is the whole Basic + HRA + LTA gross. PF, ESI and PT come out of it, so they are not added again. The employer's own PF and ESI are not included here either.</p></div>`;
   } else if(key === 'loan'){
     // One row per loan, not per employee — somebody repaying two shows twice,
