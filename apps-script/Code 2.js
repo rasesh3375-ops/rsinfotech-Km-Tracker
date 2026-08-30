@@ -219,7 +219,13 @@ function purgeExpiredSessions_(sheet) {
   const perUser = {};
   const keep = [data[0]];
   for (let i = 0; i < live.length; i++) {
-    const who = String(live[i][1]) + ' ' + String(live[i][2]); // role + username
+    // The separator is written as an escape, not the literal NUL byte that
+    // used to sit in this source. The file is deployed by copying it into the
+    // Apps Script editor, and a raw NUL does not survive a clipboard round
+    // trip intact. Silently dropped, role+username would run together and
+    // 'hr'+'admin' would collide with 'h'+'radmin', so the per-person cap
+    // would count two people as one and prune a session it should keep.
+    const who = String(live[i][1]) + '\u0000' + String(live[i][2]); // role + username
     perUser[who] = (perUser[who] || 0) + 1;
     if (perUser[who] <= MAX_SESSIONS_PER_USER) keep.push(live[i]);
   }
