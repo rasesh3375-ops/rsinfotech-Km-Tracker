@@ -1715,3 +1715,75 @@ const LEAVE_DETAIL_METRICS = [
   { key:'halfDays',     label:'Half Day' },
   { key:'shortCount',   label:'Short Leave' }
 ];
+
+
+// ---- leave applied for in advance ----
+// The dates leave would actually be taken on. Sundays and declared holidays
+// are stepped over: they are not working days, so charging a day of EL against
+// one would spend a leave day the employee never took. The sandwich rule still
+// has its say — the policy engine raises it as a note on the application, where
+// somebody can see it and decide, rather than it being applied silently here.
+function leaveWorkingDays(fromStr, toStr, holidayMap){
+  const out = [];
+  if(!fromStr || !toStr || toStr < fromStr) return out;
+  const end = new Date(toStr + 'T00:00:00');
+  for(let d = new Date(fromStr + 'T00:00:00'); d <= end; d.setDate(d.getDate() + 1)){
+    const iso = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') +
+                '-' + String(d.getDate()).padStart(2, '0');
+    if(d.getDay() === 0) continue;               // Sunday
+    if(holidayMap && holidayMap[iso]) continue;  // declared holiday
+    out.push(iso);
+  }
+  return out;
+}
+
+
+// "Always mark Present" filled in across a window, without fetching anything.
+//
+// Kept here rather than in index.html because it decides WHAT the payroll and
+// attendance calculations are handed: an Always-Present employee has no
+// attendance rows saved, and computeAttendanceSummary reads an unmarked past
+// day as Absent. If the report emails skipped this they would run the very
+// same arithmetic over different input and quietly disagree with the screen.
+//
+// `todayIso` is passed in rather than read from the clock so the caller
+// decides what "today" means — the app uses the browser's, Apps Script uses
+// the IST date, and a test can pin it.
+// Returns fresh per-employee objects; the ones passed in may be held by a
+// shared read cache.
+function applyAlwaysPresentFill(attByEmpId, employees, holidayMap, fromStr, toStr, todayIso){
+  (employees || []).forEach(emp => {
+    if(!emp || !emp.alwaysPresentFrom || !attByEmpId[emp.id]) return;
+    const cutoff = (emp.employmentStatus === 'left' && emp.leftDate) ? emp.leftDate : todayIso;
+    const from = (fromStr && fromStr > emp.alwaysPresentFrom) ? fromStr : emp.alwaysPresentFrom;
+    const to = (toStr && toStr < cutoff) ? toStr : cutoff;
+    const filled = Object.assign({}, attByEmpId[emp.id]);
+    leaveWorkingDays(from, to, holidayMap).forEach(dateStr => {
+      if(!filled[dateStr]) filled[dateStr] = { code: 'P' };
+    });
+    attByEmpId[emp.id] = filled;
+  });
+  return attByEmpId;
+}
+
+// One employee's Monthly Leave Detail figures. The report screen and the
+// report email both call this, so the row in the attachment and the row on
+// screen are the same row.
+function leaveDetailRowFor(emp, att, dateList, holidayMap){
+  const s = computeAttendanceSummary(att, emp, dateList, holidayMap);
+  return { name: emp.name, lateCount: s.lateCount, elUsed: s.elUsed, slUsed: s.slUsed,
+           fullDayLeave: s.absent + s.lpDays, halfDays: s.halfDays, shortCount: s.shortCount };
+}
+
+// The whole report: a row per employee who actually took something. Anyone
+// with a zero in every column is left out — a row of dashes tells HR nothing
+// and buries the handful who did. Driven off LEAVE_DETAIL_METRICS so a column
+// added to that config is part of the test automatically.
+function leaveDetailReportRows(employees, attByEmpId, dateList, holidayMap){
+  const all = (employees || []).map(e => leaveDetailRowFor(e, attByEmpId[e.id] || {}, dateList, holidayMap));
+  return { all, rows: all.filter(r => LEAVE_DETAIL_METRICS.some(m => (r[m.key] || 0) > 0)) };
+}
+function leaveDetailCsvHeader(){ return ['Name'].concat(LEAVE_DETAIL_METRICS.map(m => m.label)); }
+function leaveDetailCsvRows(rows){
+  return rows.map(r => [r.name].concat(LEAVE_DETAIL_METRICS.map(m => r[m.key] || 0)));
+}

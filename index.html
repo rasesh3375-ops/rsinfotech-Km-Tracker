@@ -4508,22 +4508,15 @@ async function withAlwaysPresentFill_(employeeId, att){
 // pass null/null for a whole-history read (getAttendanceMany). Always
 // returns fresh per-employee objects rather than mutating the ones passed in,
 // since those may be the same object a shared read cache is holding.
+// The fetching half; the fill itself is applyAlwaysPresentFill in
+// shared/report-logic.js, because it decides what the calculation is given
+// and the report emails have to shape their data the same way or they would
+// be running the same arithmetic over different input.
 async function applyAlwaysPresentFillToMany_(attByEmpId, ids, fromStr, toStr){
   const employees = await getEmployees();
   const relevant = employees.filter(e => ids.indexOf(e.id) !== -1 && e.alwaysPresentFrom && attByEmpId[e.id]);
   if(!relevant.length) return attByEmpId;
-  const holidayMap = await getHolidayMap_local();
-  relevant.forEach(emp => {
-    const cutoff = (emp.employmentStatus === 'left' && emp.leftDate) ? emp.leftDate : todayStr();
-    const from = (fromStr && fromStr > emp.alwaysPresentFrom) ? fromStr : emp.alwaysPresentFrom;
-    const to = (toStr && toStr < cutoff) ? toStr : cutoff;
-    const filled = Object.assign({}, attByEmpId[emp.id]);
-    leaveWorkingDays(from, to, holidayMap).forEach(dateStr => {
-      if(!filled[dateStr]) filled[dateStr] = { code: 'P' };
-    });
-    attByEmpId[emp.id] = filled;
-  });
-  return attByEmpId;
+  return applyAlwaysPresentFill(attByEmpId, relevant, await getHolidayMap_local(), fromStr, toStr, todayStr());
 }
 // Late coming is a flag on the day, not a code that replaces it. Somebody who
 // arrives late still worked, so overwriting their Present with anything else
@@ -11122,7 +11115,34 @@ async function deleteGeofenceZone(id){
 
 let lastHRRows = [];
 
+// Where this app is served from, recorded so the scheduled report emails can
+// fetch shared/report-logic.js and work the figures out themselves.
+//
+// This is a one-off configuration value, not report data: the emails do not
+// depend on anyone opening a report, only on the app having been opened at
+// least once since it was deployed so the backend knows its own front end's
+// address. SHARED_LOGIC_URL in Code 2.js overrides it if it ever needs
+// pinning by hand. Written only when it changes, so this is normally a read
+// and nothing else.
+let siteOriginNoted_ = false;
+async function noteSiteOrigin_(){
+  if(siteOriginNoted_) return;
+  siteOriginNoted_ = true;
+  try{
+    const here = location.origin;
+    if(!/^https?:/.test(here)) return;   // opened from a file:// copy — not a real deployment
+    const known = await safeGet('site_origin');
+    if(known !== here) await remoteSet('site_origin', here);
+  }catch(e){
+    // Never block the HR screen on this. A failure only means the report
+    // emails cannot self-configure, and they say so loudly when that happens
+    // rather than sending anything stale.
+    console.warn('Could not record the site origin for report emails', e);
+  }
+}
+
 async function loadHR(){
+  noteSiteOrigin_().catch(() => {});
   const users = await getUsers();
   const rate = await getRate();
   const today = todayStr();
@@ -19291,29 +19311,20 @@ async function renderMonthlyLeaveDetailReport(){
   const holidayMap = await getHolidayMap_local();
   await getAttendanceMany(employees.map(e => e.id));
 
-  const allRows = [];
-  for(const emp of employees){
-    const att = await getAttendance(emp.id);
-    const s = computeAttendanceSummary(att, emp, dateList, holidayMap);
-    allRows.push({ name: emp.name, lateCount: s.lateCount, elUsed: s.elUsed, slUsed: s.slUsed,
-                   fullDayLeave: s.absent + s.lpDays, halfDays: s.halfDays, shortCount: s.shortCount });
-  }
-
-  // Only people who actually took something. A row of dashes tells HR nothing
-  // and, on a roster of forty, buries the handful who did — which is the one
-  // thing this report exists to surface. Anyone with a zero in every column is
-  // left out entirely rather than shown as blank.
-  //
-  // Driven off LEAVE_DETAIL_METRICS rather than a hand-written list of six
-  // fields, so a column added to that config is automatically part of the test
-  // and nobody can be dropped for having activity in a column this forgot.
-  const rows = allRows.filter(r => LEAVE_DETAIL_METRICS.some(m => (r[m.key] || 0) > 0));
+  // The rows themselves come from leaveDetailReportRows in
+  // shared/report-logic.js — the same function the monthly email calls, so
+  // what is on screen and what is attached to that email are the same rows
+  // rather than two builds of them that can disagree.
+  const attByEmpId = {};
+  for(const emp of employees) attByEmpId[emp.id] = await getAttendance(emp.id);
+  const built = leaveDetailReportRows(employees, attByEmpId, dateList, holidayMap);
+  const allRows = built.all, rows = built.rows;
   const excludedCount = allRows.length - rows.length;
 
   const maxes = {};
   LEAVE_DETAIL_METRICS.forEach(m => { maxes[m.key] = rows.reduce((mx, r) => Math.max(mx, r[m.key] || 0), 0); });
 
-  const header = ['Name'].concat(LEAVE_DETAIL_METRICS.map(m => m.label));
+  const header = leaveDetailCsvHeader();
   const tableRows = rows.map(r => `<tr><td class="sal-name">${escapeHtml(r.name)}</td>${
     LEAVE_DETAIL_METRICS.map(m => leaveDetailCell(r[m.key], maxes[m.key], false)).join('')}</tr>`).join('');
 
@@ -19339,10 +19350,10 @@ async function renderMonthlyLeaveDetailReport(){
     <p style="font-size:11px;color:var(--muted);margin:10px 0;">Showing ${rows.length} of ${allRows.length} on-roll employee(s)${excludedCount ? ' — ' + excludedCount + ' with nothing recorded this month are not listed' : ''}. Full Day Leave is Absent plus Leave Without Pay; EL/PL and SL include half-day instances at 0.5; Half Day is the count of half-day instances of any kind. A number shown in red is the highest in that column this month.</p>`;
 
   const csvHeader = header;
-  // Built from LEAVE_DETAIL_METRICS in the same order as the header above, so
-  // a column added to the config cannot end up with values under the wrong
-  // heading in the file that gets emailed out.
-  const csvRows = rows.map(r => [r.name].concat(LEAVE_DETAIL_METRICS.map(m => r[m.key] || 0)));
+  // Both from shared/report-logic.js, in one order — so a column added to the
+  // config cannot end up with values under the wrong heading, and the file
+  // this writes is byte-identical to the one the monthly email builds.
+  const csvRows = leaveDetailCsvRows(rows);
   {
     const fileName = `Monthly Leave Detail Report - ${monthLabel}.csv`;
     const content = toCsv(csvHeader, csvRows);
@@ -23162,26 +23173,6 @@ async function declineLoanRequest(id){
   await saveLoanRequests(requests);
   addActivityLog('Declined ₹' + fmtMoney(req.amount) + ' loan/advance request from ' + req.employeeName).catch(() => {});
   await renderPendingLoanRequests();
-}
-
-// ---- leave applied for in advance ----
-// The dates leave would actually be taken on. Sundays and declared holidays
-// are stepped over: they are not working days, so charging a day of EL against
-// one would spend a leave day the employee never took. The sandwich rule still
-// has its say — the policy engine raises it as a note on the application, where
-// somebody can see it and decide, rather than it being applied silently here.
-function leaveWorkingDays(fromStr, toStr, holidayMap){
-  const out = [];
-  if(!fromStr || !toStr || toStr < fromStr) return out;
-  const end = new Date(toStr + 'T00:00:00');
-  for(let d = new Date(fromStr + 'T00:00:00'); d <= end; d.setDate(d.getDate() + 1)){
-    const iso = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') +
-                '-' + String(d.getDate()).padStart(2, '0');
-    if(d.getDay() === 0) continue;               // Sunday
-    if(holidayMap && holidayMap[iso]) continue;  // declared holiday
-    out.push(iso);
-  }
-  return out;
 }
 
 function isHalfDayLeaveCode(code){ return code === 'HEL' || code === 'HSL'; }
