@@ -1787,3 +1787,53 @@ function leaveDetailCsvHeader(){ return ['Name'].concat(LEAVE_DETAIL_METRICS.map
 function leaveDetailCsvRows(rows){
   return rows.map(r => [r.name].concat(LEAVE_DETAIL_METRICS.map(m => r[m.key] || 0)));
 }
+
+
+// ---- Loan & Advance Report rows ----
+// One row per loan, not per employee — somebody repaying two shows twice,
+// which is the point of a ledger. Recovered-so-far and balance are worked out
+// from the start month rather than stored, so they cannot go stale between
+// months.
+//
+// Shared so the report screen and the monthly email produce the same ledger.
+// `nowY`/`nowM` are passed in rather than read from the clock: the app asks
+// about today, the email asks about the month it is reporting on, and a test
+// can pin either.
+function loanLedgerRows(employees, nowY, nowM){
+  const nowYm = nowY + '-' + String(nowM).padStart(2, '0');
+  const ledger = [];
+  (employees || []).forEach(e => loansOf(e).forEach((l, i) => ledger.push({ e, l, i })));
+  // Anything still being recovered first, biggest balance at the top: the
+  // report exists to show what is outstanding, and a closed loan is history.
+  ledger.sort((a, b) =>
+    (Number(b.l.status === 'active') - Number(a.l.status === 'active')) ||
+    (loanBalanceAfter(b.l, nowY, nowM) - loanBalanceAfter(a.l, nowY, nowM)) ||
+    String(a.e.name || '').localeCompare(String(b.e.name || '')));
+  return ledger.map(({ e, l, i }) => {
+    const amount = Number(l.amount) || 0;
+    const bal = loanBalanceAfter(l, nowY, nowM);
+    const recovered = l.status === 'active' ? Math.max(0, Math.round((amount - bal) * 100) / 100) : amount;
+    const started = l.startMonth || '';
+    const stalled = l.status === 'active' && !started;
+    const skippedThisMonth = l.status === 'active' && (l.skipMonths || []).indexOf(nowYm) !== -1;
+    return {
+      emp: e, loan: l, index: i,
+      name: e.name, what: l.reason ? l.reason : 'Loan ' + (i + 1),
+      amount, balance: l.status === 'active' ? bal : 0,
+      recovered: l.status === 'active' ? recovered : amount,
+      currentEmi: loanEmiRateAsOf(l, nowYm),
+      started, stalled, skippedThisMonth,
+      note: l.status !== 'active' ? 'closed'
+          : stalled ? 'active — no recovery month set, nothing is being deducted'
+          : skippedThisMonth ? 'active — this month skipped'
+          : 'active'
+    };
+  });
+}
+function loanLedgerCsvHeader(){
+  return ['Name','Loan','Amount','Current EMI','Recovery from','Recovered so far','Balance','Status'];
+}
+function loanLedgerCsvRows(rows){
+  return rows.map(r => [r.name, r.what, Math.round(r.amount), Math.round(r.currentEmi),
+                        r.started || '—', Math.round(r.recovered), Math.round(r.balance), r.note]);
+}

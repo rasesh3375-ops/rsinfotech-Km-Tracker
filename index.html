@@ -20362,40 +20362,23 @@ async function viewReport(key, label, monthFilter){
     // out from the start month rather than stored, so they cannot go stale
     // between months.
     const nowD = new Date(), nowY = nowD.getFullYear(), nowM = nowD.getMonth() + 1;
-    const nowYm = nowY + '-' + String(nowM).padStart(2, '0');
-    csvHeader = ['Name','Loan','Amount','Current EMI','Recovery from','Recovered so far','Balance','Status'];
-    const ledger = [];
-    employees.forEach(e => loansOf(e).forEach((l, i) => ledger.push({ e, l, i })));
-    // Anything still being recovered first, biggest balance at the top: the
-    // report exists to show what is outstanding, and a closed loan is history.
-    ledger.sort((a, b) =>
-      (Number(b.l.status === 'active') - Number(a.l.status === 'active')) ||
-      (loanBalanceAfter(b.l, nowY, nowM) - loanBalanceAfter(a.l, nowY, nowM)) ||
-      String(a.e.name || '').localeCompare(String(b.e.name || '')));
+    // The ledger itself comes from loanLedgerRows in shared/report-logic.js —
+    // the same function the monthly Loan & Advance email calls, so the two
+    // cannot disagree about what is outstanding.
+    csvHeader = loanLedgerCsvHeader();
+    const ledger = loanLedgerRows(employees, nowY, nowM);
+    csvRows = loanLedgerCsvRows(ledger);
 
     let loanCards = '';
-    rows = ledger.map(({ e, l, i }) => {
-      const amount = Number(l.amount) || 0;
-      const bal = loanBalanceAfter(l, nowY, nowM);
-      const recovered = l.status === 'active' ? Math.max(0, Math.round((amount - bal) * 100) / 100) : amount;
-      const started = l.startMonth || '';
-      const stalled = l.status === 'active' && !started;
-      const skippedThisMonth = l.status === 'active' && (l.skipMonths || []).includes(nowYm);
-      const note = l.status !== 'active' ? 'closed'
-                 : stalled ? 'active — no recovery month set, nothing is being deducted'
-                 : skippedThisMonth ? 'active — this month skipped'
-                 : 'active';
-      const currentEmi = loanEmiRateAsOf(l, nowYm);
-      const what = l.reason ? l.reason : 'Loan ' + (i + 1);
-      csvRows.push([e.name, what, Math.round(amount), Math.round(currentEmi), started || '—',
-                    Math.round(l.status === 'active' ? recovered : amount),
-                    Math.round(l.status === 'active' ? bal : 0), note]);
+    rows = ledger.map(({ emp: e, loan: l, amount, balance, recovered, started, stalled,
+                         skippedThisMonth, note, currentEmi, what }) => {
+      const bal = balance;
       if(isCompact){
         loanCards += hrCard(`<strong>${escapeHtml(e.name)}</strong><span class="id">${escapeHtml(what)}</span>`,
           hrRow('Amount', rupees(amount)) + hrRow('Current EMI', rupees(currentEmi)) +
           hrRow('Recovery from', started ? escapeHtml(started) : '<span class="pol-warn">not set</span>') +
-          hrRow('Recovered so far', rupees(l.status === 'active' ? recovered : amount)) +
-          hrRow('Balance', rupees(l.status === 'active' ? bal : 0)) +
+          hrRow('Recovered so far', rupees(recovered)) +
+          hrRow('Balance', rupees(bal)) +
           hrRow('Status', escapeHtml(note)),
           stalled || skippedThisMonth ? 'is-new' : '');
       }
@@ -20404,14 +20387,14 @@ async function viewReport(key, label, monthFilter){
         <td class="num">${rupees(amount)}</td>
         <td class="num">${rupees(currentEmi)}</td>
         <td>${started ? escapeHtml(started) : '<span class="pol-warn">not set</span>'}</td>
-        <td class="num">${rupees(l.status === 'active' ? recovered : amount)}</td>
-        <td class="num">${rupees(l.status === 'active' ? bal : 0)}</td>
+        <td class="num">${rupees(recovered)}</td>
+        <td class="num">${rupees(bal)}</td>
         <td>${escapeHtml(note)}</td></tr>`;
     }).join('');
 
-    const stalledCount = ledger.filter(({ l }) => l.status === 'active' && !l.startMonth).length;
-    const outstanding = ledger.reduce((t, { l }) => t + loanBalanceAfter(l, nowY, nowM), 0);
-    const monthly = ledger.reduce((t, { l }) => t + loanEmiForMonth(l, nowY, nowM), 0);
+    const stalledCount = ledger.filter(r => r.stalled).length;
+    const outstanding = ledger.reduce((t, r) => t + r.balance, 0);
+    const monthly = ledger.reduce((t, r) => t + loanEmiForMonth(r.loan, nowY, nowM), 0);
     const multi = employees.filter(e => loansOf(e).filter(l => l.status === 'active').length > 1).length;
     const loanInner = isCompact ? (loanCards ? `<div class="hr-sheet-cards">${loanCards}</div>` : '<div class="empty">No data yet</div>')
       : `<div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th class="num">Amount</th><th class="num">Current EMI</th><th>Recovery from</th><th class="num">Recovered so far</th><th class="num">Balance</th><th>Status</th></tr>${rows || '<tr><td colspan="7" class="empty">No data yet</td></tr>'}</table></div>`;
