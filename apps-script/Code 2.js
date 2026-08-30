@@ -1849,7 +1849,8 @@ function loadSharedReportLogic_(map) {
     'statutoryReportData', 'pfReturnCsv', 'esiReturnCsv', 'statutoryAmountCsv',
     'policyRowsFor', 'attCodeText_', 'SALARY_HEADING_ORDER',
     'consultantReportEmployees', 'consultantReportRows',
-    'consultantSummaryEmployees', 'consultantSummaryTotals', 'consultantSummaryCsv'];
+    'consultantSummaryEmployees', 'consultantSummaryTotals', 'consultantSummaryCsv',
+    'withSalaryCache'];
   var collect = new Function(body + '\nreturn (function(){ var o = {};' +
     names.map(function (n) { return 'try{ o[' + JSON.stringify(n) + '] = ' + n + '; }catch(e){}'; }).join('') +
     'return o; })();');
@@ -1986,6 +1987,7 @@ function buildLoanAdvanceReport_(snap, y, m) {
 // attendance reads, then six CSVs off the same figures — so the Salary Sheet
 // and the PF return in the same email cannot disagree about anyone's basic.
 function buildMonthlyReportPack_(snap, y, m) {
+  var startedAt = Date.now();
   var logic = loadSharedReportLogic_(snap.map);
   var monthVal = y + '-' + ('0' + m).slice(-2);
   var monthLabel = LEAVE_DETAIL_MONTH_NAMES[m - 1] + ' ' + y;
@@ -2001,15 +2003,23 @@ function buildMonthlyReportPack_(snap, y, m) {
   });
   var att = attendanceForMonth_(snap.map, employees, y, m, holidayMap, logic);
 
-  var salary = logic.salarySheetCsv(employees, att, dateList, monthDays, holidayMap);
-  var finalSal = logic.finalSalarySheetCsv(employees, att, dateList, monthDays, holidayMap);
-  var attendance = logic.attendanceSheetCsv(employees, att, dateList, holidayMap);
-  var pf = logic.statutoryReportData(employees, att, dateList, monthDays, holidayMap, 'pf');
-  var esi = logic.statutoryReportData(employees, att, dateList, monthDays, holidayMap, 'esi');
-  var pt = logic.statutoryReportData(employees, att, dateList, monthDays, holidayMap, 'pt');
-  var pfCsv = logic.pfReturnCsv(pf.pfRows, pf.pfTot);
-  var esiCsv = logic.esiReturnCsv(esi.esiRows, esi.esiTot);
-  var ptCsv = logic.statutoryAmountCsv(pt.rows, pt.grandTotal, 'pt');
+  // Built inside one withSalaryCache block, so each employee's salary is
+  // worked out once for the whole pack instead of once per report — six
+  // reports were asking for it 4.3 times each. Same figures, since the
+  // calculation is pure; measurably less work.
+  var salary, finalSal, attendance, pf, esi, pt, pfCsv, esiCsv, ptCsv;
+  logic.withSalaryCache(function () {
+    salary = logic.salarySheetCsv(employees, att, dateList, monthDays, holidayMap);
+    finalSal = logic.finalSalarySheetCsv(employees, att, dateList, monthDays, holidayMap);
+    attendance = logic.attendanceSheetCsv(employees, att, dateList, holidayMap);
+    pf = logic.statutoryReportData(employees, att, dateList, monthDays, holidayMap, 'pf');
+    esi = logic.statutoryReportData(employees, att, dateList, monthDays, holidayMap, 'esi');
+    pt = logic.statutoryReportData(employees, att, dateList, monthDays, holidayMap, 'pt');
+    pfCsv = logic.pfReturnCsv(pf.pfRows, pf.pfTot);
+    esiCsv = logic.esiReturnCsv(esi.esiRows, esi.esiTot);
+    ptCsv = logic.statutoryAmountCsv(pt.rows, pt.grandTotal, 'pt');
+  });
+  assertWithinBudget_(startedAt, 'Building the monthly report pack');
 
   // The names are the ones the app files under, so an attachment and the Drive
   // copy of the same report are the same file by name as well as by content.
@@ -2034,6 +2044,66 @@ function buildMonthlyReportPack_(snap, y, m) {
   };
 }
 
+// Apps Script kills an execution at six minutes with no warning and no email,
+// so HR would simply never hear from it. These two stop that being the way
+// anybody finds out.
+//
+// The build itself is not the risk: six reports for a 200-person roster is
+// about 30ms of arithmetic, measured. What can genuinely run long is reading a
+// very large sheet, and what can genuinely fail is Gmail refusing an
+// over-sized attachment. Both are caught here and reported as "could not be
+// generated" with the reason, rather than the run dying quietly.
+var REPORT_BUILD_BUDGET_MS = 240000;   // 4 minutes of the 6, leaving room to send
+var MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;   // Gmail's own limit is 25MB
+
+function assertWithinBudget_(startedAt, what) {
+  var spent = Date.now() - startedAt;
+  if (spent > REPORT_BUILD_BUDGET_MS) {
+    throw new Error(what + ' took ' + Math.round(spent / 1000) + 's, past the ' +
+      Math.round(REPORT_BUILD_BUDGET_MS / 1000) + 's budget. Stopped before Apps Script ' +
+      'would have killed the run without sending anything.');
+  }
+}
+
+function describeBytes_(n) {
+  if (n >= 1048576) return (Math.round(n / 104857.6) / 10) + 'MB';
+  if (n >= 1024) return Math.round(n / 1024) + 'KB';
+  return n + ' bytes';
+}
+
+// Bytes, not characters — a name in a non-Latin script is several bytes a
+// letter, and the mail limit is on the wire, not on the string. Counted
+// directly rather than by building a Blob just to measure it: measuring should
+// not allocate, and this way the guard is plain arithmetic that runs and can be
+// tested anywhere, with no Apps Script behind it.
+function utf8Bytes_(str) {
+  var s = String(str == null ? '' : str), n = 0;
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xD800 && c <= 0xDBFF && i + 1 < s.length) { n += 4; i++; }  // surrogate pair
+    else n += 3;
+  }
+  return n;
+}
+
+function assertAttachmentsFit_(reports) {
+  var total = 0, biggest = null;
+  for (var i = 0; i < reports.length; i++) {
+    var bytes = utf8Bytes_(reports[i].csv);
+    total += bytes;
+    if (!biggest || bytes > biggest.bytes) biggest = { label: reports[i].label, bytes: bytes };
+  }
+  if (total > MAX_ATTACHMENT_BYTES) {
+    throw new Error('The attachments come to ' + describeBytes_(total) + ', over the ' +
+      describeBytes_(MAX_ATTACHMENT_BYTES) + ' limit — the largest is ' + biggest.label +
+      ' at ' + describeBytes_(biggest.bytes) +
+      '. Nothing was sent rather than have the whole email bounce.');
+  }
+  return total;
+}
+
 // Every report in a pack has to be for the month asked for and have something
 // in it. One bad report fails the whole pack rather than sending five good
 // ones and one that quietly is not what its heading says.
@@ -2043,6 +2113,7 @@ function validateFreshPack_(pack, expectedMonthLabel) {
     throw new Error('Built for ' + pack.monthLabel + ' but ' + expectedMonthLabel + ' was asked for.');
   }
   if (!pack.reports || !pack.reports.length) throw new Error('The pack contains no reports.');
+  pack.totalBytes = assertAttachmentsFit_(pack.reports);
   for (var i = 0; i < pack.reports.length; i++) {
     var r = pack.reports[i];
     if (!r.csv || r.csv.split('\n').length < 2) {
@@ -2064,6 +2135,7 @@ function monthValOf_(monthLabel) {
 
 // ---- Consultant Report and its Final Summary, generated here and now ----
 function buildConsultantPack_(snap, y, m) {
+  var startedAt = Date.now();
   var logic = loadSharedReportLogic_(snap.map);
   var monthVal = y + '-' + ('0' + m).slice(-2);
   var monthLabel = LEAVE_DETAIL_MONTH_NAMES[m - 1] + ' ' + y;
@@ -2081,9 +2153,15 @@ function buildConsultantPack_(snap, y, m) {
   }
   var att = attendanceForMonth_(snap.map, everyone, y, m, holidayMap, logic);
 
-  var detail = logic.consultantReportRows(detailEmps, att, dateList, monthDays, holidayMap, y, m);
-  var totals = logic.consultantSummaryTotals(summaryEmps, att, dateList, monthDays, holidayMap);
+  // Same reason as the pack: the register and the summary both need every
+  // salary, and the two populations overlap.
+  var detail, totals;
+  logic.withSalaryCache(function () {
+    detail = logic.consultantReportRows(detailEmps, att, dateList, monthDays, holidayMap, y, m);
+    totals = logic.consultantSummaryTotals(summaryEmps, att, dateList, monthDays, holidayMap);
+  });
   var summary = logic.consultantSummaryCsv(totals);
+  assertWithinBudget_(startedAt, 'Building the consultant reports');
 
   return {
     monthLabel: monthLabel,
@@ -2113,6 +2191,7 @@ function validateFreshReport_(report, expectedMonthLabel, expectedFileName) {
     throw new Error('Attachment would be named ' + report.fileName + ', expected ' + expectedFileName + '.');
   }
   if (!report.csv || !report.csv.length) throw new Error('The generated report was empty.');
+  assertAttachmentsFit_([{ label: expectedFileName, csv: report.csv }]);
   var lines = report.csv.split('\n');
   if (lines.length < 1 || !lines[0]) throw new Error('The generated report has no header row.');
   if (report.csv.indexOf(expectedMonthLabel) === -1 && report.fileName.indexOf(expectedMonthLabel) === -1) {

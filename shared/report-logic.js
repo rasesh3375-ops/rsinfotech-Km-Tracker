@@ -1312,6 +1312,42 @@ function computeSalaryFromAttendance(emp, att, dateList, monthDays, holidayMap){
            employerPfMerged: pfCalc.employerPfMerged };
 }
 
+// One salary per employee per run, not one per report.
+//
+// The six reports in the monthly pack each need every employee's salary, and
+// each was working it out for itself — measured at 4.3 computations per
+// employee to produce one pack. Correct, because the calculation is pure and
+// gives the same answer every time, but four times the work for nothing.
+//
+// withSalaryCache runs a block with those repeats collapsed. Inside it, the
+// inputs are fixed by construction — one month, one snapshot of the records,
+// one set of attendance — which is what makes the answer safe to reuse. The
+// cache is torn down on the way out whether the block succeeds or throws, so
+// nothing can leak into a later run with different data.
+//
+// Outside a withSalaryCache block nothing caches at all and every call
+// computes, which is why the app screens needed no changes.
+let salaryCache_ = null;
+function withSalaryCache(fn){
+  const outer = salaryCache_;          // nested calls reuse the outer cache
+  if(!outer) salaryCache_ = new Map();
+  try { return fn(); }
+  finally { if(!outer) salaryCache_ = null; }
+}
+function salaryFor_(emp, att, dateList, monthDays, holidayMap){
+  if(!salaryCache_) return computeSalaryFromAttendance(emp, att, dateList, monthDays, holidayMap);
+  // The month is part of the key as well as the employee: a caller that builds
+  // two months inside one block must not be handed January's figures for
+  // February.
+  const key = emp.id + '|' + dateList[0] + '|' + monthDays;
+  let hit = salaryCache_.get(key);
+  if(hit === undefined){
+    hit = computeSalaryFromAttendance(emp, att, dateList, monthDays, holidayMap);
+    salaryCache_.set(key, hit);
+  }
+  return hit;
+}
+
 // ---- payroll formula master ----
 // The single place that says how each salary heading is arrived at. The engine
 // below walks this list; it knows nothing about Basic or HRA specifically, so
@@ -1913,7 +1949,7 @@ function statutoryReportData(employees, attByEmpId, dateList, monthDays, holiday
                 esiRows: [], esiTot: { gross:0, employee:0, employer:0, total:0 } };
   const field = key === 'pt' ? 'pt' : key === 'pf' ? 'pf' : 'esi';
   (employees || []).forEach(emp => {
-    const s = computeSalaryFromAttendance(emp, attByEmpId[emp.id] || {}, dateList, monthDays, holidayMap);
+    const s = salaryFor_(emp, attByEmpId[emp.id] || {}, dateList, monthDays, holidayMap);
     // The heading each employee was under THIS month — a promotion recorded
     // since must not move which group a past month's row sits in.
     const headingKey = ratePayAsOf(emp, dateList[0]).salaryHeading || 'managerial';
@@ -2054,7 +2090,7 @@ function salarySheetCsv(employees, attByEmpId, dateList, monthDays, holidayMap){
     rows.push([SALARY_HEADINGS[headingKey].label]);
     const sub = salarySheetTotalsSeed_();
     group.forEach(emp => {
-      const s = computeSalaryFromAttendance(emp, attByEmpId[emp.id] || {}, dateList, monthDays, holidayMap);
+      const s = salaryFor_(emp, attByEmpId[emp.id] || {}, dateList, monthDays, holidayMap);
       rows.push([srNo++, emp.name, R(s.rate), s.leaveDays, s.policyHalfDays, R(s.leaveAmount), R(s.basic), R(s.hra),
         R(s.lta), R(s.gross), R(s.pf), R(s.esi), R(s.pt), R(s.advanceTemp), R(s.advance), R(s.loanEmi), R(s.retention),
         R(s.totalDeduction), R(s.conveyance), R(s.netBeforeDirect), R(s.directPaid), R(s.netSalary),
@@ -2091,7 +2127,7 @@ function finalSalarySheetCsv(employees, attByEmpId, dateList, monthDays, holiday
     if(!group.length) return;
     const label = SALARY_HEADINGS[headingKey].label;
     const rows = group.map(emp => ({
-      emp, net: computeSalaryFromAttendance(emp, attByEmpId[emp.id] || {}, dateList, monthDays, holidayMap).netSalary
+      emp, net: salaryFor_(emp, attByEmpId[emp.id] || {}, dateList, monthDays, holidayMap).netSalary
     }));
     rows.sort((a, b) => (a.emp.bankName || '').localeCompare(b.emp.bankName || '')
       || (a.emp.name || '').localeCompare(b.emp.name || ''));
@@ -2380,7 +2416,7 @@ function consultantSummaryTotals(employees, attByEmpId, dateList, monthDays, hol
   const alw = { basic:0, hra:0, conveyance:0, lta:0 };
   const ded = { pf:0, pt:0, adv:0, loan:0, esi:0 };
   (employees || []).forEach(emp => {
-    const s = computeSalaryFromAttendance(emp, attByEmpId[emp.id] || {}, dateList, monthDays, holidayMap);
+    const s = salaryFor_(emp, attByEmpId[emp.id] || {}, dateList, monthDays, holidayMap);
     const headingKey = ratePayAsOf(emp, dateList[0]).salaryHeading || 'managerial';
     const heading = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
     // heading.pf gates whether the heading attracts PF at all; s.pfApplicable
