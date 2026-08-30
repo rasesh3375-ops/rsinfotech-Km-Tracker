@@ -2044,6 +2044,19 @@ function buildMonthlyReportPack_(snap, y, m) {
   };
 }
 
+// How long each report email actually took, on the real sheet.
+//
+// The build was measured at about 30ms for a 200-person roster before this
+// shipped, which is why it is not split across executions — but that was a
+// bench, not this company's data. Every run now says how long it took in the
+// Apps Script log, so the question is answered by observation rather than by
+// anybody's estimate. If "took Ns" ever creeps toward the budget below, that
+// is the signal to revisit it, and there will be a number to revisit it with.
+function elapsedNote_(startedAt) {
+  var ms = Date.now() - startedAt;
+  return ms < 1000 ? ms + 'ms' : (Math.round(ms / 100) / 10) + 's';
+}
+
 // Apps Script kills an execution at six minutes with no warning and no email,
 // so HR would simply never hear from it. These two stop that being the way
 // anybody finds out.
@@ -2255,6 +2268,7 @@ function prevMonthYmIst_() {
 
 // force=true sends regardless of the date, for testing from the editor.
 function sendMonthlyReportsEmail(force) {
+  var runStartedAt = Date.now();
   var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
   if (!force && Number(istToday.slice(8, 10)) !== 1) return;
 
@@ -2322,7 +2336,9 @@ function sendMonthlyReportsEmail(force) {
     attachments: attachments
   });
   Logger.log('Monthly report pack for ' + monthLabel + ' sent to ' + MONTHLY_REPORTS_EMAIL +
-    ' — ' + (pack ? pack.reports.length + ' generated fresh and attached' : 'FAILED: ' + failure) + '.');
+    ' — ' + (pack ? pack.reports.length + ' generated fresh and attached, ' +
+      describeBytes_(pack.totalBytes) : 'FAILED: ' + failure) +
+    ', in ' + elapsedNote_(runStartedAt) + '.');
 }
 
 // ===== Loan & Advance Report, emailed separately on the 1st =====
@@ -2384,6 +2400,7 @@ function removeLoanReportTrigger() {
 
 // force=true sends regardless of the date, for testing from the editor.
 function sendLoanAdvanceReportEmail(force) {
+  var runStartedAt = Date.now();
   var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
   if (!force && Number(istToday.slice(8, 10)) !== 1) return;
 
@@ -2456,7 +2473,8 @@ function sendLoanAdvanceReportEmail(force) {
     attachments: attachments
   });
   Logger.log('Loan & Advance Report email for ' + monthLabel + ' sent to ' + LOAN_REPORT_EMAIL +
-    ' — ' + (report ? 'generated fresh and attached' : 'FAILED: ' + failure) + '.');
+    ' — ' + (report ? 'generated fresh and attached' : 'FAILED: ' + failure) +
+    ', in ' + elapsedNote_(runStartedAt) + '.');
 }
 
 // ===== Monthly Leave Detail Report, emailed separately on the 1st =====
@@ -2516,6 +2534,7 @@ function removeLeaveDetailReportTrigger() {
 
 // force=true sends regardless of the date, for testing from the editor.
 function sendLeaveDetailReportEmail(force) {
+  var runStartedAt = Date.now();
   var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
   if (!force && Number(istToday.slice(8, 10)) !== 1) return;
 
@@ -2588,7 +2607,8 @@ function sendLeaveDetailReportEmail(force) {
     attachments: attachments
   });
   Logger.log('Monthly Leave Detail report email for ' + monthLabel + ' sent to ' + LEAVE_DETAIL_EMAIL +
-    ' — ' + (report ? 'generated fresh and attached' : 'FAILED: ' + failure) + '.');
+    ' — ' + (report ? 'generated fresh and attached' : 'FAILED: ' + failure) +
+    ', in ' + elapsedNote_(runStartedAt) + '.');
 }
 
 // ===== Consultant Report, emailed separately on the 2nd =====
@@ -2641,6 +2661,7 @@ function removeConsultantReportTrigger() {
 
 // force=true sends regardless of the date, for testing from the editor.
 function sendConsultantReportEmail(force) {
+  var runStartedAt = Date.now();
   var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
   if (!force && Number(istToday.slice(8, 10)) !== CONSULTANT_REPORT_DAY) return;
 
@@ -2705,7 +2726,9 @@ function sendConsultantReportEmail(force) {
     attachments: attachments
   });
   Logger.log('Consultant reports for ' + monthLabel + ' sent to ' + CONSULTANT_REPORT_EMAIL +
-    ' — ' + (pack ? pack.reports.length + ' generated fresh and attached' : 'FAILED: ' + failure) + '.');
+    ' — ' + (pack ? pack.reports.length + ' generated fresh and attached, ' +
+      describeBytes_(pack.totalBytes) : 'FAILED: ' + failure) +
+    ', in ' + elapsedNote_(runStartedAt) + '.');
 }
 
 // One-off, run once from this editor (function dropdown -> restorePayrollDocsPf202526
