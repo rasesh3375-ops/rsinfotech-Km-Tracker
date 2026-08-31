@@ -645,6 +645,24 @@ function pfWageOf(components){
 }
 
 // Both sides of the contribution from one wage figure.
+// P.F. Account No 1 — the Employee share plus the Employer EPF share, and
+// nothing else. Employer EPS/Pension is Account No 10 and stays out of it, the
+// same split EPFO's own challan uses; EDLI is 21 and Admin is 2.
+//
+// One function because two returns file this figure — the PF Return's own
+// column and the Consultant Final Summary's "P.F. Account No 1" — and a month
+// where those two disagreed about Account 1 is a challan somebody has to
+// explain to the PF consultant.
+//
+// Note for the two employees on the standing uncapped agreement: their
+// employer share is reported as one combined figure, so employerEpf carries
+// EPS as well (see employerPfMerged in calculatePfFor) and their Account 1
+// carries it too. That is what "Employee EPF + Employer EPF" means for them,
+// and the Rule Applied column says so on their row.
+function pfAccount1(employeeShare, employerEpfShare){
+  return (Number(employeeShare) || 0) + (Number(employerEpfShare) || 0);
+}
+
 function computePf(wage){
   const w = Number(wage) || 0;
   const employee = w * PF_RULES.employeePct;
@@ -2167,7 +2185,13 @@ function pfReturnCsv(pfRows, pfTot, excluded){
       const status = x.applicable ? 'Contributing' : (x.notConfigured ? 'Not configured' : 'PF Not Applicable');
       body.push([sr, x.emp.name, x.emp.id, excelIdNumber(x.emp.uan), x.eligible, x.pfType,
         Math.round(x.wage + (x.leaveAmount || 0)), x.leaveDays || 0, Math.round(x.leaveAmount || 0), Math.round(x.wage),
-        x.applicable ? Math.round(x.employee) : 0, x.applicable ? Math.round(x.epf) : 0, x.applicable ? Math.round(x.eps) : 0,
+        x.applicable ? Math.round(x.employee) : 0, x.applicable ? Math.round(x.epf) : 0,
+        // Rounded from the full-precision sum, not from the two rounded cells
+        // beside it — the same treatment Employer Total and Grand Total in this
+        // row already get, and the same as the Consultant Final Summary's own
+        // Account No 1, which is the figure this has to agree with.
+        x.applicable ? Math.round(pfAccount1(x.employee, x.epf)) : 0,
+        x.applicable ? Math.round(x.eps) : 0,
         x.applicable ? Math.round(x.edli) : 0, x.applicable ? Math.round(x.admin) : 0,
         x.applicable ? Math.round(x.employeeTotal) : 0, x.applicable ? Math.round(x.employerTotal) : 0,
         x.applicable ? Math.round(x.total) : 0, status, x.reason]);
@@ -2175,12 +2199,14 @@ function pfReturnCsv(pfRows, pfTot, excluded){
   });
   return {
     header: ['SR NO','Employee','Employee Code','UAN','PF Eligible','PF Type','Basic Salary','Leave/LOP Days',
-             'Leave/LOP Deduction','Final Payable Basic','Employee EPF','Employer EPF','Employer EPS (PF Account 10)',
+             'Leave/LOP Deduction','Final Payable Basic','Employee EPF','Employer EPF',
+             'Employee + Employer EPF (PF Account 1)','Employer EPS (PF Account 10)',
              'EDLI (PF Account 21)','Admin Charges (PF Account 2)','Employee Total','Employer Total','Grand Total','Status','Rule Applied'],
     rows: body.concat([['', 'GRAND TOTAL', '', '', '', '', '', '', '', Math.round(pfTot.wage), Math.round(pfTot.employee),
-      Math.round(pfTot.epf), Math.round(pfTot.eps), Math.round(pfTot.edli), Math.round(pfTot.admin), Math.round(pfTot.employee),
+      Math.round(pfTot.epf), Math.round(pfAccount1(pfTot.employee, pfTot.epf)),
+      Math.round(pfTot.eps), Math.round(pfTot.edli), Math.round(pfTot.admin), Math.round(pfTot.employee),
       Math.round(pfTot.epf + pfTot.eps + pfTot.edli + pfTot.admin), Math.round(pfTot.total), '', '']])
-      .concat(excludedNote_(excluded, 'PF') ? [['', '', '', '', '', '', '', '', '', '', '', '', '',
+      .concat(excludedNote_(excluded, 'PF') ? [['', '', '', '', '', '', '', '', '', '', '', '', '', '',
         '', '', '', '', '', '', excludedNote_(excluded, 'PF')]] : [])
   };
 }
@@ -2732,7 +2758,9 @@ function consultantSummaryTotals(employees, attByEmpId, dateList, monthDays, hol
       ded.pf += s.pf; ded.adv += s.advanceTemp + s.advance; ded.loan += s.loanEmi; ded.esi += s.esi;
     }
   });
-  const acct1 = pf.empEmployee + pf.empEmployer;
+  // Same definition the PF Return's own Account 1 column files, so the two
+  // cannot drift apart.
+  const acct1 = pfAccount1(pf.empEmployee, pf.empEmployer);
   const acct22 = 0;   // EDLI admin charge — not levied, kept as a named zero
   const lwf = 0;      // Labour Welfare Fund — not tracked, same
   const pfTotal = acct1 + pf.admin + pf.eps + pf.edli + acct22;
