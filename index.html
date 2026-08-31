@@ -10087,7 +10087,7 @@ async function renderConsultantReport(){
 
   {
     const fileName = `Consultant Report - ${monthVal}.csv`;
-    const content = toCsv(CONSULTANT_REPORT_COLS, rows);
+    const content = toCsv(CONSULTANT_REPORT_COLS, consultantCsvRows(rows));
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'Consultant Report'), fileName, content, 'text/csv');
     stashReportShare('Consultant Report — ' + monthLabel(monthVal), fileName, content, 'text/csv',
       'HR Management > ' + financialYearLabel(monthVal + '-01') + ' > Reports > Consultant Report', 'consultantReportBox');
