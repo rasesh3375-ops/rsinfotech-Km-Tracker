@@ -1089,57 +1089,6 @@
      capture, which only ever reads .print-isolate — a sibling of .rpt-actions,
      never a descendant of it. */
   #fullscreenBody .rpt-actions-top, #fullscreenBody .rpt-fullscreen-btn{display:none;}
-  /* Four floating buttons so jumping from wherever you are to either end of
-     a long table, or either edge of a wide one, never needs the scrollbar
-     dragged the full distance by hand. Pinned to the bottom-right corner —
-     the one spot a wide report table almost never reaches — rather than the
-     previous middle-of-the-right-edge, which sat directly on top of a
-     report's rightmost column on anything wide enough to reach that far
-     (HR reported the buttons covering real figures on the Monthly Leave
-     Detail Report and "almost all" wide reports).
-     Now a standalone element (not nested inside #fullscreenSheetRoot, so it
-     can also float over the plain inline sheet view), so it needs its own
-     z-index above --z-fullscreen (200) to still clear the full-screen
-     overlay when that is open — sitting below --z-modal-top (300) so an
-     actual confirm dialog still wins over it.
-
-     Two layers, not one. #sheetScrollNav (.fs-scroll-zone) is a plain,
-     invisible 170x170 hit area pinned to the corner — bigger than the
-     buttons themselves on purpose, so drifting the mouse toward that side
-     of the screen reveals them before the cursor is exactly on target; a
-     hover target the exact size of four small buttons means already
-     knowing precisely where to aim before anything appears at all. The
-     buttons live inside it, genuinely invisible (opacity:0, not just
-     faint) until that zone is hovered or a button inside it holds
-     keyboard focus, at which point THEY fade in over .15s. Leaving is the
-     asymmetric half of the same trick: the invisible-state rule below
-     carries an 0.8s transition-delay, so fading back out waits nearly a
-     second after the cursor actually leaves — long enough to move from
-     "revealed" toward pressing a button without it vanishing mid-reach.
-     pointer-events toggles the same way opacity does, so the invisible
-     buttons never intercept a click meant for the table cell under them. */
-  .fs-scroll-zone{
-    position:fixed;right:0;bottom:0;width:170px;height:170px;
-    display:flex;align-items:flex-end;justify-content:flex-end;
-    padding:20px;box-sizing:border-box;z-index:210;
-  }
-  .fs-scroll-nav{
-    display:grid;grid-template-columns:repeat(2,1fr);gap:6px;
-    opacity:0;pointer-events:none;transition:opacity .2s ease .8s;
-  }
-  .fs-scroll-zone:hover .fs-scroll-nav,.fs-scroll-zone:focus-within .fs-scroll-nav{
-    opacity:1;pointer-events:auto;transition:opacity .15s ease;
-  }
-  /* One unmissable flash the first time a report opens each session, so the
-     corner is never a total mystery — after that it goes back to purely
-     hover-revealed. Added and removed by updateSheetScrollNavVisibility(). */
-  .fs-scroll-nav.intro{opacity:1;pointer-events:auto;transition:opacity .3s ease;}
-  @media (prefers-reduced-motion: reduce){ .fs-scroll-nav{transition:none;} }
-  .fs-scroll-btn{
-    width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:var(--paper);
-    color:var(--navy);font-size:16px;line-height:1;cursor:pointer;box-shadow:0 2px 6px rgba(22,33,62,.18);
-  }
-  .fs-scroll-btn:hover{background:#00000008;border-color:var(--navy);}
 
   /* ===== Role reports: real A4 sheets, branded on every page ===== */
   .rpt-page-probe{position:absolute;left:-10000px;top:0;width:718px;visibility:hidden;}
@@ -1434,7 +1383,7 @@
      would have been silently upgraded back to overflow-y:auto by the
      browser (the CSS overflow spec forces both axes non-visible the moment
      either one is), so both axes need to go, moving horizontal scrolling to
-     #fullscreenBody too — see scrollSheetView()'s full-screen branch. */
+     #fullscreenBody too. */
   #fullscreenBody .att-sheet-wrap{max-height:none;overflow:visible;}
   table.att-table{border-collapse:collapse;font-size:12px;white-space:nowrap;}
   table.att-table th, table.att-table td{border:1px solid var(--line);padding:3px 3px;text-align:center;}
@@ -3483,23 +3432,8 @@
     </div>
     <div class="fullscreen-body" id="fullscreenBody"></div>
   </div>
-  <!-- Standalone, not nested inside #fullscreenSheetRoot — the Attendance and
-       Salary Sheets each already have their own bounded-height, both-ways
-       scrolling box (.att-sheet-wrap/.sal-sheet-wrap) sitting right in the
-       page, full screen or not, so this needs to work identically either
-       way. sheetScrollNavVisibility() shows it whenever full screen is open
-       OR one of those two sheets has rendered content inline; scrollSheetView()
-       resolves which element to actually scroll for each case. -->
-  <div class="fs-scroll-zone hidden" id="sheetScrollNav">
-    <div class="fs-scroll-nav" id="sheetScrollNavCluster">
-      <button class="fs-scroll-btn" onclick="scrollSheetView('top')" title="Scroll to top" aria-label="Scroll to top">▲</button>
-      <button class="fs-scroll-btn" onclick="scrollSheetView('bottom')" title="Scroll to bottom" aria-label="Scroll to bottom">▼</button>
-      <button class="fs-scroll-btn" onclick="scrollSheetView('left')" title="Scroll to first column" aria-label="Scroll to first column">◀</button>
-      <button class="fs-scroll-btn" onclick="scrollSheetView('right')" title="Scroll to last column" aria-label="Scroll to last column">▶</button>
-    </div>
-  </div>
 
-  <!-- Standalone for the same reason as #sheetScrollNav above — the Add
+  <!-- Standalone rather than nested in #fullscreenSheetRoot — the Add
        Employee modal that a document is normally viewed from can be closed
        (and its whole innerHTML thrown away) while this is still showing
        full screen. openFullscreenView() moves this element into
@@ -7183,8 +7117,7 @@ async function renderAttendanceSheet(){
   if(!employees.length){
     box.innerHTML = '<div class="empty">Add employees in Employee Master first.</div>';
     collapseSheetTopControls('attTopControls');
-    updateSheetScrollNavVisibility();
-    return;
+      return;
   }
   const holidays = await getHolidays();
   const holidayMap = {};
@@ -7317,7 +7250,6 @@ async function renderAttendanceSheet(){
   hydrateAttCodeSelects();
   if(restored) showSavedToast(restored + ' unsaved attendance change(s) recovered — press Save attendance to store them');
   collapseSheetTopControls('attTopControls');
-  updateSheetScrollNavVisibility();
   scrollAttendanceSheetToToday();
 }
 // Opening the sheet on day 22 used to always start at day 1 — every column
@@ -7392,7 +7324,6 @@ async function closeAttendanceSheetAction(mode){
 function finishCloseAttendanceSheet(){
   closeReportView('attendanceSheetBox');
   showSheetTopControls('attTopControls');
-  updateSheetScrollNavVisibility();
 }
 
 // Edits are collected here and written when Save is pressed. Every change used
@@ -8500,18 +8431,15 @@ function openFullscreenView(title, sourceId){
   // display:none ancestor, so setting them any earlier silently did nothing.
   fsBody.scrollTop = 0;
   fsBody.scrollLeft = 0;
-  updateSheetScrollNavVisibility();
   if(kmtIsNewFullscreen && currentRole === 'hr') kmtCommitArrival();
   // Deliberately NOT calling the native Fullscreen API here (requestFullscreen()
   // used to be called on #fullscreenSheetRoot) — the CSS overlay already
   // covers the whole viewport on its own (position:fixed;inset:0), so it was
   // only ever a cosmetic extra hiding the browser's own address bar. The
   // native API promotes its element to the browser's "top layer", where only
-  // that element's own descendants ever render — #sheetScrollNav sits beside
-  // #fullscreenSheetRoot, not inside it, specifically so the same floating
-  // buttons work for the plain inline Attendance/Salary Sheet too, and the
-  // top layer made it invisible and unclickable behind the table whenever
-  // real fullscreen was engaged.
+  // that element's own descendants ever render — anything sitting beside
+  // #fullscreenSheetRoot rather than inside it became invisible and
+  // unclickable behind the table whenever real fullscreen was engaged.
 }
 // The two floating buttons pinned to the middle of the full-screen viewer —
 // a long table (a full month of attendance, every employee on the Salary
@@ -8528,47 +8456,6 @@ function inlineSheetWrap(){
   const sal = document.querySelector('#salarySheetBox .sal-sheet-wrap');
   if(sal && sal.offsetParent !== null) return sal;
   return null;
-}
-// Full screen and the plain inline view scroll differently: full screen's
-// wrap is overflow:visible (see the CSS rules above — max-height:none alone
-// left it a live position:sticky reference for a scroll position that never
-// moved), so #fullscreenBody is the one true scroll container there, on
-// both axes. Inline, the wrap still has its own max-height and genuinely
-// scrolls itself both ways — there is no taller ancestor to hand off to.
-function scrollSheetView(direction){
-  const fsBody = fullscreenActiveId ? document.getElementById('fullscreenBody') : null;
-  const target = fsBody || inlineSheetWrap();
-  if(!target) return;
-  if(direction === 'top' || direction === 'bottom'){
-    target.scrollTo({ top: direction === 'top' ? 0 : target.scrollHeight, behavior: 'smooth' });
-  } else {
-    target.scrollTo({ left: direction === 'left' ? 0 : target.scrollWidth, behavior: 'smooth' });
-  }
-}
-// Shown whenever there is actually something for it to scroll: full screen
-// open (any report), or the Attendance/Salary Sheet rendered inline — hidden
-// on mobile, where both sheets are a single column of cards with nothing to
-// jump sideways through, and vertical scrolling a phone screen by hand was
-// never the complaint this was built for.
-// The scroll-jump buttons are invisible until hovered (see .fs-scroll-nav's
-// CSS) — genuinely invisible, not just faint, so this flashes them once the
-// first time they become available each session, otherwise a corner that
-// never shows itself unless you already know to look there is a dead end.
-let scrollNavIntroShown = false;
-function updateSheetScrollNavVisibility(){
-  const nav = document.getElementById('sheetScrollNav');
-  if(!nav) return;
-  const show = isSheetDeclutterView() && (!!fullscreenActiveId || !!inlineSheetWrap());
-  const wasHidden = nav.classList.contains('hidden');
-  nav.classList.toggle('hidden', !show);
-  if(show && wasHidden && !scrollNavIntroShown){
-    scrollNavIntroShown = true;
-    const cluster = document.getElementById('sheetScrollNavCluster');
-    if(cluster){
-      cluster.classList.add('intro');
-      setTimeout(() => cluster.classList.remove('intro'), 2000);
-    }
-  }
 }
 function closeFullscreenView(){
   if(fullscreenActiveId){
@@ -8614,7 +8501,6 @@ function closeFullscreenView(){
   document.getElementById('fullscreenSheetRoot').classList.add('hidden');
   kmtUnlockBodyScroll('fullscreen');
   fullscreenActiveId = null;
-  updateSheetScrollNavVisibility();
   try{ if(document.fullscreenElement) document.exitFullscreen().catch(()=>{}); }catch(e){}
   if(returnTo){
     // The close just above (this same function, the first time it ran for
@@ -8719,7 +8605,6 @@ function cancelSalarySheetView(){
   const box = document.getElementById('salarySheetBox');
   if(box) box.innerHTML = '';
   showSheetTopControls('salTopControls');
-  updateSheetScrollNavVisibility();
 }
 
 // ---- shared report footer: Close, Full screen, Print, WhatsApp, Email ----
@@ -9270,8 +9155,7 @@ async function renderSalarySheet(){
   if(!employees.length){
     box.innerHTML = '<div class="empty">Add employees in Employee Master first.</div>';
     collapseSheetTopControls('salTopControls');
-    updateSheetScrollNavVisibility();
-    return;
+      return;
   }
   const holidays = await getHolidays();
   const holidayMap = {};
@@ -9436,7 +9320,6 @@ async function renderSalarySheet(){
       <button class="btn ghost" style="flex:1;" onclick="shareCurrentReport('email')">✉️ Email</button>
     </div>`;
   collapseSheetTopControls('salTopControls');
-  updateSheetScrollNavVisibility();
 }
 
 // Flips the Salary Sheet between the default "essential" columns and every
@@ -12034,7 +11917,6 @@ async function hrNavigate(route, opts){
   // that isn't its own Close button (sidebar, breadcrumb) — those never clear
   // the box, only hide its ancestor panel, so this re-checks actual on-screen
   // state rather than trusting whatever the nav was last explicitly set to.
-  updateSheetScrollNavVisibility();
   const title = document.getElementById('hrPageTitle');
   if(title){
     // A breadcrumb rather than a bare heading: the Dashboard is always one tap
