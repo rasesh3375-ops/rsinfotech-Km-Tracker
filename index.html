@@ -4057,6 +4057,30 @@ async function uploadDocumentToDrive(folderPath, fileName, file){
     return null;
   }
 }
+// A Drive file name for a document that is one of many rather than a slot that
+// gets replaced.
+//
+// doUploadDocument_ in Code 2.js trashes whatever file already carries the name
+// it is handed. That is right for the Employee Handbook and for an employee's
+// Uniform/ID document, where a new upload IS the replacement — those keep one
+// stable name on purpose. It is quietly destructive for the lists that
+// accumulate: apprentice documents were named for their category alone and
+// checklist documents for the employee and checklist alone, so a second
+// contract for the same apprentice, or a second Joining Checklist for the same
+// person, threw the first out of Drive while the app went on listing both —
+// every link then pointing at whichever survived.
+//
+// The date is what makes the name readable in Drive; the id is what actually
+// makes it unique, since two uploads on one day would otherwise still collide.
+// Payroll Documents reached the same conclusion first and appends its own
+// random suffix for exactly this reason — see the comment there.
+//
+// Callers pass the id they are about to store on the list entry, so the Drive
+// file and the record it belongs to are named for each other.
+function uniqueDocFileName_(parts, id, ext){
+  return (parts || []).filter(Boolean).join(' - ') + ' - ' + todayStr() + ' - ' + id + (ext || '');
+}
+
 function csvEscape(v){
   const s = (v===undefined || v===null) ? '' : String(v);
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
@@ -20599,7 +20623,8 @@ async function uploadPrintChecklistDoc_(key){
   msg.textContent = 'Uploading…';
   msg.classList.remove('error');
   const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
-  const fileName = `${emp.name} - ${cfg.label}${ext}`;
+  const docId = randomHex(6);
+  const fileName = uniqueDocFileName_([emp.name, cfg.label], docId, ext);
   const url = await uploadDocumentToDrive(
     hrYearPath('', 'Office Documents', 'Checklists', cfg.folder), fileName, file);
   if(!url){
@@ -20608,7 +20633,7 @@ async function uploadPrintChecklistDoc_(key){
     return;
   }
   const list = await getChecklistDocs();
-  list.unshift({ id: randomHex(6), checklist: cfg.key, checklistLabel: cfg.label,
+  list.unshift({ id: docId, checklist: cfg.key, checklistLabel: cfg.label,
                  employeeId: empId, employeeName: emp.name || empId,
                  note, fileName, url, uploadedAt: new Date().toISOString() });
   await saveChecklistDocs(list);
@@ -22249,17 +22274,10 @@ async function uploadApprenticeDoc(){
   msg.textContent = 'Uploading…';
   msg.classList.remove('error');
   const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
-  // The id is made here rather than at the list entry below because it goes
-  // into the Drive file name too. doUploadDocument_ trashes whatever already
-  // carries the name it is handed — deliberately, so re-uploading one
-  // employee document replaces it — and every apprentice document was being
-  // named for its category alone. Two claim documents, or two contracts for
-  // the same apprentice, and the first was silently thrown away while the app
-  // went on listing both. The date follows what the Office Documents uploader
-  // beside this one already does; the id is what actually guarantees it,
-  // since two uploads on one day would otherwise still collide.
+  // The id is made here rather than at the list entry below because the Drive
+  // file is named for it too — see uniqueDocFileName_.
   const docId = randomHex(6);
-  const fileName = `${emp ? emp.name + ' - ' : ''}${category} - ${todayStr()} - ${docId}${ext}`;
+  const fileName = uniqueDocFileName_([emp && emp.name, category], docId, ext);
   const url = await uploadDocumentToDrive(hrYearPath('', 'Office Documents', 'Apprentice Documents', category), fileName, file);
   if(!url){
     msg.textContent = 'Upload failed — check your connection and try again.';
@@ -22364,7 +22382,8 @@ async function uploadCompanyDoc(category, folderLabel){
   msg.textContent = 'Uploading…';
   msg.classList.remove('error');
   const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
-  const fileName = `${docName} - ${todayStr()}${ext}`;
+  const docId = randomHex(6);
+  const fileName = uniqueDocFileName_([docName], docId, ext);
   const url = await uploadDocumentToDrive(hrYearPath('', 'Office Documents', folderLabel), fileName, file);
   if(!url){
     msg.textContent = 'Upload failed — check your connection and try again.';
@@ -22372,7 +22391,7 @@ async function uploadCompanyDoc(category, folderLabel){
     return;
   }
   const list = await getCompanyDocs(category);
-  list.unshift({ id: randomHex(6), name: docName, fileName, url, uploadedAt: new Date().toISOString() });
+  list.unshift({ id: docId, name: docName, fileName, url, uploadedAt: new Date().toISOString() });
   await saveCompanyDocs(category, list);
   await addActivityLog('Uploaded ' + folderLabel + ' document: ' + docName);
   // Re-fetched by id — see handleDocUpload's comment for why a reference
