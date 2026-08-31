@@ -2595,7 +2595,12 @@ function consultantReportRows(employees, attByEmpId, dateList, monthDays, holida
     if(dow === 0) weekOff++;
     else if(holidayMap[dateStr]) publicHolidays++;
   });
-  const workingDays = monthDays - weekOff;
+  // Public holidays come out too. W.DYS + W.OFF + PH has to be the month, and
+  // leaving them in made August 2026 read 26 + 5 + 1 = 32 days in a 31-day
+  // month. It was invisible until then only because there had been no declared
+  // holiday since the column was built -- with PH always 0 the wrong formula
+  // and the right one agree.
+  const workingDays = monthDays - weekOff - publicHolidays;
   const rows = [];
   let sr = 0;
   (employees || []).forEach(emp => {

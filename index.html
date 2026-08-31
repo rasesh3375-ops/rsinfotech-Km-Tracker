@@ -9918,22 +9918,24 @@ async function renderConsultantReport(){
 
   // W.OFF is the Sundays in the month; PH is declared holidays that don't already
   // fall on a Sunday (otherwise the same day would be counted twice).
-  let weekOff = 0, publicHolidays = 0;
   // The declared holidays themselves, not just how many — the consultant
   // needs to see WHICH dates were paid holidays to reconcile the payable
   // days against their own calendar. Straight from the Holiday List, the
-  // single source of truth for them.
+  // single source of truth for them. The COUNTS are not taken from here:
+  // they come off consultantReportRows below, so the summary line and the
+  // W.DYS/W.OFF/PH columns are the same three numbers rather than two
+  // tallies of the same days that could disagree.
   const phDates = [];
   dateList.forEach(dateStr => {
     // 'T00:00:00' — local midnight, not UTC (see computeAttendanceSummary).
     const isSunday = new Date(dateStr + 'T00:00:00').getDay() === 0;
-    if(isSunday) weekOff++;
-    else if(holidayMap[dateStr]){
-      publicHolidays++;
-      phDates.push({ date: dateStr, name: holidayMap[dateStr] });
-    }
+    if(!isSunday && holidayMap[dateStr]) phDates.push({ date: dateStr, name: holidayMap[dateStr] });
   });
-  const workingDays = monthDays - weekOff;
+  // workingDays is NOT worked out here. consultantReportRows returns it along
+  // with weekOff and publicHolidays, and a second copy of "days minus Sundays
+  // minus holidays" on this screen is exactly how the summary line and the
+  // W.DYS column could have disagreed. phDates above is still built here —
+  // it needs the holiday NAMES, which the report does not carry.
 
   // Rows from consultantReportRows in shared/report-logic.js — the same
   // function the monthly Consultant email calls, so the wage register the
@@ -9943,6 +9945,9 @@ async function renderConsultantReport(){
   for(const emp of employees) attByEmpId[emp.id] = await getAttendance(emp.id);
   const consultantBuilt = consultantReportRows(employees, attByEmpId, dateList, monthDays, holidayMap, year, month);
   const rows = consultantBuilt.rows;
+  const workingDays = consultantBuilt.workingDays;
+  const weekOff = consultantBuilt.weekOff;
+  const publicHolidays = consultantBuilt.publicHolidays;
 
   const head = CONSULTANT_REPORT_COLS.map(c => `<th>${c}</th>`).join('');
   const body = rows.map(r => '<tr>' + r.map((cell, i) =>
