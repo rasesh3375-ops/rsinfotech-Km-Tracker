@@ -2637,8 +2637,12 @@ function sendLeaveDetailReportEmail(force) {
 // generally asks for the other. Both are attached when both exist; drop the
 // summary from CONSULTANT_REPORT_SPECS_ if only the detail is wanted.
 var CONSULTANT_REPORT_EMAIL = 'rasesh@rsinfotech.net';
-var CONSULTANT_REPORT_DAY = 2;
-var CONSULTANT_REPORT_HOUR = 8; // 8 AM IST on the 2nd
+// The 1st, with every other monthly report. It used to be the 2nd, from when
+// this email attached whichever CSV the app had last filed to Drive and the
+// extra day was there to give HR time to open the report and file one. It
+// builds its own figures now, so there is nothing to wait for.
+var CONSULTANT_REPORT_DAY = 1;
+var CONSULTANT_REPORT_HOUR = 8; // 8 AM IST on the 1st
 
 function createConsultantReportTrigger() {
   var triggers = ScriptApp.getProjectTriggers();
@@ -2654,7 +2658,8 @@ function createConsultantReportTrigger() {
     .inTimezone('Asia/Kolkata')
     .create();
   Logger.log('Consultant report trigger created — sendConsultantReportEmail now runs daily around ' +
-    CONSULTANT_REPORT_HOUR + ':00 IST and emails only on day ' + CONSULTANT_REPORT_DAY + '.');
+    CONSULTANT_REPORT_HOUR + ':00 IST and emails only on day ' + CONSULTANT_REPORT_DAY +
+    ', reporting the previous month.');
 }
 
 // Undoes createConsultantReportTrigger — stops this email without touching any
@@ -3237,7 +3242,7 @@ function createAdvanceSummaryTrigger() {
     .inTimezone('Asia/Kolkata')
     .create();
   Logger.log('Monthly advance summary trigger created — sendMonthlyAdvanceSummaryEmail now runs daily ' +
-    'around ' + ADVANCE_SUMMARY_HOUR + ':00 IST and emails only on the last day of the month.');
+    'around ' + ADVANCE_SUMMARY_HOUR + ':00 IST and emails only on the 1st, for the month just gone.');
 }
 
 // Undoes createAdvanceSummaryTrigger — stops this summary without touching the
@@ -3254,20 +3259,21 @@ function removeAdvanceSummaryTrigger() {
   Logger.log('Removed ' + removed + ' monthly advance summary trigger(s).');
 }
 
-// True on the final day of whatever month it is — 28, 29, 30 or 31 as the month
-// and the leap year decide. new Date(y, m, 0) is the last day of month m, m
-// being 1-based here.
-function isLastDayOfMonth_(y, m, d) {
-  return d === new Date(y, m, 0).getDate();
-}
-
 // force=true sends regardless of the date, for testing from the editor.
+//
+// The 1st for the month just gone, in line with every other monthly report.
+// This used to send on the LAST day of the month about that same month, which
+// meant it went out before the month had finished — an advance paid on the 31st
+// after the 8 AM run missed its own summary and never appeared in a later one.
+// Reporting the completed month a day later cannot miss anything.
 function sendMonthlyAdvanceSummaryEmail(force) {
   var today = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
-  var y = Number(today.slice(0, 4)), m = Number(today.slice(5, 7)), d = Number(today.slice(8, 10));
-  if (!force && !isLastDayOfMonth_(y, m, d)) return;
+  if (!force && Number(today.slice(8, 10)) !== 1) return;
 
-  var ym = today.slice(0, 7);
+  // prevMonthYmIst_ is the one place every monthly email works out its period,
+  // so this cannot drift from the others or get the December rollover wrong.
+  var ym = prevMonthYmIst_();
+  var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
   var monthLabel = LEAVE_DETAIL_MONTH_NAMES[m - 1] + ' ' + y;
   var rows = getSheet_().getDataRange().getValues();
   var employees = allEmployeesFromRows_(rows);
