@@ -2954,7 +2954,7 @@ function sendAllEmailsNow() {
   };
 
   run('Daily HR Digest', function () { sendDailyDigestEmail(); });
-  run('Increments due next month', function () { sendIncrementReminderEmail(true); });
+  run('Increments due this month', function () { sendIncrementReminderEmail(true); });
   run('Birthday reminder (sends only if a birthday is tomorrow)', function () { sendBirthdayReminderEmail(); });
   run('Monthly report pack', function () { sendMonthlyReportsEmail(true); });
   run('Loan & Advance Report', function () { sendLoanAdvanceReportEmail(true); });
