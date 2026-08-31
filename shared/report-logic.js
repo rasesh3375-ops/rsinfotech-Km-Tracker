@@ -352,7 +352,17 @@ function shiftDateStr(dateStr, delta){
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
-function sandwichDaysFor(att, dateList, holidayMap){
+function sandwichDaysFor(emp, att, dateList, holidayMap){
+  // Resident Engineers are out of this, the same way policyHalfDaysFor above
+  // already excuses them from late coming and short leave. It used to apply to
+  // them deliberately -- the reasoning being that a Resident's day is marked
+  // A/LP/P through the same sheet as everyone else -- but HR has since decided
+  // the sandwich rule is not one of theirs, so it now follows the same line as
+  // the rest of the policy. Ankit Patel's 28 August was the case that raised
+  // it. Gating it here rather than at each caller means the Salary Sheet, the
+  // Attendance Sheet's policy note and the Consultant Report cannot disagree
+  // about whether a Resident was charged.
+  if((emp || {}).employeeType === 'resident') return [];
   const codes = LEAVE_POLICY.leaveApplication.sandwichCodes;
   const shiftDate = shiftDateStr;
   const isNonWorking = dateStr => new Date(dateStr + 'T00:00:00').getDay() === 0 || !!(holidayMap && holidayMap[dateStr]);
@@ -751,7 +761,15 @@ function monthlyPtFor(gross, ptPaidSoFarThisYear){
 function headingPct(p){ return (Math.round(p * 10000) / 100) + '%'; }
 
 function computeAttendanceSummary(att, employee, dateList, holidayMap){
-  let present=0, absent=0, elUsed=0, slUsed=0, lpDays=0, halfDays=0, shortCount=0, lateCount=0, holidays=0;
+  // present and paidDays are two different questions and used to be one number.
+  // "Present" is the days actually attended; "paid" adds the leave that is paid
+  // without being worked. A full day of EL or SL used to add 1 to present, so
+  // the Attendance Sheet showed Mahendrasinh 24.5 for August while the
+  // Consultant Report showed 23.5 for the same month — the consultant's own
+  // count (consultantDayCounts) has always kept leave out of Present. The two
+  // now agree, and paidDays carries exactly what present used to, so nothing
+  // that reads it moves.
+  let present=0, paidDays=0, absent=0, elUsed=0, slUsed=0, lpDays=0, halfDays=0, shortCount=0, lateCount=0, holidays=0;
   dateList.forEach(dateStr => {
     // resolvedAttendanceCode_ is the one place a day's code is resolved from
     // what's saved, the Holiday section, and the weekday — every caller
@@ -761,20 +779,24 @@ function computeAttendanceSummary(att, employee, dateList, holidayMap){
     const code = resolvedAttendanceCode_(att, dateStr, holidayMap);
     if(entry && entry.lateFlag) lateCount++;
     switch(code){
-      case 'P': present += 1; break;
+      case 'P': present += 1; paidDays += 1; break;
       case 'A': absent += 1; break;
       case 'H': holidays += 1; break;
-      case 'EL': present += 1; elUsed += 1; break;
-      case 'SL': present += 1; slUsed += 1; break;
+      // Paid, but not attended — so they count towards paidDays and not towards
+      // present. This is the line HR queried: a day of Earned Leave is not a
+      // day the person was at work.
+      case 'EL': elUsed += 1; paidDays += 1; break;
+      case 'SL': slUsed += 1; paidDays += 1; break;
       case 'LP': lpDays += 1; break;
-      case 'HEL': present += 0.5; elUsed += 0.5; halfDays += 1; break;
-      case 'HSL': present += 0.5; slUsed += 0.5; halfDays += 1; break;
-      case 'HLP': lpDays += 0.5; present += 0.5; halfDays += 1; break;
-      case 'SHORT': present += 1; shortCount += 1; break;
+      // Half worked, half leave. The worked half is genuine attendance, so it
+      // stays in present exactly as before.
+      case 'HEL': present += 0.5; elUsed += 0.5; halfDays += 1; paidDays += 0.5; break;
+      case 'HSL': present += 0.5; slUsed += 0.5; halfDays += 1; paidDays += 0.5; break;
+      case 'HLP': lpDays += 0.5; present += 0.5; halfDays += 1; paidDays += 0.5; break;
+      case 'SHORT': present += 1; shortCount += 1; paidDays += 1; break;
       default: if(dateStr <= todayStr()) absent += 1; // unmarked past day defaults to absent
     }
   });
-  const paidDays = present; // EL/SL/P/half-days all paid; A and LP are not
   return { present, absent, elUsed, slUsed, lpDays, halfDays, shortCount, lateCount, holidays, paidDays };
 }
 
@@ -1209,7 +1231,7 @@ function computeSalaryFromAttendance(emp, att, dateList, monthDays, holidayMap){
   // day is still marked A/LP/P through the same Attendance Sheet as
   // everyone else, so the same Sunday-or-holiday-bracketed-by-two-unpaid-
   // days reasoning applies to them the same way.
-  const sandwichDates = sandwichDaysFor(att, dateList, holidayMap);
+  const sandwichDates = sandwichDaysFor(emp, att, dateList, holidayMap);
   const leaveDays = summary.absent + summary.lpDays + policyHalf.total * 0.5 + sandwichDates.length;
   // Rate of Pay and heading as they stood on THIS month, not whatever they are
   // today — an increment recorded since must not move a month that has
@@ -2408,7 +2430,7 @@ function policyRowsFor(employees, attByEmp, dateList, holidayMap){
     // Resident's day is still marked A/LP/P through the same Attendance
     // Sheet everyone else uses, so there is nothing special about how their
     // sandwich days are found — only whether the exemption applied at all.
-    const sandwichDates = sandwichDaysFor(att, dateList, holidayMap || {});
+    const sandwichDates = sandwichDaysFor(emp, att, dateList, holidayMap || {});
     if(sandwichDates.length) warn.push(sandwichDates.length + ' sandwich day(s) (' + sandwichDates.join(', ') +
       ') — Sunday/holiday between two unpaid-absence days, deducted from this month’s salary');
     return { emp, lateCount, shortLeaves, sickUsed, plUsed, lwp, halfDays, attendanceDays,
@@ -2542,7 +2564,7 @@ function consultantReportRows(employees, attByEmpId, dateList, monthDays, holida
     // The same sandwich figure the Salary Sheet charges, added the same way,
     // so the payable-days count sent to the consultant cannot overstate what
     // is actually paid.
-    const sandwichDays = sandwichDaysFor(att, dateList, holidayMap).length;
+    const sandwichDays = sandwichDaysFor(emp, att, dateList, holidayMap).length;
     const absentDays = c.absent + sandwichDays;
     // Everything in the month is paid except unpaid absence. Derived by
     // subtraction so it stays inside 0..monthDays even when somebody checks in
