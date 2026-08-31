@@ -1993,6 +1993,11 @@ function loanLedgerCsvTotalRow(rows){
 
 
 const SALARY_HEADING_ORDER = ['managerial','senior','junior','apprentice','rsit','contractor'];
+// The three headings that are R.S. Infotech's own payroll. Apprentices,
+// R.S.IT Solution and Contractors are separate books kept on the same sheet,
+// which is why the Salary Sheet totals these three on their own before the
+// rest and why the Consultant Report only ever covered them.
+const OWN_PAYROLL_HEADINGS = ['managerial','senior','junior'];
 
 // Whether an employee counts as on roll for a given past period — true if
 // their tenure overlaps it at all: joined on or before the period ends, and
@@ -2222,6 +2227,8 @@ const SALARY_SHEET_TOTAL_KEYS = ['rate','leaveAmount','policyHalfDays','basic','
   'advanceTemp','advance','loanEmi','retention','totalDeduction','conveyance','netSalary','pen','employerPf',
   'pfAdmin','edli','employerCont','ctc','esiEmployer','advanceBalance','loanBalance','directPaid','netBeforeDirect'];
 
+const STAFF_TOTAL_LABEL = 'Total — Managerial, Seniors & Junior Staff';
+
 function salarySheetTotalsSeed_(){
   const o = {};
   SALARY_SHEET_TOTAL_KEYS.forEach(k => { o[k] = 0; });
@@ -2232,10 +2239,27 @@ function salarySheetCsv(employees, attByEmpId, dateList, monthDays, holidayMap){
   const R = v => Math.round(Number(v) || 0);
   const rows = [];
   const grand = salarySheetTotalsSeed_();
+  // Managerial + Seniors + Junior on their own, closed off before the first
+  // heading that is not R.S. Infotech's own payroll — HR reads that figure as
+  // the company's own wage bill, with Apprentices, R.S.IT Solution and
+  // Contractors kept out of it. The Grand Total at the foot still covers
+  // everybody, so the sheet now carries both and says which is which.
+  const staff = salarySheetTotalsSeed_();
+  let staffAny = false, staffDone = false;
+  const ownPayroll = k => OWN_PAYROLL_HEADINGS.indexOf(k) !== -1;
+  const pushStaffTotal = () => {
+    if(staffDone || !staffAny) return;
+    staffDone = true;
+    rows.push(['', STAFF_TOTAL_LABEL, R(staff.rate), '', staff.policyHalfDays, R(staff.leaveAmount),
+      R(staff.basic), R(staff.hra), R(staff.lta), R(staff.gross), R(staff.pf), R(staff.esi), R(staff.pt),
+      R(staff.advanceTemp), R(staff.advance), R(staff.loanEmi), R(staff.retention), R(staff.totalDeduction),
+      R(staff.conveyance), R(staff.netSalary)]);
+  };
   let srNo = 1;
   SALARY_HEADING_ORDER.forEach(headingKey => {
     const group = (employees || []).filter(e => ratePayAsOf(e, dateList[0]).salaryHeading === headingKey);
     if(!group.length) return;
+    if(!ownPayroll(headingKey)) pushStaffTotal();
     rows.push([SALARY_HEADINGS[headingKey].label]);
     const sub = salarySheetTotalsSeed_();
     group.forEach(emp => {
@@ -2245,7 +2269,11 @@ function salarySheetCsv(employees, attByEmpId, dateList, monthDays, holidayMap){
         R(s.totalDeduction), R(s.conveyance), R(s.netBeforeDirect), R(s.directPaid), R(s.netSalary),
         R(s.pen), R(s.employerPf), R(s.pfAdmin), R(s.edli), R(s.esiEmployer), R(s.employerCont), R(s.ctc),
         R(s.advanceBalance), R(s.loanBalance), s.fullDayLeaveBal, s.halfDayLeaveBal]);
-      SALARY_SHEET_TOTAL_KEYS.forEach(k => { sub[k] += s[k]; grand[k] += s[k]; });
+      SALARY_SHEET_TOTAL_KEYS.forEach(k => {
+        sub[k] += s[k]; grand[k] += s[k];
+        if(ownPayroll(headingKey)) staff[k] += s[k];
+      });
+      if(ownPayroll(headingKey)) staffAny = true;
     });
     // The subtotal line stops at Total Deduction/Conveyance/Net the way it
     // always has — shorter than a full row on purpose.
@@ -2253,6 +2281,7 @@ function salarySheetCsv(employees, attByEmpId, dateList, monthDays, holidayMap){
       R(sub.lta), R(sub.gross), R(sub.pf), R(sub.esi), R(sub.pt), R(sub.advanceTemp), R(sub.advance),
       R(sub.loanEmi), R(sub.retention), R(sub.totalDeduction), R(sub.conveyance), R(sub.netSalary)]);
   });
+  pushStaffTotal();
   rows.push(['', 'Grand Total', R(grand.rate), '', grand.policyHalfDays, R(grand.leaveAmount), R(grand.basic),
     R(grand.hra), R(grand.lta), R(grand.gross), R(grand.pf), R(grand.esi), R(grand.pt), R(grand.advanceTemp),
     R(grand.advance), R(grand.loanEmi), R(grand.retention), R(grand.totalDeduction), R(grand.conveyance),
@@ -2514,7 +2543,7 @@ const CONSULTANT_REPORT_COLS = [
 // these and nothing else — Apprentices, Contractors and R.S.IT Solution are
 // separate books and are not the consultant's to process. Kept here beside the
 // headings so the two are changed together.
-const CONSULTANT_REPORT_HEADINGS = ['managerial','senior','junior'];
+const CONSULTANT_REPORT_HEADINGS = OWN_PAYROLL_HEADINGS;
 
 // The consultant's sheet writes dates as dd.mm.yyyy, not the ISO form stored here.
 function consultantDate(v){
