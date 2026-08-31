@@ -1265,12 +1265,9 @@ function computeSalaryFromAttendance(emp, att, dateList, monthDays, holidayMap){
   // warned about and then left for somebody to apply by hand. Half a day each.
   const policyHalf = policyHalfDaysFor(emp, att, dateList);
   // A Sunday or holiday sandwiched between two unpaid-absence days, charged
-  // as an extra unpaid day of its own — see sandwichDaysFor. Resident
-  // Engineers are exempt from the EL/SL/short-leave/late-coming rules, but
-  // NOT from this one — a deliberate policy decision, since a Resident's
-  // day is still marked A/LP/P through the same Attendance Sheet as
-  // everyone else, so the same Sunday-or-holiday-bracketed-by-two-unpaid-
-  // days reasoning applies to them the same way.
+  // as an extra unpaid day of its own. Resident Engineers are excused from
+  // this along with the rest of the leave policy — the exemption lives inside
+  // sandwichDaysFor, not here, so every caller gets the same answer.
   const sandwichDates = sandwichDaysFor(emp, att, dateList, holidayMap);
   const leaveDays = summary.absent + summary.lpDays + policyHalf.total * 0.5 + sandwichDates.length;
   // Rate of Pay and heading as they stood on THIS month, not whatever they are
@@ -2501,12 +2498,10 @@ function policyRowsFor(employees, attByEmp, dateList, holidayMap){
       warn.push('More than ' + P.privilegeLeave.maxPerMonth + ' PL this month — excess deducted from salary');
     if(!bal.plUsable && bal.plEarned > 0) warn.push('PL earned this year is usable from the next financial year');
     if(earlyDays) warn.push(earlyDays + ' day(s) left before shift end (' + minToHHMM(P.shift.endMin) + ')');
-    // Sandwich leave applies to Resident Engineers too — confirmed as a
-    // deliberate policy decision, unlike the EL/SL/short-leave/late-coming
-    // rules just above, which stay exempt for them exactly as before. A
-    // Resident's day is still marked A/LP/P through the same Attendance
-    // Sheet everyone else uses, so there is nothing special about how their
-    // sandwich days are found — only whether the exemption applied at all.
+    // Resident Engineers are excused from sandwich leave along with the
+    // EL/SL/short-leave/late-coming rules just above. sandwichDaysFor holds
+    // that exemption, so a Resident simply comes back with no sandwich days
+    // and there is no warning to raise here.
     const sandwichDates = sandwichDaysFor(emp, att, dateList, holidayMap || {});
     if(sandwichDates.length) warn.push(sandwichDates.length + ' sandwich day(s) (' + sandwichDates.join(', ') +
       ') — Sunday/holiday between two unpaid-absence days, deducted from this month’s salary');
