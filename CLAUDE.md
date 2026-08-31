@@ -29,9 +29,10 @@ After **every** edit to `index.html`, run both checks:
 
 ```bash
 node tools/check-syntax.js          # no dependencies
-npm install acorn                   # once, for the second one
+npm install acorn acorn-walk        # once, for the acorn-based checks
 node tools/check-undeclared.js
 node tools/check-shared-standalone.js   # after touching shared/report-logic.js
+node tools/check-shared-leaks.js        # ditto — catches what the fixture never runs
 ```
 
 `check-syntax.js` parses the inline scripts. A stray brace means the app does
@@ -118,6 +119,18 @@ Three consequences worth knowing before touching it:
   gap is a ReferenceError at 8 AM on the 1st with nobody watching. Run
   `node tools/check-shared-standalone.js` after touching it — it evaluates the
   file with nothing but the JavaScript built-ins and runs every report builder.
+  **Run `node tools/check-shared-leaks.js` too**, and understand why both
+  exist. The standalone check only reaches a missing helper if its fixture runs
+  the line that calls it, and that is not a hypothetical: `evaluateAttendanceDay`
+  sat behind `if(e.checkinTime && e.checkoutTime)`, the fixture had no punch
+  times, `policyRowsFor` was listed as an export but never actually called, and
+  the 1 August 2026 report email was what found it — "could not be generated",
+  six CSVs missing. The leaks check reads the file statically instead, so a
+  branch nothing exercises is caught exactly like one that does. It carries a
+  list of known browser-only names still sitting in the shared file by mistake
+  (`getAttendanceMany` and its read cache, `payrollFormContext`, `elFyRows`,
+  `csvEscape`); move them to index.html where they belong and delete them from
+  that list. Never add a name to it to make the check pass.
 - **jsdom does not fetch `<script src>`**, so a harness that loads
   `index.html` raw gets a page with no payroll logic in it. Inline the shared
   file into the HTML string first, the way the browser ends up with it:

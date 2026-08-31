@@ -6565,62 +6565,6 @@ function renderLiveStatus(infos){
 }
 
 
-const minToHHMM = m => (m===null||m===undefined) ? '—'
-  : String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
-
-// ---- one day ----
-function evaluateAttendanceDay(inp, P){
-  P = P || LEAVE_POLICY;
-  const r = { facts: [], warnings: [], rules: [], status: inp.status || 'P', lateMinutes: 0 };
-  const L = P.lateComing;
-
-  if(inp.inMin !== null && inp.inMin !== undefined && P.shift.startMin !== null){
-    r.lateMinutes = Math.max(0, inp.inMin - P.shift.startMin);
-    r.facts.push({ k:'Shift start', v:minToHHMM(P.shift.startMin) });
-    r.facts.push({ k:'In time', v:minToHHMM(inp.inMin) });
-    if(r.lateMinutes > 0) r.facts.push({ k:'Late minutes', v:r.lateMinutes });
-  }
-  if(inp.outMin !== null && inp.outMin !== undefined){
-    r.facts.push({ k:'Out time', v:minToHHMM(inp.outMin) });
-    r.facts.push({ k:'Shift end', v:minToHHMM(P.shift.endMin) });
-    if(inp.inMin !== null && inp.inMin !== undefined){
-      const w = inp.outMin - inp.inMin;
-      r.workedMinutes = w;
-      r.facts.push({ k:'Working hours', v:Math.floor(w/60)+'h '+(w%60)+'m' });
-      // Deliberately NOT compared against the full 09:30–19:00 span. Grace
-      // permits a late arrival, so measuring hours worked against the whole
-      // shift would flag every person who used their grace as short — which
-      // would make the grace period meaningless. Leaving before shift end is
-      // the rule that matters, and it is reported below on its own.
-    }
-    if(P.shift.endMin !== null && inp.outMin < P.shift.endMin){
-      r.earlyMinutes = P.shift.endMin - inp.outMin;
-      r.warnings.push('Left ' + r.earlyMinutes + ' minutes before shift end');
-    }
-    // Overtime starts at the configured hour, not at shift end.
-    if(P.shift.overtimeFromMin !== null && inp.outMin > P.shift.overtimeFromMin){
-      r.overtimeMinutes = inp.outMin - P.shift.overtimeFromMin;
-      r.facts.push({ k:'Overtime', v:Math.floor(r.overtimeMinutes/60)+'h '+(r.overtimeMinutes%60)+'m' });
-      r.rules.push('Overtime counted from ' + minToHHMM(P.shift.overtimeFromMin));
-    }
-  }
-
-  if(r.lateMinutes > 0){
-    if(r.lateMinutes <= L.graceMinutes){
-      r.rules.push('Grace time used (up to '+L.graceMinutes+' minutes)');
-    } else if(r.lateMinutes <= L.shortLeaveAfterMinutes){
-      r.warnings.push('Late by '+r.lateMinutes+' minutes — grace period of '+L.graceMinutes+' minutes exceeded');
-      r.countsAsLateInstance = true;
-    } else {
-      r.warnings.push('Late by '+r.lateMinutes+' minutes — beyond '+L.shortLeaveAfterMinutes+' minutes');
-      r.warnings.push('Converted to Short Leave as per policy');
-      r.rules.push('Late beyond '+L.shortLeaveAfterMinutes+' minutes becomes short leave');
-      r.countsAsLateInstance = true;
-      r.becomesShortLeave = true;
-    }
-  }
-  return r;
-}
 
 // ---- short leave eligibility ----
 function checkShortLeave(emp, atMin, usedThisMonth, P){
