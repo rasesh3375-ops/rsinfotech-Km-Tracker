@@ -13969,6 +13969,44 @@ function openEmpAccordionSection(sectionId){
   updateAccordionHeaders_();
 }
 
+// Everything that has to run after employeeModalRoot's markup is written.
+// employeeModalHtml emits empty boxes for the sections whose contents are
+// rendered by JavaScript — loans, advances, the advance schedule, salary
+// history, assets — so writing the markup without this leaves them blank.
+//
+// One function because there are three callers and they had drifted apart:
+// opening the form, removing a salary-history entry, and saveIncrement's
+// refresh of the form behind it. Only the first rendered the assets, so
+// recording an increment blanked the Assets section while the draft still
+// held the items — and because collectAssetRows reads the rows back out of
+// the DOM, the next Save wrote an empty list over every asset that employee
+// had been issued. Nothing said so; the section simply looked empty.
+function renderEmployeeModalSections_(){
+  toggleStatutoryFieldsForHeading();
+  renderLoanRows();
+  renderAdvanceRows();
+  renderAdvanceTempSchedule();
+  renderSalaryHistoryBox();
+  renderAssetRows();
+}
+
+// The counterpart, and the reason a re-render is destructive without it.
+// Those same sections keep what the user has entered in the DOM, not in the
+// draft — addAssetRow pushes a blank row and the item is only ever read back
+// out of the <select> at save time, and loans and advances work the same way.
+// So rewriting employeeModalRoot's markup throws away every value typed into
+// them: an asset just chosen, a loan amount just entered, a half-filled
+// advance row. Reading them back into the draft first is what makes a
+// re-render safe, and it uses the very collectors saveEmployeeForm uses, so
+// the shapes cannot drift apart.
+function syncEmployeeModalSectionsToDraft_(){
+  if(!document.getElementById('assetRowsBox')) return;   // form not on screen
+  editingEmployeeDraft.assets = collectAssetRows();
+  editingEmployeeDraft.loans = collectLoanRows();
+  editingEmployeeDraft.advanceHistory = collectAdvanceRows();
+  editingEmployeeDraft.advanceTempSchedule = collectAdvanceTempSchedule();
+}
+
 function toggleTrackingFields(){
   const needsTracking = document.getElementById('f_needsTracking').value === 'yes';
   document.getElementById('trackingLoginFields').classList.toggle('hidden', !needsTracking);
@@ -15628,6 +15666,17 @@ function removeAssetRow(i){
 function collectAssetRows(){
   const out = [];
   const assets = editingEmployeeDraft.assets || [];
+  // The form is the truth only while it is actually on screen. If the rows
+  // were never rendered, this used to read a DOM with no asset_item_ fields
+  // in it, find nothing, and hand Save an empty list — which then overwrote
+  // every asset the employee had, with no error and nothing on screen to
+  // suggest anything had been lost. renderEmployeeModalSections_ is what
+  // stopped that happening; this makes sure that if it ever does again, the
+  // draft is written back unchanged instead of the record being emptied.
+  const box = document.getElementById('assetRowsBox');
+  if(assets.length && (!box || !box.querySelector('[id^="asset_item_"]'))){
+    return assets.slice();
+  }
   assets.forEach((a, i) => {
     const item = ((document.getElementById('asset_item_' + i) || {}).value || '').trim();
     if(!item) return;
@@ -15935,12 +15984,7 @@ async function openAddEmployeeModal(id){
   editingEmployeeDraft.assets = (editingEmployeeDraft.assets || []).filter(a => a && a.item);
   await reconcileTrackingUsername(editingEmployeeDraft);
   document.getElementById('employeeModalRoot').innerHTML = employeeModalHtml(editingEmployeeDraft);
-  toggleStatutoryFieldsForHeading();
-  renderLoanRows();
-  renderAdvanceRows();
-  renderAdvanceTempSchedule();
-  renderSalaryHistoryBox();
-  renderAssetRows();
+  renderEmployeeModalSections_();
   resettleFixedOverlays_();
   // kmtLockBodyScroll (called at the very top of this function, before the
   // awaits above) already schedules a kmtNudgeRepaint_ of its own -- but at
@@ -16116,16 +16160,15 @@ function removeSalaryHistoryEntry(hi){
     (target.from ? ' effective ' + fmtDateIN(target.from) : '') +
     '?\n\nEvery report for the months it covered will recompute using whichever entry is in force once it is gone. Use this only to correct an increment entered by mistake.')) return;
   editingEmployeeDraft.salaryHistory = hist.filter(h => h !== target);
+  // Before the markup is rewritten below, or anything typed into the assets,
+  // loans and advances sections is thrown away with it.
+  syncEmployeeModalSectionsToDraft_();
   // A full re-render, not just this box: Rate of Pay, heading and the
   // "Current since" hint above are all read out of currentRatePay() at
   // render time, and removing an entry can change what that now resolves
   // to (see saveIncrement's own refresh, which does the same).
   document.getElementById('employeeModalRoot').innerHTML = employeeModalHtml(editingEmployeeDraft);
-  toggleStatutoryFieldsForHeading();
-  renderLoanRows();
-  renderAdvanceRows();
-  renderAdvanceTempSchedule();
-  renderSalaryHistoryBox();
+  renderEmployeeModalSections_();
   renderPayrollBreakdown();
 }
 
@@ -16175,14 +16218,22 @@ async function saveIncrement(id){
   kmtBack();
   // Refresh the edit form behind it, if open, so the new figure shows at once.
   if(editingEmployeeId === id){
-    editingEmployeeDraft = JSON.parse(JSON.stringify(emp));
+    // Read the form's own sections back first, then take ONLY what this
+    // increment actually changed from the saved record. Replacing the whole
+    // draft with the server copy used to discard every unsaved edit on the
+    // form behind this modal — an asset added but not yet saved simply
+    // vanished, and the next Save wrote the record without it.
+    syncEmployeeModalSectionsToDraft_();
+    editingEmployeeDraft.salaryHistory = JSON.parse(JSON.stringify(salaryHistoryOf(emp)));
+    editingEmployeeDraft.ratePay = emp.ratePay;
+    editingEmployeeDraft.salaryHeading = emp.salaryHeading;
     await reconcileTrackingUsername(editingEmployeeDraft);
     document.getElementById('employeeModalRoot').innerHTML = employeeModalHtml(editingEmployeeDraft);
-    toggleStatutoryFieldsForHeading();
-    renderLoanRows();
-    renderAdvanceRows();
-    renderAdvanceTempSchedule();
-    renderSalaryHistoryBox();
+    renderEmployeeModalSections_();
+    // The rate of pay has just changed, so the breakdown below it is stale
+    // until this runs. removeSalaryHistoryEntry refreshed it for the same
+    // reason; this path did not.
+    renderPayrollBreakdown();
   }
   await renderEmployeeList();
 }
