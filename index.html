@@ -19932,7 +19932,10 @@ async function viewReport(key, label, monthFilter){
     // cannot disagree about what is outstanding.
     csvHeader = loanLedgerCsvHeader();
     const ledger = loanLedgerRows(employees, nowY, nowM);
-    csvRows = loanLedgerCsvRows(ledger);
+    // The Grand Total goes into the CSV too, as its last line — HR reads the
+    // emailed attachment on a phone, where there is no summary sentence above
+    // the table to add the outstanding figure up for them.
+    csvRows = loanLedgerCsvRows(ledger).concat([loanLedgerCsvTotalRow(ledger)]);
 
     let loanCards = '';
     rows = ledger.map(({ emp: e, loan: l, amount, balance, recovered, started, stalled,
@@ -19958,11 +19961,29 @@ async function viewReport(key, label, monthFilter){
     }).join('');
 
     const stalledCount = ledger.filter(r => r.stalled).length;
-    const outstanding = ledger.reduce((t, r) => t + r.balance, 0);
-    const monthly = ledger.reduce((t, r) => t + loanEmiForMonth(r.loan, nowY, nowM), 0);
+    // Both from loanLedgerTotals rather than added up again here, so the
+    // sentence above the table, the Grand Total row in it and the last line of
+    // the emailed CSV are all the same arithmetic over the same rows.
+    const loanTot = loanLedgerTotals(ledger);
+    const outstanding = loanTot.balance;
+    const monthly = loanTot.emiThisMonth;
     const multi = employees.filter(e => loansOf(e).filter(l => l.status === 'active').length > 1).length;
-    const loanInner = isCompact ? (loanCards ? `<div class="hr-sheet-cards">${loanCards}</div>` : '<div class="empty">No data yet</div>')
-      : `<div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th class="num">Amount</th><th class="num">Current EMI</th><th>Recovery from</th><th class="num">Recovered so far</th><th class="num">Balance</th><th>Status</th></tr>${rows || '<tr><td colspan="7" class="empty">No data yet</td></tr>'}</table></div>`;
+    // Blank under Recovery from and Status: neither a month nor a status word
+    // is a thing that can be added up.
+    const loanGrandRow = ledger.length ? `<tr class="sal-grandtotal">
+        <td class="sal-name">Grand Total<span class="inc-sub">${loanTot.count} loan(s)</span></td>
+        <td class="num">${rupees(loanTot.amount)}</td>
+        <td class="num">${rupees(loanTot.emiThisMonth)}</td>
+        <td></td>
+        <td class="num">${rupees(loanTot.recovered)}</td>
+        <td class="num">${rupees(loanTot.balance)}</td>
+        <td></td></tr>` : '';
+    const loanGrandCard = ledger.length ? hrCard('<strong>Grand Total</strong><span class="id">' + loanTot.count + ' loan(s)</span>',
+      hrRow('Amount', rupees(loanTot.amount)) + hrRow('Coming off this month', rupees(loanTot.emiThisMonth)) +
+      hrRow('Recovered so far', rupees(loanTot.recovered)) + hrRow('Balance', rupees(loanTot.balance)),
+      'sal-grand-card') : '';
+    const loanInner = isCompact ? (loanCards ? `<div class="hr-sheet-cards">${loanCards}${loanGrandCard}</div>` : '<div class="empty">No data yet</div>')
+      : `<div class="sal-sheet-wrap"><table class="sal-table"><tr><th>Name</th><th class="num">Amount</th><th class="num">Current EMI</th><th>Recovery from</th><th class="num">Recovered so far</th><th class="num">Balance</th><th>Status</th></tr>${rows || '<tr><td colspan="7" class="empty">No data yet</td></tr>'}${loanGrandRow}</table></div>`;
     box.innerHTML = `${fsBtn}<div class="print-isolate" id="reportPrintArea_loan" style="margin-top:12px;">${reportLogoHeader(label)}
       <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;">${rupees(outstanding)} outstanding across ${ledger.length} loan(s); ${rupees(monthly)} coming off this month's Salary Sheet.${multi ? ' ' + multi + ' employee(s) are repaying more than one at a time.' : ''}</p>
       ${stalledCount ? `<p class="pol-warn" style="font-size:12.5px;margin:0 0 10px;">${stalledCount} active loan(s) have no recovery month set, so no instalment is coming off the Salary Sheet for them. Set one on the employee record to start recovery.</p>` : ''}

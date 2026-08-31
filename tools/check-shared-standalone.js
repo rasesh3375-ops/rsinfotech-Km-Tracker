@@ -30,6 +30,7 @@ const EXPORTS = ['computeSalaryFromAttendance','computeAttendanceSummary','LEAVE
   'ratePayAsOf','SALARY_HEADINGS','PF_RULES','ESI_RULES','LEAVE_POLICY','leaveWorkingDays',
   'applyAlwaysPresentFill','leaveDetailRowFor','leaveDetailReportRows','leaveDetailCsvHeader',
   'leaveDetailCsvRows','loanLedgerRows','loanLedgerCsvHeader','loanLedgerCsvRows',
+  'loanLedgerTotals','loanLedgerCsvTotalRow',
   'employedDuringPeriod_','salarySheetCsv','finalSalarySheetCsv','attendanceSheetCsv',
   'statutoryReportData','pfReturnCsv','esiReturnCsv','statutoryAmountCsv','policyRowsFor',
   'attCodeText_','SALARY_HEADING_ORDER','consultantReportEmployees','consultantReportRows',
@@ -105,6 +106,8 @@ run('leaveDetailReportRows', () => box.leaveDetailReportRows(employees, att, dat
 run('leaveDetailCsvRows', () => box.leaveDetailCsvRows(box.leaveDetailReportRows(employees, att, dateList, holidayMap).rows));
 run('loanLedgerRows', () => box.loanLedgerRows(employees, 2026, 7));
 run('loanLedgerCsvRows', () => box.loanLedgerCsvRows(box.loanLedgerRows(employees, 2026, 7)));
+run('loanLedgerTotals', () => box.loanLedgerTotals(box.loanLedgerRows(employees, 2026, 7)));
+run('loanLedgerCsvTotalRow', () => box.loanLedgerCsvTotalRow(box.loanLedgerRows(employees, 2026, 7)));
 ['pf', 'esi', 'pt'].forEach(k => {
   run('statutoryReportData(' + k + ')', () => box.statutoryReportData(employees, att, dateList, 31, holidayMap, k));
 });

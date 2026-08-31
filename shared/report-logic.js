@@ -1893,6 +1893,20 @@ function loanLedgerRows(employees, nowY, nowM){
       amount, balance: l.status === 'active' ? bal : 0,
       recovered: l.status === 'active' ? recovered : amount,
       currentEmi: loanEmiRateAsOf(l, nowYm),
+      // What actually comes off this month, which is not the same as the rate
+      // above. currentEmi is the instalment in force; a loan already recovered
+      // in full, one with no recovery month set, and one skipped this month all
+      // still carry a rate but deduct nothing. Adding the rate column up would
+      // overstate the month: on August 2026's sixteen loans it reads 50,000
+      // against a true 35,000, because three loans sitting at a nil balance
+      // still showed "active" with a rate beside them.
+      //
+      // Note it is loanEmiForMonth and not "balance is zero, so charge zero" —
+      // those are different. A loan whose FINAL instalment falls in this month
+      // also ends at a nil balance, and that instalment is genuinely deducted;
+      // in the same August, Hardik Panchal's closing 2,000 belongs in the
+      // total. Only loanScheduleThrough knows which of the two a nil balance is.
+      emiThisMonth: loanEmiForMonth(l, nowY, nowM),
       started, stalled, skippedThisMonth,
       note: l.status !== 'active' ? 'closed'
           : stalled ? 'active — no recovery month set, nothing is being deducted'
@@ -1901,12 +1915,31 @@ function loanLedgerRows(employees, nowY, nowM){
     };
   });
 }
+// The one place the Grand Total is worked out, so the figure at the bottom of
+// the report on screen and the one in the emailed CSV come from the same sum
+// over the same rows rather than each screen adding the column up its own way.
+function loanLedgerTotals(rows){
+  const sum = k => Math.round((rows || []).reduce((t, r) => t + (Number(r[k]) || 0), 0) * 100) / 100;
+  return { count: (rows || []).length, amount: sum('amount'), recovered: sum('recovered'),
+           balance: sum('balance'), emiThisMonth: sum('emiThisMonth') };
+}
+
 function loanLedgerCsvHeader(){
   return ['Name','Loan','Amount','Current EMI','Recovery from','Recovered so far','Balance','Status'];
 }
 function loanLedgerCsvRows(rows){
   return rows.map(r => [r.name, r.what, Math.round(r.amount), Math.round(r.currentEmi),
                         r.started || '—', Math.round(r.recovered), Math.round(r.balance), r.note]);
+}
+// Appended to the CSV as its last line, so the attachment HR opens on a phone
+// carries the same totals the report tab shows. The EMI figure is the one that
+// is actually deducted, not the sum of the rates in the column above it, and
+// the Status cell says so — a bare CSV has no summary line to explain it.
+function loanLedgerCsvTotalRow(rows){
+  const t = loanLedgerTotals(rows);
+  return ['Grand Total', t.count + ' loan(s)', Math.round(t.amount), Math.round(t.emiThisMonth),
+          '', Math.round(t.recovered), Math.round(t.balance),
+          'EMI total is what comes off this month; a loan recovered in full still shows its rate above but deducts nothing'];
 }
 
 
