@@ -7198,7 +7198,7 @@ async function renderAttendanceSheet(){
 
   let headerRow = '<tr><th>S.No</th><th class="att-name-h">Name</th>' +
     dateList.map(d => `<th data-date="${d}">${parseInt(d.slice(8),10)}</th>`).join('') +
-    '<th>Present</th><th>Absent</th><th>EL</th><th>SL</th><th>LP</th><th>Half</th><th>Short</th><th>Late</th></tr>';
+    '<th>Present</th><th>Absent</th><th>EL</th><th>SL</th><th>LP</th><th>Half</th><th>Short</th><th>Late</th><th>Policy Cut</th></tr>';
   // Policy columns follow the day grid, so the export carries the same
   // judgement the on-screen panel shows rather than raw codes alone.
 
@@ -7274,7 +7274,7 @@ async function renderAttendanceSheet(){
       bodyRows += attendanceMobileCard(i, emp, isResident, summary, dayCells);
     } else {
       bodyRows += `<tr data-att-row="${emp.id}"><td>${i+1}</td><td class="att-name">${escapeHtml(emp.name)}${isResident?' <span style="color:var(--muted);font-size:10px;">(Resident)</span>':''}</td>${dayCells}` +
-        `<td data-att-summary="present">${summary.present}</td><td data-att-summary="absent">${summary.absent}</td><td data-att-summary="elUsed">${summary.elUsed}</td><td data-att-summary="slUsed">${summary.slUsed}</td><td data-att-summary="lpDays">${summary.lpDays}</td><td data-att-summary="halfDays">${summary.halfDays}</td><td data-att-summary="shortCount">${summary.shortCount}</td><td data-att-summary="lateCount">${summary.lateCount}</td></tr>`;
+        `<td data-att-summary="present">${summary.present}</td><td data-att-summary="absent">${summary.absent}</td><td data-att-summary="elUsed">${summary.elUsed}</td><td data-att-summary="slUsed">${summary.slUsed}</td><td data-att-summary="lpDays">${summary.lpDays}</td><td data-att-summary="halfDays">${summary.halfDays}</td><td data-att-summary="shortCount">${summary.shortCount}</td><td data-att-summary="lateCount">${summary.lateCount}</td><td data-att-summary="policyCut">${summary.policyCut}</td></tr>`;
     }
   }
 

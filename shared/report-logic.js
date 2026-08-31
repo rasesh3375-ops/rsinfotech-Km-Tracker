@@ -797,7 +797,17 @@ function computeAttendanceSummary(att, employee, dateList, holidayMap){
       default: if(dateStr <= todayStr()) absent += 1; // unmarked past day defaults to absent
     }
   });
-  return { present, absent, elUsed, slUsed, lpDays, halfDays, shortCount, lateCount, holidays, paidDays };
+  // The half-days the late-coming and excess-short-leave policy imposes, in
+  // DAYS rather than the half-day units policyHalfDaysFor counts in -- the same
+  // figure computeSalaryFromAttendance charges. It existed only as a sentence
+  // in the violation note before, so a 0.5 taken off somebody's pay could not
+  // be seen as a number or added up: Sanjeev Srivastav's 5 late arrivals cost
+  // him half a day in August and the Attendance Sheet showed 0 everywhere.
+  // It belongs on the summary rather than at the two places that display it,
+  // so the live row refresh keeps it current as HR edits the grid.
+  const policyCut = policyHalfDaysFor(employee, att, dateList).total * 0.5;
+  return { present, absent, elUsed, slUsed, lpDays, halfDays, shortCount, lateCount, holidays,
+           paidDays, policyCut };
 }
 
 // ---- salary sheet ----
@@ -2451,7 +2461,7 @@ function attCodeText_(code, isPh){
 // reads identically in both.
 function attendanceSheetCsv(employees, attByEmpId, dateList, holidayMap){
   const header = ['S.No','Name'].concat(dateList.map(d => parseInt(d.slice(8), 10))).concat(
-    ['Present','Absent','EL','SL','LP','Half','Short','Late',
+    ['Present','Absent','EL','SL','LP','Half','Short','Late','Policy Cut',
      'Employee Type','Late Count','Short Leaves','Half Days','Sick Used','Sick Balance',
      'PL Earned','PL Used','PL Balance','LWP','Sandwich Days','Attendance Days','Overtime Minutes','Early Leaving Days',
      'Policy Rule Applied','Violation Reason']);
@@ -2468,7 +2478,8 @@ function attendanceSheetCsv(employees, attByEmpId, dateList, holidayMap){
     });
     rows.push([i + 1, emp.name].concat(dayCodes).concat(
       [summary.present, summary.absent, summary.elUsed, summary.slUsed,
-       summary.lpDays, summary.halfDays, summary.shortCount, summary.lateCount]));
+       summary.lpDays, summary.halfDays, summary.shortCount, summary.lateCount,
+       summary.policyCut]));
   });
   // The policy columns are appended before the file is written, never after —
   // the Drive copy used to be written first and carried fourteen empty
