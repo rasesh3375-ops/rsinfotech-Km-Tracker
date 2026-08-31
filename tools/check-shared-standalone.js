@@ -32,7 +32,7 @@ const EXPORTS = ['computeSalaryFromAttendance','computeAttendanceSummary','LEAVE
   'leaveDetailCsvRows','loanLedgerRows','loanLedgerCsvHeader','loanLedgerCsvRows',
   'loanLedgerTotals','loanLedgerCsvTotalRow',
   'employedDuringPeriod_','salarySheetCsv','finalSalarySheetCsv','attendanceSheetCsv',
-  'statutoryReportData','pfReturnCsv','esiReturnCsv','statutoryAmountCsv','policyRowsFor',
+  'statutoryReportData','pfReturnCsv','esiReturnCsv','statutoryAmountCsv','policyRowsFor','evaluateAttendanceDay','minToHHMM',
   'attCodeText_','SALARY_HEADING_ORDER','consultantReportEmployees','consultantReportRows',
   'consultantSummaryEmployees','consultantSummaryTotals','consultantSummaryCsv'];
 
@@ -84,6 +84,12 @@ employees.filter(e => e.id !== 'T9').forEach(e => {
   att[e.id]['2026-07-09'] = { code: 'HSL' };
   att[e.id]['2026-07-10'] = { code: 'SHORT' };
   [13, 14, 15, 16, 17, 20, 21].forEach(d => { att[e.id]['2026-07-' + d] = { code: 'P', lateFlag: true }; });
+  // Both punches, so the branches that judge a day actually run. Without these
+  // policyRowsFor never reached evaluateAttendanceDay, and a helper that lived
+  // only in index.html looked fine here right up until the 1st of the month.
+  att[e.id]['2026-07-22'] = { code: 'P', checkinTime: '09:45', checkoutTime: '19:30' };  // late in, overtime
+  att[e.id]['2026-07-23'] = { code: 'P', checkinTime: '09:20', checkoutTime: '17:00' };  // early out
+  att[e.id]['2026-07-24'] = { code: 'P', checkinTime: '09:30', checkoutTime: '19:00' };  // exactly the shift
 });
 att['T9'] = {};
 const holidayMap = { '2026-07-15': true };
@@ -123,6 +129,8 @@ run('statutoryAmountCsv', () => {
   const d = box.statutoryReportData(employees, att, dateList, 31, holidayMap, 'pt');
   return box.statutoryAmountCsv(d.rows, d.grandTotal, 'pt');
 });
+run('policyRowsFor', () => box.policyRowsFor(employees, att, dateList, holidayMap));
+run('evaluateAttendanceDay', () => box.evaluateAttendanceDay({ inMin: 585, outMin: 1170 }));
 run('consultantReportRows', () => box.consultantReportRows(
   box.consultantReportEmployees(employees, dateList), att, dateList, 31, holidayMap, 2026, 7));
 run('consultantSummaryCsv', () => box.consultantSummaryCsv(box.consultantSummaryTotals(
