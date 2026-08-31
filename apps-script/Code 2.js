@@ -1843,7 +1843,8 @@ function loadSharedReportLogic_(map) {
     'employedDuringPeriod_', 'salarySheetCsv', 'finalSalarySheetCsv', 'attendanceSheetCsv',
     'statutoryReportData', 'pfReturnCsv', 'esiReturnCsv', 'statutoryAmountCsv',
     'policyRowsFor', 'attCodeText_', 'SALARY_HEADING_ORDER',
-    'consultantReportEmployees', 'consultantReportRows',
+    'consultantReportEmployees', 'consultantReportRows', 'consultantCsvRows',
+    'excelIdNumber',
     'consultantSummaryEmployees', 'consultantSummaryTotals', 'consultantSummaryCsv',
     'withSalaryCache'];
   var collect = new Function(body + '\nreturn (function(){ var o = {};' +
@@ -2181,7 +2182,9 @@ function buildConsultantPack_(snap, y, m) {
     employees: detailEmps.length,
     reports: [
       { label: 'Consultant Report', fileName: 'Consultant Report - ' + monthVal + '.csv',
-        csv: toCsv_(detail.cols, detail.rows) },
+        // consultantCsvRows, not detail.rows: the identifier columns need their
+        // Excel wrapper, and the emailed copy is the one HR opens in Excel.
+        csv: toCsv_(detail.cols, logic.consultantCsvRows(detail.rows)) },
       { label: 'Consultant Final Summary Report',
         fileName: 'Consultant Final Summary Report - ' + monthVal + '.csv',
         csv: toCsv_(summary.header, summary.rows) }

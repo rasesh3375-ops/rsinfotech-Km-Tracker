@@ -2024,6 +2024,24 @@ function statutoryReportData(employees, attByEmpId, dateList, monthDays, holiday
   return out;
 }
 
+// UAN, ESI number, PF number, bank account — long digit strings that are
+// identifiers, not quantities. Excel's General format turns anything past
+// eleven digits into scientific notation, so a UAN of 102058000000 opens as
+// 1.02058E+11 and two people whose UANs share their first six digits become
+// indistinguishable on a PF return. Worse on the accountant's sheet: past
+// fifteen significant digits Excel does not just display the number
+// differently, it stores a rounded one, so a sixteen-digit bank account can
+// come back with its last digit changed and nothing on screen to say so.
+//
+// ="..." is the one form Excel reads back as text, digits intact. It is
+// applied ONLY to a value that is nothing but digits, which is what every
+// identifier here is — so no value HR types can ever leave this function as a
+// live formula, and a cell that is genuinely text is left exactly as it was.
+function excelIdNumber(v){
+  const s = String(v == null ? '' : v);
+  return /^\d{11,}$/.test(s) ? '="' + s + '"' : s;
+}
+
 // Grouped by salary heading, in the app's own heading order, with a heading
 // row before each group — the shape the returns are filed in.
 function pfReturnCsv(pfRows, pfTot){
@@ -2036,7 +2054,7 @@ function pfReturnCsv(pfRows, pfTot){
     group.forEach(x => {
       sr++;
       const status = x.applicable ? 'Contributing' : (x.notConfigured ? 'Not configured' : 'PF Not Applicable');
-      body.push([sr, x.emp.name, x.emp.id, x.emp.uan || '', x.eligible, x.pfType,
+      body.push([sr, x.emp.name, x.emp.id, excelIdNumber(x.emp.uan), x.eligible, x.pfType,
         Math.round(x.wage + (x.leaveAmount || 0)), x.leaveDays || 0, Math.round(x.leaveAmount || 0), Math.round(x.wage),
         x.applicable ? Math.round(x.employee) : 0, x.applicable ? Math.round(x.epf) : 0, x.applicable ? Math.round(x.eps) : 0,
         x.applicable ? Math.round(x.edli) : 0, x.applicable ? Math.round(x.admin) : 0,
@@ -2064,7 +2082,7 @@ function esiReturnCsv(esiRows, esiTot){
     group.forEach(x => {
       sr++;
       const status = x.r.covered ? 'Covered' : 'Exempt';
-      body.push([sr, x.emp.name, x.emp.esiNumber || '', Math.round(x.s.gross),
+      body.push([sr, x.emp.name, excelIdNumber(x.emp.esiNumber), Math.round(x.s.gross),
         x.r.covered ? Math.round(x.r.employee) : 0, x.r.covered ? Math.round(x.r.employer) : 0,
         x.r.covered ? Math.round(x.r.total) : 0, status, x.r.reason]);
     });
@@ -2168,7 +2186,7 @@ function finalSalarySheetCsv(employees, attByEmpId, dateList, monthDays, holiday
     let sub = 0;
     rows.forEach(r => {
       sr++; sub += r.net; grand += r.net; grandCount++;
-      out.push([sr, r.emp.name, r.emp.bankName || '', r.emp.accountNumber || '',
+      out.push([sr, r.emp.name, r.emp.bankName || '', excelIdNumber(r.emp.accountNumber),
                 r.emp.ifsc || '', Math.round(r.net)]);
     });
     out.push(['', label + ' subtotal', rows.length + ' employee(s)', '', '', Math.round(sub)]);
@@ -2484,6 +2502,22 @@ function consultantReportRows(employees, attByEmpId, dateList, monthDays, holida
   });
   return { cols: CONSULTANT_REPORT_COLS.slice(), rows, workingDays, weekOff, publicHolidays };
 }
+// The same rows, made safe to open in Excel. consultantReportRows above is
+// rendered on screen as well as written to CSV, and ="102058000000" belongs in
+// a spreadsheet cell, not in a table on a phone -- so the identifier columns
+// are wrapped here at the export boundary, exactly where the money columns are
+// rounded rather than in the arithmetic behind them.
+// Found by name, not written as [6,7,8]: insert a column into
+// CONSULTANT_REPORT_COLS one day and the wrapper follows it instead of quietly
+// wrapping whatever moved into position 6.
+const CONSULTANT_ID_COLS = ['PFNo', 'Uan No', 'ESINo']
+  .map(h => CONSULTANT_REPORT_COLS.indexOf(h))
+  .filter(i => i !== -1);
+function consultantCsvRows(rows){
+  return (rows || []).map(r => r.map((cell, i) =>
+    CONSULTANT_ID_COLS.indexOf(i) === -1 ? cell : excelIdNumber(cell)));
+}
+
 function consultantReportEmployees(employees, dateList){
   return (employees || []).filter(e =>
     employedDuringPeriod_(e, dateList[0], dateList[dateList.length - 1]) &&

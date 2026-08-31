@@ -34,7 +34,8 @@ const EXPORTS = ['computeSalaryFromAttendance','computeAttendanceSummary','LEAVE
   'employedDuringPeriod_','salarySheetCsv','finalSalarySheetCsv','attendanceSheetCsv',
   'statutoryReportData','pfReturnCsv','esiReturnCsv','statutoryAmountCsv','policyRowsFor','evaluateAttendanceDay','minToHHMM',
   'attCodeText_','SALARY_HEADING_ORDER','consultantReportEmployees','consultantReportRows',
-  'consultantSummaryEmployees','consultantSummaryTotals','consultantSummaryCsv'];
+  'consultantSummaryEmployees','consultantSummaryTotals','consultantSummaryCsv',
+  'consultantCsvRows','excelIdNumber'];
 
 let box;
 try {
@@ -133,6 +134,8 @@ run('policyRowsFor', () => box.policyRowsFor(employees, att, dateList, holidayMa
 run('evaluateAttendanceDay', () => box.evaluateAttendanceDay({ inMin: 585, outMin: 1170 }));
 run('consultantReportRows', () => box.consultantReportRows(
   box.consultantReportEmployees(employees, dateList), att, dateList, 31, holidayMap, 2026, 7));
+run('consultantCsvRows', () => box.consultantCsvRows(box.consultantReportRows(
+  box.consultantReportEmployees(employees, dateList), att, dateList, 31, holidayMap, 2026, 7).rows));
 run('consultantSummaryCsv', () => box.consultantSummaryCsv(box.consultantSummaryTotals(
   box.consultantSummaryEmployees(employees, dateList), att, dateList, 31, holidayMap)));
 
