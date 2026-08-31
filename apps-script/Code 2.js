@@ -1499,15 +1499,17 @@ function sendDailyDigestEmail() {
 // trigger first, so it can never end up sending twice.
 // removeIncrementReminderTrigger undoes it.
 //
-// The trigger runs DAILY and the function returns immediately unless today
-// is the send day. That is deliberate rather than lazy: Apps Script's
-// onMonthDay(30) simply never fires in February, so one month would be
-// silently skipped every year. isIncrementReminderSendDay_ sends on the
-// 30th, or on the last day of the month when the month is shorter than
-// that — one email a month, every month, February included.
+// The trigger runs DAILY and the function returns immediately unless today is
+// the 1st, the same shape every other monthly email here uses. It used to send
+// on the 30th about the month ahead, which needed a "or the last day of a
+// shorter month" rule because Apps Script's onMonthDay(30) never fires in
+// February. The 1st exists in every month, so that rule is gone with it.
+//
+// Note this one alone reports the month it is SENT in, not the month before:
+// the monthly reports are a record of a finished month, but this is a list of
+// what falls due in the month now starting, so HR has the whole of it to act.
 var INCREMENT_REMINDER_EMAIL = 'rasesh@rsinfotech.net';
-var INCREMENT_REMINDER_DAY = 30;
-var INCREMENT_REMINDER_HOUR = 10; // 10 AM IST
+var INCREMENT_REMINDER_HOUR = 10; // 10 AM IST on the 1st
 
 function createIncrementReminderTrigger() {
   var triggers = ScriptApp.getProjectTriggers();
@@ -1523,8 +1525,8 @@ function createIncrementReminderTrigger() {
     .inTimezone('Asia/Kolkata')
     .create();
   Logger.log('Increment reminder trigger created — sendIncrementReminderEmail now runs daily around ' +
-    INCREMENT_REMINDER_HOUR + ':00 IST and emails only on day ' + INCREMENT_REMINDER_DAY +
-    ' (or the last day of a shorter month).');
+    INCREMENT_REMINDER_HOUR + ':00 IST and emails only on the 1st, listing the increments ' +
+    'due in the month then starting.');
 }
 
 // Undoes createIncrementReminderTrigger — stops the monthly email without
@@ -1541,30 +1543,16 @@ function removeIncrementReminderTrigger() {
   Logger.log('Removed ' + removed + ' increment reminder trigger(s).');
 }
 
-// The 30th, or the last day of the month when the month is shorter than that.
-// m is 1-based; new Date(y, m, 0) is the last day of month m.
-function isIncrementReminderSendDay_(y, m, d) {
-  var lastDay = new Date(y, m, 0).getDate();
-  return d === Math.min(INCREMENT_REMINDER_DAY, lastDay);
-}
-
-// 'YYYY-MM' of the month after the one given, rolling the year over in December.
-function nextMonthYm_(y, m) {
-  var ny = m === 12 ? y + 1 : y;
-  var nm = m === 12 ? 1 : m + 1;
-  return ny + '-' + (nm < 10 ? '0' + nm : String(nm));
-}
-
 // The function the trigger calls. Also safe to run by hand from the editor at
 // any time to see the email immediately — pass true to skip the day check.
 function sendIncrementReminderEmail(force) {
   var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
-  var y = Number(istToday.slice(0, 4));
-  var m = Number(istToday.slice(5, 7));
-  var d = Number(istToday.slice(8, 10));
-  if (force !== true && !isIncrementReminderSendDay_(y, m, d)) return;
+  if (force !== true && Number(istToday.slice(8, 10)) !== 1) return;
 
-  var targetYm = nextMonthYm_(y, m);
+  // The month being sent in, not the one before it — see the note above the
+  // trigger. Taken off the IST date string rather than worked out from a Date's
+  // own month, so it cannot land in the wrong month in a timezone behind UTC.
+  var targetYm = istToday.slice(0, 7);
   var sheet = getSheet_();
   var employees = allEmployeesFromRows_(sheet.getDataRange().getValues());
 
