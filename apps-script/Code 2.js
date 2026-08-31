@@ -2016,8 +2016,8 @@ function buildMonthlyReportPack_(snap, y, m) {
     pf = logic.statutoryReportData(employees, att, dateList, monthDays, holidayMap, 'pf');
     esi = logic.statutoryReportData(employees, att, dateList, monthDays, holidayMap, 'esi');
     pt = logic.statutoryReportData(employees, att, dateList, monthDays, holidayMap, 'pt');
-    pfCsv = logic.pfReturnCsv(pf.pfRows, pf.pfTot);
-    esiCsv = logic.esiReturnCsv(esi.esiRows, esi.esiTot);
+    pfCsv = logic.pfReturnCsv(pf.pfRows, pf.pfTot, pf.pfExcluded);
+    esiCsv = logic.esiReturnCsv(esi.esiRows, esi.esiTot, esi.esiExcluded);
     ptCsv = logic.statutoryAmountCsv(pt.rows, pt.grandTotal, 'pt');
   });
   assertWithinBudget_(startedAt, 'Building the monthly report pack');
@@ -2220,10 +2220,15 @@ function csvEscape_(v) {
   var s = (v === null || v === undefined) ? '' : String(v);
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
+// The leading \uFEFF is a UTF-8 byte order mark, and it is load-bearing on
+// Windows. Without it Excel opens a .csv in the system codepage, not UTF-8, so
+// every rupee sign arrives as "a,1" and every em dash as "a\u20ac\"" -- which is
+// what made the PF and ESI returns unreadable in the Rule Applied column. The
+// mark costs three bytes and every other reader ignores it.
 function toCsv_(header, rows) {
   var out = [header.map(csvEscape_).join(',')];
   for (var i = 0; i < rows.length; i++) out.push(rows[i].map(csvEscape_).join(','));
-  return out.join('\n');
+  return '\uFEFF' + out.join('\n');
 }
 
 var MONTHLY_REPORTS_EMAIL = 'rasesh@rsinfotech.net';
@@ -3284,12 +3289,18 @@ function sendMonthlyAdvanceSummaryEmail(force) {
         addedOn: h.addedOn || '',
         left: e.employmentStatus === 'left'
       };
-      if (h.addedOn && String(h.addedOn).slice(0, 7) === ym) paidOut.push(who);
+      // Paid out in this month: by the day it was entered where that is
+      // recorded, and otherwise by the month it belongs to. The fallback
+      // matters -- an advance carrying no addedOn (entered before the stamp
+      // existed) was counted under Recovered but not under Paid out, so the
+      // same 3,000 made the email's own two halves disagree. Same money, two
+      // sections, one of them silently short.
+      var addedYm = h.addedOn ? String(h.addedOn).slice(0, 7) : '';
+      if (addedYm ? addedYm === ym : h.month === ym) paidOut.push(who);
       if (h.month === ym) {
         recovered.push(who);
-        // An entry recovered this month that carries no addedOn predates the
-        // stamp — worth counting so the email can say why the two sections may
-        // not line up, rather than leaving it looking like a discrepancy.
+        // Still counted, so the email can say how many entries are dated only
+        // by their month rather than by the day they were entered.
         if (!h.addedOn) undatedInMonth++;
       }
     });

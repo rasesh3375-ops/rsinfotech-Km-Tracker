@@ -9473,7 +9473,12 @@ async function renderStatutoryReport(key, label){
   const pfRows = data.pfRows, pfTot = data.pfTot;
   const esiRows = data.esiRows, esiTot = data.esiTot;
 
-  if(key === 'pf' && pfRows.length){
+  // pfExcluded as well as pfRows: now that non-members are filtered out, a
+  // month where nobody contributes would otherwise make the whole PF Return
+  // disappear -- no screen, no file, no attachment in the monthly pack, and
+  // nothing to say why. A return that says "no members this month, and here is
+  // who was left off" is the honest version of empty.
+  if(key === 'pf' && (pfRows.length || (data.pfExcluded || []).length)){
     const money = rupees;
     let body = '';
     let sr = 0;
@@ -9521,7 +9526,7 @@ async function renderStatutoryReport(key, label){
         }
       });
     });
-    const pfCsvParts = pfReturnCsv(pfRows, pfTot);
+    const pfCsvParts = pfReturnCsv(pfRows, pfTot, data.pfExcluded);
     const csv = toCsv(pfCsvParts.header, pfCsvParts.rows);
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'PF'), `PF Return - ${monthVal}.csv`, csv, 'text/csv');
     const pfGrandCard = hrCard('<strong>Grand Total</strong>',
@@ -9568,7 +9573,8 @@ async function renderStatutoryReport(key, label){
     return;
   }
 
-  if(key === 'esi' && esiRows.length){
+  // Same as PF above — an empty ESI Return still has to be produced and say so.
+  if(key === 'esi' && (esiRows.length || (data.esiExcluded || []).length)){
     const period = esiContributionPeriod(dateList[0]);
     const money = rupees;
     let body = '';
@@ -9605,7 +9611,7 @@ async function renderStatutoryReport(key, label){
         }
       });
     });
-    const esiCsvParts = esiReturnCsv(esiRows, esiTot);
+    const esiCsvParts = esiReturnCsv(esiRows, esiTot, data.esiExcluded);
     const csv = toCsv(esiCsvParts.header, esiCsvParts.rows);
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'ESI'), `ESI Return - ${monthVal}.csv`, csv, 'text/csv');
     const esiGrandCard = hrCard('<strong>Total</strong>',
