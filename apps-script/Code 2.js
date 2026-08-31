@@ -1746,10 +1746,10 @@ function sendBirthdayReminderEmail() {
 
 // ===== Monthly report pack, emailed on the 1st for the month just ended =====
 //
-// This ATTACHES the CSVs the app already filed in Drive. It does not compute a
-// single figure of its own, and it must never be changed to.
+// This builds the six reports at send time from shared/report-logic.js, and
+// does not compute a single figure of its own — it must never be changed to.
 //
-// Every number in these six reports comes out of index.html —
+// Every number in these six reports comes out of that shared file —
 // computeSalaryForEmployee, calculatePfFor, computeEsi, monthlyPtFor, the
 // attendance resolver, sandwich leave, loan and advance recovery. Working any
 // of that out a second time here would be a second copy of the payroll
@@ -1761,13 +1761,12 @@ function sendBirthdayReminderEmail() {
 // worst version of that bug — the figures would drift and the drift would be
 // invisible until somebody's bank transfer was wrong.
 //
-// So the deal is: whatever HR saw on screen is exactly what gets attached,
-// byte for byte, because it IS the file the report wrote when HR opened it.
-// The consequence is that a report nobody opened for that month has no file to
-// attach, and the email says so by name instead of quietly arriving one
-// attachment short. Each attachment is also stamped with the date its Drive
-// copy was last written, so a copy generated mid-month — before attendance was
-// finished — is visible as stale rather than trusted silently.
+// So the deal is: whatever HR sees on screen is what gets attached, because
+// both come out of the same functions over the same records. An earlier version
+// attached whichever CSV the app had last filed in Drive, which made an emailed
+// report only as fresh as the last time somebody happened to open it — and
+// silently one attachment short if nobody ever had. See "Fresh report
+// generation" below for how it works now.
 // ===== Fresh report generation =====
 //
 // Every report email below builds its own figures at the moment it runs. It
@@ -1942,13 +1941,18 @@ function buildLeaveDetailReport_(snap, y, m) {
   var holidayMap = holidayMapFromSheet_(snap.map);
   var attByEmpId = attendanceForMonth_(snap.map, employees, y, m, holidayMap, logic);
   var built = logic.leaveDetailReportRows(employees, attByEmpId, dateList, holidayMap);
+  // sheet is what goes in the file, in either format: the flat CSV shape of the
+  // rows, not the objects in built.rows that the email prose counts.
+  var sheet = { header: logic.leaveDetailCsvHeader(), rows: logic.leaveDetailCsvRows(built.rows) };
   return {
+    label: 'Monthly Leave Detail Report',
     monthLabel: monthLabel,
     fileName: 'Monthly Leave Detail Report - ' + monthLabel + '.csv',
-    header: logic.leaveDetailCsvHeader(),
+    header: sheet.header,
     rows: built.rows,
     onRoll: built.all.length,
-    csv: toCsv_(logic.leaveDetailCsvHeader(), logic.leaveDetailCsvRows(built.rows))
+    sheet: sheet,
+    csv: toCsv_(sheet.header, sheet.rows)
   };
 }
 
@@ -1971,21 +1975,38 @@ function buildLoanAdvanceReport_(snap, y, m) {
   // attachment is the report's own arithmetic and not a second version of it
   // added up here.
   var totals = logic.loanLedgerTotals(ledger);
+  var sheet = { header: logic.loanLedgerCsvHeader(),
+                rows: logic.loanLedgerCsvRows(ledger).concat([logic.loanLedgerCsvTotalRow(ledger)]) };
   return {
+    label: 'Loan & Advance Report',
     monthLabel: monthLabel,
     fileName: 'Loan & Advance Report - ' + monthLabel + '.csv',
     rows: ledger,
     outstanding: Math.round(totals.balance),
     monthlyRecovery: Math.round(totals.emiThisMonth),
     stalled: stalled,
-    csv: toCsv_(logic.loanLedgerCsvHeader(),
-                logic.loanLedgerCsvRows(ledger).concat([logic.loanLedgerCsvTotalRow(ledger)]))
+    sheet: sheet,
+    csv: toCsv_(sheet.header, sheet.rows)
+  };
+}
+
+// One report in a pack, in the two forms it has to exist in: the CSV that the
+// freshness checks, the attachment size budget and the Drive copies read, and
+// the header and rows the workbook builder lays out column widths from. Built
+// from one pair of arrays, so the file that is checked and the file that is
+// sent can never hold different figures.
+function packReport_(label, monthVal, header, rows) {
+  return {
+    label: label,
+    fileName: label + ' - ' + monthVal + '.csv',
+    sheet: { header: header, rows: rows },
+    csv: toCsv_(header, rows)
   };
 }
 
 // ---- The monthly report pack, all six generated here and now ----
 // One snapshot of the sheet, one load of the shared logic, one set of
-// attendance reads, then six CSVs off the same figures — so the Salary Sheet
+// attendance reads, then six reports off the same figures — so the Salary Sheet
 // and the PF return in the same email cannot disagree about anyone's basic.
 function buildMonthlyReportPack_(snap, y, m) {
   var startedAt = Date.now();
@@ -2028,19 +2049,12 @@ function buildMonthlyReportPack_(snap, y, m) {
     monthLabel: monthLabel,
     employees: employees.length,
     reports: [
-      { label: 'Salary Sheet', fileName: 'Salary Sheet - ' + monthVal + '.csv',
-        csv: toCsv_(salary.cols, salary.rows) },
-      { label: 'Final Salary Sheet for Accountant',
-        fileName: 'Final Salary Sheet for Accountant - ' + monthVal + '.csv',
-        csv: toCsv_(finalSal.cols, finalSal.rows) },
-      { label: 'Attendance Sheet', fileName: 'Attendance Sheet - ' + monthVal + '.csv',
-        csv: toCsv_(attendance.header, attendance.rows) },
-      { label: 'PF Return', fileName: 'PF Return - ' + monthVal + '.csv',
-        csv: toCsv_(pfCsv.header, pfCsv.rows) },
-      { label: 'ESI Return', fileName: 'ESI Return - ' + monthVal + '.csv',
-        csv: toCsv_(esiCsv.header, esiCsv.rows) },
-      { label: 'PT Report', fileName: 'PT Report - ' + monthVal + '.csv',
-        csv: toCsv_(ptCsv.header, ptCsv.rows) }
+      packReport_('Salary Sheet', monthVal, salary.cols, salary.rows),
+      packReport_('Final Salary Sheet for Accountant', monthVal, finalSal.cols, finalSal.rows),
+      packReport_('Attendance Sheet', monthVal, attendance.header, attendance.rows),
+      packReport_('PF Return', monthVal, pfCsv.header, pfCsv.rows),
+      packReport_('ESI Return', monthVal, esiCsv.header, esiCsv.rows),
+      packReport_('PT Report', monthVal, ptCsv.header, ptCsv.rows)
     ]
   };
 }
@@ -2181,13 +2195,12 @@ function buildConsultantPack_(snap, y, m) {
     monthLabel: monthLabel,
     employees: detailEmps.length,
     reports: [
-      { label: 'Consultant Report', fileName: 'Consultant Report - ' + monthVal + '.csv',
-        // consultantCsvRows, not detail.rows: the identifier columns need their
-        // Excel wrapper, and the emailed copy is the one HR opens in Excel.
-        csv: toCsv_(detail.cols, logic.consultantCsvRows(detail.rows)) },
-      { label: 'Consultant Final Summary Report',
-        fileName: 'Consultant Final Summary Report - ' + monthVal + '.csv',
-        csv: toCsv_(summary.header, summary.rows) }
+      // consultantCsvRows, not detail.rows: the identifier columns need their
+      // Excel marker, and the emailed copy is the one HR opens in Excel. The
+      // workbook builder reads that same marker and lays the digits out as
+      // text; the CSV keeps the ="..." form, which is what Excel needs there.
+      packReport_('Consultant Report', monthVal, detail.cols, logic.consultantCsvRows(detail.rows)),
+      packReport_('Consultant Final Summary Report', monthVal, summary.header, summary.rows)
     ]
   };
 }
@@ -2229,6 +2242,227 @@ function toCsv_(header, rows) {
   var out = [header.map(csvEscape_).join(',')];
   for (var i = 0; i < rows.length; i++) out.push(rows[i].map(csvEscape_).join(','));
   return '\uFEFF' + out.join('\n');
+}
+
+// ---- The same figures, as a real Excel workbook ----
+//
+// A CSV cannot carry a column width. There is nowhere in the format to put one,
+// so every report arrived with all twenty columns at Excel's default and the
+// consultant widened them by hand, every month, before a single name was
+// readable. Nor can a CSV say "this cell is text" except by the ="..." trick
+// below, or "this cell is a number Excel may sum".
+//
+// So the emailed copy is now an .xlsx, built here. The OOXML parts are written
+// out and zipped rather than round-tripping through a temporary Google Sheet:
+// no temp file to create, delete, and leak in Drive if a run dies halfway, no
+// extra Drive scope on this script, and milliseconds instead of seconds apiece
+// across ten attachments inside a six-minute budget.
+//
+// The CSV is still built for every report, unchanged \u2014 it is what the freshness
+// checks, the size budget and the Drive copies read. One header and one set of
+// rows feed both, so the file that is checked and the file that is sent cannot
+// hold different figures.
+
+function xlsxEscape_(v) {
+  return String(v === null || v === undefined ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    // Excel refuses to open a file containing raw control characters.
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+}
+
+function xlsxColName_(n) {
+  var s = '';
+  while (n > 0) { var m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = (n - m - 1) / 26; }
+  return s;
+}
+
+// A cell the shared logic marked as an identifier by putting it through
+// excelIdNumber, which wraps a long digit string as ="102057612761". In a CSV
+// that wrapper is the only form Excel reads back as text with the digits
+// intact; in an xlsx the cell carries a real text number format, so the wrapper
+// would be shown literally and the UAN column would read ="102057612761" \u2014
+// worse than the scientific notation it exists to prevent. One marker, two
+// renderers: the shared logic goes on saying "this is an identifier" in exactly
+// one place, and neither file format has to be told again.
+function xlsxUnwrapId_(v) {
+  var m = /^="(\d+)"$/.exec(String(v === null || v === undefined ? '' : v));
+  return m ? m[1] : null;
+}
+
+// A number for Excel only when the cell really is one, so the consultant can
+// sum a column of rupees. Blank stays blank, and anything with a letter, a
+// comma or a leading zero stays text \u2014 an employee code of 007 must not arrive
+// as 7.
+function xlsxIsNumber_(v) {
+  if (typeof v === 'number') return isFinite(v);
+  var s = String(v === null || v === undefined ? '' : v).trim();
+  if (!s) return false;
+  if (!/^-?\d+(\.\d+)?$/.test(s)) return false;
+  if (/^-?0\d/.test(s)) return false;
+  return String(Number(s)) === s;
+}
+
+// Column width in Excel's units, from the widest thing actually in the column.
+// Clamped so one long Rule Applied sentence cannot push a column off the screen
+// and a one-character column is still wide enough to click.
+function xlsxColWidths_(header, rows, minW, maxW) {
+  var widths = [];
+  var consider = function (i, v) {
+    var id = xlsxUnwrapId_(v);
+    var len = String(id === null ? (v === null || v === undefined ? '' : v) : id).length;
+    if (!(widths[i] > len)) widths[i] = len;
+  };
+  (header || []).forEach(function (h, i) { consider(i, h); });
+  (rows || []).forEach(function (r) { (r || []).forEach(function (c, i) { consider(i, c); }); });
+  return widths.map(function (w) {
+    return Math.min(maxW, Math.max(minW, (w || 0) + 2));
+  });
+}
+
+// header: array of column names. rows: array of arrays. Returns the OOXML parts
+// of a one-sheet workbook, each { path, content }, in the order they must be
+// zipped. Identifier columns need no argument here \u2014 they are recognised by
+// excelIdNumber's own marker, whichever column they land in.
+function xlsxParts_(sheetName, header, rows) {
+  var widths = xlsxColWidths_(header, rows, 8, 60);
+
+  var cols = widths.map(function (w, i) {
+    return '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + w.toFixed(2) +
+           '" customWidth="1"/>';
+  }).join('');
+
+  var cell = function (rowNum, colIdx, value, styleId) {
+    var ref = xlsxColName_(colIdx + 1) + rowNum;
+    var id = xlsxUnwrapId_(value);
+    if (id !== null) { value = id; styleId = 2; }   // style 2 = text format
+    var s = styleId ? ' s="' + styleId + '"' : '';
+    if (value === null || value === undefined || value === '') return '<c r="' + ref + '"' + s + '/>';
+    if (id === null && xlsxIsNumber_(value)) {
+      return '<c r="' + ref + '"' + s + '><v>' + Number(value) + '</v></c>';
+    }
+    // Inline strings, so there is no sharedStrings.xml to keep in step.
+    return '<c r="' + ref + '"' + s + ' t="inlineStr"><is><t xml:space="preserve">' +
+           xlsxEscape_(value) + '</t></is></c>';
+  };
+
+  var body = '<row r="1">' + (header || []).map(function (h, i) {
+    return cell(1, i, h, 1);                        // style 1 = bold header
+  }).join('') + '</row>';
+
+  (rows || []).forEach(function (r, ri) {
+    var n = ri + 2;
+    body += '<row r="' + n + '">' + (r || []).map(function (c, i) {
+      return cell(n, i, c, 0);
+    }).join('') + '</row>';
+  });
+
+  var lastCol = xlsxColName_(Math.max(1, (header || []).length));
+  var sheet =
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<dimension ref="A1:' + lastCol + Math.max(1, (rows || []).length + 1) + '"/>' +
+    '<sheetViews><sheetView workbookViewId="0">' +
+    // The header stays put while a 200-row sheet scrolls, so column 14 is still
+    // identifiable at row 150.
+    '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>' +
+    '</sheetView></sheetViews>' +
+    '<sheetFormatPr defaultRowHeight="15"/>' +
+    (cols ? '<cols>' + cols + '</cols>' : '') +
+    '<sheetData>' + body + '</sheetData></worksheet>';
+
+  var styles =
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<fonts count="2">' +
+      '<font><sz val="11"/><name val="Calibri"/></font>' +
+      '<font><b/><sz val="11"/><name val="Calibri"/></font>' +
+    '</fonts>' +
+    '<fills count="2"><fill><patternFill patternType="none"/></fill>' +
+      '<fill><patternFill patternType="gray125"/></fill></fills>' +
+    '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+    '<cellXfs count="3">' +
+      '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+      '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+      '<xf numFmtId="49" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
+    '</cellXfs>' +
+    '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
+    '</styleSheet>';
+
+  // Excel's own limits on a sheet tab name: 31 characters, and none of \ / ? * [ ] :
+  var safeName = String(sheetName || 'Sheet1').replace(/[\\\/\?\*\[\]:]/g, ' ').slice(0, 31) || 'Sheet1';
+
+  return [
+    { path: '[Content_Types].xml', content:
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+      '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+      '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
+      '</Types>' },
+    { path: '_rels/.rels', content:
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
+      '</Relationships>' },
+    { path: 'xl/workbook.xml', content:
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
+      'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+      '<sheets><sheet name="' + xlsxEscape_(safeName) + '" sheetId="1" r:id="rId1"/></sheets>' +
+      '</workbook>' },
+    { path: 'xl/_rels/workbook.xml.rels', content:
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
+      '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
+      '</Relationships>' },
+    { path: 'xl/styles.xml', content: styles },
+    { path: 'xl/worksheets/sheet1.xml', content: sheet }
+  ];
+}
+
+// An .xlsx is a zip of those parts, and Utilities.zip takes each blob's name as
+// its entry path \u2014 slashes included \u2014 which is the whole reason this can be
+// done without a library. [Content_Types].xml goes first because some readers
+// expect it there.
+function xlsxBytes_(sheetName, header, rows) {
+  var parts = xlsxParts_(sheetName, header, rows);
+  var blobs = [];
+  for (var i = 0; i < parts.length; i++) {
+    blobs.push(Utilities.newBlob(parts[i].content, 'application/xml', parts[i].path));
+  }
+  return Utilities.zip(blobs).getBytes();
+}
+
+var XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+// The name the attachment actually arrives under. report.fileName stays the
+// .csv name every report has always filed under in Drive, so the Drive copy and
+// the emailed copy are still recognisably the same report \u2014 only the extension
+// differs, because only one of the two can carry column widths.
+function attachmentName_(report) {
+  return String(report.fileName).replace(/\.csv$/i, '') + '.xlsx';
+}
+
+// If anything goes wrong assembling the workbook, attach the CSV instead of
+// letting the whole email fail. This runs OUTSIDE the try/catch that guards the
+// report build, so an exception here would mean HR got no email at all on the
+// 1st — not even the "could not be generated" one that names the reason. A CSV
+// with unhelpful column widths is a far better outcome than silence, and the
+// reason is in the log either way.
+function reportAttachment_(report) {
+  try {
+    return Utilities.newBlob(xlsxBytes_(report.label, report.sheet.header, report.sheet.rows),
+                             XLSX_MIME, attachmentName_(report));
+  } catch (e) {
+    Logger.log('The workbook for ' + report.label + ' could not be built (' +
+      (e && e.message ? e.message : e) + '), so the CSV was attached instead.');
+    return Utilities.newBlob(report.csv, 'text/csv', report.fileName);
+  }
 }
 
 var MONTHLY_REPORTS_EMAIL = 'rasesh@rsinfotech.net';
@@ -2302,7 +2536,7 @@ function sendMonthlyReportsEmail(force) {
   var subject, plain, html, attachments = [];
   if (pack) {
     for (var i = 0; i < pack.reports.length; i++) {
-      attachments.push(Utilities.newBlob(pack.reports[i].csv, 'text/csv', pack.reports[i].fileName));
+      attachments.push(reportAttachment_(pack.reports[i]));
     }
     subject = 'R.S. Infotech — Monthly Reports — ' + monthLabel;
     var generatedAt = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd/MM/yyyy HH:mm');
@@ -2317,7 +2551,7 @@ function sendMonthlyReportsEmail(force) {
       'font-family:Arial,sans-serif;font-size:13px;">' +
       '<tr><th align="left">Report</th><th align="left">File</th><th align="right">Rows</th></tr>';
     for (var j = 0; j < pack.reports.length; j++) {
-      html += '<tr><td>' + esc(pack.reports[j].label) + '</td><td>' + esc(pack.reports[j].fileName) +
+      html += '<tr><td>' + esc(pack.reports[j].label) + '</td><td>' + esc(attachments[j].getName()) +
         '</td><td align="right">' + (pack.reports[j].csv.split('\n').length - 1) + '</td></tr>';
     }
     html += '</table>';
@@ -2435,7 +2669,7 @@ function sendLoanAdvanceReportEmail(force) {
 
   var subject, plain, html, attachments = [];
   if (report) {
-    attachments.push(Utilities.newBlob(report.csv, 'text/csv', report.fileName));
+    attachments.push(reportAttachment_(report));
     subject = 'R.S. Infotech — Loan & Advance Report — ' + monthLabel;
     var generatedAt = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd/MM/yyyy HH:mm');
     var lead = 'Attached is the Loan & Advance Report for ' + monthLabel + ' — the position as it ' +
@@ -2452,14 +2686,14 @@ function sendLoanAdvanceReportEmail(force) {
       '<table cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;' +
       'font-family:Arial,sans-serif;font-size:13px;">' +
       '<tr><td><strong>Month</strong></td><td>' + esc(monthLabel) + '</td></tr>' +
-      '<tr><td><strong>File</strong></td><td>' + esc(report.fileName) + '</td></tr>' +
+      '<tr><td><strong>File</strong></td><td>' + esc(attachments[0].getName()) + '</td></tr>' +
       '<tr><td><strong>Loans</strong></td><td>' + report.rows.length + '</td></tr>' +
       '<tr><td><strong>Outstanding</strong></td><td>' + esc(rupeesIn_(report.outstanding)) + '</td></tr>' +
       '<tr><td><strong>Generated</strong></td><td>' + esc(generatedAt) + '</td></tr>' +
       '</table>';
     plain = lead + '\n\n' + figures + '\n' + (warn ? warn + '\n' : '') + '\n' + freshness + '\n\n' +
       '  Month      : ' + monthLabel + '\n' +
-      '  File       : ' + report.fileName + '\n' +
+      '  File       : ' + attachments[0].getName() + '\n' +
       '  Loans      : ' + report.rows.length + '\n' +
       '  Outstanding: ' + rupeesIn_(report.outstanding) + '\n' +
       '  Generated  : ' + generatedAt + '\n';
@@ -2568,7 +2802,7 @@ function sendLeaveDetailReportEmail(force) {
 
   var subject, plain, html, attachments = [];
   if (report) {
-    attachments.push(Utilities.newBlob(report.csv, 'text/csv', report.fileName));
+    attachments.push(reportAttachment_(report));
     subject = 'R.S. Infotech — Monthly Leave Detail Report — ' + monthLabel;
     var generatedAt = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd/MM/yyyy HH:mm');
     var lead = 'Attached is the Monthly Leave Detail Report for ' + monthLabel + '.';
@@ -2586,13 +2820,13 @@ function sendLeaveDetailReportEmail(force) {
       '<table cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;' +
       'font-family:Arial,sans-serif;font-size:13px;">' +
       '<tr><td><strong>Month</strong></td><td>' + esc(monthLabel) + '</td></tr>' +
-      '<tr><td><strong>File</strong></td><td>' + esc(report.fileName) + '</td></tr>' +
+      '<tr><td><strong>File</strong></td><td>' + esc(attachments[0].getName()) + '</td></tr>' +
       '<tr><td><strong>Employees listed</strong></td><td>' + report.rows.length + ' of ' + report.onRoll + '</td></tr>' +
       '<tr><td><strong>Generated</strong></td><td>' + esc(generatedAt) + '</td></tr>' +
       '</table>';
     plain = lead + '\n\n' + note + '\n\n' + freshness + '\n\n' +
       '  Month            : ' + monthLabel + '\n' +
-      '  File             : ' + report.fileName + '\n' +
+      '  File             : ' + attachments[0].getName() + '\n' +
       '  Employees listed : ' + report.rows.length + ' of ' + report.onRoll + '\n' +
       '  Generated        : ' + generatedAt + '\n';
   } else {
@@ -2699,7 +2933,7 @@ function sendConsultantReportEmail(force) {
   var subject, plain, html, attachments = [];
   if (pack) {
     for (var i = 0; i < pack.reports.length; i++) {
-      attachments.push(Utilities.newBlob(pack.reports[i].csv, 'text/csv', pack.reports[i].fileName));
+      attachments.push(reportAttachment_(pack.reports[i]));
     }
     subject = 'R.S. Infotech — Consultant Reports — ' + monthLabel;
     var generatedAt = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd/MM/yyyy HH:mm');
@@ -2713,7 +2947,7 @@ function sendConsultantReportEmail(force) {
       'font-family:Arial,sans-serif;font-size:13px;">' +
       '<tr><th align="left">Report</th><th align="left">File</th><th align="right">Rows</th></tr>';
     for (var j = 0; j < pack.reports.length; j++) {
-      html += '<tr><td>' + esc(pack.reports[j].label) + '</td><td>' + esc(pack.reports[j].fileName) +
+      html += '<tr><td>' + esc(pack.reports[j].label) + '</td><td>' + esc(attachments[j].getName()) +
         '</td><td align="right">' + (pack.reports[j].csv.split('\n').length - 1) + '</td></tr>';
     }
     html += '</table>';

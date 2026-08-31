@@ -9382,7 +9382,7 @@ async function renderStatutoryReport(key, label){
       const group = pfRows.filter(x => x.headingKey === hk);
       if(!group.length) return;
       if(isCompact) body += hrHeadingCard(SALARY_HEADINGS[hk].label);
-      else body += `<tr class="sal-heading"><td colspan="13">${escapeHtml(SALARY_HEADINGS[hk].label)}</td></tr>`;
+      else body += `<tr class="sal-heading"><td colspan="14">${escapeHtml(SALARY_HEADINGS[hk].label)}</td></tr>`;
       group.forEach(x => {
         sr++;
         const status = (x.applicable ? 'Contributing' : (x.notConfigured ? 'Not configured' : 'PF Not Applicable'));
@@ -9394,6 +9394,8 @@ async function renderStatutoryReport(key, label){
             hrRow('Final Payable Basic', money(x.wage)) +
             hrRow('Employee', x.applicable ? money(x.employee) : '—') +
             hrRow('Employer EPF', x.applicable ? money(x.epf) : '—') +
+            hrRow('Employee + Employer EPF (PF Account 1)',
+                  x.applicable ? money(pfAccount1(x.employee, x.epf)) : '—') +
             hrRow('Employer EPS (PF Account 10)', x.applicable ? money(x.eps) : '—') +
             hrRow('Admin (PF Account 2)', x.applicable ? money(x.admin) : '—') +
             hrRow('EDLI (PF Account 21)', x.applicable ? money(x.edli) : '—') +
@@ -9411,6 +9413,7 @@ async function renderStatutoryReport(key, label){
         <td class="num">${money(x.wage)}</td>
         <td class="num">${x.applicable ? money(x.employee) : '—'}</td>
         <td class="num">${x.applicable ? money(x.epf) : '—'}</td>
+        <td class="num">${x.applicable ? money(pfAccount1(x.employee, x.epf)) : '—'}</td>
         <td class="num">${x.applicable ? money(x.eps) : '—'}</td>
         <td class="num">${x.applicable ? money(x.admin) : '—'}</td>
         <td class="num">${x.applicable ? money(x.edli) : '—'}</td>
@@ -9427,7 +9430,9 @@ async function renderStatutoryReport(key, label){
     queueFileToDrive(hrYearPath(monthVal + '-01', 'Reports', 'PF'), `PF Return - ${monthVal}.csv`, csv, 'text/csv');
     const pfGrandCard = hrCard('<strong>Grand Total</strong>',
       hrRow('Final Payable Basic', money(pfTot.wage)) + hrRow('Employee', money(pfTot.employee)) +
-      hrRow('Employer EPF', money(pfTot.epf)) + hrRow('Employer EPS (PF Account 10)', money(pfTot.eps)) +
+      hrRow('Employer EPF', money(pfTot.epf)) +
+      hrRow('Employee + Employer EPF (PF Account 1)', money(pfAccount1(pfTot.employee, pfTot.epf))) +
+      hrRow('Employer EPS (PF Account 10)', money(pfTot.eps)) +
       hrRow('Admin (PF Account 2)', money(pfTot.admin)) + hrRow('EDLI (PF Account 21)', money(pfTot.edli)) +
       hrRow('Employer Total', money(pfTot.epf + pfTot.eps + pfTot.admin + pfTot.edli)) +
       `<div class="hr-sheet-net"><span>Grand Total</span><span>${money(pfTot.total)}</span></div>`,
@@ -9438,13 +9443,17 @@ async function renderStatutoryReport(key, label){
         <thead><tr><th>#</th><th>Employee</th><th>Eligible / Type</th>
           <th class="num">Leave<br><span class="th-sub">days / ₹</span></th>
           <th class="num">Final Payable<br><span class="th-sub">${PF_RULES.wageComponents.map(k => ({ basic:'Basic', hra:'HRA', lta:'LTA' }[k] || k)).join(' + ')}</span></th>
-          <th class="num">Employee</th><th class="num">Empr EPF</th><th class="num">Empr EPS (PF Account 10)</th>
+          <th class="num">Employee</th><th class="num">Empr EPF</th>
+          <th class="num">Emp + Empr EPF<br><span class="th-sub">PF Account 1</span></th>
+          <th class="num">Empr EPS (PF Account 10)</th>
           <th class="num">Admin (PF Account 2)</th><th class="num">EDLI (PF Account 21)</th>
           <th class="num">Employer Total</th><th class="num">Grand Total</th><th>Status</th></tr></thead>
         <tbody>${body}
           <tr class="pay-total"><td></td><td><strong>Grand Total</strong></td><td></td><td></td>
             <td class="num">${money(pfTot.wage)}</td><td class="num">${money(pfTot.employee)}</td>
-            <td class="num">${money(pfTot.epf)}</td><td class="num">${money(pfTot.eps)}</td>
+            <td class="num">${money(pfTot.epf)}</td>
+            <td class="num">${money(pfAccount1(pfTot.employee, pfTot.epf))}</td>
+            <td class="num">${money(pfTot.eps)}</td>
             <td class="num">${money(pfTot.admin)}</td><td class="num">${money(pfTot.edli)}</td>
             <td class="num">${money(pfTot.epf + pfTot.eps + pfTot.admin + pfTot.edli)}</td>
             <td class="num">${money(pfTot.total)}</td><td></td></tr>
