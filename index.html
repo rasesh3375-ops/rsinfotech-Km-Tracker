@@ -9310,12 +9310,37 @@ async function renderSalarySheet(){
   let srNo = 1;
   const grand = { rate:0, leaveAmount:0, policyHalfDays:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, loanEmi:0, loanBalance:0, retention:0, totalDeduction:0, conveyance:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0, directPaid:0, netBeforeDirect:0 };
   const R = v => Math.round(Number(v) || 0);
+  // One markup for all three totals rows. Subtotal and Grand Total were two
+  // copies of the same thirty-odd cells; adding a third for the staff total
+  // would have been three places to keep in step every time a column moves.
+  const salaryTotalsRow_ = (label, t, rowCls, cardCls) => {
+  return isCompact ? salaryMobileTotalsCard(label, t, cardCls) : `<tr class="${rowCls}"><td class="sal-sr"></td><td class="sal-name">${label}</td><td>${fmtMoney(t.rate)}</td><td></td><td class="sal-col-2nd">${t.policyHalfDays || '—'}</td><td class="sal-col-2nd">${fmtMoney(t.leaveAmount)}</td>` +
+    `<td>${fmtMoney(t.basic)}</td><td>${fmtMoney(t.hra)}</td><td>${fmtMoney(t.lta)}</td><td>${fmtMoney(t.gross)}</td>` +
+    `<td class="sal-col-2nd">${fmtMoney(t.pf)}</td><td class="sal-col-2nd">${fmtMoney(t.esi)}</td><td class="sal-col-2nd">${fmtMoney(t.pt)}</td><td class="sal-col-2nd">${fmtMoney(t.advanceTemp)}</td><td class="sal-col-2nd">${fmtMoney(t.advance)}</td><td class="sal-col-2nd">${fmtMoney(t.loanEmi)}</td><td class="sal-col-2nd">${fmtMoney(t.retention)}</td>` +
+    `<td class="sal-col-2nd">${fmtMoney(t.totalDeduction)}</td><td class="sal-col-2nd">${t.conveyance ? '+' + fmtMoney(t.conveyance) : '—'}</td><td class="sal-col-2nd">${fmtMoney(t.netBeforeDirect)}</td>` +
+    `<td class="sal-col-2nd">${t.directPaid ? fmtMoney(t.directPaid) : '—'}</td><td>${fmtMoney(t.netSalary)}</td>` +
+    `<td class="sal-col-2nd">${fmtMoney(t.pen)}</td><td class="sal-col-2nd">${fmtMoney(t.employerPf)}</td><td class="sal-col-2nd">${fmtMoney(t.pfAdmin)}</td>` +
+    `<td class="sal-col-2nd">${fmtMoney(t.edli)}</td><td class="sal-col-2nd">${fmtMoney(t.esiEmployer)}</td><td class="sal-col-2nd">${fmtMoney(t.employerCont)}</td><td class="sal-col-2nd">${fmtMoney(t.ctc)}</td>` +
+    `<td class="sal-col-2nd">${fmtMoney(t.advanceBalance)}</td><td class="sal-col-2nd">${fmtMoney(t.loanBalance)}</td><td class="sal-col-2nd"></td><td class="sal-col-2nd"></td></tr>`;
+  };
+  // The same three headings the CSV totals, from the same list, so the row on
+  // screen and the row in the file cannot disagree about who is in it.
+  const ownPayroll_ = k => OWN_PAYROLL_HEADINGS.indexOf(k) !== -1;
+  const staff = salarySheetTotalsSeed_();
+  let staffAny_ = false, staffDone_ = false;
+  const pushStaffTotal_ = () => {
+    if(staffDone_ || !staffAny_) return;
+    staffDone_ = true;
+    bodyRows += salaryTotalsRow_(STAFF_TOTAL_LABEL, staff, 'sal-grandtotal', 'sal-grand-card');
+  };
+
 
   for(const headingKey of SALARY_HEADING_ORDER){
     // Grouped by the heading each employee was under THIS month — a promotion
     // recorded since must not move which group a past month's row sits in.
     const group = employees.filter(e => ratePayAsOf(e, dateList[0]).salaryHeading === headingKey);
     if(!group.length) continue;
+    if(!ownPayroll_(headingKey)) pushStaffTotal_();
     bodyRows += isCompact
       ? `<div class="hr-sheet-card sal-heading-card">${SALARY_HEADINGS[headingKey].label}</div>`
       : `<tr class="sal-heading"><td colspan="${cols.length}">${SALARY_HEADINGS[headingKey].label}</td></tr>`;
@@ -9346,26 +9371,14 @@ async function renderSalarySheet(){
           `<td class="sal-col-2nd">${fmtMoney(s.edli)}</td><td class="sal-col-2nd">${fmtMoney(s.esiEmployer)}</td><td class="sal-col-2nd">${fmtMoney(s.employerCont)}</td><td class="sal-col-2nd">${fmtMoney(s.ctc)}</td>` +
           `<td class="sal-col-2nd">${fmtMoney(s.advanceBalance)}</td><td class="sal-col-2nd">${fmtMoney(s.loanBalance)}</td><td class="sal-col-2nd">${s.fullDayLeaveBal}</td><td class="sal-col-2nd">${s.halfDayLeaveBal}</td></tr>`;
       }
-      ['rate','leaveAmount','policyHalfDays','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','loanEmi','retention','totalDeduction','conveyance','netSalary','pen','employerPf','pfAdmin','edli','employerCont','ctc','esiEmployer','advanceBalance','loanBalance','directPaid','netBeforeDirect'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; });
+      ['rate','leaveAmount','policyHalfDays','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','loanEmi','retention','totalDeduction','conveyance','netSalary','pen','employerPf','pfAdmin','edli','employerCont','ctc','esiEmployer','advanceBalance','loanBalance','directPaid','netBeforeDirect'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; if(ownPayroll_(headingKey)) staff[k]+=s[k]; });
+      if(ownPayroll_(headingKey)) staffAny_ = true;
     }
-    bodyRows += isCompact ? salaryMobileTotalsCard('Subtotal', sub, 'sal-total-card') : `<tr class="sal-subtotal"><td class="sal-sr"></td><td class="sal-name">Subtotal</td><td>${fmtMoney(sub.rate)}</td><td></td><td class="sal-col-2nd">${sub.policyHalfDays || '—'}</td><td class="sal-col-2nd">${fmtMoney(sub.leaveAmount)}</td>` +
-      `<td>${fmtMoney(sub.basic)}</td><td>${fmtMoney(sub.hra)}</td><td>${fmtMoney(sub.lta)}</td><td>${fmtMoney(sub.gross)}</td>` +
-      `<td class="sal-col-2nd">${fmtMoney(sub.pf)}</td><td class="sal-col-2nd">${fmtMoney(sub.esi)}</td><td class="sal-col-2nd">${fmtMoney(sub.pt)}</td><td class="sal-col-2nd">${fmtMoney(sub.advanceTemp)}</td><td class="sal-col-2nd">${fmtMoney(sub.advance)}</td><td class="sal-col-2nd">${fmtMoney(sub.loanEmi)}</td><td class="sal-col-2nd">${fmtMoney(sub.retention)}</td>` +
-      `<td class="sal-col-2nd">${fmtMoney(sub.totalDeduction)}</td><td class="sal-col-2nd">${sub.conveyance ? '+' + fmtMoney(sub.conveyance) : '—'}</td><td class="sal-col-2nd">${fmtMoney(sub.netBeforeDirect)}</td>` +
-      `<td class="sal-col-2nd">${sub.directPaid ? fmtMoney(sub.directPaid) : '—'}</td><td>${fmtMoney(sub.netSalary)}</td>` +
-      `<td class="sal-col-2nd">${fmtMoney(sub.pen)}</td><td class="sal-col-2nd">${fmtMoney(sub.employerPf)}</td><td class="sal-col-2nd">${fmtMoney(sub.pfAdmin)}</td>` +
-      `<td class="sal-col-2nd">${fmtMoney(sub.edli)}</td><td class="sal-col-2nd">${fmtMoney(sub.esiEmployer)}</td><td class="sal-col-2nd">${fmtMoney(sub.employerCont)}</td><td class="sal-col-2nd">${fmtMoney(sub.ctc)}</td>` +
-      `<td class="sal-col-2nd">${fmtMoney(sub.advanceBalance)}</td><td class="sal-col-2nd">${fmtMoney(sub.loanBalance)}</td><td class="sal-col-2nd"></td><td class="sal-col-2nd"></td></tr>`;
+    bodyRows += salaryTotalsRow_('Subtotal', sub, 'sal-subtotal', 'sal-total-card');
   }
 
-  bodyRows += isCompact ? salaryMobileTotalsCard('Grand Total', grand, 'sal-grand-card') : `<tr class="sal-grandtotal"><td class="sal-sr"></td><td class="sal-name">Grand Total</td><td>${fmtMoney(grand.rate)}</td><td></td><td class="sal-col-2nd">${grand.policyHalfDays || '—'}</td><td class="sal-col-2nd">${fmtMoney(grand.leaveAmount)}</td>` +
-    `<td>${fmtMoney(grand.basic)}</td><td>${fmtMoney(grand.hra)}</td><td>${fmtMoney(grand.lta)}</td><td>${fmtMoney(grand.gross)}</td>` +
-    `<td class="sal-col-2nd">${fmtMoney(grand.pf)}</td><td class="sal-col-2nd">${fmtMoney(grand.esi)}</td><td class="sal-col-2nd">${fmtMoney(grand.pt)}</td><td class="sal-col-2nd">${fmtMoney(grand.advanceTemp)}</td><td class="sal-col-2nd">${fmtMoney(grand.advance)}</td><td class="sal-col-2nd">${fmtMoney(grand.loanEmi)}</td><td class="sal-col-2nd">${fmtMoney(grand.retention)}</td>` +
-    `<td class="sal-col-2nd">${fmtMoney(grand.totalDeduction)}</td><td class="sal-col-2nd">${grand.conveyance ? '+' + fmtMoney(grand.conveyance) : '—'}</td><td class="sal-col-2nd">${fmtMoney(grand.netBeforeDirect)}</td>` +
-    `<td class="sal-col-2nd">${grand.directPaid ? fmtMoney(grand.directPaid) : '—'}</td><td>${fmtMoney(grand.netSalary)}</td>` +
-    `<td class="sal-col-2nd">${fmtMoney(grand.pen)}</td><td class="sal-col-2nd">${fmtMoney(grand.employerPf)}</td><td class="sal-col-2nd">${fmtMoney(grand.pfAdmin)}</td>` +
-    `<td class="sal-col-2nd">${fmtMoney(grand.edli)}</td><td class="sal-col-2nd">${fmtMoney(grand.esiEmployer)}</td><td class="sal-col-2nd">${fmtMoney(grand.employerCont)}</td><td class="sal-col-2nd">${fmtMoney(grand.ctc)}</td>` +
-    `<td class="sal-col-2nd">${fmtMoney(grand.advanceBalance)}</td><td class="sal-col-2nd">${fmtMoney(grand.loanBalance)}</td><td class="sal-col-2nd"></td><td class="sal-col-2nd"></td></tr>`;
+  pushStaffTotal_();
+  bodyRows += salaryTotalsRow_('Grand Total', grand, 'sal-grandtotal', 'sal-grand-card');
 
   {
     const fileName = `Salary Sheet - ${monthVal}.csv`;
