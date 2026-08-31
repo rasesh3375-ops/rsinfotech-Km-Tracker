@@ -806,8 +806,20 @@ function computeAttendanceSummary(att, employee, dateList, holidayMap){
   // It belongs on the summary rather than at the two places that display it,
   // so the live row refresh keeps it current as HR edits the grid.
   const policyCut = policyHalfDaysFor(employee, att, dateList).total * 0.5;
-  return { present, absent, elUsed, slUsed, lpDays, halfDays, shortCount, lateCount, holidays,
-           paidDays, policyCut };
+  // Present is what the person is credited with, so the policy half-day comes
+  // off it. Sanjeev Srivastav's 5th late arrival in August cost him half a day
+  // and the sheet went on showing 23 present days beside a salary that paid
+  // 22.5 — the deduction was visible in the Policy Cut column next to it and
+  // nowhere in the figure it had reduced.
+  //
+  // Absent is deliberately left alone: it counts days not worked, which is a
+  // different question, and the Policy Cut column already says where the half
+  // day went. Payroll never reads this number — computeSalaryFromAttendance
+  // charges the same half day straight from policyHalfDaysFor — so netting it
+  // off here changes what is shown and not a rupee of what is paid.
+  const present_ = Math.max(0, present - policyCut);
+  return { present: present_, absent, elUsed, slUsed, lpDays, halfDays, shortCount, lateCount,
+           holidays, paidDays, policyCut };
 }
 
 // ---- salary sheet ----
@@ -2610,7 +2622,20 @@ function consultantReportRows(employees, attByEmpId, dateList, monthDays, holida
     // so the payable-days count sent to the consultant cannot overstate what
     // is actually paid.
     const sandwichDays = sandwichDaysFor(emp, att, dateList, holidayMap).length;
-    const absentDays = c.absent + sandwichDays;
+    // The half days the late-coming and excess-short-leave policy imposes —
+    // the same figure computeSalaryFromAttendance charges and the same one the
+    // Attendance Sheet's Present column is now net of, so the consultant is
+    // sent the number HR is looking at.
+    //
+    // It is taken off PRESENT DYS and added to ABSENT DAYS together, for two
+    // reasons. PRESENT + EL + SL + ABSENT has to come to W.DYS, and moving one
+    // without the other would break that. And PAYABLE DYS below is the month
+    // less absence: unpaid absence and sandwich days were already coming off
+    // it and the policy cut was not, so the consultant was being told Sanjeev
+    // was owed a full day that payroll had already docked half of.
+    const policyCutDays = policyHalfDaysFor(emp, att, dateList).total * 0.5;
+    const presentDays = Math.max(0, c.present - policyCutDays);
+    const absentDays = c.absent + sandwichDays + policyCutDays;
     // Everything in the month is paid except unpaid absence. Derived by
     // subtraction so it stays inside 0..monthDays even when somebody checks in
     // on a Sunday, which would otherwise be counted twice.
@@ -2627,7 +2652,7 @@ function consultantReportRows(employees, attByEmpId, dateList, monthDays, holida
     rows.push([sr, emp.id || '', emp.name || '', emp.designation || '',
       consultantDate(emp.dob), consultantDate(emp.doj), emp.pfNo || '', emp.uan || 'NA',
       emp.esiNumber || '', Math.round(ratePayAsOf(emp, dateList[0]).ratePay),
-      consultantDays(workingDays), consultantDays(weekOff), consultantDays(c.present),
+      consultantDays(workingDays), consultantDays(weekOff), consultantDays(presentDays),
       consultantDays(publicHolidays), consultantDays(c.el), consultantDays(c.sl),
       consultantDays(absentDays), consultantDays(payableDays),
       Number(emp.otherAllowances) ? fmtMoney(Number(emp.otherAllowances)) : 'NA',
