@@ -14668,7 +14668,27 @@ function extForDocMime_(mime){
   if(m.indexOf('heic') !== -1 || m.indexOf('heif') !== -1) return 'heic';
   if(m.indexOf('webp') !== -1) return 'webp';
   if(m.indexOf('gif') !== -1) return 'gif';
-  return 'jpg';
+  if(m.indexOf('jpeg') !== -1 || m.indexOf('jpg') !== -1) return 'jpg';
+  // The Office types the document pickers actually accept — Apprentice
+  // Documents takes .doc/.docx, Office Documents adds .ppt/.pptx and Payroll
+  // Documents .xls/.xlsx. Without these they all fell through to the 'jpg'
+  // below, and uploadDocumentToDrive renames the file to match whatever comes
+  // back from here: an apprentice's signed agreement arrived in Drive as
+  // "Apprentice Contract.jpg" and would not open in anything.
+  if(m.indexOf('wordprocessingml') !== -1) return 'docx';
+  if(m.indexOf('msword') !== -1) return 'doc';
+  if(m.indexOf('spreadsheetml') !== -1) return 'xlsx';
+  if(m.indexOf('ms-excel') !== -1) return 'xls';
+  if(m.indexOf('presentationml') !== -1) return 'pptx';
+  if(m.indexOf('ms-powerpoint') !== -1) return 'ppt';
+  if(m.indexOf('csv') !== -1) return 'csv';
+  // Not recognised, and '' means "leave the name alone" rather than guess.
+  // Guessing is what did the damage: the file the user picked already carries
+  // its own extension and it is better than anything inferred from a mime type
+  // this does not know. The one caller with no filename to fall back on —
+  // uploadEmployeeDocToDrive, whose inputs are camera photos and PDFs — says
+  // so explicitly with its own default.
+  return '';
 }
 // An unprocessed phone photo can be several megabytes — worth keeping at
 // full detail, but also slower and more likely to fail the round trip to
@@ -14713,7 +14733,10 @@ async function uploadEmployeeDocToDrive(label, dataUrl, empId, empName){
   const folderPath = ['HR Management', 'Employee Documents', (name ? name + ' ' : '') + '(' + id + ')'];
   const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl || '');
   if(!m) return null;
-  const ext = extForDocMime_(m[1]);
+  // Photos and PDFs only (the camera and file inputs behind this accept
+  // nothing else), so jpg stays the right last resort where the mime type is
+  // unrecognised — this caller has no picked filename to keep instead.
+  const ext = extForDocMime_(m[1]) || 'jpg';
   const res = await apiFetch(API_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -22226,7 +22249,17 @@ async function uploadApprenticeDoc(){
   msg.textContent = 'Uploading…';
   msg.classList.remove('error');
   const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
-  const fileName = `${emp ? emp.name + ' - ' : ''}${category}${ext}`;
+  // The id is made here rather than at the list entry below because it goes
+  // into the Drive file name too. doUploadDocument_ trashes whatever already
+  // carries the name it is handed — deliberately, so re-uploading one
+  // employee document replaces it — and every apprentice document was being
+  // named for its category alone. Two claim documents, or two contracts for
+  // the same apprentice, and the first was silently thrown away while the app
+  // went on listing both. The date follows what the Office Documents uploader
+  // beside this one already does; the id is what actually guarantees it,
+  // since two uploads on one day would otherwise still collide.
+  const docId = randomHex(6);
+  const fileName = `${emp ? emp.name + ' - ' : ''}${category} - ${todayStr()} - ${docId}${ext}`;
   const url = await uploadDocumentToDrive(hrYearPath('', 'Office Documents', 'Apprentice Documents', category), fileName, file);
   if(!url){
     msg.textContent = 'Upload failed — check your connection and try again.';
@@ -22234,7 +22267,7 @@ async function uploadApprenticeDoc(){
     return;
   }
   const list = await getApprenticeDocs();
-  list.unshift({ id: randomHex(6), category, employeeId: empId, employeeName: emp ? emp.name : '', note, fileName, url, uploadedAt: new Date().toISOString() });
+  list.unshift({ id: docId, category, employeeId: empId, employeeName: emp ? emp.name : '', note, fileName, url, uploadedAt: new Date().toISOString() });
   await saveApprenticeDocs(list);
   await addActivityLog('Uploaded ' + category + (emp ? ' for ' + emp.name : ''));
   // Re-fetched by id — see handleDocUpload's comment for why a reference
