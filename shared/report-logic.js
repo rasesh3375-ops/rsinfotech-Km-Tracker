@@ -1981,10 +1981,15 @@ function employedDuringPeriod_(emp, startStr, endStr){
   return true;
 }
 
+// The leading \uFEFF is a UTF-8 byte order mark, and it is load-bearing on
+// Windows. Without it Excel opens a .csv in the system codepage, not UTF-8, so
+// every rupee sign arrives as "a,1" and every em dash as "a\u20ac\"" -- which is
+// what made the PF and ESI returns unreadable in the Rule Applied column. The
+// mark costs three bytes and every other reader ignores it.
 function toCsv(headerArr, rowsArr){
   const lines = [headerArr.map(csvEscape).join(',')];
   rowsArr.forEach(r => lines.push(r.map(csvEscape).join(',')));
-  return lines.join('\n');
+  return '\uFEFF' + lines.join('\n');
 }
 
 
@@ -1996,7 +2001,11 @@ function toCsv(headerArr, rowsArr){
 function statutoryReportData(employees, attByEmpId, dateList, monthDays, holidayMap, key){
   const out = { rows: [], grandTotal: 0,
                 pfRows: [], pfTot: { wage:0, employee:0, epf:0, eps:0, admin:0, edli:0, total:0 },
-                esiRows: [], esiTot: { gross:0, employee:0, employer:0, total:0 } };
+                esiRows: [], esiTot: { gross:0, employee:0, employer:0, total:0 },
+                // Who was left off each return, and why. Not rows -- a count
+                // and a reason, so the report can account for the difference
+                // between headcount and members without listing them.
+                pfExcluded: [], esiExcluded: [] };
   const field = key === 'pt' ? 'pt' : key === 'pf' ? 'pf' : 'esi';
   (employees || []).forEach(emp => {
     const s = salaryFor_(emp, attByEmpId[emp.id] || {}, dateList, monthDays, holidayMap);
@@ -2023,6 +2032,16 @@ function statutoryReportData(employees, attByEmpId, dateList, monthDays, holiday
         out.pfTot.eps += s.pen; out.pfTot.admin += s.pfAdmin; out.pfTot.edli += s.edli;
         out.pfTot.total += s.pfGrandTotal;
       }
+      // Non-contributors are dropped, not listed with a row of zeroes. A PF
+      // return is a list of the members being contributed for; somebody marked
+      // not eligible has nothing to file and reading past them to find the
+      // people who do was the complaint. They add nothing to any total either,
+      // so no figure moves -- see pfExcluded below, which keeps the count so
+      // the report can still say how many were left out and why.
+      if(!s.pfApplicable){
+        out.pfExcluded.push({ name: emp.name, reason: s.pfReason || 'Not applicable' });
+        out.pfRows.pop();
+      }
     }
     if(key === 'esi' && heading.esi){
       const r = computeEsi(s.gross, {
@@ -2031,10 +2050,15 @@ function statutoryReportData(employees, attByEmpId, dateList, monthDays, holiday
         eligible: emp.esiEligible !== 'no',
         asOf: dateList[0]
       });
-      out.esiRows.push({ emp, headingKey, s, r });
       if(r.covered){
+        out.esiRows.push({ emp, headingKey, s, r });
         out.esiTot.gross += s.gross; out.esiTot.employee += r.employee;
         out.esiTot.employer += r.employer; out.esiTot.total += r.total;
+      } else {
+        // Same rule as PF above: an exempt employee -- over the wage ceiling,
+        // or marked not eligible -- is not a member of the return, so they are
+        // counted and named in esiExcluded rather than filling a row.
+        out.esiExcluded.push({ name: emp.name, reason: r.reason || 'Exempt' });
       }
     }
   });
@@ -2061,7 +2085,28 @@ function excelIdNumber(v){
 
 // Grouped by salary heading, in the app's own heading order, with a heading
 // row before each group — the shape the returns are filed in.
-function pfReturnCsv(pfRows, pfTot){
+// Everyone dropped from a return is left off for one of two very different
+// reasons, and the difference matters. "Marked not eligible" or "above the
+// ceiling" is a decision somebody made -- there is nothing to file and nothing
+// to chase. "Not configured" is a blank field: nobody has said yet whether that
+// person contributes, and quietly dropping them would file a return with a
+// member missing and no sign of it. So the deliberate exclusions are counted
+// and the unconfigured ones are named, on screen and at the foot of the CSV.
+function excludedNote_(excluded, what){
+  const list = excluded || [];
+  if(!list.length) return '';
+  const unconfigured = list.filter(x => /not configured|not selected/i.test(x.reason || ''));
+  let note = list.length + ' employee(s) are not ' + what + ' members this month and are not listed.';
+  if(unconfigured.length){
+    note += ' ' + unconfigured.length + ' of them because ' + what +
+      ' has not been set on their record — ' +
+      unconfigured.map(x => x.name).join(', ') +
+      ' — which is a gap to fill in, not an exemption.';
+  }
+  return note;
+}
+
+function pfReturnCsv(pfRows, pfTot, excluded){
   const body = [];
   let sr = 0;
   SALARY_HEADING_ORDER.forEach(hk => {
@@ -2086,10 +2131,12 @@ function pfReturnCsv(pfRows, pfTot){
     rows: body.concat([['', 'GRAND TOTAL', '', '', '', '', '', '', '', Math.round(pfTot.wage), Math.round(pfTot.employee),
       Math.round(pfTot.epf), Math.round(pfTot.eps), Math.round(pfTot.edli), Math.round(pfTot.admin), Math.round(pfTot.employee),
       Math.round(pfTot.epf + pfTot.eps + pfTot.edli + pfTot.admin), Math.round(pfTot.total), '', '']])
+      .concat(excludedNote_(excluded, 'PF') ? [['', '', '', '', '', '', '', '', '', '', '', '', '',
+        '', '', '', '', '', '', excludedNote_(excluded, 'PF')]] : [])
   };
 }
 
-function esiReturnCsv(esiRows, esiTot){
+function esiReturnCsv(esiRows, esiTot, excluded){
   const body = [];
   let sr = 0;
   SALARY_HEADING_ORDER.forEach(hk => {
@@ -2108,6 +2155,8 @@ function esiReturnCsv(esiRows, esiTot){
     header: ['SR NO','Name','ESI Number','Gross Wages','Employee 0.75%','Employer 3.25%','Total','Status','Rule Applied'],
     rows: body.concat([['', 'TOTAL', '', Math.round(esiTot.gross), Math.round(esiTot.employee),
       Math.round(esiTot.employer), Math.round(esiTot.total), '', '']])
+      .concat(excludedNote_(excluded, 'ESI') ? [['', '', '', '', '', '', '', '',
+        excludedNote_(excluded, 'ESI')]] : [])
   };
 }
 
