@@ -1851,6 +1851,7 @@ function loadSharedReportLogic_(map) {
     'leaveWorkingDays', 'applyAlwaysPresentFill', 'leaveDetailRowFor',
     'leaveDetailReportRows', 'leaveDetailCsvHeader', 'leaveDetailCsvRows',
     'loanLedgerRows', 'loanLedgerCsvHeader', 'loanLedgerCsvRows',
+    'loanLedgerTotals', 'loanLedgerCsvTotalRow',
     'employedDuringPeriod_', 'salarySheetCsv', 'finalSalarySheetCsv', 'attendanceSheetCsv',
     'statutoryReportData', 'pfReturnCsv', 'esiReturnCsv', 'statutoryAmountCsv',
     'policyRowsFor', 'attCodeText_', 'SALARY_HEADING_ORDER',
@@ -1973,18 +1974,23 @@ function buildLoanAdvanceReport_(snap, y, m) {
     return e && e.employmentStatus !== 'left';
   });
   var ledger = logic.loanLedgerRows(employees, y, m);
-  var outstanding = 0, stalled = 0;
+  var stalled = 0;
   for (var i = 0; i < ledger.length; i++) {
-    outstanding += ledger[i].balance;
     if (ledger[i].stalled) stalled++;
   }
+  // Same totals function the report tab uses, so the Grand Total in the
+  // attachment is the report's own arithmetic and not a second version of it
+  // added up here.
+  var totals = logic.loanLedgerTotals(ledger);
   return {
     monthLabel: monthLabel,
     fileName: 'Loan & Advance Report - ' + monthLabel + '.csv',
     rows: ledger,
-    outstanding: Math.round(outstanding),
+    outstanding: Math.round(totals.balance),
+    monthlyRecovery: Math.round(totals.emiThisMonth),
     stalled: stalled,
-    csv: toCsv_(logic.loanLedgerCsvHeader(), logic.loanLedgerCsvRows(ledger))
+    csv: toCsv_(logic.loanLedgerCsvHeader(),
+                logic.loanLedgerCsvRows(ledger).concat([logic.loanLedgerCsvTotalRow(ledger)]))
   };
 }
 
