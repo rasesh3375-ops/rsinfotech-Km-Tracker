@@ -1910,10 +1910,25 @@ function loanLedgerRows(employees, nowY, nowM){
       started, stalled, skippedThisMonth,
       note: l.status !== 'active' ? 'closed'
           : stalled ? 'active — no recovery month set, nothing is being deducted'
+          // Cleared this month by its own final instalment. It reads "active"
+          // on the record because nobody has marked it closed, and saying so
+          // beside a nil balance and a live-looking rate is what made HR think
+          // three settled loans were still running.
+          : (bal === 0 && loanEmiForMonth(l, nowY, nowM) > 0) ? 'fully recovered this month'
+          : bal === 0 ? 'fully recovered'
           : skippedThisMonth ? 'active — this month skipped'
           : 'active'
     };
-  });
+  })
+  // A loan appears for as long as it is being repaid, and once more in the
+  // month it finishes — that last instalment came off a real salary, so hiding
+  // it would take a genuine deduction out of the payroll record. From the month
+  // after, it has nothing outstanding and nothing deducted, and drops off.
+  //
+  // Both conditions are needed. "balance is zero" alone would drop the closing
+  // month too; "nothing deducted" alone would drop a loan whose recovery month
+  // has not started yet, which is still owed in full.
+  .filter(r => r.balance > 0 || r.emiThisMonth > 0);
 }
 // The one place the Grand Total is worked out, so the figure at the bottom of
 // the report on screen and the one in the emailed CSV come from the same sum
@@ -1933,13 +1948,15 @@ function loanLedgerCsvRows(rows){
 }
 // Appended to the CSV as its last line, so the attachment HR opens on a phone
 // carries the same totals the report tab shows. The EMI figure is the one that
-// is actually deducted, not the sum of the rates in the column above it, and
-// the Status cell says so — a bare CSV has no summary line to explain it.
+// is actually deducted, not the sum of the rates in the column above it — a
+// month can be skipped, and a closing instalment is only as big as what is
+// left — and the Status cell says so, since a bare CSV has no summary line
+// above it to explain the difference.
 function loanLedgerCsvTotalRow(rows){
   const t = loanLedgerTotals(rows);
   return ['Grand Total', t.count + ' loan(s)', Math.round(t.amount), Math.round(t.emiThisMonth),
           '', Math.round(t.recovered), Math.round(t.balance),
-          'EMI total is what comes off this month; a loan recovered in full still shows its rate above but deducts nothing'];
+          'EMI total is what actually comes off this month. A loan is listed once more in the month it finishes, then drops off.'];
 }
 
 
