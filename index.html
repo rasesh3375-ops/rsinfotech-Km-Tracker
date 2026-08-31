@@ -19404,7 +19404,7 @@ async function renderEmployeeDetailReport(){
           d.setDate(d.getDate() + 1);
         }
       }
-      const fySandwichDays0 = sandwichDaysFor(att, fyDateList0, holidayMap).length;
+      const fySandwichDays0 = sandwichDaysFor(emp, att, fyDateList0, holidayMap).length;
       if(fySandwichDays0) observations.push('Sandwich leave this FY: ' + fySandwichDays0 + ' day(s) deducted.');
     } else {
       // computeAttendanceSummary itself has no monthly reset logic (each day
@@ -19424,7 +19424,7 @@ async function renderEmployeeDetailReport(){
       // unpaid day on the Salary Sheet (computeSalaryForEmployee) — folded in
       // here too, so "days paid" cannot read higher than what payroll
       // actually pays for the same period.
-      const fySandwichDays = sandwichDaysFor(att, fyDateList, holidayMap).length;
+      const fySandwichDays = sandwichDaysFor(emp, att, fyDateList, holidayMap).length;
       const fyPaidDays = Math.max(0, fySummary.paidDays - fySandwichDays);
       const fyAbsentDays = fySummary.absent + fySandwichDays;
       const fyPct = fyDateList.length ? Math.round((fyPaidDays / fyDateList.length) * 100) : 0;
