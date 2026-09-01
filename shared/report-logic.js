@@ -1332,7 +1332,13 @@ function computeSalaryFromAttendance(emp, att, dateList, monthDays, holidayMap){
   // conveyance is agreed as a figure, and HR lowers it on the record if a month
   // warrants less.
   const conveyance = Number(emp.conveyance) || 0;
-  const netBeforeDirect = gross - totalDeduction + conveyance;
+  // The salary itself, before the conveyance that is paid on top of it. HR
+  // reads this as what the consultant is owed for the month, so the Salary
+  // Sheet names it Consultant Salary and shows conveyance in the column after
+  // it, added back to reach Net Salary. Net Salary is unchanged either way —
+  // the same figure, reached in the order HR reconciles it.
+  const consultantSalary = gross - totalDeduction;
+  const netBeforeDirect = consultantSalary + conveyance;
   const netSalary = netBeforeDirect - directPaid;
   // Employer side, from the same call — never recomputed.
   const pen = pfCalc.employerEps;
@@ -1377,7 +1383,7 @@ function computeSalaryFromAttendance(emp, att, dateList, monthDays, holidayMap){
            retention, totalDeduction, netSalary, pen, employerPf, pfAdmin, edli, employerCont, ctc,
            esiEmployer, advanceBalance, elBalance, slBalance,
            pfWage, pfType: pfCalc.type, pfApplicable: pfCalc.applicable, pfReason: pfCalc.reason,
-           directPaid, netBeforeDirect,
+           directPaid, netBeforeDirect, consultantSalary,
            pfEmployeeTotal: pfCalc.employeeTotal, pfEmployerTotal: pfCalc.employerTotal,
            pfGrandTotal: pfCalc.grandTotal,
            // pen/employerPf above already carry the merge (employerPf holds
@@ -2272,12 +2278,13 @@ function statutoryAmountCsv(rows, grandTotal, key){
 // Whole rupees, matching what the sheet shows. Day counts (leave days, half
 // days, leave balances) are left exactly as they are — they are not money.
 const SALARY_SHEET_COLS = ['SR NO','Name','Rate of Pay','Leave Days','Policy Half Days','Leave Amount','Basic','HRA','LTA','Gross',
-  'PF','ESI','PT','Advance Temp','Advance','Loan EMI','Retention','Total Deduction','Conveyance','Net Before Direct','Paid Directly','Net Salary',
+  'PF','ESI','PT','Advance Temp','Advance','Loan EMI','Retention','Total Deduction','Consultant Salary','Conveyance','Paid Directly','Net Salary',
   'PEN','Employer PF','PF Admin','EDLI','ESI Employer','Employer Cont.','CTC',
   'Advance Balance','Loan Balance','EL Balance','SL Balance'];
 const SALARY_SHEET_TOTAL_KEYS = ['rate','leaveAmount','policyHalfDays','basic','hra','lta','gross','pf','esi','pt',
   'advanceTemp','advance','loanEmi','retention','totalDeduction','conveyance','netSalary','pen','employerPf',
-  'pfAdmin','edli','employerCont','ctc','esiEmployer','advanceBalance','loanBalance','directPaid','netBeforeDirect'];
+  'pfAdmin','edli','employerCont','ctc','esiEmployer','advanceBalance','loanBalance','directPaid',
+  'netBeforeDirect','consultantSalary'];
 
 const STAFF_TOTAL_LABEL = 'Total — Managerial, Seniors & Junior Staff';
 
@@ -2285,6 +2292,30 @@ function salarySheetTotalsSeed_(){
   const o = {};
   SALARY_SHEET_TOTAL_KEYS.forEach(k => { o[k] = 0; });
   return o;
+}
+
+// One shape for all three total rows — a heading's Subtotal, the
+// Managerial/Seniors/Junior staff total and the Grand Total at the foot.
+//
+// They used to be written out separately, and the two smaller ones stopped at
+// column 20: every figure from Paid Directly rightwards — Net Salary, the whole
+// employer side, CTC, the balances — had no subtotal at all, only a grand
+// total. Worse, the cell they ended on sat under "Net Before Direct" while
+// carrying netSalary, a different figure the moment anyone is paid directly —
+// which only ever happens under Apprentices (see directPaidForMonth), so that
+// heading's subtotal was the one that read wrong.
+//
+// Building all three from one function is what stops a column being added to
+// the sheet and reaching only one of them.
+function salarySheetTotalRow_(label, t){
+  const R = v => Math.round(Number(v) || 0);
+  return ['', label, R(t.rate), '', t.policyHalfDays, R(t.leaveAmount), R(t.basic), R(t.hra), R(t.lta),
+    R(t.gross), R(t.pf), R(t.esi), R(t.pt), R(t.advanceTemp), R(t.advance), R(t.loanEmi), R(t.retention),
+    R(t.totalDeduction), R(t.consultantSalary), R(t.conveyance), R(t.directPaid), R(t.netSalary),
+    R(t.pen), R(t.employerPf), R(t.pfAdmin), R(t.edli), R(t.esiEmployer), R(t.employerCont), R(t.ctc),
+    R(t.advanceBalance), R(t.loanBalance),
+    // A leave balance is a per-person figure; adding them up would say nothing.
+    '', ''];
 }
 
 function salarySheetCsv(employees, attByEmpId, dateList, monthDays, holidayMap){
@@ -2302,10 +2333,7 @@ function salarySheetCsv(employees, attByEmpId, dateList, monthDays, holidayMap){
   const pushStaffTotal = () => {
     if(staffDone || !staffAny) return;
     staffDone = true;
-    rows.push(['', STAFF_TOTAL_LABEL, R(staff.rate), '', staff.policyHalfDays, R(staff.leaveAmount),
-      R(staff.basic), R(staff.hra), R(staff.lta), R(staff.gross), R(staff.pf), R(staff.esi), R(staff.pt),
-      R(staff.advanceTemp), R(staff.advance), R(staff.loanEmi), R(staff.retention), R(staff.totalDeduction),
-      R(staff.conveyance), R(staff.netSalary)]);
+    rows.push(salarySheetTotalRow_(STAFF_TOTAL_LABEL, staff));
   };
   let srNo = 1;
   SALARY_HEADING_ORDER.forEach(headingKey => {
@@ -2318,7 +2346,7 @@ function salarySheetCsv(employees, attByEmpId, dateList, monthDays, holidayMap){
       const s = salaryFor_(emp, attByEmpId[emp.id] || {}, dateList, monthDays, holidayMap);
       rows.push([srNo++, emp.name, R(s.rate), s.leaveDays, s.policyHalfDays, R(s.leaveAmount), R(s.basic), R(s.hra),
         R(s.lta), R(s.gross), R(s.pf), R(s.esi), R(s.pt), R(s.advanceTemp), R(s.advance), R(s.loanEmi), R(s.retention),
-        R(s.totalDeduction), R(s.conveyance), R(s.netBeforeDirect), R(s.directPaid), R(s.netSalary),
+        R(s.totalDeduction), R(s.consultantSalary), R(s.conveyance), R(s.directPaid), R(s.netSalary),
         R(s.pen), R(s.employerPf), R(s.pfAdmin), R(s.edli), R(s.esiEmployer), R(s.employerCont), R(s.ctc),
         R(s.advanceBalance), R(s.loanBalance), s.elBalance, s.slBalance]);
       SALARY_SHEET_TOTAL_KEYS.forEach(k => {
@@ -2327,19 +2355,10 @@ function salarySheetCsv(employees, attByEmpId, dateList, monthDays, holidayMap){
       });
       if(ownPayroll(headingKey)) staffAny = true;
     });
-    // The subtotal line stops at Total Deduction/Conveyance/Net the way it
-    // always has — shorter than a full row on purpose.
-    rows.push(['', 'Subtotal', R(sub.rate), '', sub.policyHalfDays, R(sub.leaveAmount), R(sub.basic), R(sub.hra),
-      R(sub.lta), R(sub.gross), R(sub.pf), R(sub.esi), R(sub.pt), R(sub.advanceTemp), R(sub.advance),
-      R(sub.loanEmi), R(sub.retention), R(sub.totalDeduction), R(sub.conveyance), R(sub.netSalary)]);
+    rows.push(salarySheetTotalRow_('Subtotal', sub));
   });
   pushStaffTotal();
-  rows.push(['', 'Grand Total', R(grand.rate), '', grand.policyHalfDays, R(grand.leaveAmount), R(grand.basic),
-    R(grand.hra), R(grand.lta), R(grand.gross), R(grand.pf), R(grand.esi), R(grand.pt), R(grand.advanceTemp),
-    R(grand.advance), R(grand.loanEmi), R(grand.retention), R(grand.totalDeduction), R(grand.conveyance),
-    R(grand.netBeforeDirect), R(grand.directPaid), R(grand.netSalary), R(grand.pen), R(grand.employerPf),
-    R(grand.pfAdmin), R(grand.edli), R(grand.esiEmployer), R(grand.employerCont), R(grand.ctc),
-    R(grand.advanceBalance), R(grand.loanBalance), '', '']);
+  rows.push(salarySheetTotalRow_('Grand Total', grand));
   return { cols: SALARY_SHEET_COLS.slice(), rows, grand };
 }
 
