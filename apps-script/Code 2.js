@@ -1956,7 +1956,7 @@ function buildLeaveDetailReport_(snap, y, m) {
   };
 }
 
-// ---- Loan & Advance Report, generated here and now ----
+// ---- Loan and EMI Report, generated here and now ----
 // A running position rather than a closed month: reported as it stands at the
 // END of the month being reported on, which is the moment the payroll for that
 // month was finished.
@@ -1978,9 +1978,9 @@ function buildLoanAdvanceReport_(snap, y, m) {
   var sheet = { header: logic.loanLedgerCsvHeader(),
                 rows: logic.loanLedgerCsvRows(ledger).concat([logic.loanLedgerCsvTotalRow(ledger)]) };
   return {
-    label: 'Loan & Advance Report',
+    label: 'Loan and EMI Report',
     monthLabel: monthLabel,
-    fileName: 'Loan & Advance Report - ' + monthLabel + '.csv',
+    fileName: 'Loan and EMI Report - ' + monthLabel + '.csv',
     rows: ledger,
     outstanding: Math.round(totals.balance),
     monthlyRecovery: Math.round(totals.emiThisMonth),
@@ -2583,29 +2583,27 @@ function sendMonthlyReportsEmail(force) {
     ', in ' + elapsedNote_(runStartedAt) + '.');
 }
 
-// ===== Loan & Advance Report, emailed separately on the 1st =====
+// ===== Loan and EMI Report, emailed separately on the 1st =====
 //
 // Its own email rather than a sixth attachment on the pack above, because it is
 // a different kind of thing and reads wrongly filed next to the other five.
 // Those are five views of one closed month; this is a running position that
 // belongs to no month at all.
 //
-// The Loan & Advance Report is a snapshot of the day it is run, not of a chosen
-// month — index.html files it as "Loan & Advance Report - <today>.csv" with the
-// RUN date in the name, and every run leaves a new file rather than replacing
-// the last one. So there is no such thing as "last month's" copy to fetch: what
-// exists is however many snapshots HR happened to take. This attaches the most
-// recent one and says, plainly and in the subject, what date it is a snapshot
-// of and how many days stale that makes it.
+// A loan balance moves with every month's EMI, so which day it is a position
+// FOR matters more here than anywhere else in these emails. This one is built
+// at send time for the end of the month just ended — the moment that month's
+// payroll was finished — rather than being whatever snapshot HR last happened
+// to take in the app. That is what it used to attach, and why a report could
+// arrive looking perfectly valid while its balances were a month behind.
 //
-// That date matters more here than anywhere else in these emails. A loan
-// balance moves with every month's EMI, so a snapshot taken mid-August is not
-// the 1 September position — the balances are a month behind and the report
-// looks perfectly valid while being wrong for the day it arrives. Saying the
-// snapshot date is what stops it being read as current. As everywhere else in
-// these emails, nothing is recalculated here: loansOf, loanScheduleThrough and
-// loanEmiRateAsOf live in index.html and stay the only place that arithmetic
-// happens.
+// The app still files its own copy under "Loan & Advance Report - <date>.csv",
+// with the run date in the name, and that name is unchanged. Only what HR
+// receives by email is called the Loan and EMI Report.
+//
+// As everywhere else in these emails, nothing is recalculated here: loansOf,
+// loanScheduleThrough and loanEmiRateAsOf live in shared/report-logic.js and
+// stay the only place that arithmetic happens.
 var LOAN_REPORT_EMAIL = 'rasesh@rsinfotech.net';
 var LOAN_REPORT_HOUR = 8; // 8 AM IST on the 1st, alongside the report pack
 
@@ -2649,7 +2647,7 @@ function sendLoanAdvanceReportEmail(force) {
   var ym = prevMonthYmIst_();
   var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
   var monthLabel = LEAVE_DETAIL_MONTH_NAMES[m - 1] + ' ' + y;
-  var fileName = 'Loan & Advance Report - ' + monthLabel + '.csv';
+  var fileName = 'Loan and EMI Report - ' + monthLabel + '.csv';
   var esc = function (s) {
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   };
@@ -2664,15 +2662,15 @@ function sendLoanAdvanceReportEmail(force) {
     report = validateFreshReport_(buildLoanAdvanceReport_(reportDataSnapshot_(), y, m), monthLabel, fileName);
   } catch (e) {
     failure = e && e.message ? e.message : String(e);
-    Logger.log('Loan & Advance Report for ' + monthLabel + ' could not be generated: ' + failure);
+    Logger.log('Loan and EMI Report for ' + monthLabel + ' could not be generated: ' + failure);
   }
 
   var subject, plain, html, attachments = [];
   if (report) {
     attachments.push(reportAttachment_(report));
-    subject = 'R.S. Infotech — Loan & Advance Report — ' + monthLabel;
+    subject = 'R.S. Infotech — Loan and EMI Report — ' + monthLabel;
     var generatedAt = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd/MM/yyyy HH:mm');
-    var lead = 'Attached is the Loan & Advance Report for ' + monthLabel + ' — the position as it ' +
+    var lead = 'Attached is the Loan and EMI Report for ' + monthLabel + ' — the position as it ' +
       'stood at the end of that month, once that month\u2019s instalments had come off.';
     var figures = rupeesIn_(report.outstanding) + ' outstanding across ' + report.rows.length + ' loan(s).';
     var warn = report.stalled
@@ -2698,8 +2696,8 @@ function sendLoanAdvanceReportEmail(force) {
       '  Outstanding: ' + rupeesIn_(report.outstanding) + '\n' +
       '  Generated  : ' + generatedAt + '\n';
   } else {
-    subject = 'R.S. Infotech — Loan & Advance Report — ' + monthLabel + ' could not be generated';
-    var none = 'The Loan & Advance Report for ' + monthLabel + ' could not be generated, so nothing ' +
+    subject = 'R.S. Infotech — Loan and EMI Report — ' + monthLabel + ' could not be generated';
+    var none = 'The Loan and EMI Report for ' + monthLabel + ' could not be generated, so nothing ' +
       'is attached. No older snapshot has been sent in its place — an out-of-date loan balance reads ' +
       'as a current one.';
     var why = 'Reason: ' + failure;
@@ -2714,7 +2712,7 @@ function sendLoanAdvanceReportEmail(force) {
     htmlBody: html,
     attachments: attachments
   });
-  Logger.log('Loan & Advance Report email for ' + monthLabel + ' sent to ' + LOAN_REPORT_EMAIL +
+  Logger.log('Loan and EMI Report email for ' + monthLabel + ' sent to ' + LOAN_REPORT_EMAIL +
     ' — ' + (report ? 'generated fresh and attached' : 'FAILED: ' + failure) +
     ', in ' + elapsedNote_(runStartedAt) + '.');
 }
@@ -2722,7 +2720,7 @@ function sendLoanAdvanceReportEmail(force) {
 // ===== Monthly Leave Detail Report, emailed separately on the 1st =====
 //
 // Like the report pack this is a closed month's report, so there is a definite
-// "last month's file" to look for — unlike the Loan & Advance Report, which is
+// "last month's file" to look for — unlike the Loan and EMI Report, which is
 // a running position with no month of its own. Its own email because that is
 // what was asked for, and because leave detail is read by different people than
 // the payroll sheets.
@@ -3196,7 +3194,7 @@ function sendAllEmailsNow() {
   run('Increments due this month', function () { sendIncrementReminderEmail(true); });
   run('Birthday reminder (sends only if a birthday is tomorrow)', function () { sendBirthdayReminderEmail(); });
   run('Monthly report pack', function () { sendMonthlyReportsEmail(true); });
-  run('Loan & Advance Report', function () { sendLoanAdvanceReportEmail(true); });
+  run('Loan and EMI Report', function () { sendLoanAdvanceReportEmail(true); });
   run('Monthly Leave Detail Report', function () { sendLeaveDetailReportEmail(true); });
   run('Consultant Report', function () { sendConsultantReportEmail(true); });
   run('Salary advance alert (normally silent unless one was recorded)',
@@ -3216,7 +3214,7 @@ function listReminderTriggers() {
     ['sendIncrementReminderEmail', 'Increments due next month — 30th'],
     ['sendBirthdayReminderEmail', 'Birthday reminder — day before'],
     ['sendMonthlyReportsEmail', 'Report pack — 1st'],
-    ['sendLoanAdvanceReportEmail', 'Loan & Advance Report — 1st'],
+    ['sendLoanAdvanceReportEmail', 'Loan and EMI Report — 1st'],
     ['sendLeaveDetailReportEmail', 'Monthly Leave Detail Report — 1st'],
     ['sendConsultantReportEmail', 'Consultant Report — 2nd'],
     ['sendSalaryAdvanceAlertEmail', 'Salary advance taken — same evening'],
