@@ -9127,7 +9127,7 @@ function salaryCardGroups(s){
         ${row('Loan EMI', fmtMoney(s.loanEmi))}
         ${row('Retention', fmtMoney(s.retention))}
         ${row('Total Deduction', fmtMoney(s.totalDeduction))}
-        ${row('Net Before Direct', fmtMoney(s.netBeforeDirect))}
+        ${row('Consultant Salary', fmtMoney(s.consultantSalary))}
         ${row('Paid Directly', s.directPaid ? fmtMoney(s.directPaid) : '—')}
       </div>
       <div class="hr-sheet-group">
@@ -9216,7 +9216,7 @@ async function renderSalarySheet(){
   const isCompact = isCompactSheetView();
   let bodyRows = '';
   let srNo = 1;
-  const grand = { rate:0, leaveAmount:0, policyHalfDays:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, loanEmi:0, loanBalance:0, retention:0, totalDeduction:0, conveyance:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0, directPaid:0, netBeforeDirect:0 };
+  const grand = salarySheetTotalsSeed_();
   const R = v => Math.round(Number(v) || 0);
   // One markup for all three totals rows. Subtotal and Grand Total were two
   // copies of the same thirty-odd cells; adding a third for the staff total
@@ -9225,7 +9225,7 @@ async function renderSalarySheet(){
   return isCompact ? salaryMobileTotalsCard(label, t, cardCls) : `<tr class="${rowCls}"><td class="sal-sr"></td><td class="sal-name">${label}</td><td>${fmtMoney(t.rate)}</td><td></td><td class="sal-col-2nd">${t.policyHalfDays || '—'}</td><td class="sal-col-2nd">${fmtMoney(t.leaveAmount)}</td>` +
     `<td>${fmtMoney(t.basic)}</td><td>${fmtMoney(t.hra)}</td><td>${fmtMoney(t.lta)}</td><td>${fmtMoney(t.gross)}</td>` +
     `<td class="sal-col-2nd">${fmtMoney(t.pf)}</td><td class="sal-col-2nd">${fmtMoney(t.esi)}</td><td class="sal-col-2nd">${fmtMoney(t.pt)}</td><td class="sal-col-2nd">${fmtMoney(t.advanceTemp)}</td><td class="sal-col-2nd">${fmtMoney(t.advance)}</td><td class="sal-col-2nd">${fmtMoney(t.loanEmi)}</td><td class="sal-col-2nd">${fmtMoney(t.retention)}</td>` +
-    `<td class="sal-col-2nd">${fmtMoney(t.totalDeduction)}</td><td class="sal-col-2nd">${t.conveyance ? '+' + fmtMoney(t.conveyance) : '—'}</td><td class="sal-col-2nd">${fmtMoney(t.netBeforeDirect)}</td>` +
+    `<td class="sal-col-2nd">${fmtMoney(t.totalDeduction)}</td><td class="sal-col-2nd">${fmtMoney(t.consultantSalary)}</td><td class="sal-col-2nd">${t.conveyance ? '+' + fmtMoney(t.conveyance) : '—'}</td>` +
     `<td class="sal-col-2nd">${t.directPaid ? fmtMoney(t.directPaid) : '—'}</td><td>${fmtMoney(t.netSalary)}</td>` +
     `<td class="sal-col-2nd">${fmtMoney(t.pen)}</td><td class="sal-col-2nd">${fmtMoney(t.employerPf)}</td><td class="sal-col-2nd">${fmtMoney(t.pfAdmin)}</td>` +
     `<td class="sal-col-2nd">${fmtMoney(t.edli)}</td><td class="sal-col-2nd">${fmtMoney(t.esiEmployer)}</td><td class="sal-col-2nd">${fmtMoney(t.employerCont)}</td><td class="sal-col-2nd">${fmtMoney(t.ctc)}</td>` +
@@ -9252,7 +9252,7 @@ async function renderSalarySheet(){
     bodyRows += isCompact
       ? `<div class="hr-sheet-card sal-heading-card">${SALARY_HEADINGS[headingKey].label}</div>`
       : `<tr class="sal-heading"><td colspan="${cols.length}">${SALARY_HEADINGS[headingKey].label}</td></tr>`;
-    const sub = { rate:0, leaveAmount:0, policyHalfDays:0, basic:0, hra:0, lta:0, gross:0, pf:0, esi:0, pt:0, advanceTemp:0, advance:0, loanEmi:0, loanBalance:0, retention:0, totalDeduction:0, conveyance:0, netSalary:0, pen:0, employerPf:0, pfAdmin:0, edli:0, esiEmployer:0, employerCont:0, ctc:0, advanceBalance:0, directPaid:0, netBeforeDirect:0 };
+    const sub = salarySheetTotalsSeed_();
     for(const emp of group){
       const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
 
@@ -9273,13 +9273,15 @@ async function renderSalarySheet(){
         bodyRows += `<tr${rowCls}><td class="sal-sr">${srNo++}</td><td class="sal-name">${escapeHtml(emp.name)}${isNewThisMonth ? ' <span class="pill new">new</span>' : ''}</td><td class="${rateCellCls}">${fmtMoney(s.rate)}</td><td>${s.leaveDays}${s.sandwichDays ? ' <span class="pol-warn" title="' + escapeHtml(s.sandwichDates.join(', ')) + ' — sandwiched between two unpaid-absence days">(incl. ' + s.sandwichDays + ' sandwich)</span>' : ''}</td><td class="sal-col-2nd">${s.policyHalfDays ? '<span class="pol-warn">' + s.policyHalfDays + '</span>' : '—'}</td><td class="sal-col-2nd">${fmtMoney(s.leaveAmount)}</td>` +
           `<td>${fmtMoney(s.basic)}</td><td>${fmtMoney(s.hra)}</td><td>${fmtMoney(s.lta)}</td><td>${fmtMoney(s.gross)}</td>` +
           `<td class="sal-col-2nd">${fmtMoney(s.pf)}</td><td class="sal-col-2nd">${fmtMoney(s.esi)}</td><td class="sal-col-2nd">${fmtMoney(s.pt)}</td><td class="sal-col-2nd">${fmtMoney(s.advanceTemp)}</td><td class="sal-col-2nd">${fmtMoney(s.advance)}${s.advanceMissingThisMonth ? ' <span class="pol-warn" title="This employee has a Salary Advance Payment entry for another month, but none for this one">(no entry this month)</span>' : ''}</td><td class="sal-col-2nd">${fmtMoney(s.loanEmi)}</td><td class="sal-col-2nd">${fmtMoney(s.retention)}</td>` +
-          `<td class="sal-col-2nd">${fmtMoney(s.totalDeduction)}</td><td class="sal-col-2nd">${s.conveyance ? '+' + fmtMoney(s.conveyance) : '—'}</td><td class="sal-col-2nd">${fmtMoney(s.netBeforeDirect)}</td>` +
+          `<td class="sal-col-2nd">${fmtMoney(s.totalDeduction)}</td><td class="sal-col-2nd">${fmtMoney(s.consultantSalary)}</td><td class="sal-col-2nd">${s.conveyance ? '+' + fmtMoney(s.conveyance) : '—'}</td>` +
           `<td class="sal-col-2nd">${s.directPaid ? fmtMoney(s.directPaid) : '—'}</td><td><strong>${fmtMoney(s.netSalary)}</strong></td>` +
           `<td class="sal-col-2nd">${fmtMoney(s.pen)}</td><td class="sal-col-2nd">${fmtMoney(s.employerPf)}</td><td class="sal-col-2nd">${fmtMoney(s.pfAdmin)}</td>` +
           `<td class="sal-col-2nd">${fmtMoney(s.edli)}</td><td class="sal-col-2nd">${fmtMoney(s.esiEmployer)}</td><td class="sal-col-2nd">${fmtMoney(s.employerCont)}</td><td class="sal-col-2nd">${fmtMoney(s.ctc)}</td>` +
           `<td class="sal-col-2nd">${fmtMoney(s.advanceBalance)}</td><td class="sal-col-2nd">${fmtMoney(s.loanBalance)}</td><td class="sal-col-2nd">${s.elBalance}</td><td class="sal-col-2nd">${s.slBalance}</td></tr>`;
       }
-      ['rate','leaveAmount','policyHalfDays','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','loanEmi','retention','totalDeduction','conveyance','netSalary','pen','employerPf','pfAdmin','edli','employerCont','ctc','esiEmployer','advanceBalance','loanBalance','directPaid','netBeforeDirect'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; if(ownPayroll_(headingKey)) staff[k]+=s[k]; });
+      // The same key list and the same seed the CSV uses — three hand-kept
+      // copies of it were three places to remember when a column is added.
+      SALARY_SHEET_TOTAL_KEYS.forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; if(ownPayroll_(headingKey)) staff[k]+=s[k]; });
       if(ownPayroll_(headingKey)) staffAny_ = true;
     }
     bodyRows += salaryTotalsRow_('Subtotal', sub, 'sal-subtotal', 'sal-total-card');
