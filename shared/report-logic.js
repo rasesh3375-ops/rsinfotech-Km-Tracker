@@ -1350,15 +1350,32 @@ function computeSalaryFromAttendance(emp, att, dateList, monthDays, holidayMap){
   // financial year began, not just this month. Taking only the current month
   // would show the same balance every month and never run down.
   const ytd = leaveUsedThisFinancialYear(att, dateList[dateList.length - 1], emp.leaveOpeningFrom);
-  const fullDayLeaveBal = Math.max(0, (Number(emp.elOpening) || 0) - ytd.el);
-  const halfDayLeaveBal = Math.max(0, (Number(emp.slOpening) || 0) - ytd.sl);
+  // Earned Leave and Sick Leave, named for what they are. These were
+  // fullDayLeaveBal and halfDayLeaveBal, and the Salary Sheet's own column
+  // headings repeated the mistake — "Full Day Leave Bal" over the EL balance
+  // and "Half Day Leave Bal" over the SL balance. The figures were right all
+  // along; only the names were wrong, which is worse than useless on a sheet
+  // the consultant reads.
+  //
+  // Resident Engineers are outside the SL/EL scheme entirely — Employee Master
+  // hides the opening-balance fields for them and says so. A record switched
+  // to Resident later can still be carrying the openings it was given before,
+  // so this must not compute a balance from them: Hardik Parmar came through
+  // the emailed Salary Sheet with EL and SL against his name for a scheme he
+  // is not in. Same early return as policyHalfDaysFor and sandwichDaysFor,
+  // for the same reason.
+  const outsideLeaveScheme = (emp || {}).employeeType === 'resident';
+  const elBalance = outsideLeaveScheme ? 'NA'
+    : Math.max(0, (Number(emp.elOpening) || 0) - ytd.el);
+  const slBalance = outsideLeaveScheme ? 'NA'
+    : Math.max(0, (Number(emp.slOpening) || 0) - ytd.sl);
   return { rate, leaveDays, leaveAmount, basic, hra, lta, gross, pf, esi, pt, advanceTemp, advance, advanceMissingThisMonth,
            policyHalfDays: policyHalf.total, policyHalfReasons: policyHalf.reasons,
            sandwichDays: sandwichDates.length, sandwichDates,
            conveyance,
            loanEmi, loanBalance,
            retention, totalDeduction, netSalary, pen, employerPf, pfAdmin, edli, employerCont, ctc,
-           esiEmployer, advanceBalance, fullDayLeaveBal, halfDayLeaveBal,
+           esiEmployer, advanceBalance, elBalance, slBalance,
            pfWage, pfType: pfCalc.type, pfApplicable: pfCalc.applicable, pfReason: pfCalc.reason,
            directPaid, netBeforeDirect,
            pfEmployeeTotal: pfCalc.employeeTotal, pfEmployerTotal: pfCalc.employerTotal,
@@ -2257,7 +2274,7 @@ function statutoryAmountCsv(rows, grandTotal, key){
 const SALARY_SHEET_COLS = ['SR NO','Name','Rate of Pay','Leave Days','Policy Half Days','Leave Amount','Basic','HRA','LTA','Gross',
   'PF','ESI','PT','Advance Temp','Advance','Loan EMI','Retention','Total Deduction','Conveyance','Net Before Direct','Paid Directly','Net Salary',
   'PEN','Employer PF','PF Admin','EDLI','ESI Employer','Employer Cont.','CTC',
-  'Advance Balance','Loan Balance','Full Day Leave Bal','Half Day Leave Bal'];
+  'Advance Balance','Loan Balance','EL Balance','SL Balance'];
 const SALARY_SHEET_TOTAL_KEYS = ['rate','leaveAmount','policyHalfDays','basic','hra','lta','gross','pf','esi','pt',
   'advanceTemp','advance','loanEmi','retention','totalDeduction','conveyance','netSalary','pen','employerPf',
   'pfAdmin','edli','employerCont','ctc','esiEmployer','advanceBalance','loanBalance','directPaid','netBeforeDirect'];
@@ -2303,7 +2320,7 @@ function salarySheetCsv(employees, attByEmpId, dateList, monthDays, holidayMap){
         R(s.lta), R(s.gross), R(s.pf), R(s.esi), R(s.pt), R(s.advanceTemp), R(s.advance), R(s.loanEmi), R(s.retention),
         R(s.totalDeduction), R(s.conveyance), R(s.netBeforeDirect), R(s.directPaid), R(s.netSalary),
         R(s.pen), R(s.employerPf), R(s.pfAdmin), R(s.edli), R(s.esiEmployer), R(s.employerCont), R(s.ctc),
-        R(s.advanceBalance), R(s.loanBalance), s.fullDayLeaveBal, s.halfDayLeaveBal]);
+        R(s.advanceBalance), R(s.loanBalance), s.elBalance, s.slBalance]);
       SALARY_SHEET_TOTAL_KEYS.forEach(k => {
         sub[k] += s[k]; grand[k] += s[k];
         if(ownPayroll(headingKey)) staff[k] += s[k];

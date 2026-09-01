@@ -1435,7 +1435,7 @@
   table.sal-table th, table.sal-table td{border:1px solid var(--line);padding:4px 6px;text-align:right;}
   table.sal-table th{background:var(--navy);color:#fff;font-size:10.5px;text-transform:uppercase;text-align:center;position:sticky;top:0;z-index:2;
     /* Headers wrap onto two lines instead of forcing every column as wide as
-       its longest label ("Full Day Leave Bal" etc.) — numbers underneath stay
+       its longest label ("Advance Balance" etc.) — numbers underneath stay
        nowrap so amounts never break awkwardly. */
     white-space:normal;line-height:1.2;}
   /* Same sticky-name-column treatment .att-table already had — the row you
@@ -9103,7 +9103,7 @@ async function computeSalaryForEmployee(emp, dateList, monthDays, holidayMap){
 // bottom of the card exactly where it sits at the right-hand edge of the row.
 function salaryCardGroups(s){
   const row = (label, val) => `<div class="hr-sheet-row"><span>${label}</span><span class="v">${val}</span></div>`;
-  const hasBalCols = s.fullDayLeaveBal !== undefined;
+  const hasBalCols = s.elBalance !== undefined;
   return `<div class="hr-sheet-group">
       <h4>Salary</h4>
       ${row('Rate of Pay', fmtMoney(s.rate))}
@@ -9144,8 +9144,8 @@ function salaryCardGroups(s){
         <h4>Balances</h4>
         ${row('Advance Balance', fmtMoney(s.advanceBalance))}
         ${row('Loan Balance', fmtMoney(s.loanBalance))}
-        ${row('Full Day Leave Bal', hasBalCols ? s.fullDayLeaveBal : '—')}
-        ${row('Half Day Leave Bal', hasBalCols ? s.halfDayLeaveBal : '—')}
+        ${row('EL Balance', hasBalCols ? s.elBalance : '—')}
+        ${row('SL Balance', hasBalCols ? s.slBalance : '—')}
       </div>
     </details>
     <div class="hr-sheet-net"><span>Net Salary</span><span>${fmtMoney(s.netSalary)}</span></div>`;
@@ -9277,7 +9277,7 @@ async function renderSalarySheet(){
           `<td class="sal-col-2nd">${s.directPaid ? fmtMoney(s.directPaid) : '—'}</td><td><strong>${fmtMoney(s.netSalary)}</strong></td>` +
           `<td class="sal-col-2nd">${fmtMoney(s.pen)}</td><td class="sal-col-2nd">${fmtMoney(s.employerPf)}</td><td class="sal-col-2nd">${fmtMoney(s.pfAdmin)}</td>` +
           `<td class="sal-col-2nd">${fmtMoney(s.edli)}</td><td class="sal-col-2nd">${fmtMoney(s.esiEmployer)}</td><td class="sal-col-2nd">${fmtMoney(s.employerCont)}</td><td class="sal-col-2nd">${fmtMoney(s.ctc)}</td>` +
-          `<td class="sal-col-2nd">${fmtMoney(s.advanceBalance)}</td><td class="sal-col-2nd">${fmtMoney(s.loanBalance)}</td><td class="sal-col-2nd">${s.fullDayLeaveBal}</td><td class="sal-col-2nd">${s.halfDayLeaveBal}</td></tr>`;
+          `<td class="sal-col-2nd">${fmtMoney(s.advanceBalance)}</td><td class="sal-col-2nd">${fmtMoney(s.loanBalance)}</td><td class="sal-col-2nd">${s.elBalance}</td><td class="sal-col-2nd">${s.slBalance}</td></tr>`;
       }
       ['rate','leaveAmount','policyHalfDays','basic','hra','lta','gross','pf','esi','pt','advanceTemp','advance','loanEmi','retention','totalDeduction','conveyance','netSalary','pen','employerPf','pfAdmin','edli','employerCont','ctc','esiEmployer','advanceBalance','loanBalance','directPaid','netBeforeDirect'].forEach(k => { sub[k]+=s[k]; grand[k]+=s[k]; if(ownPayroll_(headingKey)) staff[k]+=s[k]; });
       if(ownPayroll_(headingKey)) staffAny_ = true;
@@ -19398,21 +19398,12 @@ async function renderEmployeeDetailReport(){
 
     const flags = [];
     if(emp.employeeType === 'resident'){
-      observations.push('Resident Engineer — outside the attendance, leave and late-coming policy, except sandwich leave, which applies the same way it does for everyone else.');
-      // Not folded into the exempt narrative above — a Resident's sandwich
-      // days ARE deducted on their Salary Sheet (see computeSalaryForEmployee),
-      // so this report has to say so too, or it would read as though nothing
-      // about their pay this FY was ever reduced.
-      const fyStart0 = financialYearStart(todayStr());
-      const fyDateList0 = [];
-      { const d = new Date(fyStart0 + 'T00:00:00'), end = new Date(todayStr() + 'T00:00:00');
-        while(d <= end){
-          fyDateList0.push(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'));
-          d.setDate(d.getDate() + 1);
-        }
-      }
-      const fySandwichDays0 = sandwichDaysFor(emp, att, fyDateList0, holidayMap).length;
-      if(fySandwichDays0) observations.push('Sandwich leave this FY: ' + fySandwichDays0 + ' day(s) deducted.');
+      // Sandwich leave used to be the one rule that still applied to them, and
+      // this said so and counted their sandwich days for the FY. HR has since
+      // decided it is not one of theirs either (see sandwichDaysFor), so the
+      // sentence was telling HR their pay had been reduced by a rule that no
+      // longer touches it, and the count beside it could only ever be nought.
+      observations.push('Resident Engineer — outside the attendance, leave, late-coming and sandwich-leave policy.');
     } else {
       // computeAttendanceSummary itself has no monthly reset logic (each day
       // is tallied independently), so a single date list spanning the whole
