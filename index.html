@@ -16981,7 +16981,13 @@ async function renderReportsTab(){
   const reports = [
     {key:'increment', label:'Increment Report', desc:'Next increment due date and amount for each employee.'},
     {key:'loan', label:'Loan & Advance Report', desc:'Outstanding loans and advances, with recovery amounts, for each employee.'},
-    {key:'salary', label:'Salary Report', desc:'Full salary breakdown for one month, for everyone on roll.'},
+    // monthlyPayFor, which this is built from, is documented as "at full
+    // attendance" — no leave, absence or LOP is applied. That is the point of
+    // the report and the reason for the name, but it also means its Net is not
+    // the Salary Sheet's whenever anybody took a day, so the description says so
+    // rather than leaving the two to be read as interchangeable.
+    {key:'salary', label:'Salary Report Net for Employer',
+     desc:'Each employee’s actual salary at full attendance — EL, SL, absence and LOP are not applied. Deductions, loan and advance show against it; the Salary Sheet is what is payable.'},
     {key:'ctc', label:'Cost to Company Report', desc:'Full Cost to Company for each employee, employer contributions included.'},
     {key:'contact', label:'Employee Contact Report', desc:'Phone number and email address for every employee.'},
     {key:'birthday', label:'Birthday Report', desc:"Everyone's date of birth, so upcoming birthdays don't get missed."},
@@ -17022,9 +17028,12 @@ async function renderReportsTab(){
   // rather than all of them into one.
   const REPORT_CARD_LANDING_GROUPS = {
     reportCardsLandingBox1: ['increment', 'loan'],
-    reportCardsLandingBox2: ['salary'],
+    // Empty: the Salary Report moved down the grid at HR's request and this
+    // placeholder is the slot it used to occupy, kept for whatever goes there
+    // next rather than removed from the markup above.
+    reportCardsLandingBox2: [],
     reportCardsLandingBox3: ['ctc'],
-    reportCardsLandingBox4: ['contact', 'birthday', 'assets', 'insurance', 'diwali'],
+    reportCardsLandingBox4: ['contact', 'birthday', 'assets', 'insurance', 'diwali', 'salary'],
   };
   const cardButtonHtml = r => `<button type="button" class="gen-accordion-header" data-target="rptSecReport_${r.key}" onclick="openReportsCard('rptSecReport_${r.key}')" aria-expanded="false">
       <span class="gen-accordion-num"></span>
