@@ -567,7 +567,7 @@ function calculatePfFor(emp, wage){
     const cFixed = computePf(pfBase);
     const edliFixed  = pfBase * PF_RULES.edliPct;
     const adminFixed = pfBase * PF_RULES.adminPct;
-    return { applicable:true, type:'fixed', wage:w,
+    return { applicable:true, type:'fixed', wage:w, epfWage:pfBase,
              employee:f, employerEpf:cFixed.employerEpf, employerEps:cFixed.employerEps,
              edli:edliFixed, admin:adminFixed,
              employeeTotal:f,
@@ -603,8 +603,16 @@ function calculatePfFor(emp, wage){
   // column it lands in, changes.
   const employerEpf = isUncapped ? (c.employerEpf + c.employerEps) : c.employerEpf;
   const employerEps = isUncapped ? 0 : c.employerEps;
+  // The wage the contribution was actually charged on, as opposed to `wage`,
+  // which is the Basic the employee really earns. They differ for anyone above
+  // the ceiling: capped at ₹15,000 for everybody except the two HR-confirmed
+  // exceptions, who genuinely do contribute on their whole Basic. Reported so
+  // the Consultant Final Summary can print the figure its PF line rests on
+  // instead of leaving the reader to work out why 12% of Total Wages is not
+  // what was filed.
+  const epfWage = isUncapped ? w : Math.min(w, PF_RULES.epsWageCeiling);
   return {
-    applicable:true, type:'percent', wage:w,
+    applicable:true, type:'percent', wage:w, epfWage,
     employee:employeeCharged, employerEpf, employerEps, edli, admin,
     employeeTotal:employeeCharged,
     employerTotal:employerEpf + employerEps + edli + admin,
@@ -1404,7 +1412,8 @@ function computeSalaryFromAttendance(emp, att, dateList, monthDays, holidayMap){
            loanEmi, loanBalance,
            retention, totalDeduction, netSalary, pen, employerPf, pfAdmin, edli, employerCont, ctc,
            esiEmployer, advanceBalance, elBalance, slBalance,
-           pfWage, pfType: pfCalc.type, pfApplicable: pfCalc.applicable, pfReason: pfCalc.reason,
+           pfWage, pfEpfWage: pfCalc.epfWage || 0,
+           pfType: pfCalc.type, pfApplicable: pfCalc.applicable, pfReason: pfCalc.reason,
            directPaid, netBeforeDirect, consultantSalary,
            pfEmployeeTotal: pfCalc.employeeTotal, pfEmployerTotal: pfCalc.employerTotal,
            pfGrandTotal: pfCalc.grandTotal,
@@ -3069,7 +3078,7 @@ function consultantSummaryEmployees(employees, dateList){
 function Rup_(v){ return Math.round(Number(v) || 0); }
 
 function consultantSummaryTotals(employees, attByEmpId, dateList, monthDays, holidayMap){
-  const pf = { count:0, wage:0, empEmployee:0, empEmployer:0, admin:0, eps:0, edli:0 };
+  const pf = { count:0, wage:0, epfWage:0, empEmployee:0, empEmployer:0, admin:0, eps:0, edli:0 };
   const esiT = { count:0, wage:0, employee:0, employer:0 };
   const alw = { basic:0, hra:0, conveyance:0, lta:0 };
   const ded = { pf:0, pt:0, adv:0, loan:0, esi:0 };
@@ -3086,7 +3095,7 @@ function consultantSummaryTotals(employees, attByEmpId, dateList, monthDays, hol
       // rounded exact total does not. Account 10 read 10,801 against the
       // consultant's 10,802, which is 1,250 + 1,133 + 1,198 + 1,250 + 1,176 +
       // 1,045 + 1,250 + 1,250 + 1,250 added up.
-      pf.count++; pf.wage += Rup_(s.pfWage);
+      pf.count++; pf.wage += Rup_(s.pfWage); pf.epfWage += Rup_(s.pfEpfWage);
       pf.empEmployee += Rup_(s.pf); pf.empEmployer += Rup_(s.employerPf);
       pf.admin += Rup_(s.pfAdmin); pf.eps += Rup_(s.pen); pf.edli += Rup_(s.edli);
     }
@@ -3135,6 +3144,7 @@ function consultantSummaryCsv(t){
     rows: [
       ['PF Summary','Total No Of Employees', t.pf.count],
       ['PF Summary','Total Wages', Math.round(t.pf.wage)],
+      ['PF Summary','EPF Wages (what PF is charged on)', Math.round(t.pf.epfWage)],
       ['PF Summary','P.F. Account No 1', Math.round(t.acct1)],
       ['PF Summary','P.F. Account No 1 — Employee share', Math.round(t.pf.empEmployee)],
       ['PF Summary','P.F. Account No 1 — Employer EPF share', Math.round(t.pf.empEmployer)],

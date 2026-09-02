@@ -152,6 +152,24 @@ check('the Allowance total is its own heads',
 const ded = csv.rows.filter(r => r[0] === 'Deduction' && r[1] !== 'Total Deduction');
 check('the Deduction total is its own heads',
       ded.reduce((t, r) => t + n(r[2]), 0), amt('Total Deduction'));
+// The line that started this: our Total Wages was everyone's Basic, sitting
+// directly above a contribution charged on the capped wage, so 12% of the
+// printed wage was 23,716 against the 22,160 actually filed. Both lines are
+// printed now, and this asserts the PF rests on the right one.
+console.log('\nthe PF lines follow from the wage line printed above them\n');
+const empShare = amt('P.F. Account No 1 — Employee share');
+const epfWage = amt('EPF Wages (what PF is charged on)');
+const totalWage = amt('Total Wages');
+console.log('  Total Wages ' + totalWage + ' (Basic earned) · EPF Wages ' + epfWage +
+            ' (charged on) · employee share ' + empShare);
+check('EPF Wages is never above Basic earned', epfWage <= totalWage, true);
+check('the employee share is 12% of EPF Wages, to the rupee',
+      Math.abs(empShare - epfWage * 0.12) <= 2, true);
+// Somebody above the ceiling has to be in the fixture, or the two wage lines
+// would be equal and this would prove nothing.
+check('and the two lines genuinely differ, so the check has something to catch',
+      epfWage < totalWage, true);
+
 check('Net is the Allowance total less the Deduction total',
       csv.rows.find(r => r[0] === 'Allowance' && r[1] === 'Total')[2] - amt('Total Deduction'),
       csv.rows.find(r => r[0] === 'Net')[2]);

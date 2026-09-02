@@ -10110,7 +10110,8 @@ async function renderConsultantSummaryReport(){
 
   const pfCard = hrCard('<strong>PF Summary</strong>',
     hrRow('Total No Of Employees', pf.count) +
-    hrRow('Total Wages', money(pf.wage)) +
+    hrRow('Total Wages', money(pf.wage) + ' <span style="color:var(--muted);font-size:11px;white-space:nowrap;" title="Everyone\'s Basic added up — what the eleven PF members actually earn. This is NOT the figure the contributions below are calculated on; see EPF Wages.">(Basic earned)</span>') +
+    hrRow('EPF Wages', money(pf.epfWage) + ' <span style="color:var(--muted);font-size:11px;white-space:nowrap;" title="The wage PF is actually charged on. EPFO caps it at ₹15,000 a month, so anyone whose Basic is above that contributes on ₹15,000 rather than on what they earn. Every figure below rests on this line, not on Total Wages above it.">(PF is charged on this)</span>') +
     hrRow('P.F. Account No 1', money(acct1) + ' <span style="color:var(--muted);font-size:11px;white-space:nowrap;">(' + money(pf.empEmployee) + ' + ' + money(pf.empEmployer) + ')</span>') +
     hrRow('P.F. Account No 2', money(pf.admin)) +
     hrRow('P.F. Account No 10', money(pf.eps)) +
