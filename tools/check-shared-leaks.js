@@ -11,13 +11,18 @@
 //
 //   node tools/check-shared-leaks.js
 //
-// KNOWN is the browser-only code still sitting in the shared file by mistake --
+// KNOWN is empty, and that is the point: every browser-only name that was
+// sitting in the shared file has been moved to index.html where it belongs --
 // getAttendanceMany and its read cache (async, and it calls the backend),
 // payrollFormContext (reads the open form through document), elFyRows (async),
-// and toCsv's csvEscape. None of them is reachable from any report email today,
-// which is the only reason they are tolerated rather than fixed. They belong in
-// index.html; move them there and delete the name from this list. Do NOT add a
-// new name to KNOWN to make this pass -- that is the bug it exists to stop.
+// and toCsv, which needed csvEscape. None was reachable from a report email,
+// which is why they survived so long; being unreachable is not the same as
+// being safe, and each was one refactor away from being reached.
+//
+// Do NOT add a name to KNOWN to make this pass -- that is the bug it exists to
+// stop. If the shared file needs something the browser has, the answer is the
+// computeSalaryForEmployee pattern: a thin async wrapper in index.html fetches,
+// and a pure function here does the arithmetic.
 const fs = require('fs');
 const acorn = require('acorn');
 const walk = require('acorn-walk');
@@ -28,8 +33,7 @@ const ast = acorn.parse(src, { ecmaVersion: 2022 });
 
 // Everything the JS language itself provides, plus what Apps Script's own
 // runtime has. Anything outside this and outside the file is a leak.
-const KNOWN = new Set(['LONG_READ_TTL_MS', 'applyAlwaysPresentFillToMany_', 'backendAction',
-  'csvEscape', 'document', 'getAttendance']);
+const KNOWN = new Set([]);
 
 const BUILTINS = new Set(['undefined','NaN','Infinity','Object','Function','Boolean','Symbol',
   'Error','TypeError','RangeError','SyntaxError','ReferenceError','EvalError','URIError',
