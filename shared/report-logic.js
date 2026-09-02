@@ -2067,6 +2067,24 @@ function seqNoOf(emp){
   return (isFinite(n) && n > 0) ? n : Infinity;
 }
 
+// What an SR NO column prints. seqNoOf answers "where does this employee
+// sort?" and says Infinity for anyone never given a number, which is right for
+// ordering and wrong for printing: the day the central sequence shipped nobody
+// had a number yet, so every SR NO on the Salary Sheet, both statutory
+// returns, the accountant file, the Consultant Report and the wage register
+// read the literal word "Infinity". The consultant's August summary is what
+// found it.
+//
+// So a report asks for the label and passes the row's own position: the
+// central number when the employee has one, and the running count these
+// columns showed before the central sequence existed when they do not. A
+// half-numbered roster therefore still reads sensibly rather than mixing
+// numbers with blanks.
+function seqNoLabel(emp, position){
+  const n = seqNoOf(emp);
+  return isFinite(n) ? n : position;
+}
+
 // Name then id after the number itself, so the order is fully determined even
 // when two records somehow share a number or nobody has one at all. Without a
 // final tiebreak the list could come back in a different order on two machines
@@ -2282,13 +2300,14 @@ function excludedNote_(excluded, what){
 
 function pfReturnCsv(pfRows, pfTot, excluded){
   const body = [];
+  let pos = 0;
   SALARY_HEADING_ORDER.forEach(hk => {
     const group = pfRows.filter(x => x.headingKey === hk);
     if(!group.length) return;
     body.push([SALARY_HEADINGS[hk].label]);
     group.forEach(x => {
       const status = x.applicable ? 'Contributing' : (x.notConfigured ? 'Not configured' : 'PF Not Applicable');
-      body.push([seqNoOf(x.emp), x.emp.name, x.emp.id, excelIdNumber(x.emp.uan), x.eligible, x.pfType,
+      body.push([seqNoLabel(x.emp, ++pos), x.emp.name, x.emp.id, excelIdNumber(x.emp.uan), x.eligible, x.pfType,
         Math.round(x.wage + (x.leaveAmount || 0)), x.leaveDays || 0, Math.round(x.leaveAmount || 0), Math.round(x.wage),
         x.applicable ? Math.round(x.employee) : 0, x.applicable ? Math.round(x.epf) : 0,
         // Rounded from the full-precision sum, not from the two rounded cells
@@ -2318,13 +2337,14 @@ function pfReturnCsv(pfRows, pfTot, excluded){
 
 function esiReturnCsv(esiRows, esiTot, excluded){
   const body = [];
+  let pos = 0;
   SALARY_HEADING_ORDER.forEach(hk => {
     const group = esiRows.filter(x => x.headingKey === hk);
     if(!group.length) return;
     body.push([SALARY_HEADINGS[hk].label]);
     group.forEach(x => {
       const status = x.r.covered ? 'Covered' : 'Exempt';
-      body.push([seqNoOf(x.emp), x.emp.name, excelIdNumber(x.emp.esiNumber), Math.round(x.s.gross),
+      body.push([seqNoLabel(x.emp, ++pos), x.emp.name, excelIdNumber(x.emp.esiNumber), Math.round(x.s.gross),
         x.r.covered ? Math.round(x.r.employee) : 0, x.r.covered ? Math.round(x.r.employer) : 0,
         x.r.covered ? Math.round(x.r.total) : 0, status, x.r.reason]);
     });
@@ -2422,6 +2442,9 @@ function salarySheetCsv(employees, attByEmpId, dateList, monthDays, holidayMap){
   // down the page — the point of a central sequence being that the same person
   // is the same number on every sheet. It will not run 1,2,3 inside a heading
   // group, because a group only holds part of the roster; that is expected.
+  // pos is only the fallback for an employee who has not been given a number
+  // yet, so the column reads as a running count until HR numbers the roster.
+  let pos = 0;
   SALARY_HEADING_ORDER.forEach(headingKey => {
     const group = (employees || []).filter(e => ratePayAsOf(e, dateList[0]).salaryHeading === headingKey);
     if(!group.length) return;
@@ -2430,7 +2453,7 @@ function salarySheetCsv(employees, attByEmpId, dateList, monthDays, holidayMap){
     const sub = salarySheetTotalsSeed_();
     group.forEach(emp => {
       const s = salaryFor_(emp, attByEmpId[emp.id] || {}, dateList, monthDays, holidayMap);
-      rows.push([seqNoOf(emp), emp.name, R(s.rate), s.leaveDays, s.policyHalfDays, R(s.leaveAmount), R(s.basic), R(s.hra),
+      rows.push([seqNoLabel(emp, ++pos), emp.name, R(s.rate), s.leaveDays, s.policyHalfDays, R(s.leaveAmount), R(s.basic), R(s.hra),
         R(s.lta), R(s.gross), R(s.pf), R(s.esi), R(s.pt), R(s.advanceTemp), R(s.advance), R(s.loanEmi), R(s.retention),
         R(s.totalDeduction), R(s.consultantSalary), R(s.conveyance), R(s.directPaid), R(s.netSalary),
         R(s.pen), R(s.employerPf), R(s.pfAdmin), R(s.edli), R(s.esiEmployer), R(s.employerCont), R(s.ctc),
@@ -2474,7 +2497,7 @@ function finalSalarySheetCsv(employees, attByEmpId, dateList, monthDays, holiday
       // sheet as on every other. This one is sorted by bank rather than by
       // sequence, so the column will not ascend — it identifies rather than
       // orders, which is what a central number is for.
-      out.push([seqNoOf(r.emp), r.emp.name, r.emp.bankName || '', excelIdNumber(r.emp.accountNumber),
+      out.push([seqNoLabel(r.emp, grandCount), r.emp.name, r.emp.bankName || '', excelIdNumber(r.emp.accountNumber),
                 r.emp.ifsc || '', Math.round(r.net)]);
     });
     out.push(['', label + ' subtotal', rows.length + ' employee(s)', '', '', Math.round(sub)]);
@@ -2794,7 +2817,7 @@ function consultantReportRows(employees, attByEmpId, dateList, monthDays, holida
     if(loanEmi && advance) loanLabel = 'Loan / Advance';
     else if(loanEmi) loanLabel = 'Loan';
     else if(advance) loanLabel = 'Advance';
-    rows.push([seqNoOf(emp), emp.id || '', emp.name || '', emp.designation || '',
+    rows.push([seqNoLabel(emp, rows.length + 1), emp.id || '', emp.name || '', emp.designation || '',
       consultantDate(emp.dob), consultantDate(emp.doj), emp.pfNo || '', emp.uan || 'NA',
       emp.esiNumber || '', Math.round(ratePayAsOf(emp, dateList[0]).ratePay),
       consultantDays(workingDays), consultantDays(weekOff), consultantDays(presentDays),
@@ -2934,7 +2957,7 @@ function wageRegisterRows(employees, attByEmpId, dateList, monthDays, holidayMap
     const lwf = 0;   // Labour Welfare Fund — no field anywhere in this app
 
     const row = [
-      seqNoOf(emp), emp.id || '', emp.name || '', emp.designation || '',
+      seqNoLabel(emp, rows.length + 1), emp.id || '', emp.name || '', emp.designation || '',
       emp.uan || 'NA', emp.esiNumber || 'NA', emp.accountNumber || '',
       consultantDays(monthDays), consultantDays(c.sl), consultantDays(presentDays),
       consultantDays(weekOff), consultantDays(publicHolidays), consultantDays(c.el),
