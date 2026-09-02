@@ -145,7 +145,10 @@ built.rows.forEach(r => {
   const pairs = [
     ['Basic', 'Basic'], ['HRA', 'HRA'], ['LTA', 'LTA'], ['P.F.', 'PF'],
     ['P.T.', 'PT'], ['E.S.I.', 'ESI'], ['Loan', 'Loan EMI'],
-    ['Conv All', 'Conveyance'], ['Gross Dedu.', 'Total Deduction'], ['Net Salary', 'Net Salary']
+    // Net on the register is the Salary Sheet's Consultant Salary, not its Net
+    // Salary: conveyance is paid but sits outside the wage register, so the
+    // two columns are different figures on purpose for anyone drawing it.
+    ['Gross Dedu.', 'Total Deduction'], ['Net Salary', 'Consultant Salary']
   ];
   pairs.forEach(([reg, she]) => {
     if (Math.abs(n(r[C[reg]]) - n(sr[S[she]])) > 0.5) {
@@ -155,6 +158,24 @@ built.rows.forEach(r => {
   });
 });
 check('not one figure differs from the Salary Sheet', driftBad, 0);
+
+console.log('\nconveyance is paid, and deliberately not on this register\n');
+const conv = built.rows.find(r => r[C['Emp Name']] === 'Gets Conveyance');
+const convSheet = sheetRows['Gets Conveyance'];
+console.log('  Salary Sheet: gross ' + convSheet[S['Gross']] + ' + conveyance ' +
+            convSheet[S['Conveyance']] + ' = net ' + convSheet[S['Net Salary']]);
+console.log('  Register    : gross ' + conv[C['Gross Earni.']] + ' + Conv All ' +
+            conv[C['Conv All']] + ' = net ' + conv[C['Net Salary']]);
+check('he really does draw conveyance', n(convSheet[S['Conveyance']]) > 0, true);
+check('the register\'s Conv All column is nil', n(conv[C['Conv All']]), 0);
+check('and its rate column too', n(conv[C['Conv All Rate']]), 0);
+check('so his Gross Earni. is Basic + HRA + LTA only',
+      n(conv[C['Gross Earni.']]), n(convSheet[S['Gross']]));
+check('and the register net is below the Salary Sheet net by the conveyance',
+      n(convSheet[S['Net Salary']]) - n(conv[C['Net Salary']]), n(convSheet[S['Conveyance']]));
+check('while the Salary Sheet still pays it in full',
+      n(convSheet[S['Net Salary']]),
+      n(convSheet[S['Consultant Salary']]) + n(convSheet[S['Conveyance']]));
 
 console.log('\nthe identifier columns survive Excel\n');
 const csv = L.wageRegisterCsvRows(built.rows);

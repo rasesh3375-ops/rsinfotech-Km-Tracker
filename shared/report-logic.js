@@ -2945,14 +2945,25 @@ function wageRegisterRows(employees, attByEmpId, dateList, monthDays, holidayMap
     const weekOff = Math.max(0,
       monthDays - presentDays - publicHolidays - c.el - c.sl - absentDays);
 
-    // Gross on his form is every earning head added up, and conveyance is one
-    // of them — unlike our Salary Sheet, which keeps conveyance out of Gross
-    // and adds it back at Net. Net is then Gross Earni. less Gross Dedu.,
-    // which is netBeforeDirect: "Paid Directly" has no head on his register
-    // and is nil for everyone in this scope anyway (it is an Apprentice
-    // arrangement), so this is the same figure as the Salary Sheet's Net.
-    const grossRate = full.basic + full.hra + full.lta + full.conveyance;
-    const grossEarn = s.basic + s.hra + s.lta + s.conveyance;
+    // Conveyance is deliberately NOT in this register, and its two columns are
+    // a real zero rather than an omission — his form carries a Conv All head
+    // and prints nil in it, so the columns stay to line up with the sheet he
+    // sends. Conveyance is reimbursed outside the wage register: it attracts
+    // no PF, ESI or PT, it is not part of the wage he files on, and including
+    // it made Dharmesh Shirke read 31,858 against the 28,980 on the
+    // consultant's own register — a difference that looked like an error in
+    // one of the two documents and was only ever a difference in what the two
+    // documents are for.
+    //
+    // This is the consultant's view only. The Salary Sheet, the accountant's
+    // payable sheet, the payslip and everything else still add conveyance and
+    // still pay it; nothing about what anybody receives changes here.
+    //
+    // Gross is therefore Basic + HRA + LTA, which is exactly s.gross, and Net
+    // is that less the deductions, which is exactly s.consultantSalary — the
+    // Salary Sheet's own Consultant Salary column, so the two cannot drift.
+    const grossRate = full.salaryGross;
+    const grossEarn = s.gross;
     const advance = s.advanceTemp + s.advance;
     const lwf = 0;   // Labour Welfare Fund — no field anywhere in this app
 
@@ -2964,11 +2975,11 @@ function wageRegisterRows(employees, attByEmpId, dateList, monthDays, holidayMap
       consultantDays(payableDays), R(full.basic),
       R(full.basic), R(s.basic), R(s.pf),
       R(full.hra), R(s.hra), R(s.pt),
-      R(full.conveyance), R(s.conveyance), R(advance),
+      0, 0, R(advance),
       R(full.lta), R(s.lta), R(lwf),
       0, 0, R(s.loanEmi),
       0, 0, R(s.retention),
-      R(grossRate), R(grossEarn), R(s.esi), R(s.totalDeduction), R(s.netBeforeDirect)
+      R(grossRate), R(grossEarn), R(s.esi), R(s.totalDeduction), R(s.consultantSalary)
     ];
     rows.push(row);
     SUM.forEach(k => {
@@ -3037,7 +3048,14 @@ function consultantSummaryTotals(employees, attByEmpId, dateList, monthDays, hol
     }
     ded.pt += s.pt;
     if(CONSULTANT_REPORT_HEADINGS.indexOf(headingKey) !== -1){
-      alw.basic += s.basic; alw.hra += s.hra; alw.conveyance += s.conveyance; alw.lta += s.lta;
+      // Conveyance is deliberately not added — see wageRegisterRows above.
+      // It is reimbursed outside the wage register, carries no PF, ESI or PT,
+      // and the consultant files on the wage without it. The head stays in the
+      // list at nil because his own summary carries a Conv All line at nil
+      // too, so the two pages line up; leaving the figure in made this
+      // summary's Allowance Total and Net disagree with the register printed
+      // directly above them on the same tab.
+      alw.basic += s.basic; alw.hra += s.hra; alw.lta += s.lta;
       ded.pf += s.pf; ded.adv += s.advanceTemp + s.advance; ded.loan += s.loanEmi; ded.esi += s.esi;
     }
   });
