@@ -321,7 +321,7 @@ add(table(['Code', 'Means', 'Effect on pay'], [
   ['<b>HLP</b>', 'Half day leave without pay', 'Half present, half unpaid'],
   ['<b>A</b>', 'Absent', 'Unpaid'],
   ['<b>LP</b>', 'Leave without pay', 'Unpaid'],
-  ['<b>H</b>', 'Week off or declared holiday', 'Paid, not a working day'],
+  ['<b>H</b>', 'Week off or declared holiday', 'Paid, not a working day. Counts towards EL'],
   ['<b>SHORT</b>', 'Short leave', 'Counted as present; three a month are free, past that see below'],
 ], [18*mm, 60*mm, 87*mm]))
 
@@ -409,8 +409,14 @@ A(P('6 &nbsp;Leave', 'h1'))
 add(table(['', 'Rule'], [
   ['<b>Sick leave</b>', '7 days a year, or 4 for Work From Home. Not carried forward. '
    'A medical certificate is required.'],
-  ['<b>Earned leave</b>', 'Earned at 1 day per 25 attendance days. Not carried forward. '
-   'What is earned in one year becomes next year\'s opening balance.'],
+  ['<b>Earned leave</b>', 'One day per 25 qualifying present days, as a running total across '
+   'the whole financial year — it does not start again each month, and it is not rounded down. '
+   '28 qualifying days earns 1.12 days, and the remainder keeps accruing. Not carried forward: '
+   'what is earned in one year becomes next year\'s opening balance.'],
+  ['<b>A qualifying day</b>', 'A day present (short leave included), a day of EL or SL, and a '
+   'Sunday or declared holiday the employee was in service for, each count 1. A half-day code '
+   'counts 0.5. Unpaid absence, an unmarked day and a sandwiched day count nothing — what '
+   'payroll does not pay for does not earn leave.'],
   ['<b>Encashment</b>', 'Earned leave is encashable at 70% of Basic + HRA, a day being a '
    'twenty-fifth of that.'],
   ['<b>Resident Engineers</b>', 'Outside the leave scheme entirely. Their leave columns read NA.'],
