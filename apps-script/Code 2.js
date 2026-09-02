@@ -302,6 +302,56 @@ function clearLoginFailure_(username) {
   CacheService.getScriptCache().remove('fail_' + username);
 }
 
+// Passwords are stretched, not hashed once.
+//
+// A single salted SHA-256 is fast, and fast is the whole problem: if the KV
+// sheet were ever exposed, an ordinary password falls to a dictionary run in
+// minutes. Apps Script has no bcrypt or scrypt, so this iterates SHA-256
+// instead — the same idea PBKDF2 uses, which is to make each guess cost the
+// attacker as much as it costs us.
+//
+// The number of rounds is set for Apps Script's speed, not a laptop's.
+// Utilities.computeDigest carries real per-call overhead — measured in Node
+// the same loop runs in well under a second at 60,000 rounds, and on Apps
+// Script that would be ten seconds or more and could hit the execution limit.
+// A login that times out is a worse outcome than the weakness this fixes.
+//
+// 5,000 rounds should land comfortably inside a second there while multiplying
+// an attacker's work by 5,000. Time a real login after pasting this: if it is
+// quick, raise the number — thanks to the "v2$<rounds>$" prefix that costs
+// nothing and needs no migration, because every stored hash says how many
+// rounds made it, and the next login upgrades each row on its own.
+var PASSWORD_HASH_ROUNDS = 5000;
+var PASSWORD_HASH_PREFIX = 'v2';
+
+// "v2$<rounds>$<hex>". The scheme is stored beside the hash rather than
+// assumed, so the rounds can be raised later without a second migration and
+// without guessing what an old row was made with.
+function hashPassword_(salt, password, rounds) {
+  var n = rounds || PASSWORD_HASH_ROUNDS;
+  var h = sha256Hex_(String(salt) + ':' + String(password));
+  for (var i = 0; i < n; i++) h = sha256Hex_(h);
+  return PASSWORD_HASH_PREFIX + '$' + n + '$' + h;
+}
+
+// True when `stored` matches, whichever scheme it was written with. Legacy
+// rows are a bare hex digest of salt:password with no prefix; they keep
+// working, and upgradePasswordHash_ below rewrites them the first time their
+// owner logs in, so nobody has to reset anything.
+function passwordMatches_(stored, salt, password) {
+  var str = String(stored || '');
+  if (str.indexOf(PASSWORD_HASH_PREFIX + '$') === 0) {
+    var parts = str.split('$');
+    var rounds = Number(parts[1]) || PASSWORD_HASH_ROUNDS;
+    return hashPassword_(salt, password, rounds) === str;
+  }
+  return sha256Hex_(String(salt) + ':' + String(password)) === str;
+}
+
+function isLegacyPasswordHash_(stored) {
+  return String(stored || '').indexOf(PASSWORD_HASH_PREFIX + '$') !== 0;
+}
+
 function sha256Hex_(str) {
   const raw = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, str, Utilities.Charset.UTF_8);
   return raw.map(function (b) { return ('0' + (b & 0xFF).toString(16)).slice(-2); }).join('');
@@ -321,10 +371,18 @@ function doLogin_(body) {
     const row = findRow_(sheet, 'hr_password');
     if (row === -1) return { error: 'HR account not set up yet' };
     const rec = JSON.parse(sheet.getRange(row, 2).getValue());
-    const hash = sha256Hex_(rec.salt + ':' + password);
-    if (rec.username !== username || hash !== rec.hash) {
+    if (rec.username !== username || !passwordMatches_(rec.hash, rec.salt, password)) {
       recordLoginFailure_(username);
       return { error: 'Invalid credentials' };
+    }
+    // The password was just proved correct, so this is the one moment the
+    // plaintext is available to re-hash with. Wrapped: a failure to upgrade
+    // must never stop somebody logging in.
+    if (isLegacyPasswordHash_(rec.hash)) {
+      try {
+        rec.hash = hashPassword_(rec.salt, password);
+        sheet.getRange(row, 2).setValue(JSON.stringify(rec));
+      } catch (err) { Logger.log('HR password hash upgrade skipped: ' + err); }
     }
     clearLoginFailure_(username);
     const session = createSession_('hr', username, HR_SESSION_LIFETIME_MS);
@@ -334,8 +392,15 @@ function doLogin_(body) {
     const users = row === -1 ? [] : JSON.parse(sheet.getRange(row, 2).getValue() || '[]');
     const user = users.filter(function (u) { return u.username === username && u.enabled !== false; })[0];
     if (!user) { recordLoginFailure_(username); return { error: 'Invalid credentials' }; }
-    const hash = sha256Hex_(user.salt + ':' + password);
-    if (hash !== user.hash) { recordLoginFailure_(username); return { error: 'Invalid credentials' }; }
+    if (!passwordMatches_(user.hash, user.salt, password)) {
+      recordLoginFailure_(username); return { error: 'Invalid credentials' };
+    }
+    if (isLegacyPasswordHash_(user.hash)) {
+      try {
+        user.hash = hashPassword_(user.salt, password);
+        sheet.getRange(row, 2).setValue(JSON.stringify(users));
+      } catch (err) { Logger.log('Engineer password hash upgrade skipped: ' + err); }
+    }
     clearLoginFailure_(username);
     const session = createSession_('engineer', username);
     return { ok: true, token: session.token, role: 'engineer', displayName: user.displayName };
@@ -1001,6 +1066,28 @@ function doPost(e) {
   const auth = validateSession_(body.token);
   if (!auth) return jsonOut_({ error: 'unauthorized' });
   const isEngineer = auth.role === 'engineer';
+
+  // `get` and `getAllEmployees` over POST as well as GET. A GET carries the
+  // session token in the query string, and a URL is written to the Apps Script
+  // execution log and the browser's history in a way a request body is not —
+  // so a token that should live for 24 hours was being recorded in two places
+  // that outlive it. Every other call already used POST; these two were the
+  // last on GET.
+  //
+  // The doGet versions stay for now, deliberately. The frontend and this file
+  // deploy at different moments — index.html is live within a minute of a push
+  // and this has to be pasted by hand — so removing them here would break
+  // every read for however long that gap is.
+  if (body.action === 'get') {
+    if (isEngineer && !engineerMayRead_(body.key, auth.username)) return forbidden_();
+    const sheetG = getSheet_();
+    const rowG = findRow_(sheetG, body.key);
+    return jsonOut_({ value: rowG === -1 ? null : sheetG.getRange(rowG, 2).getValue() });
+  }
+  if (body.action === 'getAllEmployees') {
+    if (isEngineer) return forbidden_();
+    return jsonOut_({ ok: true, employees: allEmployeesFromRows_(getSheet_().getDataRange().getValues()) });
+  }
 
   // The engineer app's own record, six fields, instead of the employees list.
   if (body.action === 'getMyProfile') return jsonOut_(doGetMyProfile_(auth));
