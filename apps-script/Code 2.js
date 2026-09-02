@@ -1509,7 +1509,7 @@ function sendDailyDigestEmail() {
 // the monthly reports are a record of a finished month, but this is a list of
 // what falls due in the month now starting, so HR has the whole of it to act.
 var INCREMENT_REMINDER_EMAIL = 'rasesh@rsinfotech.net';
-var INCREMENT_REMINDER_HOUR = 10; // 10 AM IST on the 1st
+var INCREMENT_REMINDER_HOUR = 10; // 10 AM IST on the 1st, for this month's increments
 
 function createIncrementReminderTrigger() {
   var triggers = ScriptApp.getProjectTriggers();
@@ -3211,14 +3211,14 @@ function sendAllEmailsNow() {
 function listReminderTriggers() {
   var expected = [
     ['sendDailyDigestEmail', 'Daily HR Digest — every day'],
-    ['sendIncrementReminderEmail', 'Increments due next month — 30th'],
+    ['sendIncrementReminderEmail', 'Increments due this month — 1st'],
     ['sendBirthdayReminderEmail', 'Birthday reminder — day before'],
     ['sendMonthlyReportsEmail', 'Report pack — 1st'],
     ['sendLoanAdvanceReportEmail', 'Loan and EMI Report — 1st'],
     ['sendLeaveDetailReportEmail', 'Monthly Leave Detail Report — 1st'],
-    ['sendConsultantReportEmail', 'Consultant Report — 2nd'],
+    ['sendConsultantReportEmail', 'Consultant Report — 1st'],
     ['sendSalaryAdvanceAlertEmail', 'Salary advance taken — same evening'],
-    ['sendMonthlyAdvanceSummaryEmail', 'Salary advances for the month — last day']
+    ['sendMonthlyAdvanceSummaryEmail', 'Salary advances for last month — 1st']
   ];
   var installed = {};
   var triggers = ScriptApp.getProjectTriggers();
@@ -3454,7 +3454,7 @@ function sendSalaryAdvanceAlertEmail(force) {
 // would train the reader to stop looking. This is a month-end report, and "no
 // advances were paid this month" is a fact worth confirming.
 var ADVANCE_SUMMARY_EMAIL = 'rasesh@rsinfotech.net';
-var ADVANCE_SUMMARY_HOUR = 20; // 8 PM IST on the last day of the month
+var ADVANCE_SUMMARY_HOUR = 20; // 8 PM IST on the 1st, for the month just ended
 
 function createAdvanceSummaryTrigger() {
   var triggers = ScriptApp.getProjectTriggers();
