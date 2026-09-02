@@ -33,6 +33,7 @@ npm install acorn acorn-walk        # once, for the acorn-based checks
 node tools/check-undeclared.js
 node tools/check-shared-standalone.js   # after touching shared/report-logic.js
 node tools/check-shared-leaks.js        # ditto — catches what the fixture never runs
+node tools/check-reports.js             # no dependencies — run it every time
 ```
 
 `check-syntax.js` parses the inline scripts. A stray brace means the app does
@@ -49,11 +50,36 @@ never wrote their Drive copy. Nothing else in the project catches that.
 
 ### Verifying behaviour
 
-There is no test suite. The way changes get verified here is a throwaway
+There are two kinds of check here, and which one a change needs depends on
+whether the answer it produces is worth re-checking next month.
+
+**Payroll answers are worth keeping.** `tools/check-reports.js` runs every
+report check in one command, with no dependencies, and prints four lines unless
+something breaks — which is what makes running it every time cheap enough to
+actually do. Each check loads `shared/report-logic.js` into a bare `vm` context
+and asserts on what the report builders return. Add to it whenever you change a
+figure, an ordering or a column; don't write a throwaway for that.
+
+This convention replaced a throwaway-only one, and it was a regression that
+changed it. The central sequence shipped with `seqNoOf` returning `Infinity`
+for anyone not yet numbered — correct for sorting, and printed straight into
+the SR NO column of the Salary Sheet, both statutory returns, the accountant
+file, the Consultant Report and the wage register. Nobody had been numbered
+yet, so every one of those columns read the literal word "Infinity" on the live
+site. A throwaway harness *had* covered an unnumbered roster: it asserted the
+order was right and that every report still built, both true, and it had been
+deleted by then anyway. What found it was a consultant's emailed summary.
+`tools/check-srno.js` now asserts the printed cell, and fails loudly if that
+fix is ever undone.
+
+**Screen behaviour is not worth keeping.** For anything that needs the real
+UI — a modal, a form, a rendered table — write a throwaway
 [jsdom](https://github.com/jsdom/jsdom) harness that loads the real
-`index.html`, stubs the network, drives the actual UI and asserts on what comes
-out. Write one per change, keep it out of the repo, and make it assert rather
-than print — printing hides regressions in a wall of output.
+`index.html`, stubs the network, drives the UI and asserts on what comes out,
+then delete it. Those need `npm install jsdom`, take seconds rather than
+milliseconds, and break for reasons that have nothing to do with payroll being
+wrong. Keep them out of the repo. Make them assert rather than print — printing
+hides regressions in a wall of output.
 
 ```js
 const dom = new JSDOM(html, { runScripts: 'dangerously', url: 'https://x.test/hr/',
