@@ -3843,7 +3843,10 @@ async function remoteGetAllEmployees_(){
     // with "signal is aborted without reason". Two attempts of up to 15s
     // each, inside a 32s overall budget, gives a slow-but-working response
     // room to actually land instead of being aborted mid-flight.
-    const res = await apiFetch(API_URL + '?action=getAllEmployees&token=' + encodeURIComponent(sessionToken || '') + '&_=' + Date.now() + Math.random().toString(36).slice(2), undefined, 2, 32000, 15000);
+    const res = await postOrLegacyGet_(
+      { action: 'getAllEmployees' },
+      '?action=getAllEmployees&token=' + encodeURIComponent(sessionToken || ''),
+      2, 32000, 15000);
     const text = await res.text();
     let data;
     try{ data = JSON.parse(text); }
@@ -3860,13 +3863,43 @@ async function remoteGetAllEmployees_(){
     return lastGoodEmployeesJson !== null ? { value: lastGoodEmployeesJson } : null;
   }
 }
+// Reads go over POST, so the session token travels in the body rather than the
+// query string. A URL is written to the Apps Script execution log and to the
+// browser's history; a request body is not, so a token good for 24 hours was
+// being recorded in two places that outlive it. These two reads were the last
+// on GET — everything else already posted.
+//
+// The fallback is not belt-and-braces, it is the deploy order. index.html is
+// live within a minute of a push and Code 2.js has to be pasted into the Apps
+// Script editor by hand, so there is always a window where the new frontend is
+// talking to the old backend. An old backend answers an unknown POST action
+// with "unknown action" rather than an error anyone would notice, and every
+// read would quietly return nothing. So: try POST, and if the backend does not
+// know the action yet, use the old URL once. It stops firing by itself the
+// moment the backend is pasted, and the GET handlers can be deleted then.
+async function postOrLegacyGet_(payload, legacyQuery, retries, budgetMs, perTryMs){
+  const res = await apiFetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(Object.assign({ token: sessionToken }, payload))
+  }, retries, budgetMs, perTryMs);
+  const text = await res.text();
+  let known = true;
+  try{ known = JSON.parse(text).error !== 'unknown action'; }catch(e){ /* not JSON: let the caller report it */ }
+  if(known) return { ok: res.ok, status: res.status, text: async () => text };
+  return apiFetch(API_URL + legacyQuery + '&_=' + Date.now() + Math.random().toString(36).slice(2),
+                  undefined, retries, budgetMs, perTryMs);
+}
+
 async function remoteGet(key){
   if(key === 'employees') return remoteGetAllEmployees_();
   try{
     // See the matching comment in remoteGetAllEmployees_ above — same
     // cache-busting, same reason: this URL is otherwise identical every time
     // this key is read within one login session.
-    const res = await apiFetch(API_URL + '?action=get&key=' + encodeURIComponent(key) + '&token=' + encodeURIComponent(sessionToken || '') + '&_=' + Date.now() + Math.random().toString(36).slice(2));
+    const res = await postOrLegacyGet_(
+      { action: 'get', key },
+      '?action=get&key=' + encodeURIComponent(key) + '&token=' + encodeURIComponent(sessionToken || ''));
     const text = await res.text();
     let data;
     try{ data = JSON.parse(text); }
@@ -15065,7 +15098,16 @@ async function uploadEmployeeDocToDrive(label, dataUrl, empId, empName){
   const emp = editingEmployeeDraft || {};
   const id = empId || (document.getElementById('f_id') || {}).value || emp.id || 'unfiled';
   const name = empName || (document.getElementById('f_name') || {}).value || emp.name || '';
-  const folderPath = ['HR Management', 'Employee Documents', (name ? name + ' ' : '') + '(' + id + ')'];
+  // Year-wise, like every other Drive path in the app, so a document lands
+  // under the financial year it was filed in.
+  //
+  // Worth knowing rather than discovering: an employee's documents will now
+  // sit under whichever year each was uploaded in, so somebody's Aadhaar and
+  // their PAN can end up in different year folders. Anything filed before this
+  // stays where it is under HR Management > Employee Documents — nothing was
+  // moved, because moving live files is not something to do as a side effect
+  // of a code change.
+  const folderPath = hrYearPath('', 'Employee Documents', (name ? name + ' ' : '') + '(' + id + ')');
   const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl || '');
   if(!m) return null;
   // Photos and PDFs only (the camera and file inputs behind this accept
