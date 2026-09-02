@@ -10141,6 +10141,36 @@ async function renderConsultantSummaryReport(){
     <td style="width:100%;"><div class="rpt-sign-line"></div>For ${escapeHtml(co.name)}<br>${signatory ? escapeHtml(signatory.name) + '<br>Authorised Signatory' : 'Authorised Signatory'}</td>
   </tr></tbody></table>`;
 
+  // The wage register, in the consultant's own column order, above the summary
+  // — the same order his document puts them in, so the two can be read against
+  // each other page for page. Scoped to consultantReportEmployees, the core
+  // three headings, because that is who his register covers: `employees` above
+  // is the wider PT population and would put R.S.IT Solution people on a
+  // register he has never seen them on.
+  const registerEmps = consultantReportEmployees(employees, dateList);
+  const reg = wageRegisterRows(registerEmps, attByEmpId, dateList, monthDays, holidayMap, year, month);
+  // Right-align every column but the six identifying ones, which read as text.
+  const REG_TEXT_COLS = 7;
+  const regHead = reg.cols.map((c, i) =>
+    `<th${i < REG_TEXT_COLS ? '' : ' style="text-align:right;"'}>${escapeHtml(c)}</th>`).join('');
+  const regBody = reg.rows.map(r => '<tr>' + r.map((v, i) =>
+      `<td${i < REG_TEXT_COLS ? '' : ' style="text-align:right;"'}>${escapeHtml(String(v))}</td>`
+    ).join('') + '</tr>').join('');
+  const regTotal = '<tr class="sal-grandtotal">' + reg.total.map((v, i) =>
+      `<td${i < REG_TEXT_COLS ? '' : ' style="text-align:right;"'}>${escapeHtml(String(v))}</td>`
+    ).join('') + '</tr>';
+  const registerBlock = `
+    <h4 style="margin:18px 0 6px;">Wage Register — ${escapeHtml(monthLabel(monthVal))}</h4>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">
+      ${registerEmps.length} employee(s) under ${CONSULTANT_REPORT_HEADINGS.map(k => SALARY_HEADINGS[k].label).join(', ')} —
+      the same population and the same column order as the register the consultant returns, so the two can be compared row by row.
+      Every figure is this software's own; nothing here is recalculated for the register.
+      <em>Per.All</em> and <em>Extra All2</em> are his heads and are always ₹0 here; <em>Retention</em> is ours and has no head on his form.
+    </p>
+    <table class="sal-table" style="min-width:2400px;font-size:11px;">
+      <thead><tr>${regHead}</tr></thead><tbody>${regBody}${regTotal}</tbody>
+    </table>`;
+
   box.innerHTML = `${reportActionBar('Consultant Final Summary Report — ' + monthLabel(monthVal), 'consultantSummaryReportBox')}
     <div class="sal-sheet-wrap print-isolate" id="consultantSummaryPrintArea">
       ${reportLogoHeader('Consultant Final Summary Report — ' + monthLabel(monthVal))}
@@ -10150,13 +10180,28 @@ async function renderConsultantSummaryReport(){
         ESI Code No: <strong>${co.esiCodeNo ? escapeHtml(co.esiCodeNo) : 'Not set — add it under Company Letterhead'}</strong>
         ${payDate ? ' &nbsp;·&nbsp; Pay Date: <strong>' + fmtDateIN(payDate) + '</strong>' : ''}
       </p>
+      ${registerBlock}
       <div class="hr-sheet-cards">${pfCard}${esiCard}${alwCard}</div>
       ${signOff}
     </div>`;
 
+  // One file, two blocks — the register, then the account-wise summary, in the
+  // order his own document carries them. The summary is three columns and the
+  // register thirty-eight, so the register sets the width and the summary's
+  // Section/Item/Amount sit in the first three columns beneath it, which is
+  // what his page 5 does too.
   const summaryCsv = consultantSummaryCsv(T);
-  const csvHeader = summaryCsv.header;
-  const csvRows = summaryCsv.rows;
+  const csvHeader = reg.cols.slice();
+  const pad = row => {
+    const out = row.slice();
+    while(out.length < csvHeader.length) out.push('');
+    return out;
+  };
+  const csvRows = wageRegisterCsvRows(reg.rows).map(pad)
+    .concat([pad(reg.total)])
+    .concat([pad([])])
+    .concat([pad(summaryCsv.header)])
+    .concat(summaryCsv.rows.map(pad));
   {
     const fileName = `Consultant Final Summary Report - ${monthVal}.csv`;
     const content = toCsv(csvHeader, csvRows);

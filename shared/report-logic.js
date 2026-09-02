@@ -2828,6 +2828,147 @@ function consultantReportEmployees(employees, dateList){
 }
 
 
+// ---- Wage Register ----
+// The consultant files a Register of Wages — the Gujarat Minimum Wages Rules
+// Rule 25(2) form — and sends it back each month. Until now the only thing we
+// could hold it against was the Final Summary's totals, and a per-person error
+// does not show up in a total: in August 2026 a ₹6,000 loan EMI was recovered
+// from the wrong engineer, which nets to zero across the sheet, and Manish
+// Patel was run at his pre-increment salary. Both were invisible in the totals
+// and obvious the moment the two registers sat side by side.
+//
+// So this builds the same register from our own data, in his column order, on
+// the same tab as the summary — the way his own document carries the register
+// and the summary together. Nothing here calculates anything: every figure
+// comes from computeSalaryForEmployee or monthlyPayFor, only re-arranged into
+// the shape his sheet is in. A number that disagrees with his is therefore a
+// disagreement about payroll, never about which report you are reading.
+//
+// His layout pairs each earning head with the deduction printed beside it —
+// Basic with P.F., HRA with P.T., Conv All with Adv, LTA with L.W.F., Per.All
+// with Loan — and carries a full-month "rate" next to the earned amount for
+// every head. Both halves are kept, because a comparison is only useful if the
+// cells line up.
+//
+// Two columns are not his. Retention has no head on his form and we do deduct
+// it, so it sits before Gross Dedu. rather than being dropped, which would
+// leave the deduction columns not adding to their own total. Per.All and Extra
+// All2 are his and are always ₹0 here — kept so the columns align with the
+// sheet he sends, not because we have anything to put in them.
+const WAGE_REGISTER_COLS = [
+  'SR NO','EC','Emp Name','Designation','UAN No','ESI No','A/c No',
+  'W.Days','SL','P.Days','W.Off','P.H.','PL','Payable Days','Rate of Pay',
+  'Basic Rate','Basic','P.F.','HRA Rate','HRA','P.T.',
+  'Conv All Rate','Conv All','Adv','LTA Rate','LTA','L.W.F.',
+  'Per.All Rate','Per.All','Loan','Extra All2 Rate','Extra All2','Retention',
+  'Gross Earni. Rate','Gross Earni.','E.S.I.','Gross Dedu.','Net Salary'
+];
+
+// The identifier columns, found by name so inserting a column above moves them
+// with it instead of quietly wrapping whatever slid into position 4. Same
+// treatment and the same reason as CONSULTANT_ID_COLS.
+const WAGE_REGISTER_ID_COLS = ['EC', 'UAN No', 'ESI No', 'A/c No']
+  .map(h => WAGE_REGISTER_COLS.indexOf(h))
+  .filter(i => i !== -1);
+
+function wageRegisterCsvRows(rows){
+  return (rows || []).map(r => r.map((cell, i) =>
+    WAGE_REGISTER_ID_COLS.indexOf(i) === -1 ? cell : excelIdNumber(cell)));
+}
+
+function wageRegisterRows(employees, attByEmpId, dateList, monthDays, holidayMap, year, month){
+  const R = v => Math.round(Number(v) || 0);
+  // Declared holidays that are not already a Sunday — counted the same way
+  // consultantReportRows counts them, so PH means one thing across the pack.
+  let publicHolidays = 0;
+  dateList.forEach(dateStr => {
+    const dow = new Date(dateStr + 'T00:00:00').getDay();
+    if(dow !== 0 && holidayMap[dateStr]) publicHolidays++;
+  });
+
+  const rows = [];
+  const t = {};
+  const SUM = ['SL','P.Days','W.Off','P.H.','PL','Payable Days','Rate of Pay',
+    'Basic Rate','Basic','P.F.','HRA Rate','HRA','P.T.','Conv All Rate','Conv All','Adv',
+    'LTA Rate','LTA','L.W.F.','Per.All Rate','Per.All','Loan','Extra All2 Rate','Extra All2',
+    'Retention','Gross Earni. Rate','Gross Earni.','E.S.I.','Gross Dedu.','Net Salary'];
+  SUM.forEach(k => { t[k] = 0; });
+
+  (employees || []).forEach(emp => {
+    const att = attByEmpId[emp.id] || {};
+    const s = salaryFor_(emp, att, dateList, monthDays, holidayMap);
+    // What the heads come to at full attendance — the "rate" side of every
+    // pair. monthlyPayFor is the one function that answers that question, so
+    // the register cannot quote a rate the Salary Report disagrees with.
+    const full = monthlyPayFor(emp, year, month);
+    const c = consultantDayCounts(att, dateList, holidayMap);
+
+    // Days, taken apart exactly as the Consultant Report takes them apart, so
+    // the two reports in the same pack cannot say different things about the
+    // same person's month.
+    const policyCutDays = policyHalfDaysFor(emp, att, dateList).total * 0.5;
+    const sandwichDays = sandwichDaysFor(emp, att, dateList, holidayMap).length;
+    const presentDays = Math.max(0, c.present - policyCutDays);
+    const absentDays = c.absent + sandwichDays + policyCutDays;
+    const payableDays = Math.max(0, monthDays - absentDays);
+    // W.Off is derived rather than being the month's Sunday count, so that
+    // P.Days + W.Off + P.H. + PL + SL comes to Payable Days for everybody.
+    // It matters for anyone who was not employed for the whole month: Hastrak
+    // Dave joined on 3 August 2026, so Sunday the 2nd is both a week-off in a
+    // flat month count and one of his two non-employed days, and counting it
+    // in both places made his row add to 30 in a month where he is paid 29.
+    // Deriving it drops him to four week-offs, which is what the consultant's
+    // own register shows.
+    const weekOff = Math.max(0,
+      monthDays - presentDays - publicHolidays - c.el - c.sl - absentDays);
+
+    // Gross on his form is every earning head added up, and conveyance is one
+    // of them — unlike our Salary Sheet, which keeps conveyance out of Gross
+    // and adds it back at Net. Net is then Gross Earni. less Gross Dedu.,
+    // which is netBeforeDirect: "Paid Directly" has no head on his register
+    // and is nil for everyone in this scope anyway (it is an Apprentice
+    // arrangement), so this is the same figure as the Salary Sheet's Net.
+    const grossRate = full.basic + full.hra + full.lta + full.conveyance;
+    const grossEarn = s.basic + s.hra + s.lta + s.conveyance;
+    const advance = s.advanceTemp + s.advance;
+    const lwf = 0;   // Labour Welfare Fund — no field anywhere in this app
+
+    const row = [
+      seqNoOf(emp), emp.id || '', emp.name || '', emp.designation || '',
+      emp.uan || 'NA', emp.esiNumber || 'NA', emp.accountNumber || '',
+      consultantDays(monthDays), consultantDays(c.sl), consultantDays(presentDays),
+      consultantDays(weekOff), consultantDays(publicHolidays), consultantDays(c.el),
+      consultantDays(payableDays), R(full.basic),
+      R(full.basic), R(s.basic), R(s.pf),
+      R(full.hra), R(s.hra), R(s.pt),
+      R(full.conveyance), R(s.conveyance), R(advance),
+      R(full.lta), R(s.lta), R(lwf),
+      0, 0, R(s.loanEmi),
+      0, 0, R(s.retention),
+      R(grossRate), R(grossEarn), R(s.esi), R(s.totalDeduction), R(s.netBeforeDirect)
+    ];
+    rows.push(row);
+    SUM.forEach(k => {
+      const i = WAGE_REGISTER_COLS.indexOf(k);
+      t[k] += Number(row[i]) || 0;
+    });
+  });
+
+  // The total row carries the same day columns as the rows above it, which is
+  // what his own Grand Total does — 651 W.Days across 21 people, not 31.
+  const total = WAGE_REGISTER_COLS.map(k => {
+    if(k === 'Emp Name') return 'GRAND TOTAL';
+    if(k === 'W.Days') return consultantDays(monthDays * rows.length);
+    if(SUM.indexOf(k) === -1) return '';
+    const dayCol = ['SL','P.Days','W.Off','P.H.','PL','Payable Days'].indexOf(k) !== -1;
+    return dayCol ? consultantDays(t[k]) : Math.round(t[k]);
+  });
+
+  return { cols: WAGE_REGISTER_COLS.slice(), rows, total, totals: t,
+           monthDays, publicHolidays };
+}
+
+
 // ---- Consultant Final Summary Report ----
 // The one-page PF/ESI account-wise totals the consultant files alongside the
 // wage register. Not a per-employee listing — the same totals the Salary
