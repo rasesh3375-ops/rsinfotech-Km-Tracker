@@ -2526,35 +2526,72 @@ function salarySheetCsv(employees, attByEmpId, dateList, monthDays, holidayMap){
 // every deduction. Grouped by the heading each employee was under that month,
 // and within a group sorted bank first then name, so everyone at one bank sits
 // together and the block can be handed over as a single transfer instruction.
+// Conveyance is shown as its own column here, and only in a month somebody
+// actually draws it. The accountant transfers one amount per person, so the
+// last column is always what to pay — the split above it is there to say what
+// the payment is made of. In a month with no conveyance the two extra columns
+// would be a pair of zeros the length of the sheet, so they are simply absent
+// and the sheet is the six columns it has always been.
+//
+// It is the one report that shows conveyance broken out. The Salary Sheet
+// carries it as a column among thirty, the wage register deliberately excludes
+// it, and the payslip folds it into net.
 function finalSalarySheetCsv(employees, attByEmpId, dateList, monthDays, holidayMap){
-  const out = [];
-  let grand = 0, grandCount = 0;
+  const R = v => Math.round(Number(v) || 0);
+  // Two passes: nothing can be laid out until it is known whether any of these
+  // employees drew conveyance at all, and that is not knowable until every
+  // salary has been worked out.
+  const groups = [];
+  let anyConveyance = false;
   SALARY_HEADING_ORDER.forEach(headingKey => {
     const group = (employees || []).filter(e => ratePayAsOf(e, dateList[0]).salaryHeading === headingKey);
     if(!group.length) return;
-    const label = SALARY_HEADINGS[headingKey].label;
-    const rows = group.map(emp => ({
-      emp, net: salaryFor_(emp, attByEmpId[emp.id] || {}, dateList, monthDays, holidayMap).netSalary
-    }));
+    const rows = group.map(emp => {
+      const s = salaryFor_(emp, attByEmpId[emp.id] || {}, dateList, monthDays, holidayMap);
+      if(R(s.conveyance) > 0) anyConveyance = true;
+      // netSalary already has conveyance in it, so the salary half is what is
+      // left once it comes back out — never recomputed from the components,
+      // which is what would let the two halves stop adding to the total.
+      return { emp, net: s.netSalary, conveyance: s.conveyance,
+               salaryOnly: s.netSalary - s.conveyance };
+    });
     rows.sort((a, b) => (a.emp.bankName || '').localeCompare(b.emp.bankName || '')
       || (a.emp.name || '').localeCompare(b.emp.name || ''));
-    out.push([label]);
-    let sub = 0;
-    rows.forEach(r => {
-      sub += r.net; grand += r.net; grandCount++;
+    groups.push({ label: SALARY_HEADINGS[headingKey].label, rows });
+  });
+
+  const money = anyConveyance
+    ? (salaryOnly, conveyance, net) => [R(salaryOnly), R(conveyance), R(net)]
+    : (salaryOnly, conveyance, net) => [R(net)];
+  const out = [];
+  let grand = 0, grandSalary = 0, grandConv = 0, grandCount = 0;
+  groups.forEach(g => {
+    out.push([g.label]);
+    let sub = 0, subSalary = 0, subConv = 0;
+    g.rows.forEach(r => {
+      sub += r.net; subSalary += r.salaryOnly; subConv += r.conveyance;
+      grand += r.net; grandSalary += r.salaryOnly; grandConv += r.conveyance;
+      grandCount++;
       // The central number here too, so a person is the same number on this
       // sheet as on every other. This one is sorted by bank rather than by
       // sequence, so the column will not ascend — it identifies rather than
       // orders, which is what a central number is for.
-      out.push([seqNoLabel(r.emp, grandCount), r.emp.name, r.emp.bankName || '', excelIdNumber(r.emp.accountNumber),
-                r.emp.ifsc || '', Math.round(r.net)]);
+      out.push([seqNoLabel(r.emp, grandCount), r.emp.name, r.emp.bankName || '',
+                excelIdNumber(r.emp.accountNumber), r.emp.ifsc || '']
+                .concat(money(r.salaryOnly, r.conveyance, r.net)));
     });
-    out.push(['', label + ' subtotal', rows.length + ' employee(s)', '', '', Math.round(sub)]);
+    out.push(['', g.label + ' subtotal', g.rows.length + ' employee(s)', '', '']
+             .concat(money(subSalary, subConv, sub)));
   });
-  out.push(['', 'GRAND TOTAL', grandCount + ' employee(s)', '', '', Math.round(grand)]);
+  out.push(['', 'GRAND TOTAL', grandCount + ' employee(s)', '', '']
+           .concat(money(grandSalary, grandConv, grand)));
   return {
-    cols: ['SR NO','Employee Name','Bank Name','Account Number','IFSC','Final Payable Salary'],
-    rows: out, grand: Math.round(grand), count: grandCount
+    cols: ['SR NO','Employee Name','Bank Name','Account Number','IFSC']
+      .concat(anyConveyance
+        ? ['Payable Salary','Conveyance Expense','Final Payable Salary']
+        : ['Final Payable Salary']),
+    rows: out, grand: R(grand), count: grandCount,
+    anyConveyance, conveyance: R(grandConv), salaryOnly: R(grandSalary)
   };
 }
 

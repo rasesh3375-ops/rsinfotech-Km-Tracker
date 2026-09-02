@@ -19,7 +19,8 @@ vm.createContext(sb);
 vm.runInContext(fs.readFileSync(R + '/shared/report-logic.js', 'utf8'), sb);
 const L = vm.runInContext('({salarySheetCsv, SALARY_SHEET_COLS, wageRegisterRows,' +
   ' WAGE_REGISTER_COLS, consultantReportEmployees, consultantSummaryTotals,' +
-  ' consultantSummaryEmployees, consultantSummaryCsv, employeesInSequence, computeEsi})', sb);
+  ' consultantSummaryEmployees, consultantSummaryCsv, employeesInSequence, computeEsi,' +
+  ' finalSalarySheetCsv})', sb);
 
 const monthDays = 31;
 const dateList = [];
@@ -129,6 +130,45 @@ esiCases.forEach(([gross, wantEmp, wantEr]) => {
   check('gross ' + gross + ' → employee', r.employee, wantEmp);
   check('gross ' + gross + ' → employer', r.employer, wantEr);
 });
+
+// The accountant's sheet grows two columns in a month somebody draws
+// conveyance and is six columns wide otherwise. Both shapes have to hold, and
+// the last column has to stay the amount to transfer either way — that is what
+// the accountant pays, and it must not move depending on the month.
+console.log('\nthe accountant\'s sheet: conveyance columns only when they apply\n');
+function finalSheet(emps) {
+  return L.finalSalarySheetCsv(L.employeesInSequence(emps), ATT, dateList, monthDays, holidayMap);
+}
+const withConv = finalSheet(EMPS);
+const noConv = finalSheet(EMPS.map(e => { const c = Object.assign({}, e); delete c.conveyance; return c; }));
+
+console.log('  someone draws it : ' + withConv.cols.join(' | '));
+console.log('  nobody does      : ' + noConv.cols.join(' | '));
+check('with conveyance the sheet is eight columns', withConv.cols.length, 8);
+check('and carries a Conveyance Expense column',
+      withConv.cols.indexOf('Conveyance Expense') !== -1, true);
+check('without it the sheet is the six it has always been', noConv.cols.length, 6);
+check('and has no conveyance column at all',
+      noConv.cols.indexOf('Conveyance Expense'), -1);
+check('the last column is the amount to transfer, either way',
+      [withConv.cols[withConv.cols.length - 1], noConv.cols[noConv.cols.length - 1]],
+      ['Final Payable Salary', 'Final Payable Salary']);
+check('and the grand total is the same money whichever shape it takes',
+      withConv.grand, noConv.grand + withConv.conveyance);
+
+const iSal = withConv.cols.indexOf('Payable Salary');
+const iCon = withConv.cols.indexOf('Conveyance Expense');
+const iNet = withConv.cols.indexOf('Final Payable Salary');
+const splitBad = [];
+withConv.rows.forEach(r => {
+  if (r.length !== withConv.cols.length) return;
+  if (n(r[iSal]) + n(r[iCon]) !== n(r[iNet])) splitBad.push(String(r[1]));
+});
+check('every row, subtotal and grand total splits into its own total', splitBad, []);
+check('only the employee who draws conveyance has a figure in that column',
+      withConv.rows.filter(r => r.length === withConv.cols.length && n(r[iCon]) > 0 &&
+                                !/subtotal|GRAND/i.test(String(r[1]))).map(r => r[1]),
+      ['Conveyance']);
 
 console.log('\nthe Consultant Final Summary: its lines add up to its own totals\n');
 const T = L.consultantSummaryTotals(L.consultantSummaryEmployees(L.employeesInSequence(EMPS), dateList),
