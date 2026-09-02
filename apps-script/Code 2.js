@@ -1500,16 +1500,43 @@ function sendDailyDigestEmail() {
 // removeIncrementReminderTrigger undoes it.
 //
 // The trigger runs DAILY and the function returns immediately unless today is
-// the 1st, the same shape every other monthly email here uses. It used to send
-// on the 30th about the month ahead, which needed a "or the last day of a
-// shorter month" rule because Apps Script's onMonthDay(30) never fires in
-// February. The 1st exists in every month, so that rule is gone with it.
+// MONTHLY_EMAIL_DAY, the same shape every other monthly email here uses. It
+// used to send on the 30th about the month ahead, which needed a "or the last
+// day of a shorter month" rule because Apps Script's onMonthDay(30) never fires
+// in February. An early day of the month exists in every month, so that rule is
+// gone with it.
 //
 // Note this one alone reports the month it is SENT in, not the month before:
 // the monthly reports are a record of a finished month, but this is a list of
 // what falls due in the month now starting, so HR has the whole of it to act.
+// Which day of the month every month-end email goes out on.
+//
+// It was hard-coded as 1 in six separate date checks, and the labels and log
+// lines describing it drifted out of step more than once — listReminderTriggers
+// was still announcing the 30th and the 2nd long after both had moved. One
+// constant now, and every gate, label and log line reads from it, so the day
+// and what the script says about the day cannot disagree again.
+//
+// Deliberately a day-of-month check inside each function rather than an Apps
+// Script monthly trigger: onMonthDay(30) never fires in February, so a monthly
+// trigger silently skips a month. Every one of these is a DAILY trigger whose
+// function returns immediately unless today is this day.
+//
+// Changing this number moves all six emails together and needs no trigger to be
+// recreated — the triggers only decide the hour.
+var MONTHLY_EMAIL_DAY = 2;
+
+// "2nd", for the log lines and labels that say when these go out.
+function monthlyEmailDayLabel_() {
+  var d = MONTHLY_EMAIL_DAY, r = d % 10, t = d % 100;
+  var suffix = (r === 1 && t !== 11) ? 'st'
+             : (r === 2 && t !== 12) ? 'nd'
+             : (r === 3 && t !== 13) ? 'rd' : 'th';
+  return d + suffix;
+}
+
 var INCREMENT_REMINDER_EMAIL = 'rasesh@rsinfotech.net';
-var INCREMENT_REMINDER_HOUR = 10; // 10 AM IST on the 1st, for this month's increments
+var INCREMENT_REMINDER_HOUR = 10; // 10 AM IST on MONTHLY_EMAIL_DAY, for this month's increments
 
 function createIncrementReminderTrigger() {
   var triggers = ScriptApp.getProjectTriggers();
@@ -1525,7 +1552,8 @@ function createIncrementReminderTrigger() {
     .inTimezone('Asia/Kolkata')
     .create();
   Logger.log('Increment reminder trigger created — sendIncrementReminderEmail now runs daily around ' +
-    INCREMENT_REMINDER_HOUR + ':00 IST and emails only on the 1st, listing the increments ' +
+    INCREMENT_REMINDER_HOUR + ':00 IST and emails only on the ' + monthlyEmailDayLabel_() +
+    ', listing the increments ' +
     'due in the month then starting.');
 }
 
@@ -1547,7 +1575,7 @@ function removeIncrementReminderTrigger() {
 // any time to see the email immediately — pass true to skip the day check.
 function sendIncrementReminderEmail(force) {
   var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
-  if (force !== true && Number(istToday.slice(8, 10)) !== 1) return;
+  if (force !== true && Number(istToday.slice(8, 10)) !== MONTHLY_EMAIL_DAY) return;
 
   // The month being sent in, not the one before it — see the note above the
   // trigger. Taken off the IST date string rather than worked out from a Date's
@@ -1744,7 +1772,7 @@ function sendBirthdayReminderEmail() {
     '), ' + birthdays.length + ' email(s) sent to ' + BIRTHDAY_REMINDER_EMAIL + '.');
 }
 
-// ===== Monthly report pack, emailed on the 1st for the month just ended =====
+// ===== Monthly report pack, emailed on MONTHLY_EMAIL_DAY for the month just ended =====
 //
 // This builds the six reports at send time from shared/report-logic.js, and
 // does not compute a single figure of its own — it must never be changed to.
@@ -2451,7 +2479,7 @@ function attachmentName_(report) {
 // If anything goes wrong assembling the workbook, attach the CSV instead of
 // letting the whole email fail. This runs OUTSIDE the try/catch that guards the
 // report build, so an exception here would mean HR got no email at all on the
-// 1st — not even the "could not be generated" one that names the reason. A CSV
+// month-end run — not even the "could not be generated" one that names the reason. A CSV
 // with unhelpful column widths is a far better outcome than silence, and the
 // reason is in the log either way.
 function reportAttachment_(report) {
@@ -2466,7 +2494,7 @@ function reportAttachment_(report) {
 }
 
 var MONTHLY_REPORTS_EMAIL = 'rasesh@rsinfotech.net';
-var MONTHLY_REPORTS_HOUR = 8; // 8 AM IST on the 1st
+var MONTHLY_REPORTS_HOUR = 8; // 8 AM IST on MONTHLY_EMAIL_DAY
 
 function createMonthlyReportsTrigger() {
   var triggers = ScriptApp.getProjectTriggers();
@@ -2482,7 +2510,7 @@ function createMonthlyReportsTrigger() {
     .inTimezone('Asia/Kolkata')
     .create();
   Logger.log('Monthly report pack trigger created — sendMonthlyReportsEmail now runs daily around ' +
-    MONTHLY_REPORTS_HOUR + ':00 IST and emails only on the 1st.');
+    MONTHLY_REPORTS_HOUR + ':00 IST and emails only on the ' + monthlyEmailDayLabel_() + '.');
 }
 
 // Undoes createMonthlyReportsTrigger — stops the monthly pack without touching
@@ -2512,7 +2540,7 @@ function prevMonthYmIst_() {
 function sendMonthlyReportsEmail(force) {
   var runStartedAt = Date.now();
   var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
-  if (!force && Number(istToday.slice(8, 10)) !== 1) return;
+  if (!force && Number(istToday.slice(8, 10)) !== MONTHLY_EMAIL_DAY) return;
 
   var ym = prevMonthYmIst_();
   var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
@@ -2583,7 +2611,7 @@ function sendMonthlyReportsEmail(force) {
     ', in ' + elapsedNote_(runStartedAt) + '.');
 }
 
-// ===== Loan and EMI Report, emailed separately on the 1st =====
+// ===== Loan and EMI Report, emailed separately on MONTHLY_EMAIL_DAY =====
 //
 // Its own email rather than a sixth attachment on the pack above, because it is
 // a different kind of thing and reads wrongly filed next to the other five.
@@ -2605,7 +2633,7 @@ function sendMonthlyReportsEmail(force) {
 // loanScheduleThrough and loanEmiRateAsOf live in shared/report-logic.js and
 // stay the only place that arithmetic happens.
 var LOAN_REPORT_EMAIL = 'rasesh@rsinfotech.net';
-var LOAN_REPORT_HOUR = 8; // 8 AM IST on the 1st, alongside the report pack
+var LOAN_REPORT_HOUR = 8; // 8 AM IST, alongside the report pack
 
 function createLoanReportTrigger() {
   var triggers = ScriptApp.getProjectTriggers();
@@ -2621,7 +2649,7 @@ function createLoanReportTrigger() {
     .inTimezone('Asia/Kolkata')
     .create();
   Logger.log('Loan & Advance report trigger created — sendLoanAdvanceReportEmail now runs daily around ' +
-    LOAN_REPORT_HOUR + ':00 IST and emails only on the 1st.');
+    LOAN_REPORT_HOUR + ':00 IST and emails only on the ' + monthlyEmailDayLabel_() + '.');
 }
 
 // Undoes createLoanReportTrigger — stops this email without touching the
@@ -2642,7 +2670,7 @@ function removeLoanReportTrigger() {
 function sendLoanAdvanceReportEmail(force) {
   var runStartedAt = Date.now();
   var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
-  if (!force && Number(istToday.slice(8, 10)) !== 1) return;
+  if (!force && Number(istToday.slice(8, 10)) !== MONTHLY_EMAIL_DAY) return;
 
   var ym = prevMonthYmIst_();
   var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
@@ -2717,7 +2745,7 @@ function sendLoanAdvanceReportEmail(force) {
     ', in ' + elapsedNote_(runStartedAt) + '.');
 }
 
-// ===== Monthly Leave Detail Report, emailed separately on the 1st =====
+// ===== Monthly Leave Detail Report, emailed separately on MONTHLY_EMAIL_DAY =====
 //
 // Like the report pack this is a closed month's report, so there is a definite
 // "last month's file" to look for — unlike the Loan and EMI Report, which is
@@ -2731,7 +2759,7 @@ function sendLoanAdvanceReportEmail(force) {
 // 2026.csv", because index.html builds it from MONTH_NAMES rather than the
 // numeric string. Get that wrong and the lookup silently finds nothing.
 var LEAVE_DETAIL_EMAIL = 'rasesh@rsinfotech.net';
-var LEAVE_DETAIL_HOUR = 8; // 8 AM IST on the 1st
+var LEAVE_DETAIL_HOUR = 8; // 8 AM IST on MONTHLY_EMAIL_DAY
 
 // Deliberately a hardcoded list rather than Utilities.formatDate(..., 'MMMM'),
 // which formats in the SCRIPT's locale. These names are not decoration here —
@@ -2755,7 +2783,7 @@ function createLeaveDetailReportTrigger() {
     .inTimezone('Asia/Kolkata')
     .create();
   Logger.log('Monthly Leave Detail report trigger created — sendLeaveDetailReportEmail now runs daily ' +
-    'around ' + LEAVE_DETAIL_HOUR + ':00 IST and emails only on the 1st.');
+    'around ' + LEAVE_DETAIL_HOUR + ':00 IST and emails only on the ' + monthlyEmailDayLabel_() + '.');
 }
 
 // Undoes createLeaveDetailReportTrigger — stops this email without touching any
@@ -2776,7 +2804,7 @@ function removeLeaveDetailReportTrigger() {
 function sendLeaveDetailReportEmail(force) {
   var runStartedAt = Date.now();
   var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
-  if (!force && Number(istToday.slice(8, 10)) !== 1) return;
+  if (!force && Number(istToday.slice(8, 10)) !== MONTHLY_EMAIL_DAY) return;
 
   var ym = prevMonthYmIst_();
   var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
@@ -2851,13 +2879,12 @@ function sendLeaveDetailReportEmail(force) {
     ', in ' + elapsedNote_(runStartedAt) + '.');
 }
 
-// ===== Consultant Report, emailed separately on the 2nd =====
+// ===== Consultant Report, emailed separately on MONTHLY_EMAIL_DAY =====
 //
-// The 2nd rather than the 1st, which is what was asked for. It leaves a day
-// after month end for the last attendance and payroll corrections to be made,
-// and every report email here attaches the copy the app filed when HR last
-// opened the report, so a later send makes it likelier that copy is the final
-// one.
+// Sent with every other month-end email on MONTHLY_EMAIL_DAY. That day is a
+// clear one after month end, which leaves room for the last attendance and
+// payroll corrections before anything reaches the consultant — the figures are
+// built fresh at send time, so a later day means later corrections are in them.
 //
 // Two files, not one. The Consultant Report and the Consultant Final Summary
 // Report are a matched pair for the same reader — the per-employee detail and
@@ -2865,12 +2892,11 @@ function sendLeaveDetailReportEmail(force) {
 // generally asks for the other. Both are attached when both exist; drop the
 // summary from CONSULTANT_REPORT_SPECS_ if only the detail is wanted.
 var CONSULTANT_REPORT_EMAIL = 'rasesh@rsinfotech.net';
-// The 1st, with every other monthly report. It used to be the 2nd, from when
-// this email attached whichever CSV the app had last filed to Drive and the
-// extra day was there to give HR time to open the report and file one. It
-// builds its own figures now, so there is nothing to wait for.
-var CONSULTANT_REPORT_DAY = 1;
-var CONSULTANT_REPORT_HOUR = 8; // 8 AM IST on the 1st
+// This had a CONSULTANT_REPORT_DAY of its own, from when it was the only one
+// that did not go out with the rest. It moves with them now, so the day comes
+// from MONTHLY_EMAIL_DAY and there is one number to change rather than two that
+// can disagree.
+var CONSULTANT_REPORT_HOUR = 8; // 8 AM IST on MONTHLY_EMAIL_DAY
 
 function createConsultantReportTrigger() {
   var triggers = ScriptApp.getProjectTriggers();
@@ -2886,7 +2912,7 @@ function createConsultantReportTrigger() {
     .inTimezone('Asia/Kolkata')
     .create();
   Logger.log('Consultant report trigger created — sendConsultantReportEmail now runs daily around ' +
-    CONSULTANT_REPORT_HOUR + ':00 IST and emails only on day ' + CONSULTANT_REPORT_DAY +
+    CONSULTANT_REPORT_HOUR + ':00 IST and emails only on the ' + monthlyEmailDayLabel_() +
     ', reporting the previous month.');
 }
 
@@ -2908,7 +2934,7 @@ function removeConsultantReportTrigger() {
 function sendConsultantReportEmail(force) {
   var runStartedAt = Date.now();
   var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
-  if (!force && Number(istToday.slice(8, 10)) !== CONSULTANT_REPORT_DAY) return;
+  if (!force && Number(istToday.slice(8, 10)) !== MONTHLY_EMAIL_DAY) return;
 
   var ym = prevMonthYmIst_();
   var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
@@ -3164,7 +3190,7 @@ function restorePayrollDocsPf202526() {
 //
 // It exists because the Run button calls a function with NO arguments. Picking
 // sendMonthlyReportsEmail from the dropdown therefore passes force = undefined,
-// its date check sees a day that is not the 1st, and it returns silently having
+// its date check sees a day that is not MONTHLY_EMAIL_DAY, and it returns silently having
 // sent nothing — which looks exactly like a broken email. There is nowhere in
 // that UI to type the argument, so a wrapper that passes it is the only way to
 // test these by hand.
@@ -3211,14 +3237,14 @@ function sendAllEmailsNow() {
 function listReminderTriggers() {
   var expected = [
     ['sendDailyDigestEmail', 'Daily HR Digest — every day'],
-    ['sendIncrementReminderEmail', 'Increments due this month — 1st'],
+    ['sendIncrementReminderEmail', 'Increments due this month — ' + monthlyEmailDayLabel_()],
     ['sendBirthdayReminderEmail', 'Birthday reminder — day before'],
-    ['sendMonthlyReportsEmail', 'Report pack — 1st'],
-    ['sendLoanAdvanceReportEmail', 'Loan and EMI Report — 1st'],
-    ['sendLeaveDetailReportEmail', 'Monthly Leave Detail Report — 1st'],
-    ['sendConsultantReportEmail', 'Consultant Report — 1st'],
+    ['sendMonthlyReportsEmail', 'Report pack — ' + monthlyEmailDayLabel_()],
+    ['sendLoanAdvanceReportEmail', 'Loan and EMI Report — ' + monthlyEmailDayLabel_()],
+    ['sendLeaveDetailReportEmail', 'Monthly Leave Detail Report — ' + monthlyEmailDayLabel_()],
+    ['sendConsultantReportEmail', 'Consultant Report — ' + monthlyEmailDayLabel_()],
     ['sendSalaryAdvanceAlertEmail', 'Salary advance taken — same evening'],
-    ['sendMonthlyAdvanceSummaryEmail', 'Salary advances for last month — 1st']
+    ['sendMonthlyAdvanceSummaryEmail', 'Salary advances for last month — ' + monthlyEmailDayLabel_()]
   ];
   var installed = {};
   var triggers = ScriptApp.getProjectTriggers();
@@ -3428,7 +3454,7 @@ function sendSalaryAdvanceAlertEmail(force) {
 // every advance of the month with the name, the amount and a total.
 //
 // It reports the month that is ENDING, not the previous one. Every other
-// monthly email here runs on the 1st or 2nd and looks back a month; this one
+// monthly email here runs on MONTHLY_EMAIL_DAY and looks back a month; this one
 // runs on the last day, so "this month" is the month it is about. Getting that
 // backwards would report a month already covered and miss the one just closed.
 //
@@ -3454,7 +3480,7 @@ function sendSalaryAdvanceAlertEmail(force) {
 // would train the reader to stop looking. This is a month-end report, and "no
 // advances were paid this month" is a fact worth confirming.
 var ADVANCE_SUMMARY_EMAIL = 'rasesh@rsinfotech.net';
-var ADVANCE_SUMMARY_HOUR = 20; // 8 PM IST on the 1st, for the month just ended
+var ADVANCE_SUMMARY_HOUR = 20; // 8 PM IST on MONTHLY_EMAIL_DAY, for the month just ended
 
 function createAdvanceSummaryTrigger() {
   var triggers = ScriptApp.getProjectTriggers();
@@ -3470,7 +3496,8 @@ function createAdvanceSummaryTrigger() {
     .inTimezone('Asia/Kolkata')
     .create();
   Logger.log('Monthly advance summary trigger created — sendMonthlyAdvanceSummaryEmail now runs daily ' +
-    'around ' + ADVANCE_SUMMARY_HOUR + ':00 IST and emails only on the 1st, for the month just gone.');
+    'around ' + ADVANCE_SUMMARY_HOUR + ':00 IST and emails only on the ' + monthlyEmailDayLabel_() +
+    ', for the month just gone.');
 }
 
 // Undoes createAdvanceSummaryTrigger — stops this summary without touching the
@@ -3489,14 +3516,14 @@ function removeAdvanceSummaryTrigger() {
 
 // force=true sends regardless of the date, for testing from the editor.
 //
-// The 1st for the month just gone, in line with every other monthly report.
+// MONTHLY_EMAIL_DAY, for the month just gone, in line with every other report.
 // This used to send on the LAST day of the month about that same month, which
 // meant it went out before the month had finished — an advance paid on the 31st
 // after the 8 AM run missed its own summary and never appeared in a later one.
 // Reporting the completed month a day later cannot miss anything.
 function sendMonthlyAdvanceSummaryEmail(force) {
   var today = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
-  if (!force && Number(today.slice(8, 10)) !== 1) return;
+  if (!force && Number(today.slice(8, 10)) !== MONTHLY_EMAIL_DAY) return;
 
   // prevMonthYmIst_ is the one place every monthly email works out its period,
   // so this cannot drift from the others or get the December rollover wrong.
