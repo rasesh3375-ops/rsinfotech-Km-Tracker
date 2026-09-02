@@ -1873,6 +1873,7 @@ function loadSharedReportLogic_(map) {
     'consultantReportEmployees', 'consultantReportRows', 'consultantCsvRows',
     'excelIdNumber', 'employeesInSequence', 'seqNoOf',
     'consultantSummaryEmployees', 'consultantSummaryTotals', 'consultantSummaryCsv',
+    'WAGE_REGISTER_COLS', 'wageRegisterRows', 'wageRegisterCsvRows',
     'withSalaryCache'];
   var collect = new Function(body + '\nreturn (function(){ var o = {};' +
     names.map(function (n) { return 'try{ o[' + JSON.stringify(n) + '] = ' + n + '; }catch(e){}'; }).join('') +
@@ -2223,10 +2224,14 @@ function buildConsultantPack_(snap, y, m) {
 
   // Same reason as the pack: the register and the summary both need every
   // salary, and the two populations overlap.
-  var detail, totals;
+  var detail, totals, register;
   logic.withSalaryCache(function () {
     detail = logic.consultantReportRows(detailEmps, att, dateList, monthDays, holidayMap, y, m);
     totals = logic.consultantSummaryTotals(summaryEmps, att, dateList, monthDays, holidayMap);
+    // The wage register in the consultant's own column order, on the same
+    // population as the Consultant Report — his register covers the core three
+    // headings, not the wider PT group the summary totals.
+    register = logic.wageRegisterRows(detailEmps, att, dateList, monthDays, holidayMap, y, m);
   });
   var summary = logic.consultantSummaryCsv(totals);
   assertWithinBudget_(startedAt, 'Building the consultant reports');
@@ -2240,9 +2245,31 @@ function buildConsultantPack_(snap, y, m) {
       // workbook builder reads that same marker and lays the digits out as
       // text; the CSV keeps the ="..." form, which is what Excel needs there.
       packReport_('Consultant Report', monthVal, detail.cols, logic.consultantCsvRows(detail.rows)),
-      packReport_('Consultant Final Summary Report', monthVal, summary.header, summary.rows)
+      packReport_('Consultant Final Summary Report', monthVal, register.cols,
+                  consultantSummarySheetRows_(logic, register, summary))
     ]
   };
+}
+
+// The Final Summary carries two blocks in one sheet: the wage register, then
+// the account-wise summary under it, which is the order the consultant's own
+// document puts them in — register pages first, summary last. The register is
+// thirty-eight columns and the summary three, so the register sets the width
+// and every summary row is padded out to it; otherwise the workbook builder
+// sees rows shorter than the header and lays the cells out ragged.
+function consultantSummarySheetRows_(logic, register, summary) {
+  var width = register.cols.length;
+  function pad(row) {
+    var out = (row || []).slice();
+    while (out.length < width) out.push('');
+    return out;
+  }
+  var rows = logic.wageRegisterCsvRows(register.rows).map(pad);
+  rows.push(pad(register.total));
+  rows.push(pad([]));
+  rows.push(pad(summary.header));
+  for (var i = 0; i < summary.rows.length; i++) rows.push(pad(summary.rows[i]));
+  return rows;
 }
 
 // ---- what every report email checks before it sends anything ----

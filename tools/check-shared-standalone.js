@@ -35,7 +35,8 @@ const EXPORTS = ['computeSalaryFromAttendance','computeAttendanceSummary','LEAVE
   'statutoryReportData','pfReturnCsv','esiReturnCsv','statutoryAmountCsv','policyRowsFor','evaluateAttendanceDay','minToHHMM',
   'attCodeText_','SALARY_HEADING_ORDER','consultantReportEmployees','consultantReportRows',
   'consultantSummaryEmployees','consultantSummaryTotals','consultantSummaryCsv',
-  'consultantCsvRows','excelIdNumber'];
+  'consultantCsvRows','excelIdNumber',
+  'WAGE_REGISTER_COLS','wageRegisterRows','wageRegisterCsvRows'];
 
 let box;
 try {
@@ -138,6 +139,10 @@ run('consultantCsvRows', () => box.consultantCsvRows(box.consultantReportRows(
   box.consultantReportEmployees(employees, dateList), att, dateList, 31, holidayMap, 2026, 7).rows));
 run('consultantSummaryCsv', () => box.consultantSummaryCsv(box.consultantSummaryTotals(
   box.consultantSummaryEmployees(employees, dateList), att, dateList, 31, holidayMap)));
+run('wageRegisterRows', () => box.wageRegisterRows(
+  box.consultantReportEmployees(employees, dateList), att, dateList, 31, holidayMap, 2026, 7));
+run('wageRegisterCsvRows', () => box.wageRegisterCsvRows(box.wageRegisterRows(
+  box.consultantReportEmployees(employees, dateList), att, dateList, 31, holidayMap, 2026, 7).rows));
 
 if (problems.length) {
   console.log(problems.map(p => '  ' + p).join('\n'));
