@@ -1871,7 +1871,7 @@ function loadSharedReportLogic_(map) {
     'statutoryReportData', 'pfReturnCsv', 'esiReturnCsv', 'statutoryAmountCsv',
     'policyRowsFor', 'attCodeText_', 'SALARY_HEADING_ORDER',
     'consultantReportEmployees', 'consultantReportRows', 'consultantCsvRows',
-    'excelIdNumber',
+    'excelIdNumber', 'employeesInSequence', 'seqNoOf',
     'consultantSummaryEmployees', 'consultantSummaryTotals', 'consultantSummaryCsv',
     'withSalaryCache'];
   var collect = new Function(body + '\nreturn (function(){ var o = {};' +
@@ -1895,7 +1895,19 @@ function reportDataSnapshot_() {
   var rows = getSheet_().getDataRange().getValues();
   var map = {};
   for (var i = 0; i < rows.length; i++) map[rows[i][0]] = rows[i][1];
-  return { map: map, rows: rows, employees: allEmployeesFromRows_(rows) };
+  // Put in the central sequence once, here, so every emailed report lists
+  // people in the same order the screen does — and so a report added later
+  // inherits that without being told.
+  //
+  // Sorted here rather than inside allEmployeesFromRows_ because that is also
+  // on the engineer request path, where loading the shared logic would add a
+  // network round trip to every call; an engineer reading their own attendance
+  // does not care what order the roster is in. Every caller of this function is
+  // a report that loads the shared logic anyway, and loadSharedReportLogic_
+  // caches it for the execution, so this costs nothing.
+  var logic = loadSharedReportLogic_(map);
+  return { map: map, rows: rows,
+           employees: logic.employeesInSequence(allEmployeesFromRows_(rows)) };
 }
 
 // Every date in a month, as the app builds it for a report.
