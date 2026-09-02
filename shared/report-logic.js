@@ -746,8 +746,17 @@ function computeEsi(gross, opts){
   // Low earners keep their share; the employer still pays the full 3.25%.
   const dailyWage = g / ESI_RULES.daysInMonthForDailyWage;
   const lowWage = dailyWage <= ESI_RULES.lowWageDailyLimit;
-  const employee = lowWage ? 0 : g * ESI_RULES.employeePct;
-  const employer = g * ESI_RULES.employerPct;
+  // Rounded UP to the next rupee, per member, and deliberately here rather
+  // than at the display layer where every other figure in this file rounds.
+  // An ESI contribution is not a full-precision amount that happens to get
+  // printed short: ESIC's rule is that each member's share is raised to the
+  // next rupee, and the challan is the sum of those. Keeping full precision and
+  // rounding the total instead put us a rupee under the consultant's return on
+  // both the employee share and the total for August — 414 against his 415,
+  // where his 415 is 139 + 126 + 150 and each of those is a real deduction.
+  const ceilRupee = v => Math.ceil((Number(v) || 0) - 1e-9);
+  const employee = lowWage ? 0 : ceilRupee(g * ESI_RULES.employeePct);
+  const employer = ceilRupee(g * ESI_RULES.employerPct);
   return {
     covered:true, employee, employer, total: employee + employer, ceiling, period, lowWage,
     reason: mustContinue
@@ -1321,7 +1330,20 @@ function computeSalaryFromAttendance(emp, att, dateList, monthDays, holidayMap){
   const retention = computeRetentionForMonth(emp, dYear, dMonth);
   const loanEmi = computeLoanEmiForMonth(emp, dYear, dMonth);
   const loanBalance = loanBalanceAfterMonth(emp, dYear, dMonth);
-  const totalDeduction = pf + esi + pt + advanceTemp + advance + loanEmi + retention;
+  // Added up from the rounded parts, and the figures that follow from it are
+  // derived the same way, so a printed row adds up as printed.
+  //
+  // Every amount in this project is whole rupees, and these are the four the
+  // payslip and the wage register actually show — a deduction total, what is
+  // left of the salary, and the net. They used to be full-precision
+  // differences that were rounded only when printed, and Hastrak Dave's August
+  // row came out 25,080 − 1,705 = 23,376, which is a row contradicting itself
+  // in front of the consultant. The individual components (PF, ESI, PT, the
+  // recoveries) still come from their own domain functions untouched; only the
+  // sums of them are pinned to the rupee here.
+  const Rp_ = v => Math.round(Number(v) || 0);
+  const totalDeduction = Rp_(pf) + Rp_(esi) + Rp_(pt) + Rp_(advanceTemp) +
+                         Rp_(advance) + Rp_(loanEmi) + Rp_(retention);
   // Money already in the employee's account. It is not a statutory deduction
   // and must not sit inside Total Deduction — Gross, PF, ESI and PT are all
   // computed as if it were not there. It only reduces what is left to pay.
@@ -1337,9 +1359,9 @@ function computeSalaryFromAttendance(emp, att, dateList, monthDays, holidayMap){
   // Sheet names it Consultant Salary and shows conveyance in the column after
   // it, added back to reach Net Salary. Net Salary is unchanged either way —
   // the same figure, reached in the order HR reconciles it.
-  const consultantSalary = gross - totalDeduction;
-  const netBeforeDirect = consultantSalary + conveyance;
-  const netSalary = netBeforeDirect - directPaid;
+  const consultantSalary = Rp_(gross) - totalDeduction;
+  const netBeforeDirect = consultantSalary + Rp_(conveyance);
+  const netSalary = netBeforeDirect - Rp_(directPaid);
   // Employer side, from the same call — never recomputed.
   const pen = pfCalc.employerEps;
   const employerPf = pfCalc.employerEpf;
@@ -2389,6 +2411,26 @@ const SALARY_SHEET_TOTAL_KEYS = ['rate','leaveAmount','policyHalfDays','basic','
   'pfAdmin','edli','employerCont','ctc','esiEmployer','advanceBalance','loanBalance','directPaid',
   'netBeforeDirect','consultantSalary'];
 
+// A half day is a real half, so it is the one total that must not be rounded
+// per employee before it is added up. Everything else in the list is rupees.
+const SALARY_SHEET_UNROUNDED_TOTAL_KEYS = ['policyHalfDays'];
+
+// Add up what the sheet actually printed, not the exact figures behind it.
+//
+// A total used to be the rounded sum of full-precision values, so a column
+// could add to something other than the numbers above it — ten of them did on
+// the August sheet, and the consultant's register (whose totals are the sum of
+// his printed rows) disagreed with ours by a rupee in four places because of
+// it. For a statutory return that is not cosmetic: the challan has to equal the
+// sum of the per-member amounts filed.
+function addRoundedTotals_(target, s){
+  SALARY_SHEET_TOTAL_KEYS.forEach(k => {
+    target[k] += SALARY_SHEET_UNROUNDED_TOTAL_KEYS.indexOf(k) === -1
+      ? Math.round(Number(s[k]) || 0)
+      : (Number(s[k]) || 0);
+  });
+}
+
 const STAFF_TOTAL_LABEL = 'Total — Managerial, Seniors & Junior Staff';
 
 function salarySheetTotalsSeed_(){
@@ -2458,10 +2500,8 @@ function salarySheetCsv(employees, attByEmpId, dateList, monthDays, holidayMap){
         R(s.totalDeduction), R(s.consultantSalary), R(s.conveyance), R(s.directPaid), R(s.netSalary),
         R(s.pen), R(s.employerPf), R(s.pfAdmin), R(s.edli), R(s.esiEmployer), R(s.employerCont), R(s.ctc),
         R(s.advanceBalance), R(s.loanBalance), s.elBalance, s.slBalance]);
-      SALARY_SHEET_TOTAL_KEYS.forEach(k => {
-        sub[k] += s[k]; grand[k] += s[k];
-        if(ownPayroll(headingKey)) staff[k] += s[k];
-      });
+      addRoundedTotals_(sub, s); addRoundedTotals_(grand, s);
+      if(ownPayroll(headingKey)) addRoundedTotals_(staff, s);
       if(ownPayroll(headingKey)) staffAny = true;
     });
     rows.push(salarySheetTotalRow_('Subtotal', sub));
@@ -2979,7 +3019,12 @@ function wageRegisterRows(employees, attByEmpId, dateList, monthDays, holidayMap
       R(full.lta), R(s.lta), R(lwf),
       0, 0, R(s.loanEmi),
       0, 0, R(s.retention),
-      R(grossRate), R(grossEarn), R(s.esi), R(s.totalDeduction), R(s.consultantSalary)
+      // Net is the printed gross less the printed deduction, not the rounded
+      // exact difference. Hastrak Dave's row printed 25,080 − 1,705 = 23,376,
+      // which is a row contradicting itself in front of the consultant, whose
+      // own register has never had a row that does not add up.
+      R(grossRate), R(grossEarn), R(s.esi), R(s.totalDeduction),
+      R(grossEarn) - R(s.totalDeduction)
     ];
     rows.push(row);
     SUM.forEach(k => {
@@ -3019,6 +3064,10 @@ function consultantSummaryEmployees(employees, dateList){
     wider.indexOf(ratePayAsOf(e, dateList[0]).salaryHeading) !== -1);
 }
 
+// One rupee, the way the sheet prints it. Named rather than inlined so every
+// account below is visibly added up the same way.
+function Rup_(v){ return Math.round(Number(v) || 0); }
+
 function consultantSummaryTotals(employees, attByEmpId, dateList, monthDays, holidayMap){
   const pf = { count:0, wage:0, empEmployee:0, empEmployer:0, admin:0, eps:0, edli:0 };
   const esiT = { count:0, wage:0, employee:0, employer:0 };
@@ -3032,8 +3081,14 @@ function consultantSummaryTotals(employees, attByEmpId, dateList, monthDays, hol
     // additionally covers an employee-level pfEligible:'no' or a not-yet-
     // configured contribution type, either of which means nothing to add.
     if(heading.pf && s.pfApplicable){
-      pf.count++; pf.wage += s.pfWage; pf.empEmployee += s.pf; pf.empEmployer += s.employerPf;
-      pf.admin += s.pfAdmin; pf.eps += s.pen; pf.edli += s.edli;
+      // Every account is the sum of the per-member amounts actually filed,
+      // rounded first — the challan has to equal what the ECR lists, and a
+      // rounded exact total does not. Account 10 read 10,801 against the
+      // consultant's 10,802, which is 1,250 + 1,133 + 1,198 + 1,250 + 1,176 +
+      // 1,045 + 1,250 + 1,250 + 1,250 added up.
+      pf.count++; pf.wage += Rup_(s.pfWage);
+      pf.empEmployee += Rup_(s.pf); pf.empEmployer += Rup_(s.employerPf);
+      pf.admin += Rup_(s.pfAdmin); pf.eps += Rup_(s.pen); pf.edli += Rup_(s.edli);
     }
     if(heading.esi){
       const r = computeEsi(s.gross, {
@@ -3043,10 +3098,11 @@ function consultantSummaryTotals(employees, attByEmpId, dateList, monthDays, hol
         asOf: dateList[0]
       });
       if(r.covered){
-        esiT.count++; esiT.wage += s.gross; esiT.employee += r.employee; esiT.employer += r.employer;
+        esiT.count++; esiT.wage += Rup_(s.gross);
+        esiT.employee += Rup_(r.employee); esiT.employer += Rup_(r.employer);
       }
     }
-    ded.pt += s.pt;
+    ded.pt += Rup_(s.pt);
     if(CONSULTANT_REPORT_HEADINGS.indexOf(headingKey) !== -1){
       // Conveyance is deliberately not added — see wageRegisterRows above.
       // It is reimbursed outside the wage register, carries no PF, ESI or PT,
@@ -3055,8 +3111,9 @@ function consultantSummaryTotals(employees, attByEmpId, dateList, monthDays, hol
       // too, so the two pages line up; leaving the figure in made this
       // summary's Allowance Total and Net disagree with the register printed
       // directly above them on the same tab.
-      alw.basic += s.basic; alw.hra += s.hra; alw.lta += s.lta;
-      ded.pf += s.pf; ded.adv += s.advanceTemp + s.advance; ded.loan += s.loanEmi; ded.esi += s.esi;
+      alw.basic += Rup_(s.basic); alw.hra += Rup_(s.hra); alw.lta += Rup_(s.lta);
+      ded.pf += Rup_(s.pf); ded.adv += Rup_(s.advanceTemp) + Rup_(s.advance);
+      ded.loan += Rup_(s.loanEmi); ded.esi += Rup_(s.esi);
     }
   });
   // Same definition the PF Return's own Account 1 column files, so the two
