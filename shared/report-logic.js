@@ -62,74 +62,6 @@ function fmtDateIN(v){
   return String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + d.getFullYear();
 }
 
-// Every "shared" key also gets a local mirror, kept as a fallback for when
-// the backend is briefly unreachable (network blip, quota hit, etc.) — the
-// real Apps Script backend is configured above and is the source of truth
-// whenever it's reachable.
-// A render often asks for the same shared key several times — the reports tab
-// alone reads the employee list from three different builders — and each ask
-// was a separate round trip to Apps Script, which is where the wait came from.
-// Reads are held very briefly so one screen's repeated asks cost one call.
-// Short enough that nothing looks stale, and any write clears the key outright.
-const SHARED_READ_TTL_MS = 8000;
-
-function readTtlFor(key){
-  if(key && key.indexOf('attendance:') === 0) return LONG_READ_TTL_MS.ATTENDANCE;
-  return LONG_READ_TTL_MS[key] || SHARED_READ_TTL_MS;
-}
-
-const sharedReadCache = new Map();
-
-function primeSharedRead(key, value){
-  sharedReadCache.set(key, { value, until: Date.now() + readTtlFor(key) });
-}
-
-async function getAttendanceMany(ids){
-  const out = {};
-  if(!ids.length) return out;
-  const allIds = ids;
-  // This filled the cache but never looked in it, so the dashboard downloaded
-  // everybody's attendance to work out who is absent today and the Attendance
-  // Sheet downloaded the identical thing again a second later. Whatever is
-  // already held is used, and only the rest is asked for.
-  const missing = [];
-  ids.forEach(id => {
-    const hit = sharedReadCache.get('attendance:' + id);
-    if(hit && Date.now() < hit.until){
-      try{ out[id] = hit.value ? JSON.parse(hit.value) : {}; }catch(e){ out[id] = {}; }
-    } else {
-      missing.push(id);
-    }
-  });
-  if(missing.length){
-    ids = missing;
-    let handledByBatch = false;
-    // Whole history, merged on the backend across every financial year each
-    // employee has plus whatever is still in their legacy attendance:<id> key.
-    try{
-      const data = await backendAction({ action:'getAttendanceAll', ids });
-      if(data && data.values){
-        ids.forEach(id => { out[id] = data.values[id] || {}; });
-        handledByBatch = true;
-      }
-    }catch(e){}
-    if(!handledByBatch){
-      // Older backend, or the call failed — one at a time, as before.
-      const each = await Promise.all(ids.map(id => getAttendance(id).catch(() => ({}))));
-      ids.forEach((id, i) => { out[id] = each[i] || {}; });
-    }
-  }
-  const filled = await applyAlwaysPresentFillToMany_(out, allIds, null, null);
-  // Primed with the FILLED value, not the raw one — getAttendance()'s own
-  // cache-hit fast path trusts whatever is here without re-applying the fill
-  // itself, so a stale unfilled entry here would make the Salary Sheet's read
-  // (which goes through that single-employee path) silently disagree with
-  // this one the moment this function had already run once this session.
-  missing.forEach(id => {
-    if(filled[id] !== undefined) primeSharedRead('attendance:' + id, JSON.stringify(filled[id]));
-  });
-  return filled;
-}
 
 // ---- attendance sheet ----
 // ===== R.S. Infotech Leave & Attendance Policy — configuration =====
@@ -1528,7 +1460,13 @@ function computePayrollComponents(rate, headingKey, manual, ctx){
   const h = SALARY_HEADINGS[headingKey] || SALARY_HEADINGS.managerial;
   const r = Number(rate) || 0;
   const m = manual || {};
-  const c = ctx || payrollFormContext();
+  // ctx is required of any caller that has a form on screen —
+  // payrollFormContext() lives in index.html now, because it reads the DOM and
+  // this file has to evaluate in Apps Script where there is none. It used to be
+  // the default here, which meant this function could only run in a browser and
+  // every report builder above it was one refactor away from finding that out
+  // at 8 AM on the 2nd. Reports pass payrollRecordContext(emp, ym) instead.
+  const c = ctx || {};
   const out = [];
   const val = k => { const c = out.find(x => x.key === k); return c ? c.value : 0; };
 
@@ -1681,29 +1619,6 @@ function payrollRecoveryFrom(src, ym){
   };
 }
 
-// The four per-person answers, read from the open form.
-function payrollFormContext(){
-  return {
-    hasPriorUan: (document.getElementById('f_hasPriorUan') || {}).value || '',
-    form11Submitted: (document.getElementById('f_form11') || {}).value || '',
-    pfEligible: (document.getElementById('f_pfEligible') || {}).value || '',
-    pfContributionType: (document.getElementById('f_pfContributionType') || {}).value || '',
-    isDisabled: (document.getElementById('f_esiDisabled') || {}).value === 'yes',
-    coveredAtPeriodStart: (document.getElementById('f_esiCovered') || {}).value === 'yes',
-    esiEligible: (document.getElementById('f_esiEligible') || {}).value || '',
-    // Built from the form as it stands, including any loan/advance rows
-    // typed but not yet saved, so the breakdown answers for what is on
-    // screen.
-    recovery: payrollRecoveryFrom({
-      advanceHistory: (typeof editingEmployeeDraft === 'object' && editingEmployeeDraft && editingEmployeeDraft.advanceHistory) || [],
-      advanceTempSchedule: (typeof editingEmployeeDraft === 'object' && editingEmployeeDraft && editingEmployeeDraft.advanceTempSchedule) || null,
-      loans: (typeof editingEmployeeDraft === 'object' && editingEmployeeDraft && editingEmployeeDraft.loans) || [],
-      retentionMoney: (document.getElementById('f_retentionMoney') || {}).value,
-      retentionMonths: (document.getElementById('f_retentionMonths') || {}).value,
-      bondStart: (document.getElementById('f_bondStart') || {}).value
-    })
-  };
-}
 
 // The same four, read from a stored record, for whichever month ym names
 // (defaults to the current month, same reasoning as payrollRecoveryFrom).
@@ -1830,54 +1745,6 @@ function resolvedAttendanceCode_(att, dateStr, holidayMap){
   return dateStr <= todayStr() ? 'A' : null;
 }
 
-// Privilege leave earned, used and left for one financial year, with what the
-// remainder is worth. Shared by the Leave Balance Next Year Report and the
-// Leave Encashment Report — two reports that disagreed about how many days
-// somebody had pending would be worse than having only one of them.
-async function elFyRows(employees, startYear){
-  const fyStart = fyOfStartYear(startYear).from;
-  const fyEnd = fyOfStartYear(startYear).to;
-  const rows = [];
-  // One request for everyone's attendance before the loop; each read below
-  // then comes from the primed cache instead of its own round trip.
-  await getAttendanceMany(employees.map(e => e.id));
-  for(const emp of employees){
-    const att = await getAttendance(emp.id);
-    let presentDays = 0, elUsed = 0;
-    Object.keys(att).forEach(dateStr => {
-      if(dateStr < fyStart || dateStr > fyEnd) return;
-      const code = att[dateStr].code;
-      if(code === 'P' || code === 'EL' || code === 'SL') presentDays += 1;
-      else if(code === 'HEL' || code === 'HSL' || code === 'HLP') presentDays += 0.5;
-      if(code === 'EL') elUsed += 1;
-      else if(code === 'HEL') elUsed += 0.5;
-    });
-    const opening = Number(emp.elOpening) || 0;
-    // What is earned THIS year is not usable until NEXT year — "earned in
-    // year 1, usable from year 2" (LEAVE_POLICY.privilegeLeave.usableInFirstYear)
-    // — so it is never part of what gets paid for the year that is closing.
-    // It only carries forward automatically as next year's opening balance.
-    const earned = Math.floor(presentDays / LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays);
-    // What is actually payable now: whatever was already usable this year
-    // (last year's earned days, i.e. this year's opening) and went unused. A
-    // negative figure is leave taken beyond what was available and is not an
-    // encashment of less than nothing.
-    const unusedOpening = Math.max(0, opening - elUsed);
-    // Kept only for the legacy "carry the whole balance forward, no cash"
-    // option — the old opening leftover plus this year's earned days, in one
-    // figure, the way EL used to be rolled over before encashment was
-    // automated. Deliberately NOT floored at nil here: a negative figure is
-    // leave taken beyond what was available, and carrying that debt forward
-    // is the point of this legacy path — flooring it would forgive it instead.
-    const closing = opening + earned - elUsed;
-    const cash = plEncashmentFor(emp, unusedOpening);
-    rows.push({ emp, id: emp.id, name: emp.name, opening, presentDays, earned, elUsed,
-                unusedOpening, closing, nextOpening: earned,
-                pending: unusedOpening, monthly: cash.monthly, basis: cash.basis,
-                perDay: cash.perDay, amount: cash.amount });
-  }
-  return rows;
-}
 
 // ---- leave detail reports: late coming / EL-PL / SL / half day / short leave, broken out per category ----
 // EL and PL are the same figure — the app only ever stores one earned-leave
@@ -2204,16 +2071,6 @@ function employedDuringPeriod_(emp, startStr, endStr){
   return true;
 }
 
-// The leading \uFEFF is a UTF-8 byte order mark, and it is load-bearing on
-// Windows. Without it Excel opens a .csv in the system codepage, not UTF-8, so
-// every rupee sign arrives as "a,1" and every em dash as "a\u20ac\"" -- which is
-// what made the PF and ESI returns unreadable in the Rule Applied column. The
-// mark costs three bytes and every other reader ignores it.
-function toCsv(headerArr, rowsArr){
-  const lines = [headerArr.map(csvEscape).join(',')];
-  rowsArr.forEach(r => lines.push(r.map(csvEscape).join(',')));
-  return '\uFEFF' + lines.join('\n');
-}
 
 
 // ---- PF / ESI / PT returns ----
