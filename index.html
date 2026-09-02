@@ -1955,6 +1955,12 @@
             <span class="gen-accordion-desc">Check whether this device can actually read and write to the Google Sheet backend.</span></span>
           <span class="gen-accordion-chevron">▼</span>
         </button>
+        <button type="button" class="gen-accordion-header" data-target="secSequence" onclick="openSettingsCard('secSequence')" aria-expanded="false">
+          <span class="gen-accordion-num">6</span>
+          <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Employee sequence</strong>
+            <span class="gen-accordion-desc">Give the whole roster a clean 1, 2, 3 to start from. Individual numbers are set on each employee's own record.</span></span>
+          <span class="gen-accordion-chevron">▼</span>
+        </button>
       </div>
     </div>
     </div><!-- /hrSubSettings -->
@@ -2019,6 +2025,13 @@
       <div class="msg" id="zoneMsg"></div>
       <div style="height:14px"></div>
       <div id="geofenceZoneList"></div>
+    </section>
+
+    <section class="block hidden gen-accordion-body" id="secSequence">
+      <h2 style="margin:0 0 4px;">Employee sequence</h2>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Every employee has one Sequence No., set on their own record, and it is the order they appear in everywhere — every report, sheet, export and email. Anyone without one is listed after everybody who has one, in name order. This gives the whole roster a clean 1, 2, 3 in the order they are listed in now, so there is somewhere to start from; after that, change an individual number on their record. It only ever writes the sequence — no salary, attendance, leave or past record is touched.</p>
+      <button class="btn full" onclick="withBusy(this,'Numbering…',numberEveryoneInSequence)">Number everyone in the current order</button>
+      <div id="seqNumberBox" style="margin-top:10px;"></div>
     </section>
 
     <section class="block hidden gen-accordion-body" id="secDocStorage">
@@ -9215,7 +9228,6 @@ async function renderSalarySheet(){
   const secondaryClass = label => SAL_PRIMARY_COLS.has(label) ? '' : ' sal-col-2nd';
   const isCompact = isCompactSheetView();
   let bodyRows = '';
-  let srNo = 1;
   const grand = salarySheetTotalsSeed_();
   const R = v => Math.round(Number(v) || 0);
   // One markup for all three totals rows. Subtotal and Grand Total were two
@@ -9268,9 +9280,9 @@ async function renderSalarySheet(){
       const rateCellCls = rateChanged ? 'cell-changed' : '';
 
       if(isCompact){
-        bodyRows += salaryMobileCard(srNo++, emp, s, isNewThisMonth, rateChanged);
+        bodyRows += salaryMobileCard(seqNoOf(emp), emp, s, isNewThisMonth, rateChanged);
       } else {
-        bodyRows += `<tr${rowCls}><td class="sal-sr">${srNo++}</td><td class="sal-name">${escapeHtml(emp.name)}${isNewThisMonth ? ' <span class="pill new">new</span>' : ''}</td><td class="${rateCellCls}">${fmtMoney(s.rate)}</td><td>${s.leaveDays}${s.sandwichDays ? ' <span class="pol-warn" title="' + escapeHtml(s.sandwichDates.join(', ')) + ' — sandwiched between two unpaid-absence days">(incl. ' + s.sandwichDays + ' sandwich)</span>' : ''}</td><td class="sal-col-2nd">${s.policyHalfDays ? '<span class="pol-warn">' + s.policyHalfDays + '</span>' : '—'}</td><td class="sal-col-2nd">${fmtMoney(s.leaveAmount)}</td>` +
+        bodyRows += `<tr${rowCls}><td class="sal-sr">${seqNoOf(emp)}</td><td class="sal-name">${escapeHtml(emp.name)}${isNewThisMonth ? ' <span class="pill new">new</span>' : ''}</td><td class="${rateCellCls}">${fmtMoney(s.rate)}</td><td>${s.leaveDays}${s.sandwichDays ? ' <span class="pol-warn" title="' + escapeHtml(s.sandwichDates.join(', ')) + ' — sandwiched between two unpaid-absence days">(incl. ' + s.sandwichDays + ' sandwich)</span>' : ''}</td><td class="sal-col-2nd">${s.policyHalfDays ? '<span class="pol-warn">' + s.policyHalfDays + '</span>' : '—'}</td><td class="sal-col-2nd">${fmtMoney(s.leaveAmount)}</td>` +
           `<td>${fmtMoney(s.basic)}</td><td>${fmtMoney(s.hra)}</td><td>${fmtMoney(s.lta)}</td><td>${fmtMoney(s.gross)}</td>` +
           `<td class="sal-col-2nd">${fmtMoney(s.pf)}</td><td class="sal-col-2nd">${fmtMoney(s.esi)}</td><td class="sal-col-2nd">${fmtMoney(s.pt)}</td><td class="sal-col-2nd">${fmtMoney(s.advanceTemp)}</td><td class="sal-col-2nd">${fmtMoney(s.advance)}${s.advanceMissingThisMonth ? ' <span class="pol-warn" title="This employee has a Salary Advance Payment entry for another month, but none for this one">(no entry this month)</span>' : ''}</td><td class="sal-col-2nd">${fmtMoney(s.loanEmi)}</td><td class="sal-col-2nd">${fmtMoney(s.retention)}</td>` +
           `<td class="sal-col-2nd">${fmtMoney(s.totalDeduction)}</td><td class="sal-col-2nd">${fmtMoney(s.consultantSalary)}</td><td class="sal-col-2nd">${s.conveyance ? '+' + fmtMoney(s.conveyance) : '—'}</td>` +
@@ -9643,7 +9655,6 @@ async function renderApprenticeSalaryReport(){
   const cols = ['Name','Rate of Pay','Leave Days','Leave Amount','Basic','HRA','LTA','Gross','Advance Temp','Advance','Loan EMI','Retention','Total Deduction','Conveyance','Net Before Direct','Paid Directly','Net Payable'];
   const csvRows = [];
   const R = v => Math.round(Number(v) || 0);
-  let srNo = 1;
   const grand = { rate:0, leaveAmount:0, basic:0, hra:0, lta:0, gross:0, advanceTemp:0, advance:0, loanEmi:0, retention:0, totalDeduction:0, conveyance:0, netBeforeDirect:0, directPaid:0, netSalary:0 };
   // Same field set the table's own columns show — Rate of Pay through Paid
   // Directly — reused for both the row and the compact card so neither can
@@ -11213,7 +11224,11 @@ const CHECKLIST_ITEMS = {
 // ---- storage ----
 async function getEmployees(){
   const v = await safeGet('employees', true);
-  return v ? JSON.parse(v) : [];
+  // Sorted into the central sequence here, once. Every screen, report, export,
+  // PDF and email in the app gets its roster through this function, so all of
+  // them follow the sequence without knowing it exists — including the ones
+  // written next year. See employeesInSequence in shared/report-logic.js.
+  return v ? employeesInSequence(JSON.parse(v)) : [];
 }
 // Same data as getEmployees(), but throws when the underlying fetch
 // genuinely failed instead of quietly resolving to an empty list.
@@ -11233,7 +11248,7 @@ async function getEmployees(){
 async function getEmployeesOrThrow_(){
   const v = await safeGet('employees', true);
   if(v === null) throw new Error(lastBackendError || 'Could not load employees');
-  return JSON.parse(v);
+  return employeesInSequence(JSON.parse(v));
 }
 // Asks the backend to merge one record into a shared array itself. Still
 // used for 'leave_requests' (one shared list an engineer can add their own
@@ -11306,6 +11321,48 @@ async function saveOneEmployee_(emp){
 // (compaction, document migration). remoteSetMany already invalidates each
 // individual employee:<id> key it wrote; the aggregate 'employees' entry
 // getEmployees() reads through needs its own explicit invalidation on top.
+// Put one employee at the sequence number HR asked for and write back every
+// record the shift moved — and only those. On a roster of forty, moving somebody
+// from 30 to 3 rewrites twenty-eight records; moving them to the number they
+// already hold rewrites none.
+//
+// The arithmetic is resequenceEmployees in shared/report-logic.js, which is
+// also what the emails would use if they ever needed it. This function is only
+// the part that decides what to save.
+//
+// Nothing here touches a salary, an attendance day or a leave balance: the only
+// field written is seqNo. That is why it is safe to run on every save.
+async function applySequenceChange_(employees, empId, wanted){
+  const after = resequenceEmployees(employees, empId, wanted);
+  const changed = changedSequenceRecords(employees, after);
+  if(!changed.length) return 0;
+  await saveEmployees(changed);
+  return changed.length;
+}
+
+// Gives everybody a number in the order they are already listed in, which is
+// the sequence where one is set and name order where it is not. Safe to re-run:
+// normaliseSequence always produces a clean 1..N from whatever it finds, so
+// running it twice changes nothing the second time.
+async function numberEveryoneInSequence(){
+  const box = document.getElementById('seqNumberBox');
+  const say = (t, bad) => { if(box){ box.textContent = t; box.classList.toggle('error', !!bad); } };
+  try{
+    const employees = await getEmployeesOrThrow_();
+    if(!employees.length){ say('No employees to number.'); return; }
+    const changed = changedSequenceRecords(employees, normaliseSequence(employees));
+    if(!changed.length){ say('Already numbered 1 to ' + employees.length + ' — nothing to change.'); return; }
+    await saveEmployees(changed);
+    await addActivityLog('Numbered the employee sequence — ' + changed.length + ' record(s) updated');
+    say(changed.length + ' of ' + employees.length + ' employee(s) numbered. The roster now runs 1 to ' +
+        employees.length + '.');
+    try{ await renderEmployeeList(); }catch(e){}
+  }catch(err){
+    say('Could not number the sequence: ' + ((err && err.message) || 'the server did not respond') +
+        '. Nothing was changed — try again.', true);
+  }
+}
+
 async function saveEmployees(list){
   const entries = {};
   for(const e of list) entries['employee:' + e.id] = employeeSizeCheck_(e);
@@ -13317,6 +13374,15 @@ function employeeModalHtml(emp){
         <div style="height:12px"></div>
         <label class="field">Full name</label>
         <input type="text" id="f_name" placeholder="Employee full name" value="${escapeHtml(emp.name)}">
+        <div style="height:12px"></div>
+        <label class="field">Sequence No.</label>
+        <input type="number" min="1" step="1" id="f_seqNo" placeholder="Leave blank to add at the end"
+               value="${seqNoOf(emp) === Infinity ? '' : seqNoOf(emp)}">
+        <p style="font-size:12px;color:var(--muted);margin:6px 0 0;">The order this person appears in
+          everywhere — every report, sheet, export and email. Give somebody a number that is already
+          taken and whoever holds it moves down one, and everybody after them, so no two people ever
+          share a number. It changes the order and nothing else: no salary, attendance, leave or past
+          record moves with it.</p>
         <div style="height:12px"></div>
         <label class="field">Salutation</label>
         <select class="field-input" id="f_salutation">
@@ -16498,7 +16564,7 @@ async function saveEmployeeForm(){
   // twenty staff that was around thirty sequential calls to Apps Script for a
   // single save. Those screens rebuild when they are next opened instead.
   const isNew = !editingEmployeeId;
-  let saved = false;
+  let saved = false, seqMoved = 0, seqNoteFailed = false;
   let droppedDocs = [];
   try{
     // Whatever failed to reach Drive the first time — a network blip while
@@ -16528,6 +16594,20 @@ async function saveEmployeeForm(){
     // shared-array race that no longer applies.
     await saveOneEmployee_(toStore);
     saved = true;
+    // The sequence, after the record is safely stored and never before it: a
+    // reshuffle that failed half way would be a roster with two people on the
+    // same number, which is worse than a sequence that did not move. A failure
+    // here leaves the employee saved and the order untouched, and says so.
+    try{
+      // `employees` already has toStore in it — pushed for a new employee,
+      // replaced in place for an existing one, a few lines above.
+      const wantSeq = Number((document.getElementById('f_seqNo') || {}).value);
+      const target = (isFinite(wantSeq) && wantSeq > 0) ? wantSeq
+        : (seqNoOf(toStore) === Infinity ? employees.length : seqNoOf(toStore));
+      seqMoved = await applySequenceChange_(employees, toStore.id, target);
+    }catch(err){
+      seqNoteFailed = true;
+    }
   }catch(err){
     showEmpSaveError('Could not save: ' + (err && err.message ? err.message : 'the server did not respond') + '. Nothing was lost — press Save again.');
   }finally{
@@ -16546,7 +16626,10 @@ async function saveEmployeeForm(){
   // is still sitting on the stack — pop it too, or a later Back would try
   // to reopen the very form that was just successfully saved and closed.
   kmtBack();
-  showSavedToast((isNew ? 'Added ' : 'Updated ') + name + ' (' + id + ')');
+  showSavedToast((isNew ? 'Added ' : 'Updated ') + name + ' (' + id + ')' +
+    (seqNoteFailed ? ' — saved, but the sequence could not be updated; set it again'
+     : seqMoved > 1 ? ' — sequence updated, ' + (seqMoved - 1) + ' other(s) moved'
+     : seqMoved === 1 ? ' — sequence updated' : ''));
   // A toast fades on its own in a few seconds — fine for confirming the
   // save, not for telling HR a document silently didn't make it in. This
   // needs to actually be seen and acted on, so it's a real alert instead.
@@ -20294,7 +20377,7 @@ function reportTypeSelectChanged_(){
 // Same accordion again for Settings' five sections — a fixed list rather
 // than the generic id-prefix match Reports uses, since these are static
 // (never rebuilt per visit) exactly like Generator's fourteen.
-const SETTINGS_SECTIONS = ['secExpenseRate','secGeofence','secDocStorage','secAlwaysPresentBulk','secBackendConn'];
+const SETTINGS_SECTIONS = ['secExpenseRate','secGeofence','secDocStorage','secAlwaysPresentBulk','secBackendConn','secSequence'];
 function showSettingsLanding(){
   SETTINGS_SECTIONS.forEach(id => document.getElementById(id).classList.add('hidden'));
   updateAccordionHeaders_();

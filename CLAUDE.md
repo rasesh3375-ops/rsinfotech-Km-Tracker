@@ -153,6 +153,31 @@ config**, so a heading whose treatment changes explains itself correctly
 without anyone remembering the prose exists. Do not hand-write a paragraph
 describing a calculation.
 
+**The roster arrives already in order.** Every employee carries one central
+`seqNo` — HR sets it on the Employee form, and assigning a number somebody
+already holds shifts that person and everyone after them down, so the roster
+stays a clean 1..N with no duplicates. The engine is `seqNoOf`,
+`employeesInSequence`, `normaliseSequence`, `resequenceEmployees` and
+`changedSequenceRecords` in `shared/report-logic.js`.
+
+What makes it apply to screens and reports that do not exist yet is that there
+are only two doors a roster comes through, and **both sort before handing it
+over**: `getEmployees()` / `getEmployeesOrThrow_()` in `index.html`, and
+`reportDataSnapshot_` in `Code 2.js`. A report written next year gets its list
+in sequence order without being taught about sequences at all. So: **never
+re-sort a roster you were given, and never fetch employees around those two
+functions.** A screen that sorts by name again is the one screen that stops
+following HR's order.
+
+Two things it is deliberately not. It is **display order only** — the number
+reaches SR NO columns and row order, never a salary, an attendance day, a leave
+balance or anything stored. Changing it re-orders sheets and changes nothing on
+them; `verify_sequence_end_to_end.js` asserted every employee's whole salary
+object byte-identical across a reorder. And it is **not a grouping override** —
+the Salary Sheet still groups by heading, the Consultant Report still filters by
+scope, the accountant file still groups by bank; the sequence orders *within*
+whatever grouping a report already has.
+
 ## Domain reference
 
 **Financial year: 1 April – 31 March.** FY 2026-27 runs 1 April 2026 to

@@ -2042,6 +2042,93 @@ function loanLedgerCsvTotalRow(rows){
 }
 
 
+// ---- the central engineer sequence ----
+//
+// One number per person, and the display order for the whole app. Every screen,
+// report, export, email and PDF that lists employees gets it from one place:
+// getEmployees in index.html and allEmployeesFromRows_ in Code 2.js both hand
+// back their roster already in this order, so a report written next year
+// follows it without being told to and without a sort of its own.
+//
+// It is display only. Nothing here is read by any pay, attendance or leave
+// calculation — the sequence decides what order people are listed in and
+// nothing else, so renumbering the whole roster cannot move a rupee or a day.
+//
+// Kept in shared/report-logic.js rather than index.html because the emailed
+// reports are built in Apps Script and have to list people in the same order as
+// the screen. One definition, both callers.
+const SEQ_FIELD = 'seqNo';
+
+// Somebody with no number yet sorts after everybody who has one, rather than
+// jumping to the front as a 0 would. New employees therefore land at the end
+// until a number is given to them, which is where HR would put them anyway.
+function seqNoOf(emp){
+  const n = Number((emp || {})[SEQ_FIELD]);
+  return (isFinite(n) && n > 0) ? n : Infinity;
+}
+
+// Name then id after the number itself, so the order is fully determined even
+// when two records somehow share a number or nobody has one at all. Without a
+// final tiebreak the list could come back in a different order on two machines
+// reading the same data, which is the one thing a "central" sequence must not
+// do.
+function compareBySeq_(a, b){
+  const d = seqNoOf(a) - seqNoOf(b);
+  if(d) return d < 0 ? -1 : 1;
+  const byName = String((a || {}).name || '').localeCompare(String((b || {}).name || ''));
+  if(byName) return byName;
+  return String((a || {}).id || '').localeCompare(String((b || {}).id || ''));
+}
+
+// The roster in sequence order. Never mutates what it is given — callers pass
+// the live employee list around freely.
+function employeesInSequence(list){
+  return (list || []).slice().sort(compareBySeq_);
+}
+
+// Renumber to 1..N in the order the list is already in. This is what
+// guarantees no duplicates and no gaps: whatever the stored numbers were —
+// repeated, missing, running to 900 — the result is always a clean run.
+// Returns new employee objects; the originals are left alone.
+function normaliseSequence(list){
+  return employeesInSequence(list).map((emp, i) =>
+    Object.assign({}, emp, { [SEQ_FIELD]: i + 1 }));
+}
+
+// Give one employee a sequence number and let everyone else fall into place.
+//
+// Deliberately a remove-and-reinsert rather than "bump whoever holds that
+// number, then bump whoever that displaces, and so on". Both produce the same
+// answer for the simple case HR described — assign 3, and the old 3 becomes 4,
+// 4 becomes 5 — but the cascade has to cope with duplicates, gaps and an
+// employee moving UP the list as well as down, and it gets those wrong in ways
+// that are hard to see. Taking the person out of the list and putting them back
+// at the position asked for is the same operation HR is doing in their head,
+// handles moving up and down identically, and cannot leave a duplicate behind
+// because the renumber at the end assigns each position exactly once.
+//
+// `target` is clamped into 1..N, so asking for 0 or 99 on a roster of 40 puts
+// them first or last rather than failing or leaving a gap.
+function resequenceEmployees(list, empId, target){
+  const ordered = employeesInSequence(list);
+  const from = ordered.findIndex(e => String((e || {}).id) === String(empId));
+  if(from === -1) return normaliseSequence(ordered);
+  const moving = ordered[from];
+  const rest = ordered.slice(0, from).concat(ordered.slice(from + 1));
+  const wanted = Math.max(1, Math.min(rest.length + 1, Math.round(Number(target)) || 1));
+  rest.splice(wanted - 1, 0, moving);
+  return rest.map((emp, i) => Object.assign({}, emp, { [SEQ_FIELD]: i + 1 }));
+}
+
+// Which records actually changed, so a save writes those and not all forty.
+// Compared by id against the list as it was, since resequenceEmployees returns
+// fresh objects for everybody.
+function changedSequenceRecords(before, after){
+  const was = {};
+  (before || []).forEach(e => { if(e && e.id !== undefined) was[String(e.id)] = seqNoOf(e); });
+  return (after || []).filter(e => e && e.id !== undefined && was[String(e.id)] !== seqNoOf(e));
+}
+
 const SALARY_HEADING_ORDER = ['managerial','senior','junior','apprentice','rsit','contractor'];
 // The three headings that are R.S. Infotech's own payroll. Apprentices,
 // R.S.IT Solution and Contractors are separate books kept on the same sheet,
@@ -2195,15 +2282,13 @@ function excludedNote_(excluded, what){
 
 function pfReturnCsv(pfRows, pfTot, excluded){
   const body = [];
-  let sr = 0;
   SALARY_HEADING_ORDER.forEach(hk => {
     const group = pfRows.filter(x => x.headingKey === hk);
     if(!group.length) return;
     body.push([SALARY_HEADINGS[hk].label]);
     group.forEach(x => {
-      sr++;
       const status = x.applicable ? 'Contributing' : (x.notConfigured ? 'Not configured' : 'PF Not Applicable');
-      body.push([sr, x.emp.name, x.emp.id, excelIdNumber(x.emp.uan), x.eligible, x.pfType,
+      body.push([seqNoOf(x.emp), x.emp.name, x.emp.id, excelIdNumber(x.emp.uan), x.eligible, x.pfType,
         Math.round(x.wage + (x.leaveAmount || 0)), x.leaveDays || 0, Math.round(x.leaveAmount || 0), Math.round(x.wage),
         x.applicable ? Math.round(x.employee) : 0, x.applicable ? Math.round(x.epf) : 0,
         // Rounded from the full-precision sum, not from the two rounded cells
@@ -2233,15 +2318,13 @@ function pfReturnCsv(pfRows, pfTot, excluded){
 
 function esiReturnCsv(esiRows, esiTot, excluded){
   const body = [];
-  let sr = 0;
   SALARY_HEADING_ORDER.forEach(hk => {
     const group = esiRows.filter(x => x.headingKey === hk);
     if(!group.length) return;
     body.push([SALARY_HEADINGS[hk].label]);
     group.forEach(x => {
-      sr++;
       const status = x.r.covered ? 'Covered' : 'Exempt';
-      body.push([sr, x.emp.name, excelIdNumber(x.emp.esiNumber), Math.round(x.s.gross),
+      body.push([seqNoOf(x.emp), x.emp.name, excelIdNumber(x.emp.esiNumber), Math.round(x.s.gross),
         x.r.covered ? Math.round(x.r.employee) : 0, x.r.covered ? Math.round(x.r.employer) : 0,
         x.r.covered ? Math.round(x.r.total) : 0, status, x.r.reason]);
     });
@@ -2335,7 +2418,10 @@ function salarySheetCsv(employees, attByEmpId, dateList, monthDays, holidayMap){
     staffDone = true;
     rows.push(salarySheetTotalRow_(STAFF_TOTAL_LABEL, staff));
   };
-  let srNo = 1;
+  // SR NO is the employee's own central sequence number, not a running count
+  // down the page — the point of a central sequence being that the same person
+  // is the same number on every sheet. It will not run 1,2,3 inside a heading
+  // group, because a group only holds part of the roster; that is expected.
   SALARY_HEADING_ORDER.forEach(headingKey => {
     const group = (employees || []).filter(e => ratePayAsOf(e, dateList[0]).salaryHeading === headingKey);
     if(!group.length) return;
@@ -2344,7 +2430,7 @@ function salarySheetCsv(employees, attByEmpId, dateList, monthDays, holidayMap){
     const sub = salarySheetTotalsSeed_();
     group.forEach(emp => {
       const s = salaryFor_(emp, attByEmpId[emp.id] || {}, dateList, monthDays, holidayMap);
-      rows.push([srNo++, emp.name, R(s.rate), s.leaveDays, s.policyHalfDays, R(s.leaveAmount), R(s.basic), R(s.hra),
+      rows.push([seqNoOf(emp), emp.name, R(s.rate), s.leaveDays, s.policyHalfDays, R(s.leaveAmount), R(s.basic), R(s.hra),
         R(s.lta), R(s.gross), R(s.pf), R(s.esi), R(s.pt), R(s.advanceTemp), R(s.advance), R(s.loanEmi), R(s.retention),
         R(s.totalDeduction), R(s.consultantSalary), R(s.conveyance), R(s.directPaid), R(s.netSalary),
         R(s.pen), R(s.employerPf), R(s.pfAdmin), R(s.edli), R(s.esiEmployer), R(s.employerCont), R(s.ctc),
@@ -2370,7 +2456,7 @@ function salarySheetCsv(employees, attByEmpId, dateList, monthDays, holidayMap){
 // together and the block can be handed over as a single transfer instruction.
 function finalSalarySheetCsv(employees, attByEmpId, dateList, monthDays, holidayMap){
   const out = [];
-  let sr = 0, grand = 0, grandCount = 0;
+  let grand = 0, grandCount = 0;
   SALARY_HEADING_ORDER.forEach(headingKey => {
     const group = (employees || []).filter(e => ratePayAsOf(e, dateList[0]).salaryHeading === headingKey);
     if(!group.length) return;
@@ -2383,8 +2469,12 @@ function finalSalarySheetCsv(employees, attByEmpId, dateList, monthDays, holiday
     out.push([label]);
     let sub = 0;
     rows.forEach(r => {
-      sr++; sub += r.net; grand += r.net; grandCount++;
-      out.push([sr, r.emp.name, r.emp.bankName || '', excelIdNumber(r.emp.accountNumber),
+      sub += r.net; grand += r.net; grandCount++;
+      // The central number here too, so a person is the same number on this
+      // sheet as on every other. This one is sorted by bank rather than by
+      // sequence, so the column will not ascend — it identifies rather than
+      // orders, which is what a central number is for.
+      out.push([seqNoOf(r.emp), r.emp.name, r.emp.bankName || '', excelIdNumber(r.emp.accountNumber),
                 r.emp.ifsc || '', Math.round(r.net)]);
     });
     out.push(['', label + ' subtotal', rows.length + ' employee(s)', '', '', Math.round(sub)]);
@@ -2671,7 +2761,6 @@ function consultantReportRows(employees, attByEmpId, dateList, monthDays, holida
   // and the right one agree.
   const workingDays = monthDays - weekOff - publicHolidays;
   const rows = [];
-  let sr = 0;
   (employees || []).forEach(emp => {
     const att = attByEmpId[emp.id] || {};
     const c = consultantDayCounts(att, dateList, holidayMap);
@@ -2705,8 +2794,7 @@ function consultantReportRows(employees, attByEmpId, dateList, monthDays, holida
     if(loanEmi && advance) loanLabel = 'Loan / Advance';
     else if(loanEmi) loanLabel = 'Loan';
     else if(advance) loanLabel = 'Advance';
-    sr++;
-    rows.push([sr, emp.id || '', emp.name || '', emp.designation || '',
+    rows.push([seqNoOf(emp), emp.id || '', emp.name || '', emp.designation || '',
       consultantDate(emp.dob), consultantDate(emp.doj), emp.pfNo || '', emp.uan || 'NA',
       emp.esiNumber || '', Math.round(ratePayAsOf(emp, dateList[0]).ratePay),
       consultantDays(workingDays), consultantDays(weekOff), consultantDays(presentDays),
