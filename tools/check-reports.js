@@ -25,6 +25,7 @@ const CHECKS = [
   ['check-sequence-reports.js', 'every report follows the sequence, and no figure moves when it does'],
   ['check-srno.js',             'what SR NO actually prints, numbered and unnumbered'],
   ['check-wage-register.js',    'the wage register adds up the way the consultant\'s does'],
+  ['check-tie-out.js',          'every printed sheet adds up as printed, and ESI rounds up'],
 ];
 
 let failed = 0;
