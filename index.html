@@ -9228,6 +9228,10 @@ async function renderSalarySheet(){
   const secondaryClass = label => SAL_PRIMARY_COLS.has(label) ? '' : ' sal-col-2nd';
   const isCompact = isCompactSheetView();
   let bodyRows = '';
+  // Only ever the fallback for someone HR has not numbered yet — seqNoLabel
+  // prefers the central number. Before this the screen printed seqNoOf, which
+  // is the sort key and reads "Infinity" for anyone unnumbered.
+  let salSrPos = 0;
   const grand = salarySheetTotalsSeed_();
   const R = v => Math.round(Number(v) || 0);
   // One markup for all three totals rows. Subtotal and Grand Total were two
@@ -9280,9 +9284,9 @@ async function renderSalarySheet(){
       const rateCellCls = rateChanged ? 'cell-changed' : '';
 
       if(isCompact){
-        bodyRows += salaryMobileCard(seqNoOf(emp), emp, s, isNewThisMonth, rateChanged);
+        bodyRows += salaryMobileCard(seqNoLabel(emp, ++salSrPos), emp, s, isNewThisMonth, rateChanged);
       } else {
-        bodyRows += `<tr${rowCls}><td class="sal-sr">${seqNoOf(emp)}</td><td class="sal-name">${escapeHtml(emp.name)}${isNewThisMonth ? ' <span class="pill new">new</span>' : ''}</td><td class="${rateCellCls}">${fmtMoney(s.rate)}</td><td>${s.leaveDays}${s.sandwichDays ? ' <span class="pol-warn" title="' + escapeHtml(s.sandwichDates.join(', ')) + ' — sandwiched between two unpaid-absence days">(incl. ' + s.sandwichDays + ' sandwich)</span>' : ''}</td><td class="sal-col-2nd">${s.policyHalfDays ? '<span class="pol-warn">' + s.policyHalfDays + '</span>' : '—'}</td><td class="sal-col-2nd">${fmtMoney(s.leaveAmount)}</td>` +
+        bodyRows += `<tr${rowCls}><td class="sal-sr">${seqNoLabel(emp, ++salSrPos)}</td><td class="sal-name">${escapeHtml(emp.name)}${isNewThisMonth ? ' <span class="pill new">new</span>' : ''}</td><td class="${rateCellCls}">${fmtMoney(s.rate)}</td><td>${s.leaveDays}${s.sandwichDays ? ' <span class="pol-warn" title="' + escapeHtml(s.sandwichDates.join(', ')) + ' — sandwiched between two unpaid-absence days">(incl. ' + s.sandwichDays + ' sandwich)</span>' : ''}</td><td class="sal-col-2nd">${s.policyHalfDays ? '<span class="pol-warn">' + s.policyHalfDays + '</span>' : '—'}</td><td class="sal-col-2nd">${fmtMoney(s.leaveAmount)}</td>` +
           `<td>${fmtMoney(s.basic)}</td><td>${fmtMoney(s.hra)}</td><td>${fmtMoney(s.lta)}</td><td>${fmtMoney(s.gross)}</td>` +
           `<td class="sal-col-2nd">${fmtMoney(s.pf)}</td><td class="sal-col-2nd">${fmtMoney(s.esi)}</td><td class="sal-col-2nd">${fmtMoney(s.pt)}</td><td class="sal-col-2nd">${fmtMoney(s.advanceTemp)}</td><td class="sal-col-2nd">${fmtMoney(s.advance)}${s.advanceMissingThisMonth ? ' <span class="pol-warn" title="This employee has a Salary Advance Payment entry for another month, but none for this one">(no entry this month)</span>' : ''}</td><td class="sal-col-2nd">${fmtMoney(s.loanEmi)}</td><td class="sal-col-2nd">${fmtMoney(s.retention)}</td>` +
           `<td class="sal-col-2nd">${fmtMoney(s.totalDeduction)}</td><td class="sal-col-2nd">${fmtMoney(s.consultantSalary)}</td><td class="sal-col-2nd">${s.conveyance ? '+' + fmtMoney(s.conveyance) : '—'}</td>` +
@@ -9738,7 +9742,17 @@ async function renderFinalSalarySheet(){
 
   const money = rupees;
   const isCompact = isCompactSheetView();
-  let bodyRows = '', sr = 0, grand = 0, grandCount = 0;
+  let bodyRows = '', sr = 0, grand = 0, grandConv = 0, grandCount = 0;
+
+  // Built before anything is rendered, because whether the conveyance columns
+  // appear at all is a property of the whole month and cannot be decided part
+  // way down the page. Taking the flag off the shared builder rather than
+  // working it out again here is what stops the screen and the filed CSV
+  // disagreeing about how many columns this month's sheet has.
+  const attForCsv = {};
+  for(const e of employees) attForCsv[e.id] = await getAttendance(e.id);
+  const finalBuilt = finalSalarySheetCsv(employees, attForCsv, dateList, monthDays, holidayMap);
+  const showConv = finalBuilt.anyConveyance;
 
   for(const headingKey of SALARY_HEADING_ORDER){
     // The heading each employee was under THIS month, same reasoning as the
@@ -9750,53 +9764,62 @@ async function renderFinalSalarySheet(){
     const rows = [];
     for(const emp of group){
       const s = await computeSalaryForEmployee(emp, dateList, monthDays, holidayMap);
-      rows.push({ emp, net: s.netSalary });
+      rows.push({ emp, net: s.netSalary, conveyance: Number(s.conveyance) || 0 });
     }
     // Bank first, then name, so every employee at one bank sits together and
     // the block can be handed over as a single transfer instruction.
     rows.sort((a, b) => (a.emp.bankName || '').localeCompare(b.emp.bankName || '')
       || (a.emp.name || '').localeCompare(b.emp.name || ''));
 
-    let sub = 0;
+    let sub = 0, subConv = 0;
     if(isCompact) bodyRows += hrHeadingCard(label);
-    else bodyRows += `<tr class="sal-heading"><td colspan="6">${escapeHtml(label)}</td></tr>`;
+    else bodyRows += `<tr class="sal-heading"><td colspan="${showConv ? 8 : 6}">${escapeHtml(label)}</td></tr>`;
     rows.forEach(r => {
-      sr++; sub += r.net; grand += r.net; grandCount++;
+      sr++; sub += r.net; subConv += r.conveyance; grand += r.net; grandConv += r.conveyance; grandCount++;
+      const salaryOnly = r.net - r.conveyance;
       if(isCompact){
         bodyRows += hrCard(`<strong>${escapeHtml(r.emp.name)}</strong><span class="id">#${sr}</span>`,
           hrRow('Bank Name', escapeHtml(r.emp.bankName || '—')) +
           hrRow('Account Number', escapeHtml(r.emp.accountNumber || '—')) +
           hrRow('IFSC', escapeHtml(r.emp.ifsc || '—')) +
+          (showConv ? hrRow('Payable Salary', money(salaryOnly)) +
+                      hrRow('Conveyance Expense', money(r.conveyance)) : '') +
           `<div class="hr-sheet-net"><span>Final Payable</span><span>${money(r.net)}</span></div>`);
       } else {
         bodyRows += `<tr><td>${sr}</td><td class="sal-name">${escapeHtml(r.emp.name)}</td>
           <td>${escapeHtml(r.emp.bankName || '—')}</td>
           <td>${escapeHtml(r.emp.accountNumber || '—')}</td>
-          <td>${escapeHtml(r.emp.ifsc || '—')}</td>
-          <td class="num"><strong>${money(r.net)}</strong></td></tr>`;
+          <td>${escapeHtml(r.emp.ifsc || '—')}</td>` +
+          (showConv ? `<td class="num">${money(salaryOnly)}</td><td class="num">${money(r.conveyance)}</td>` : '') +
+          `<td class="num"><strong>${money(r.net)}</strong></td></tr>`;
       }
     });
     if(isCompact){
       bodyRows += hrCard(null, hrRow(label + ' subtotal', rows.length + ' employee(s)') +
+        (showConv ? hrRow('Payable Salary', money(sub - subConv)) +
+                    hrRow('Conveyance Expense', money(subConv)) : '') +
         `<div class="hr-sheet-net"><span>Subtotal</span><span>${money(sub)}</span></div>`, 'sal-total-card');
     } else {
       bodyRows += `<tr class="sal-subtotal"><td></td><td class="sal-name">${escapeHtml(label)} subtotal</td>
-        <td colspan="3">${rows.length} employee(s)</td><td class="num">${money(sub)}</td></tr>`;
+        <td colspan="3">${rows.length} employee(s)</td>` +
+        (showConv ? `<td class="num">${money(sub - subConv)}</td><td class="num">${money(subConv)}</td>` : '') +
+        `<td class="num">${money(sub)}</td></tr>`;
     }
   }
 
   if(isCompact){
     bodyRows += hrCard(`<strong>Grand Total</strong>`, hrRow('Employees', grandCount + ' employee(s)') +
+      (showConv ? hrRow('Payable Salary', money(grand - grandConv)) +
+                  hrRow('Conveyance Expense', money(grandConv)) : '') +
       `<div class="hr-sheet-net"><span>Grand Total</span><span>${money(grand)}</span></div>`, 'sal-grand-card');
   } else {
     bodyRows += `<tr class="sal-grandtotal"><td></td><td class="sal-name">Grand Total</td>
-      <td colspan="3">${grandCount} employee(s)</td><td class="num">${money(grand)}</td></tr>`;
+      <td colspan="3">${grandCount} employee(s)</td>` +
+      (showConv ? `<td class="num">${money(grand - grandConv)}</td><td class="num">${money(grandConv)}</td>` : '') +
+      `<td class="num">${money(grand)}</td></tr>`;
   }
-  // The CSV comes from finalSalarySheetCsv in shared/report-logic.js — the
-  // same function the monthly report-pack email calls.
-  const attForCsv = {};
-  for(const e of employees) attForCsv[e.id] = await getAttendance(e.id);
-  const finalBuilt = finalSalarySheetCsv(employees, attForCsv, dateList, monthDays, holidayMap);
+  // finalBuilt was built above, before rendering, so the screen and this file
+  // are laid out from one decision about the conveyance columns.
   const csvRows = finalBuilt.rows;
   const cols = finalBuilt.cols;
   // Display name only — the Drive folder itself stays "Final Salary Sheet" so
@@ -9813,12 +9836,12 @@ async function renderFinalSalarySheet(){
 
   const finalSalaryInner = isCompact ? `<div class="hr-sheet-cards">${bodyRows}</div>` :
     `<table class="sal-table">
-      <thead><tr><th>SR</th><th>Employee Name</th><th>Bank Name</th><th>Account Number</th><th>IFSC</th><th class="num">Final Payable</th></tr></thead>
+      <thead><tr><th>SR</th><th>Employee Name</th><th>Bank Name</th><th>Account Number</th><th>IFSC</th>${showConv ? '<th class="num">Payable Salary</th><th class="num">Conveyance Expense</th>' : ''}<th class="num">Final Payable</th></tr></thead>
       <tbody>${bodyRows}</tbody></table>`;
   box.innerHTML = `${reportActionBar(rptTitle + ' — ' + monthLabel(monthVal), 'finalSalaryBox')}
     <div class="sal-sheet-wrap print-isolate" id="finalSalaryPrintArea">
       ${reportLogoHeader(rptTitle + ' — ' + monthLabel(monthVal))}
-      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by salary heading, sorted by bank. Final Payable is after every deduction, including anything paid directly to the account.</p>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Grouped by salary heading, sorted by bank. Final Payable is after every deduction, including anything paid directly to the account${showConv ? ', and is the salary and the conveyance expense added together — it is the one amount to transfer' : ''}.</p>
       ${finalSalaryInner}</div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(monthVal + '-01'))} &gt; Dashboard &gt; Final Salary Sheet.</p>`;
   openFullscreenView(rptTitle + ' — ' + monthLabel(monthVal), 'finalSalaryBox');
