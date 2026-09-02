@@ -244,10 +244,23 @@ it; the employer's contributions sit on top of it.
 - **Employee type** (`field`, `office`, `wfh`, `resident`) is separate from
   heading and decides *leave* rules. Resident Engineers are outside the leave,
   short-leave, late-coming and overtime rules entirely.
-- **Leave** — 7 SL a year (4 for Work From Home), PL earned at 1 per 25
-  attendance days, neither carried forward. PL is encashable at 70% of
-  Basic + HRA, a day being a twenty-fifth of that. SL requires a medical
-  certificate.
+- **Leave** — 7 SL a year (4 for Work From Home), neither SL nor PL carried
+  forward. PL is encashable at 70% of Basic + HRA, a day being a twenty-fifth
+  of that. SL requires a medical certificate.
+- **EL/PL accrual** — one day per 25 qualifying present days, as a **running
+  total across the financial year**, and **not floored**. 28 qualifying days is
+  1.12 EL, and the remainder carries on accruing rather than being thrown away
+  at a month boundary. There is one definition of a qualifying day —
+  `qualifyingPresentDays` — and every caller uses it: present (short leave
+  included), EL, SL, and a Sunday or declared holiday the employee was in
+  service for, count 1; a half-day code counts 0.5; unpaid absence, an unmarked
+  day and a sandwiched day count nothing, because what payroll does not pay for
+  does not earn leave. It used to be computed twice from two rules that
+  disagreed — `policyRowsFor` gave a half day nothing, `elFyRows` gave it 0.5
+  and ignored SHORT — so the Attendance Sheet and the Encashment Report could
+  report different EL for the same person in the same year. `elEarnedFrom` does
+  the division and `elDisplay` rounds to two decimals at the display boundary
+  only; the value itself keeps full precision like every other figure here.
 - **Late coming** — 15 minutes grace, then 3 free instances a month. Past
   that, each late arrival is judged by its own instance number, not a flat
   rate: the 4th is a warning with no deduction, the 5th costs half a day, the

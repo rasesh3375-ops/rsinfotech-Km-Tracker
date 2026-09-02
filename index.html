@@ -4539,23 +4539,31 @@ async function elFyRows(employees, startYear){
   // One request for everyone's attendance before the loop; each read below
   // then comes from the primed cache instead of its own round trip.
   await getAttendanceMany(employees.map(e => e.id));
+  // Sundays and declared holidays count towards EL now, and a Sunday has no
+  // attendance record of its own — it is resolved from the calendar. So the
+  // holiday list has to be here, where this used to need nothing but the
+  // marked days.
+  const holidayMap = await getHolidayMap_local();
   for(const emp of employees){
     const att = await getAttendance(emp.id);
-    let presentDays = 0, elUsed = 0;
+    let elUsed = 0;
     Object.keys(att).forEach(dateStr => {
       if(dateStr < fyStart || dateStr > fyEnd) return;
       const code = att[dateStr].code;
-      if(code === 'P' || code === 'EL' || code === 'SL') presentDays += 1;
-      else if(code === 'HEL' || code === 'HSL' || code === 'HLP') presentDays += 0.5;
       if(code === 'EL') elUsed += 1;
       else if(code === 'HEL') elUsed += 0.5;
     });
+    // The one definition, shared with policyRowsFor and the Attendance Sheet.
+    // This used to count the marked days itself, with a different rule from
+    // the one policyRowsFor used, so the same person could have two different
+    // EL figures depending on which report was open.
+    const presentDays = qualifyingPresentDays(emp, att, fyStart, fyEnd, holidayMap);
     const opening = Number(emp.elOpening) || 0;
     // What is earned THIS year is not usable until NEXT year — "earned in
     // year 1, usable from year 2" (LEAVE_POLICY.privilegeLeave.usableInFirstYear)
     // — so it is never part of what gets paid for the year that is closing.
     // It only carries forward automatically as next year's opening balance.
-    const earned = Math.floor(presentDays / LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays);
+    const earned = elEarnedFrom(presentDays);
     // What is actually payable now: whatever was already usable this year
     // (last year's earned days, i.e. this year's opening) and went unused. A
     // negative figure is leave taken beyond what was available and is not an
@@ -6792,7 +6800,7 @@ function buildPolicySummary(employees, attByEmp, dateList, precomputed, holidayM
       <td class="num">${r.shortLeaves}</td>
       <td class="num">${r.halfDays}</td>
       <td class="num">${r.sickUsed} / ${r.bal.sickTotal}</td>
-      <td class="num">${r.plUsed} used · ${r.bal.plEarned} earned</td>
+      <td class="num">${r.plUsed} used · ${elDisplay(r.bal.plEarned)} earned</td>
       <td class="num">${r.lwp || '—'}</td>
       <td class="num">${r.sandwichDays || '—'}</td>
       <td class="num">${r.otMinutes ? Math.floor(r.otMinutes/60)+'h '+(r.otMinutes%60)+'m' : '—'}</td>
@@ -18715,7 +18723,8 @@ async function renderLeaveBalanceNextYearReport(){
     const content = toCsv(
       ['Name','SL Current Opening','SL New Opening (Next Year)','EL Opening','EL Present days (FY)','EL Earned (→ next year)','EL Used','EL Unused Opening (to encash)','EL Per day','EL Encashment'],
       rows.map(r => [r.name, r.slEligible ? r.slCurrent : '—', r.slEligible ? r.slNext : '—',
-        r.opening, r.presentDays, r.earned, r.elUsed, r.unusedOpening, r.perDay, r.amount])
+        r.opening, elDisplay(r.presentDays), elDisplay(r.earned), r.elUsed,
+        elDisplay(r.unusedOpening), r.perDay, r.amount])
         .concat([['GRAND TOTAL','','','','','','','','', totalEncash]]));
     queueFileToDrive(hrYearPath(fyEnd, 'Reports', 'Leave Balance Next Year Report'), fileName, content, 'text/csv');
     stashReportShare(reportTitle, fileName, content, 'text/csv',
@@ -18726,7 +18735,7 @@ async function renderLeaveBalanceNextYearReport(){
   const inner = isCompact ? `<div class="hr-sheet-cards">
       ${rows.map(r => hrCard(`<strong>${escapeHtml(r.name)}</strong>`,
         hrRow('SL Current Opening', r.slEligible ? r.slCurrent : '—') + hrRow('SL New Opening (Next Year)', r.slEligible ? r.slNext : '—') +
-        hrRow('EL Opening', r.opening) + hrRow('EL Present days (FY)', r.presentDays) + hrRow('EL Earned (→ next year)', r.earned) +
+        hrRow('EL Opening', r.opening) + hrRow('EL Present days (FY)', elDisplay(r.presentDays)) + hrRow('EL Earned (→ next year)', elDisplay(r.earned)) +
         hrRow('EL Used', r.elUsed) + hrRow('EL Unused Opening (to encash)', r.unusedOpening) + hrRow('EL Per day', '₹' + fmtMoney(r.perDay)) +
         `<div class="hr-sheet-net"><span>EL Encashment</span><span>₹${fmtMoney(r.amount)}</span></div>`)).join('')}
       ${hrCard('<strong>Grand Total</strong>', hrRow('EL Encashment', '₹' + fmtMoney(totalEncash)), 'sal-grand-card')}
@@ -18736,7 +18745,7 @@ async function renderLeaveBalanceNextYearReport(){
       <th class="num">EL Used</th><th class="num">EL Unused Opening<br><span class="th-sub">to encash</span></th><th class="num">EL Per day</th><th class="num">EL Encashment</th></tr>
       ${rows.map(r => `<tr><td class="sal-name">${escapeHtml(r.name)}</td>
         <td class="num">${r.slEligible ? r.slCurrent : '—'}</td><td class="num">${r.slEligible ? r.slNext : '—'}</td>
-        <td class="num">${r.opening}</td><td class="num">${r.presentDays}</td><td class="num">${r.earned}</td><td class="num">${r.elUsed}</td>
+        <td class="num">${r.opening}</td><td class="num">${elDisplay(r.presentDays)}</td><td class="num">${elDisplay(r.earned)}</td><td class="num">${r.elUsed}</td>
         <td class="num">${r.unusedOpening}</td><td class="num">₹${fmtMoney(r.perDay)}</td><td class="num"><strong>₹${fmtMoney(r.amount)}</strong></td></tr>`).join('')}
       <tr class="sal-grandtotal"><td class="sal-name"><strong>Grand Total</strong></td><td colspan="8"></td><td class="num"><strong>₹${fmtMoney(totalEncash)}</strong></td></tr>
     </table>`;
@@ -18748,7 +18757,7 @@ async function renderLeaveBalanceNextYearReport(){
     </div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0;line-height:1.6;">FY ${startYear}-${String(startYear+1).slice(2)}: ${fmtDateIN(fyStart)} to ${fmtDateIN(fyEnd)}.
       <br><strong style="color:var(--navy);">SL</strong> resets to the yearly allowance for the employee's type (${P.sickLeave.perYear.full} normally, ${P.sickLeave.perYear.part} for part-time) — shown as "—" for Work From Home and non-R.S. Infotech headings, left untouched, their policy being different.
-      <br><strong style="color:var(--navy);">EL Earned</strong> = 1 day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} days present (present includes EL/SL days and half-day equivalents), floored — earned this year, usable from next year, so it is never part of what this year pays out. Unused Opening = this year's opening balance − EL used, floored at nil.
+      <br><strong style="color:var(--navy);">EL Earned</strong> = 1 day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} qualifying present days, counted as a running total across the whole financial year and <strong>not rounded down</strong> — 28 qualifying days earns ${elDisplay(28 / LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays)}, and the remainder carries on accruing instead of being lost at each month end. A qualifying day is a day present (including short leave), a day of EL or SL, a Sunday or declared holiday the employee was in service for, or half a day for a half-day code; unpaid absence and sandwiched days earn nothing. Earned this year, usable from next year, so it is never part of what this year pays out. Unused Opening = this year's opening balance − EL used, floored at nil.
       <br><strong style="color:var(--navy);">EL Encashment</strong> = Unused Opening × ${headingPct(B.grossPct)} of ${escapeHtml(B.label)} ÷ ${B.dayDivisor}, worked out from each employee's Rate of Pay and salary heading. The ${B.dayDivisor} is the same figure that earns the leave — one day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} days of attendance.</p>
     <div class="row-inline" style="margin-bottom:8px;">
       <button class="btn full" onclick='withBusy(this,"Working…",()=>openLeaveYearSl(${JSON.stringify(rows.filter(r=>r.slEligible).map(r=>({id:r.id,sl:r.slNext})))}, ${JSON.stringify(fyStart)}))'>Open leave year (SL)</button>

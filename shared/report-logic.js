@@ -2458,6 +2458,90 @@ function finalSalarySheetCsv(employees, attByEmpId, dateList, monthDays, holiday
 // Every caller that has a holidayMap handy passes it; computeSalaryForEmployee
 // always has one, so the actual Salary Sheet deduction is never affected by
 // this — only how completely a warning panel can explain it in advance.
+// ---- Earned Leave: one definition, and a running total ----
+// EL is earned at one day per 25 qualifying present days, kept as a running
+// total across the financial year rather than worked out afresh each month.
+//
+// It is no longer floored. A stretch that earns 28 qualifying days earns
+// 28 / 25 = 1.12 EL, not 1. Flooring inside a month threw the remainder away
+// at every month boundary, so up to 24 days of accrual a year could be lost to
+// rounding alone — a person could work every day of a month and earn nothing
+// for the days past the twenty-fifth.
+//
+// And there is now ONE definition of a qualifying day where there were two
+// that disagreed. policyRowsFor counted P, SHORT, EL and SL, and gave a half
+// day nothing at all. elFyRows counted P, EL and SL, gave a half day 0.5, and
+// ignored SHORT. The Attendance Sheet and the Leave Encashment Report could
+// therefore report different EL for the same person in the same year, which is
+// exactly the drift "one function per domain concept" exists to stop.
+//
+// Sundays and declared holidays count. They are paid days the employee was in
+// service for, so they qualify — with two exceptions that follow from rules
+// already in force rather than being new ones: a day charged as a sandwich day
+// is unpaid by definition and cannot earn leave, and a day outside the
+// employee's own joining and leaving dates is not a day they were employed.
+const EL_QUALIFYING_DAY_VALUE = {
+  P: 1, SHORT: 1, EL: 1, SL: 1,
+  // A Sunday or a declared holiday, resolved the same way every other report
+  // resolves one.
+  H: 1,
+  HEL: 0.5, HSL: 0.5, HLP: 0.5
+  // 'A' and 'LP' are absent from this table on purpose, and so is an unmarked
+  // day: unpaid absence earns nothing.
+};
+
+// Every date from one day to another, built from local parts rather than by
+// parsing a date-only string, which lands on UTC midnight and slips a day in
+// any timezone behind UTC.
+function datesBetween_(fromStr, toStr){
+  const out = [];
+  if(!fromStr || !toStr || fromStr > toStr) return out;
+  const d = new Date(fromStr + 'T00:00:00'), end = new Date(toStr + 'T00:00:00');
+  while(d <= end){
+    out.push(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') +
+             '-' + String(d.getDate()).padStart(2, '0'));
+    d.setDate(d.getDate() + 1);
+  }
+  return out;
+}
+
+// The running total of qualifying present days between two dates. Never counts
+// past today: a future Sunday is not a day anybody has worked yet, and before
+// this counted whole dates rather than only the marked ones, nothing needed to
+// say so.
+function qualifyingPresentDays(emp, att, fromStr, toStr, holidayMap){
+  const today = todayStr();
+  const end = (toStr && toStr < today) ? toStr : today;
+  const dates = datesBetween_(fromStr, end)
+    .filter(d => employedDuringPeriod_(emp || {}, d, d));
+  let total = 0;
+  dates.forEach(d => {
+    total += EL_QUALIFYING_DAY_VALUE[resolvedAttendanceCode_(att, d, holidayMap)] || 0;
+  });
+  // A sandwiched Sunday or holiday is charged as an unpaid day by
+  // sandwichDaysFor, and the table above has already counted it as one. Taking
+  // it off here keeps the two consistent: what payroll does not pay for does
+  // not earn leave either.
+  total -= sandwichDaysFor(emp || {}, att, dates, holidayMap).length;
+  return Math.max(0, total);
+}
+
+// Days to leave. Kept separate from the counting so the divisor is read from
+// config in one place and cannot drift from the encashment day divisor beside
+// it in LEAVE_POLICY.
+function elEarnedFrom(qualifyingDays, P){
+  P = P || LEAVE_POLICY;
+  const per = P.privilegeLeave.earnedPerAttendanceDays;
+  return per > 0 ? (Number(qualifyingDays) || 0) / per : 0;
+}
+
+// Two decimals, for anything that prints an EL figure. The value itself keeps
+// full precision — only what is shown is shortened, the same rule every money
+// figure in this file follows.
+function elDisplay(v){
+  return Math.round((Number(v) || 0) * 100) / 100;
+}
+
 // ---- leave balances ----
 function leaveBalances(emp, used, P){
   P = P || LEAVE_POLICY;
@@ -2466,7 +2550,9 @@ function leaveBalances(emp, used, P){
     : (emp.employeeType === 'part' ? 'part' : 'full');
   const sickTotal = P.sickLeave.perYear[type];
   const sickLeft = Math.max(0, sickTotal - (used.sick || 0));
-  const plEarned = Math.floor((used.attendanceDays || 0) / P.privilegeLeave.earnedPerAttendanceDays);
+  // Not floored, and `attendanceDays` is the running total for the financial
+  // year to date rather than this month's count — see qualifyingPresentDays.
+  const plEarned = elEarnedFrom(used.attendanceDays, P);
   const plUsable = P.privilegeLeave.usableInFirstYear || !emp.isFirstFinancialYear;
   return {
     sickTotal, sickLeft, sickExhausted: sickLeft === 0,
@@ -2560,7 +2646,7 @@ function policyRowsFor(employees, attByEmp, dateList, holidayMap){
       if(c === 'EL' || c === 'HEL') plUsed += (c === 'HEL' ? 0.5 : 1);
       if(c === 'LP' || c === 'HLP') lwp += (c === 'HLP' ? 0.5 : 1);
       if(c === 'HEL' || c === 'HSL' || c === 'HLP') halfDays++;
-      if(c === 'P' || c === 'SHORT' || c === 'EL' || c === 'SL') attendanceDays++;
+
       if(e.lateFlag) lateCount++;
       // Judge the day itself whenever both punches exist, so early leaving and
       // overtime are counted rather than merely storable.
@@ -2572,6 +2658,20 @@ function policyRowsFor(employees, attByEmp, dateList, holidayMap){
       }
     });
     const type = emp.employeeType === 'part' ? 'part' : 'full';
+    // EL is earned on a running total for the financial year, not on this
+    // month alone — so this counts from the start of the financial year the
+    // reported month falls in, up to the end of that month. Everything else on
+    // this row (late coming, short leaves, sick used, LWP) stays exactly what
+    // it was: the month's own figures.
+    //
+    // `att` is the employee's whole attendance, not a month's slice — every
+    // caller passes what getAttendance returned — so the year to date is
+    // already here to be counted. Running to the end of the reported month
+    // rather than to today is what makes a past month's Attendance Sheet read
+    // the same next year as it did when it was issued; qualifyingPresentDays
+    // stops at today on its own for a month still in progress.
+    attendanceDays = qualifyingPresentDays(emp, att, financialYearStart(dateList[0]),
+                                           dateList[dateList.length - 1], holidayMap);
     const bal = leaveBalances({ employeeType: type, isFirstFinancialYear: !!emp.isFirstFinancialYear },
                               { sick: sickUsed, pl: plUsed, plThisMonth: plUsed, attendanceDays });
     const L = P.lateComing, S = P.shortLeave;
@@ -2644,7 +2744,7 @@ function attendanceSheetCsv(employees, attByEmpId, dateList, holidayMap){
       r.emp.employeeType === 'part' ? 'Part-time' : 'Full-time',
       r.lateCount, r.shortLeaves, r.halfDays,
       r.sickUsed, r.bal.sickLeft,
-      r.bal.plEarned, r.plUsed, r.bal.plLeft,
+      elDisplay(r.bal.plEarned), r.plUsed, elDisplay(r.bal.plLeft),
       r.lwp, r.sandwichDays || 0, r.attendanceDays, r.otMinutes || 0, r.earlyDays || 0,
       LEAVE_POLICY.version,
       r.warn.length ? r.warn.join('; ') : 'Within policy'
