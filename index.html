@@ -10127,7 +10127,8 @@ async function renderConsultantSummaryReport(){
 
   const alwCard = hrCard('<strong>Allowance &amp; Deduction Summary</strong>',
     hrRow('Basic', money(alw.basic)) + hrRow('HRA', money(alw.hra)) +
-    hrRow('Conveyance', money(alw.conveyance)) + hrRow('LTA', money(alw.lta)) +
+    hrRow('Conveyance', money(alw.conveyance) + ' <span style="color:var(--muted);font-size:11px;white-space:nowrap;" title="Conveyance is reimbursed outside the wage register and carries no PF, ESI or PT, so it is not part of the wage the consultant files on. It is still paid in full and still shown on the Salary Sheet, the accountant\'s payable sheet and the payslip.">(outside the register)</span>') +
+    hrRow('LTA', money(alw.lta)) +
     hrRow('Total', money(alwTotal)) +
     hrRow('P.F.', money(ded.pf)) +
     hrRow('P.T.', money(ded.pt) + ' <span style="color:var(--muted);font-size:11px;white-space:nowrap;" title="Basic/HRA/LTA above and the other deductions below are R.S. Infotech\'s own three headings only — P.T. also includes R.S.IT Solution, which has Professional Tax but no PF/ESI, so Net below is not a clean per-person figure for R.S.IT Solution employees.">(incl. R.S.IT Solution)</span>') +
@@ -10166,6 +10167,7 @@ async function renderConsultantSummaryReport(){
       the same population and the same column order as the register the consultant returns, so the two can be compared row by row.
       Every figure is this software's own; nothing here is recalculated for the register.
       <em>Per.All</em> and <em>Extra All2</em> are his heads and are always ₹0 here; <em>Retention</em> is ours and has no head on his form.
+      <strong>Conveyance is nil throughout on purpose</strong> — it is reimbursed outside the wage register and carries no PF, ESI or PT, so it is not part of the wage the consultant files on. It is still paid in full, and still shown, on the Salary Sheet, the accountant's payable sheet and the payslip.
     </p>
     <table class="sal-table" style="min-width:2400px;font-size:11px;">
       <thead><tr>${regHead}</tr></thead><tbody>${regBody}${regTotal}</tbody>
