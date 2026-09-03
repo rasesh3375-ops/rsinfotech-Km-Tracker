@@ -671,6 +671,62 @@ function doUploadOfficeDoc_(body) {
   };
 }
 
+// Renames the Drive folder a document folder is stored in, so Drive keeps
+// matching what the app shows. The app itself does NOT need this to work — it
+// keys every record on a folder id that never changes, precisely so a rename
+// cannot orphan anything — which is why a folder nobody has filed into yet,
+// and therefore has no Drive folder, is a success rather than an error.
+function doRenameOfficeFolder_(body) {
+  try {
+    const parent = getOrCreateFolderPath_(['HR Management', 'Office Old Documents']);
+    const it = parent.getFoldersByName(String(body.oldName || ''));
+    if (!it.hasNext()) return { ok: true, note: 'no Drive folder yet' };
+    // A folder already carrying the new name would leave two folders HR cannot
+    // tell apart, and moving files between them is not something to do as a
+    // side effect of a rename.
+    if (parent.getFoldersByName(String(body.newName || '')).hasNext()) {
+      return { ok: false, error: 'A Google Drive folder called "' + body.newName + '" already exists.' };
+    }
+    it.next().setName(String(body.newName || ''));
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+// Renames one file, keeping the same collision rule the upload uses: a name
+// already taken in that folder gets " (2)" rather than two files HR cannot
+// tell apart. The final name is returned because it may not be the one asked
+// for, and the app has to record what Drive actually holds.
+function doRenameOfficeDoc_(body) {
+  try {
+    const file = DriveApp.getFileById(body.fileId);
+    let name = String(body.newName || '').trim();
+    if (!name) return { ok: false, error: 'A file name cannot be empty.' };
+    const parents = file.getParents();
+    if (parents.hasNext()) {
+      const folder = parents.next();
+      const taken = function (n) {
+        const it = folder.getFilesByName(n);
+        while (it.hasNext()) { if (it.next().getId() !== file.getId()) return true; }
+        return false;
+      };
+      if (taken(name)) {
+        const dot = name.lastIndexOf('.');
+        const stem = dot > 0 ? name.slice(0, dot) : name;
+        const ext = dot > 0 ? name.slice(dot) : '';
+        let n = 2;
+        while (taken(stem + ' (' + n + ')' + ext) && n < 500) n++;
+        name = stem + ' (' + n + ')' + ext;
+      }
+    }
+    file.setName(name);
+    return { ok: true, fileName: name, renamed: name !== String(body.newName || '').trim() };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 // Trashed rather than hard-deleted, so a document removed from the archive by
 // mistake is still recoverable from Drive's bin for thirty days. The app drops
 // its own record either way — a row pointing at a trashed file would show a
@@ -1574,6 +1630,16 @@ function doPost(e) {
   if (body.action === 'deleteOfficeDoc') {
     if (isEngineer) return forbidden_();
     return jsonOut_(doDeleteOfficeDoc_(body));
+  }
+
+  if (body.action === 'renameOfficeFolder') {
+    if (isEngineer) return forbidden_();
+    return jsonOut_(doRenameOfficeFolder_(body));
+  }
+
+  if (body.action === 'renameOfficeDoc') {
+    if (isEngineer) return forbidden_();
+    return jsonOut_(doRenameOfficeDoc_(body));
   }
 
   if (body.action === 'getDriveFile') {

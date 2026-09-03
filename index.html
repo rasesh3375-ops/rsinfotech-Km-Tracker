@@ -1608,6 +1608,11 @@
   .payroll-docs-search-filters .field{margin:0 0 3px;}
 
 /* ---- Office Old Documents ---- */
+.od-folder-row{display:flex;align-items:center;gap:2px;}
+.od-folder-row .od-folder-head{flex:1;min-width:0;}
+.od-icon-btn{border:0;background:none;cursor:pointer;padding:6px 5px;border-radius:6px;
+  font-size:13px;line-height:1;color:var(--muted);opacity:.55;}
+.od-icon-btn:hover{opacity:1;background:var(--sunk);color:var(--navy);}
 .od-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;}
 .od-stat{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--card);}
 .od-stat-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
@@ -21983,8 +21988,39 @@ const OFFICE_DOC_FOLDERS_DEFAULT = ['Purchase Documents', 'Employee Documents',
 // many parts a folder-year actually has, so nothing has to guess or probe.
 const OFFICE_DOCS_PER_PART = 120;
 
-function officeDocSlug_(folder){
-  return String(folder || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'folder';
+// A folder's storage id, made once when the folder is created and never
+// changed again. The DISPLAY NAME is separate and free to change.
+//
+// Folders were first stored as bare names, with this slug derived from the name
+// every time it was needed. That works right up until somebody renames a
+// folder — at which point every office_docs:<slug>:<year>:<part> key belonging
+// to it is addressed by a slug nothing computes any more, and an archive of
+// documents silently reads as empty. Splitting the id from the name means a
+// rename touches one label and nothing else: no keys move, no migration, and
+// no way to lose a document by correcting a typo.
+function officeDocSlug_(name){
+  return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'folder';
+}
+// Old shape (an array of names) reads as the new one, with each name's own slug
+// standing in as its id — which is exactly the id those documents were already
+// filed under, so nothing has to move.
+function officeDocFoldersFrom_(raw){
+  let list = [];
+  try{ list = raw ? JSON.parse(raw) : []; }catch(e){ list = []; }
+  if(!Array.isArray(list) || !list.length) list = OFFICE_DOC_FOLDERS_DEFAULT.slice();
+  return list.map(f => (f && typeof f === 'object')
+    ? { id: f.id || officeDocSlug_(f.name), name: f.name || f.id }
+    : { id: officeDocSlug_(f), name: String(f) });
+}
+// A new folder's id has to be unique among the folders that already exist,
+// including any whose name once produced the same slug.
+function officeDocNewId_(name, folders){
+  const base = officeDocSlug_(name);
+  const taken = new Set((folders || []).map(f => f.id));
+  if(!taken.has(base)) return base;
+  let n = 2;
+  while(taken.has(base + '-' + n)) n++;
+  return base + '-' + n;
 }
 function officeDocsYears_(){
   const out = [];
@@ -22002,11 +22038,11 @@ function officeDocDriveUrl_(fileId){
 }
 
 async function loadOfficeDocFolders_(){
-  const raw = await safeGet(OFFICE_DOC_FOLDERS_KEY, true);
-  let list = [];
-  try{ list = raw ? JSON.parse(raw) : []; }catch(e){ list = []; }
-  if(!Array.isArray(list) || !list.length) list = OFFICE_DOC_FOLDERS_DEFAULT.slice();
-  return list;
+  return officeDocFoldersFrom_(await safeGet(OFFICE_DOC_FOLDERS_KEY, true));
+}
+async function saveOfficeDocFolders_(folders){
+  const ok = await remoteSet(OFFICE_DOC_FOLDERS_KEY, JSON.stringify(folders));
+  if(!ok) throw new Error(lastBackendError || 'the server did not respond');
 }
 // The whole archive's shape in one small key: for each folder, for each year,
 // how many documents, how many bytes, and how many parts the records are split
@@ -22026,18 +22062,18 @@ async function saveOfficeDocIndex_(idx){
 // Every record in one folder-year, read across however many parts it has.
 // Stored short — n/f/m/s/u/b — and widened here, so the rest of the app deals
 // in readable names and only the wire format is terse.
-function officeDocWiden_(r, folder, year){
+function officeDocWiden_(r, folderId, year, folderName){
   return {
     name: r.n || '', fileId: r.f || '', mimeType: r.m || '',
     size: Number(r.s) || 0, uploadedAt: Number(r.u) || 0, uploadedBy: r.b || '',
-    folder: folder, year: String(year)
+    folderId: folderId, folder: folderName || folderId, year: String(year)
   };
 }
 function officeDocNarrow_(d){
   return { n: d.name, f: d.fileId, m: d.mimeType, s: d.size, u: d.uploadedAt, b: d.uploadedBy };
 }
-async function loadOfficeDocs_(folder, year, idx){
-  const slug = officeDocSlug_(folder);
+async function loadOfficeDocs_(folderId, year, idx, folderName){
+  const slug = folderId;
   const index = idx || await loadOfficeDocIndex_();
   const parts = ((index[slug] || {}).years || {})[String(year)];
   const count = parts ? (Number(parts.p) || 1) : 0;
@@ -22049,7 +22085,8 @@ async function loadOfficeDocs_(folder, year, idx){
   keys.forEach(k => {
     let v = null;
     try{ v = raws[k] ? JSON.parse(raws[k]) : null; }catch(e){ v = null; }
-    ((v && v.records) || []).forEach(r => out.push(officeDocWiden_(r, folder, year)));
+    ((v && v.records) || []).forEach(r => out.push(officeDocWiden_(r, folderId, year,
+      folderName || ((index[slug] || {}).name || slug))));
   });
   return out;
 }
@@ -22075,12 +22112,12 @@ async function officeDocsReadKeys_(keys){
 // before the index is deliberate: an index that promises a part which does not
 // exist reads as an empty folder, where a part the index has not caught up
 // with is merely invisible until the next upload fixes the count.
-async function appendOfficeDocs_(folder, year, docs){
+async function appendOfficeDocs_(folderId, folderName, year, docs){
   if(!docs.length) return;
-  const slug = officeDocSlug_(folder);
+  const slug = folderId;
   const idx = await loadOfficeDocIndex_();
-  idx[slug] = idx[slug] || { name: folder, years: {} };
-  idx[slug].name = folder;
+  idx[slug] = idx[slug] || { name: folderName, years: {} };
+  idx[slug].name = folderName;
   idx[slug].years = idx[slug].years || {};
   const y = idx[slug].years[String(year)] || { n: 0, b: 0, p: 0 };
 
@@ -22117,10 +22154,10 @@ async function appendOfficeDocs_(folder, year, docs){
 
 // Rewrites the folder-year's parts without one document. Compacted as it goes,
 // so deleting steadily does not leave a trail of half-empty shards behind.
-async function removeOfficeDoc_(folder, year, fileId){
-  const slug = officeDocSlug_(folder);
+async function removeOfficeDoc_(folderId, year, fileId){
+  const slug = folderId;
   const idx = await loadOfficeDocIndex_();
-  const all = await loadOfficeDocs_(folder, year, idx);
+  const all = await loadOfficeDocs_(folderId, year, idx);
   const keep = all.filter(d => d.fileId !== fileId);
   if(keep.length === all.length) return false;
 
@@ -22141,7 +22178,7 @@ async function removeOfficeDoc_(folder, year, fileId){
   const saved = await remoteSetMany(entries);
   if(!saved) throw new Error(lastBackendError || 'the server did not respond');
 
-  idx[slug] = idx[slug] || { name: folder, years: {} };
+  idx[slug] = idx[slug] || { name: slug, years: {} };
   idx[slug].years[String(year)] = {
     n: keep.length,
     b: keep.reduce((t, d) => t + (Number(d.size) || 0), 0),
@@ -22176,7 +22213,9 @@ function officeDocKind_(name, mime){
 // The screen itself. One folder-year is open at a time, which is what keeps
 // this readable on a phone as well as bounded on the wire: browsing never
 // fetches more than one folder-year's parts, however big the archive gets.
-let officeDocsState_ = { folder: null, year: null, query: '', results: null, busy: false };
+// The folder is held as its ID, never its name — so a rename changes what is
+// on screen and nothing about what is being looked at.
+let officeDocsState_ = { folderId: null, year: null, query: '', results: null, busy: false };
 
 async function renderOfficeDocsModule_(){
   const box = document.getElementById('officeDocsBox');
@@ -22191,8 +22230,11 @@ async function renderOfficeDocsModule_(){
       escapeHtml((err && err.message) || 'the server did not respond') + '</div>';
     return;
   }
-  if(!officeDocsState_.folder) officeDocsState_.folder = folders[0] || null;
+  if(!officeDocsState_.folderId || !folders.some(f => f.id === officeDocsState_.folderId)){
+    officeDocsState_.folderId = (folders[0] || {}).id || null;
+  }
   if(!officeDocsState_.year) officeDocsState_.year = officeDocsYears_()[0];
+  const current = folders.find(f => f.id === officeDocsState_.folderId) || null;
 
   // The four figures across the top come from the index alone — no folder is
   // read to draw them, so this stays instant however many documents there are.
@@ -22208,24 +22250,31 @@ async function renderOfficeDocsModule_(){
   });
 
   const years = officeDocsYears_();
-  const countFor = (folder, year) => {
-    const v = (((idx[officeDocSlug_(folder)] || {}).years) || {})[String(year)];
+  const countFor = (folderId, year) => {
+    const v = (((idx[folderId] || {}).years) || {})[String(year)];
     return Number((v || {}).n) || 0;
   };
 
   const tree = folders.map(f => {
-    const open = f === officeDocsState_.folder;
-    const total = years.reduce((t, y) => t + countFor(f, y), 0);
+    const open = f.id === officeDocsState_.folderId;
+    const total = years.reduce((t, y) => t + countFor(f.id, y), 0);
+    const q = v => JSON.stringify(v).replace(/"/g, '&quot;');
     return `<div class="od-folder">
-      <button type="button" class="od-folder-head${open ? ' open' : ''}" onclick="officeDocsPick_(${JSON.stringify(f).replace(/"/g, '&quot;')}, null)">
-        <span class="od-caret">${open ? '▾' : '▸'}</span>
-        <span class="od-folder-name">${escapeHtml(f)}</span>
-        <span class="od-folder-count">${total}</span>
-      </button>
+      <div class="od-folder-row">
+        <button type="button" class="od-folder-head${open ? ' open' : ''}" onclick="officeDocsPick_(${q(f.id)}, null)">
+          <span class="od-caret">${open ? '▾' : '▸'}</span>
+          <span class="od-folder-name">${escapeHtml(f.name)}</span>
+          <span class="od-folder-count">${total}</span>
+        </button>
+        <button type="button" class="od-icon-btn" title="Rename this folder"
+                onclick="officeDocsRenameFolder_(${q(f.id)})">✎</button>
+        <button type="button" class="od-icon-btn" title="Delete this folder"
+                onclick="officeDocsDeleteFolder_(${q(f.id)})">🗑</button>
+      </div>
       ${open ? `<div class="od-years">${years.map(y => `
         <button type="button" class="od-year${String(y) === String(officeDocsState_.year) ? ' active' : ''}"
-                onclick="officeDocsPick_(${JSON.stringify(f).replace(/"/g, '&quot;')}, '${y}')">
-          <span>${y}</span><span class="od-folder-count">${countFor(f, y)}</span>
+                onclick="officeDocsPick_(${q(f.id)}, '${y}')">
+          <span>${y}</span><span class="od-folder-count">${countFor(f.id, y)}</span>
         </button>`).join('')}</div>` : ''}
     </div>`;
   }).join('');
@@ -22256,7 +22305,7 @@ async function renderOfficeDocsModule_(){
           Files are stored on Google Drive under <strong>HR Management &gt; Office Old Documents</strong>,
           and managed entirely from here. You never need to open Drive to file or find one.</p>
       </div>
-      <div class="od-main" id="odMain">${await officeDocsMainHtml_(idx)}</div>
+      <div class="od-main" id="odMain">${await officeDocsMainHtml_(idx, current)}</div>
     </div>`;
 }
 
@@ -22268,20 +22317,20 @@ function odStat_(label, value, sub){
   </div>`;
 }
 
-async function officeDocsMainHtml_(idx){
+async function officeDocsMainHtml_(idx, folder){
   const st = officeDocsState_;
   if(st.results){
     return odTableHtml_('Search results', st.results,
       st.results.length + ' document(s) matching “' + escapeHtml(st.query) + '”', true);
   }
-  if(!st.folder) return '<div class="empty">Add a folder to begin.</div>';
+  if(!folder) return '<div class="empty">Add a folder to begin.</div>';
   let docs = [];
-  try{ docs = await loadOfficeDocs_(st.folder, st.year, idx); }
+  try{ docs = await loadOfficeDocs_(folder.id, st.year, idx, folder.name); }
   catch(err){ return '<div class="empty error">Could not load this folder: ' +
     escapeHtml((err && err.message) || 'the server did not respond') + '</div>'; }
   docs.sort((a, b) => b.uploadedAt - a.uploadedAt);
   const bytes = docs.reduce((t, d) => t + d.size, 0);
-  return odTableHtml_(escapeHtml(st.folder) + ' <span style="color:var(--muted);font-weight:400;">›</span> ' + st.year,
+  return odTableHtml_(escapeHtml(folder.name) + ' <span style="color:var(--muted);font-weight:400;">›</span> ' + st.year,
     docs, docs.length + ' document(s) · ' + officeDocSize_(bytes), false);
 }
 
@@ -22296,7 +22345,8 @@ function odTableHtml_(title, docs, sub, showWhere){
     <td class="od-actions">
       <button class="btn tiny" title="View in the app" onclick="officeDocView_('${d.fileId}', ${JSON.stringify(d.name).replace(/"/g, '&quot;')})">View</button>
       <button class="btn tiny ghost" title="Open the original in Google Drive" onclick="window.open('${officeDocDriveUrl_(d.fileId)}','_blank','noopener')">Drive</button>
-      <button class="btn tiny ghost" title="Remove from the archive" onclick="officeDocDelete_(${JSON.stringify(d.folder).replace(/"/g, '&quot;')}, '${d.year}', '${d.fileId}', ${JSON.stringify(d.name).replace(/"/g, '&quot;')})">Delete</button>
+      <button class="btn tiny ghost" title="Rename this file" onclick="officeDocRename_(${JSON.stringify(d.folderId).replace(/"/g, '&quot;')}, '${d.year}', '${d.fileId}', ${JSON.stringify(d.name).replace(/"/g, '&quot;')})">Rename</button>
+      <button class="btn tiny ghost" title="Remove from the archive" onclick="officeDocDelete_(${JSON.stringify(d.folderId).replace(/"/g, '&quot;')}, '${d.year}', '${d.fileId}', ${JSON.stringify(d.name).replace(/"/g, '&quot;')})">Delete</button>
     </td>
   </tr>`).join('');
   return `
@@ -22320,8 +22370,8 @@ function odTableHtml_(title, docs, sub, showWhere){
     </table></div>` : `<div class="empty">${showWhere ? 'Nothing matched that search.' : 'No documents filed here yet — use Upload documents to add some.'}</div>`}`;
 }
 
-async function officeDocsPick_(folder, year){
-  officeDocsState_.folder = folder;
+async function officeDocsPick_(folderId, year){
+  officeDocsState_.folderId = folderId;
   if(year) officeDocsState_.year = year;
   officeDocsState_.results = null;
   await renderOfficeDocsModule_();
@@ -22350,7 +22400,7 @@ async function officeDocsSearch_(){
       const parts = Number((years[y] || {}).p) || 0;
       for(let p = 0; p < parts; p++){
         const k = officeDocPartKey_(slug, y, p);
-        keys.push(k); where[k] = { folder: folder, year: y };
+        keys.push(k); where[k] = { id: slug, folder: folder, year: y };
       }
     });
   });
@@ -22360,7 +22410,7 @@ async function officeDocsSearch_(){
     let v = null;
     try{ v = raws[k] ? JSON.parse(raws[k]) : null; }catch(e){ v = null; }
     ((v && v.records) || []).forEach(r => {
-      const d = officeDocWiden_(r, where[k].folder, where[k].year);
+      const d = officeDocWiden_(r, where[k].id, where[k].year, where[k].folder);
       const hay = (d.name + ' ' + d.folder + ' ' + d.year + ' ' +
                    officeDocKind_(d.name, d.mimeType) + ' ' +
                    (d.uploadedAt ? fmtDateIN(new Date(d.uploadedAt).toISOString().slice(0, 10)) : '')).toLowerCase();
@@ -22376,16 +22426,125 @@ async function officeDocsAddFolder_(){
   const name = (prompt('Name the new document folder — for example "IT & Server Documents".') || '').trim();
   if(!name) return;
   const folders = await loadOfficeDocFolders_();
-  if(folders.some(f => f.toLowerCase() === name.toLowerCase())){
+  if(folders.some(f => f.name.toLowerCase() === name.toLowerCase())){
     alert('There is already a folder called ' + name + '.');
     return;
   }
-  folders.push(name);
-  const ok = await remoteSet(OFFICE_DOC_FOLDERS_KEY, JSON.stringify(folders));
-  if(!ok){ alert('Could not add the folder: ' + (lastBackendError || 'the server did not respond')); return; }
+  const id = officeDocNewId_(name, folders);
+  folders.push({ id: id, name: name });
+  try{ await saveOfficeDocFolders_(folders); }
+  catch(err){ alert('Could not add the folder: ' + ((err && err.message) || 'the server did not respond')); return; }
   await addActivityLog('Added the Office Old Documents folder "' + name + '"');
-  officeDocsState_.folder = name;
+  officeDocsState_.folderId = id;
   officeDocsState_.results = null;
+  await renderOfficeDocsModule_();
+}
+
+// Renaming changes the label and the Drive folder, and NOTHING else. Every
+// record is filed under the folder's id, which does not move, so a folder full
+// of documents survives being renamed with no migration and no risk of the
+// archive reading as empty afterwards.
+async function officeDocsRenameFolder_(folderId){
+  const folders = await loadOfficeDocFolders_();
+  const folder = folders.find(f => f.id === folderId);
+  if(!folder) return;
+  const name = (prompt('Rename this document folder.', folder.name) || '').trim();
+  if(!name || name === folder.name) return;
+  if(folders.some(f => f.id !== folderId && f.name.toLowerCase() === name.toLowerCase())){
+    alert('There is already a folder called ' + name + '.');
+    return;
+  }
+  // Drive first: if it refuses — a folder of that name already sitting there —
+  // nothing has changed yet and the app and Drive stay in step.
+  let res = null;
+  try{ res = await backendAction({ action: 'renameOfficeFolder', oldName: folder.name, newName: name }); }
+  catch(err){ res = null; }
+  if(!res || !res.ok){
+    alert('Could not rename the Google Drive folder: ' +
+      ((res && res.error) || lastBackendError || 'the server did not respond') +
+      '\n\nNothing was changed.');
+    return;
+  }
+  const was = folder.name;
+  folder.name = name;
+  try{ await saveOfficeDocFolders_(folders); }
+  catch(err){ alert('Drive was renamed but the app could not save the new name: ' +
+    ((err && err.message) || 'the server did not respond') + '\n\nReload and try again.'); return; }
+  // The index carries the display name too, for the search results' Where
+  // column — left behind, it would keep printing the old one.
+  try{
+    const idx = await loadOfficeDocIndex_();
+    if(idx[folderId]){ idx[folderId].name = name; await saveOfficeDocIndex_(idx); }
+  }catch(err){}
+  await addActivityLog('Renamed the Office Old Documents folder "' + was + '" to "' + name + '"');
+  await renderOfficeDocsModule_();
+}
+
+// Only an empty folder can go. Deleting one with documents in it would either
+// orphan them in Drive or destroy them, and neither is something to offer
+// behind a single confirm on an archive.
+async function officeDocsDeleteFolder_(folderId){
+  const folders = await loadOfficeDocFolders_();
+  const folder = folders.find(f => f.id === folderId);
+  if(!folder) return;
+  const idx = await loadOfficeDocIndex_();
+  const years = ((idx[folderId] || {}).years) || {};
+  const held = Object.keys(years).reduce((t, y) => t + (Number((years[y] || {}).n) || 0), 0);
+  if(held){
+    alert('“' + folder.name + '” still holds ' + held + ' document(s).\n\n' +
+      'Remove them first, or rename the folder instead. Deleting a folder that still has ' +
+      'documents in it would leave them stranded in Google Drive.');
+    return;
+  }
+  if(!confirm('Delete the empty folder “' + folder.name + '”?')) return;
+  const left = folders.filter(f => f.id !== folderId);
+  try{ await saveOfficeDocFolders_(left); }
+  catch(err){ alert('Could not delete the folder: ' + ((err && err.message) || 'the server did not respond')); return; }
+  await addActivityLog('Deleted the empty Office Old Documents folder "' + folder.name + '"');
+  officeDocsState_.folderId = null;
+  await renderOfficeDocsModule_();
+}
+
+// Renames one filed document. Drive decides the final name — it applies the
+// same "keep both" rule the upload does — so the record is written from what
+// came back rather than from what was typed.
+async function officeDocRename_(folderId, year, fileId, currentName){
+  const name = (prompt('Rename this document.', currentName) || '').trim();
+  if(!name || name === currentName) return;
+  let res = null;
+  try{ res = await backendAction({ action: 'renameOfficeDoc', fileId: fileId, newName: name }); }
+  catch(err){ res = null; }
+  if(!res || !res.ok){
+    alert('Could not rename it: ' + ((res && res.error) || lastBackendError || 'the server did not respond'));
+    return;
+  }
+  const finalName = res.fileName || name;
+  try{
+    const idx = await loadOfficeDocIndex_();
+    const slug = folderId;
+    const parts = Number((((idx[slug] || {}).years || {})[String(year)] || {}).p) || 0;
+    for(let p = 0; p < parts; p++){
+      const key = officeDocPartKey_(slug, year, p);
+      const raw = (await officeDocsReadKeys_([key]))[key];
+      let v = null;
+      try{ v = raw ? JSON.parse(raw) : null; }catch(e){ v = null; }
+      const recs = (v && v.records) || [];
+      const hit = recs.find(r => r.f === fileId);
+      if(!hit) continue;
+      hit.n = finalName;
+      const ok = await remoteSet(key, JSON.stringify({ savedAt: Date.now(), records: recs }));
+      if(!ok) throw new Error(lastBackendError || 'the server did not respond');
+      break;
+    }
+  }catch(err){
+    alert('Drive was renamed but the app\'s own record was not updated: ' +
+      ((err && err.message) || 'the server did not respond') + '\n\nReload the page.');
+  }
+  if(res.renamed && finalName !== name){
+    alert('A file called “' + name + '” was already in this folder, so it was saved as “' +
+      finalName + '” instead — nothing was overwritten.');
+  }
+  await addActivityLog('Renamed "' + currentName + '" to "' + finalName + '" in Office Old Documents');
   await renderOfficeDocsModule_();
 }
 
@@ -22403,7 +22562,10 @@ async function officeDocsUpload_(){
   if(officeDocsState_.busy){ say('An upload is already running.', true); return; }
   officeDocsState_.busy = true;
 
-  const folderPath = ['HR Management', 'Office Old Documents', st.folder, String(st.year)];
+  const folders = await loadOfficeDocFolders_();
+  const folder = folders.find(f => f.id === st.folderId);
+  if(!folder){ say('That folder no longer exists — reload the page.', true); officeDocsState_.busy = false; return; }
+  const folderPath = ['HR Management', 'Office Old Documents', folder.name, String(st.year)];
   const done = [], failed = [], renamed = [];
   for(let i = 0; i < files.length; i++){
     const f = files[i];
@@ -22429,9 +22591,9 @@ async function officeDocsUpload_(){
 
   if(done.length){
     try{
-      await appendOfficeDocs_(st.folder, st.year, done);
+      await appendOfficeDocs_(folder.id, folder.name, st.year, done);
       await addActivityLog('Filed ' + done.length + ' document(s) under Office Old Documents › ' +
-        st.folder + ' › ' + st.year);
+        folder.name + ' › ' + st.year);
     }catch(err){
       officeDocsState_.busy = false;
       // The files ARE in Drive at this point; only the app's own record of them
@@ -22472,13 +22634,13 @@ async function officeDocView_(fileId, name){
   }
 }
 
-async function officeDocDelete_(folder, year, fileId, name){
-  if(!confirm('Remove "' + name + '" from ' + folder + ' › ' + year + '?\n\n' +
+async function officeDocDelete_(folderId, year, fileId, name){
+  if(!confirm('Remove "' + name + '" from this folder?\n\n' +
     'The file is moved to Google Drive\'s bin, where it can still be recovered for 30 days.')) return;
   try{
     await backendAction({ action: 'deleteOfficeDoc', fileId: fileId });
-    await removeOfficeDoc_(folder, year, fileId);
-    await addActivityLog('Removed "' + name + '" from Office Old Documents › ' + folder + ' › ' + year);
+    await removeOfficeDoc_(folderId, year, fileId);
+    await addActivityLog('Removed "' + name + '" from Office Old Documents › ' + folderId + ' › ' + year);
   }catch(err){
     alert('Could not remove it: ' + ((err && err.message) || 'the server did not respond'));
   }
