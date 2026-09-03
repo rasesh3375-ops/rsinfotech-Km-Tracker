@@ -316,11 +316,25 @@ function clearLoginFailure_(username) {
 // Script that would be ten seconds or more and could hit the execution limit.
 // A login that times out is a worse outcome than the weakness this fixes.
 //
-// 5,000 rounds should land comfortably inside a second there while multiplying
-// an attacker's work by 5,000.
+// Measured, not guessed. benchmarkPasswordHashing on the live project reports
+// 0.7773 ms per round — Utilities.computeDigest is nearly all per-call
+// overhead, so an iteration count that would be trivial anywhere else is
+// expensive here. That put the previous 5,000 rounds at 4,823 ms of hashing on
+// every single login, against an 8,000 ms cap (below), leaving about three
+// seconds for the network. Fine on office wifi, which is why a real login felt
+// normal; a coin flip on a phone on mobile data, where losing the toss means
+// an aborted login into payroll with nothing on screen to explain it.
 //
-// Two corrections to what this comment used to claim, both of which matter
-// before anyone raises the number:
+// So this went DOWN, not up: 1,000 rounds is 811 ms, leaving roughly seven
+// seconds of the cap for the trip. The honest trade is 5x less attacker work
+// than the setting it replaces. It is worth taking — the file's own older note
+// had it right, that a login which times out is worse than the weakness this
+// fixes — but it should be read for what it is: modest hardening on a salted
+// hash that already sits in a private sheet behind a gated backend, not a
+// strong key-derivation function. Apps Script cannot offer one of those at a
+// price a login can pay.
+//
+// Two things that matter before this number is moved again:
 //
 //   - The limit that bites is NOT Apps Script's execution limit. A login goes
 //     through apiFetch, which aborts each attempt at BACKEND_ATTEMPT_MS (8s)
@@ -329,17 +343,18 @@ function clearLoginFailure_(username) {
 //     budget is spent without a single login ever completing. Keep hashing
 //     near a second, not near thirty.
 //
-//   - Raising this number does NOT re-hash anyone by itself. The upgrade at
-//     login fires on isLegacyPasswordHash_, which is only true for rows with
-//     no "v2$" prefix at all; a row already written as v2$5000$... keeps
-//     verifying at its own recorded 5,000 forever. Moving existing accounts up
-//     needs the upgrade to also fire when the stored rounds are below this
-//     constant. Until that is added, changing this only affects passwords set
-//     from then on.
+//   - Changing this number DOES now re-hash everyone, one account at a time,
+//     at their next login — see needsPasswordRehash_. That was not true when
+//     the upgrade fired on isLegacyPasswordHash_ alone: a row already written
+//     as v2$5000$... would have kept verifying at its own recorded 5,000
+//     forever, and this change would have improved nothing for anybody who had
+//     already logged in once.
 //
-// benchmarkPasswordHashing() measures the real per-round cost on this project;
-// run it before choosing a number rather than judging a login by feel.
-var PASSWORD_HASH_ROUNDS = 5000;
+// benchmarkPasswordHashing() measures the real per-round cost on this project.
+// Run it before moving this number, and read the verdict column rather than
+// judging a login by feel — a login that felt "fast, normal speed" was in fact
+// spending 4.8 of its 8 available seconds inside this loop.
+var PASSWORD_HASH_ROUNDS = 1000;
 var PASSWORD_HASH_PREFIX = 'v2';
 
 // "v2$<rounds>$<hex>". The scheme is stored beside the hash rather than
@@ -370,6 +385,30 @@ function isLegacyPasswordHash_(stored) {
   return String(stored || '').indexOf(PASSWORD_HASH_PREFIX + '$') !== 0;
 }
 
+// Should this stored hash be rewritten at the next successful login? Two
+// cases: a legacy row carrying no scheme prefix at all, and a v2 row whose
+// recorded rounds are not the number now in force.
+//
+// The second case is the one that makes the work factor actually movable.
+// Storing the rounds beside the hash was meant to let the factor change
+// without a migration, but nothing ever compared them, so every v2 row stayed
+// frozen at whatever it was first written with — the setting could be edited
+// and no existing account would ever feel it.
+//
+// Compared with !== rather than <, because the factor has had to move DOWN as
+// well as up: measurement put 5,000 rounds at 4.8s of an 8s cap. A row left at
+// the old higher count would go on paying exactly the cost this change exists
+// to remove, which is the failure it is meant to prevent.
+//
+// One login pays for the move: the old count to verify, the new count to
+// rewrite. At the numbers involved here that is 4.8s + 0.8s, once, still
+// inside the cap — and every login after it is 0.8s.
+function needsPasswordRehash_(stored) {
+  if (isLegacyPasswordHash_(stored)) return true;
+  var parts = String(stored || '').split('$');
+  return Number(parts[1]) !== PASSWORD_HASH_ROUNDS;
+}
+
 function sha256Hex_(str) {
   const raw = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, str, Utilities.Charset.UTF_8);
   return raw.map(function (b) { return ('0' + (b & 0xFF).toString(16)).slice(-2); }).join('');
@@ -396,7 +435,7 @@ function doLogin_(body) {
     // The password was just proved correct, so this is the one moment the
     // plaintext is available to re-hash with. Wrapped: a failure to upgrade
     // must never stop somebody logging in.
-    if (isLegacyPasswordHash_(rec.hash)) {
+    if (needsPasswordRehash_(rec.hash)) {
       try {
         rec.hash = hashPassword_(rec.salt, password);
         sheet.getRange(row, 2).setValue(JSON.stringify(rec));
@@ -413,7 +452,7 @@ function doLogin_(body) {
     if (!passwordMatches_(user.hash, user.salt, password)) {
       recordLoginFailure_(username); return { error: 'Invalid credentials' };
     }
-    if (isLegacyPasswordHash_(user.hash)) {
+    if (needsPasswordRehash_(user.hash)) {
       try {
         user.hash = hashPassword_(user.salt, password);
         sheet.getRange(row, 2).setValue(JSON.stringify(users));
@@ -1024,9 +1063,10 @@ function benchmarkPasswordHashing() {
   out.push('  would hit the ' + (ATTEMPT_CAP_MS / 1000) + 's cap : ' +
     Math.round(ATTEMPT_CAP_MS / perRound) + ' rounds');
   out.push('');
-  out.push('  Send this log back before the number is changed — raising it also');
-  out.push('  needs the login upgrade to re-hash rows already stored at ' +
-    PASSWORD_HASH_ROUNDS + '.');
+  out.push('  Changing PASSWORD_HASH_ROUNDS re-hashes each account at its own');
+  out.push('  next login (needsPasswordRehash_). The first login after a change');
+  out.push('  pays the old count to verify plus the new one to rewrite, so keep');
+  out.push('  that sum under the ' + (ATTEMPT_CAP_MS / 1000) + 's cap as well.');
 
   var text = out.join('\n');
   Logger.log(text);
