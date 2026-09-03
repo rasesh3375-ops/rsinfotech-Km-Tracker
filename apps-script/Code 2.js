@@ -957,6 +957,66 @@ function migrateEmployeesToPerRecordKeys() {
   return msg;
 }
 
+// Read-only. Answers "where is the roster, then?" when both the per-employee
+// keys and the legacy `employees` row come back empty — which is the one
+// situation neither getAllEmployees nor the migration above can explain by
+// itself, because each of them only ever looks at the place it expects the
+// data to be.
+//
+// Logs key NAMES and value LENGTHS only, never a value: this output is meant
+// to be read off a screen or sent in a message, and the KV sheet holds
+// employee records and a password hash. (Session tokens are not here at all —
+// they live in the separate SESSIONS tab — but the same rule is applied
+// anyway rather than relying on that staying true.) Keys whose name alone
+// looks sensitive are counted, not named.
+//
+// Run it from the Apps Script editor: pick diagnoseEmployeeStorage from the
+// function list and press Run, then open the execution log.
+function diagnoseEmployeeStorage() {
+  var out = [];
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  out.push('Spreadsheet: "' + ss.getName() + '"');
+  out.push('Id: ' + SPREADSHEET_ID);
+  out.push('Tabs: ' + ss.getSheets().map(function (s) {
+    return s.getName() + ' (' + s.getLastRow() + ' rows)';
+  }).join(', '));
+
+  var sheet = ss.getSheetByName(SHEET_NAME);
+  if (!sheet) {
+    out.push('!! There is no "' + SHEET_NAME + '" tab in this spreadsheet.');
+    Logger.log(out.join('\n'));
+    return out.join('\n');
+  }
+
+  var rows = sheet.getDataRange().getValues();
+  var perEmployee = 0, legacyLen = -1, sensitive = 0, groups = {};
+  for (var i = 1; i < rows.length; i++) {
+    var k = String(rows[i][0] == null ? '' : rows[i][0]);
+    if (!k) continue;
+    var len = String(rows[i][1] == null ? '' : rows[i][1]).length;
+    if (k.indexOf('employee:') === 0) { perEmployee++; continue; }
+    if (k === 'employees') { legacyLen = len; continue; }
+    if (/pass|token|secret|hash|cred/i.test(k)) { sensitive++; continue; }
+    // Grouped by prefix so one line covers forty attendance keys.
+    var g = k.indexOf(':') > 0 ? k.slice(0, k.indexOf(':') + 1) + '*' : k;
+    groups[g] = (groups[g] || 0) + 1;
+  }
+
+  out.push(SHEET_NAME + ' holds ' + Math.max(0, rows.length - 1) + ' key(s) in total.');
+  out.push('employee:<id> rows : ' + perEmployee);
+  out.push('legacy `employees`  : ' +
+    (legacyLen < 0 ? 'NOT PRESENT' : legacyLen + ' characters'));
+  var names = [];
+  for (var g2 in groups) names.push(g2 + (groups[g2] > 1 ? ' x' + groups[g2] : ''));
+  names.sort();
+  out.push('other keys: ' + (names.join(', ') || '(none)'));
+  if (sensitive) out.push('(' + sensitive + ' key name(s) withheld as sensitive)');
+
+  var text = out.join('\n');
+  Logger.log(text);
+  return text;
+}
+
 // ===== attendance for a date range =====
 // Attendance is one value per employee, now split into one key per financial
 // year — attendance:<id>:<year> — by migrateAttendanceToFY, with the legacy
