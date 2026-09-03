@@ -2756,6 +2756,27 @@
           <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">SL and EL together, for the financial year you pick — SL resets to the yearly allowance for each employee's type; EL is earned at 1 day per 25 days present (from the Attendance Sheet), unchanged from how the EL Calculation Sheet always worked. Resident Engineers are excluded from both; Work From Home and non-R.S. Infotech headings are excluded from SL only, shown as "—" in the SL columns. Run once, in April.</p>
           <label class="field">Financial year starting April of</label>
           <input class="field-input" type="number" id="leaveBalanceStartYear" placeholder="e.g. 2026 for FY 2026-27">
+          <div style="height:12px"></div>
+          <!-- Month numbers, not dates: the calendar year each one falls in is
+               worked out from whichever financial year is typed above, so this
+               list never needs rebuilding when that changes. April-December
+               belong to the starting year, January-March to the one after. -->
+          <label class="field">Count EL earned up to the end of</label>
+          <select class="field-input" id="leaveBalanceUpToMonth">
+            <option value="">Today — whatever the year has reached so far</option>
+            <option value="4">April</option>
+            <option value="5">May</option>
+            <option value="6">June</option>
+            <option value="7">July</option>
+            <option value="8">August</option>
+            <option value="9">September</option>
+            <option value="10">October</option>
+            <option value="11">November</option>
+            <option value="12">December</option>
+            <option value="1">January</option>
+            <option value="2">February</option>
+            <option value="3">March — the whole financial year</option>
+          </select>
           <div style="height:14px"></div>
           <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building report…',renderLeaveBalanceNextYearReport)">Generate leave balance report</button>
           <div style="height:14px"></div>
@@ -4576,9 +4597,17 @@ async function getAttendanceMany(ids){
 // remainder is worth. Shared by the Leave Balance Next Year Report and the
 // Leave Encashment Report — two reports that disagreed about how many days
 // somebody had pending would be worse than having only one of them.
-async function elFyRows(employees, startYear){
+// upToDate is an optional earlier cut-off INSIDE the same financial year, so
+// the Leave Balance Next Year Report can answer "how much had they earned by
+// the end of July?" without a second copy of this function. It is clamped into
+// the year and defaults to the year end, so the Leave Encashment Report — which
+// passes nothing — behaves exactly as it always has. Both the days counted and
+// the EL taken move with it, or a July cut-off would credit July's earning
+// against the whole year's leave.
+async function elFyRows(employees, startYear, upToDate){
   const fyStart = fyOfStartYear(startYear).from;
   const fyEnd = fyOfStartYear(startYear).to;
+  const upTo = (upToDate && upToDate >= fyStart && upToDate < fyEnd) ? upToDate : fyEnd;
   const rows = [];
   // One request for everyone's attendance before the loop; each read below
   // then comes from the primed cache instead of its own round trip.
@@ -4592,7 +4621,7 @@ async function elFyRows(employees, startYear){
     const att = await getAttendance(emp.id);
     let elUsed = 0;
     Object.keys(att).forEach(dateStr => {
-      if(dateStr < fyStart || dateStr > fyEnd) return;
+      if(dateStr < fyStart || dateStr > upTo) return;
       const code = att[dateStr].code;
       if(code === 'EL') elUsed += 1;
       else if(code === 'HEL') elUsed += 0.5;
@@ -4601,7 +4630,7 @@ async function elFyRows(employees, startYear){
     // This used to count the marked days itself, with a different rule from
     // the one policyRowsFor used, so the same person could have two different
     // EL figures depending on which report was open.
-    const presentDays = qualifyingPresentDays(emp, att, fyStart, fyEnd, holidayMap);
+    const presentDays = qualifyingPresentDays(emp, att, fyStart, upTo, holidayMap);
     const opening = Number(emp.elOpening) || 0;
     // What is earned THIS year is not usable until NEXT year — "earned in
     // year 1, usable from year 2" (LEAVE_POLICY.privilegeLeave.usableInFirstYear)
@@ -18760,6 +18789,25 @@ async function renderLeaveBalanceNextYearReport(){
   const fyStart = fyOfStartYear(startYear).from;
   const fyEnd = fyOfStartYear(startYear).to;
 
+  // "Up to the end of July", say, rather than the whole year — HR asked to be
+  // able to see what has been earned so far without waiting for March. April
+  // to December sit in the starting year, January to March in the next, so the
+  // month alone is enough to place the date once the FY is known. Blank means
+  // today, which is what qualifyingPresentDays does on its own anyway (nothing
+  // is earned for days that have not happened), so no cut-off is passed at all
+  // in that case and the report reads exactly as it did before this option
+  // existed.
+  const upToMonth = parseInt((document.getElementById('leaveBalanceUpToMonth') || {}).value, 10);
+  let upTo = '', upToLabel = '';
+  if(upToMonth >= 1 && upToMonth <= 12){
+    const y = upToMonth >= 4 ? startYear : startYear + 1;
+    // Day 0 of the following month is the last day of this one, leap years
+    // included — no month-length table to get February wrong.
+    const lastDay = new Date(y, upToMonth, 0).getDate();
+    upTo = y + '-' + String(upToMonth).padStart(2, '0') + '-' + String(lastDay).padStart(2, '0');
+    upToLabel = ', to ' + fmtDateIN(upTo);
+  }
+
   // Resident Engineers are excluded from both SL and EL. Work From Home and
   // non-R.S. Infotech headings are excluded from SL only (a different
   // policy) — shown as "—" in the SL columns below rather than dropped from
@@ -18778,7 +18826,7 @@ async function renderLeaveBalanceNextYearReport(){
   // already applies via ratePayAsOf. Reading the flat field here used to
   // apply today's heading to every FY ever reported, past or future.
   const slEligible = e => CONSULTANT_REPORT_HEADINGS.indexOf(ratePayAsOf(e, fyEnd).salaryHeading || 'managerial') !== -1 && e.employeeType !== 'wfh';
-  const elRows = await elFyRows(employees, startYear);
+  const elRows = await elFyRows(employees, startYear, upTo);
   const rows = elRows.map(r => {
     const eligible = slEligible(r.emp);
     return Object.assign({}, r, {
@@ -18792,9 +18840,18 @@ async function renderLeaveBalanceNextYearReport(){
   // the Leave Encashment Report. Only the SL button is left, and it needs
   // nothing but this year's start.
 
-  const reportTitle = 'Leave Balance Next Year Report — FY ' + startYear + '-' + String(startYear+1).slice(2);
+  // The cut-off belongs in the title, not just on screen: this report is
+  // shared, printed and filed to Drive, and "6.24 earned" means nothing
+  // without knowing whether that is to July or to March.
+  const reportTitle = 'Leave Balance Next Year Report — FY ' + startYear + '-' +
+    String(startYear+1).slice(2) + upToLabel;
   {
-    const fileName = `Leave Balance Next Year Report - FY ${startYear}-${String(startYear+1).slice(2)}.csv`;
+    // The cut-off is in the file name too, or a run to July and a run to March
+    // would be the same name — and saveFile_ on the backend trashes whatever
+    // already carries the name it is handed, so the earlier one would be gone
+    // rather than kept beside it.
+    const fileName = `Leave Balance Next Year Report - FY ${startYear}-${String(startYear+1).slice(2)}` +
+      (upTo ? ` to ${upTo}` : '') + '.csv';
     // Three columns, at HR's request: this report answers one question — what
     // each person has earned this financial year at one day per
     // LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays qualifying days.
