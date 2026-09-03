@@ -29,11 +29,12 @@ const CHECKS = [
   ['check-el-accrual.js',       'EL accrues cumulatively at 1 per 25 days, not floored monthly'],
   ['check-attendance-columns.js', 'the emailed attendance sheet reports each figure once, not twice'],
   ['check-pf-agreement.js',     'the PF Return and Consultant Summary state one figure per PF account'],
+  ['check-leave-detail-metrics.js', 'every Leave Detail column is a figure something actually produces'],
 ];
 
 let failed = 0;
 CHECKS.forEach(([file, what]) => {
-  const label = file.replace(/^check-|\.js$/g, '').padEnd(20);
+  const label = file.replace(/^check-|\.js$/g, '').padEnd(22);
   try {
     execFileSync(process.execPath, [path.join(__dirname, file)], { stdio: 'pipe' });
     console.log('  ok    ' + label + what);

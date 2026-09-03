@@ -19305,7 +19305,17 @@ async function renderYearlyLeaveDetailReport(){
       const monthDays = new Date(year, month, 0).getDate();
       const dateList = [];
       for(let d=1; d<=monthDays; d++) dateList.push(year + '-' + String(month).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
-      return computeAttendanceSummary(att, emp, dateList, holidayMap);
+      // leaveDetailRowFor, not computeAttendanceSummary — the same function the
+      // Monthly Leave Detail Report and its email use, so the twelve months on
+      // this report are the same figures those months were reported as.
+      //
+      // Reading the summary directly looked equivalent and was not: Full Day
+      // Leave is absent + lpDays, a definition that exists only in
+      // leaveDetailRowFor, and computeAttendanceSummary has no fullDayLeave
+      // key at all. LEAVE_DETAIL_METRICS asks for one, so `s[metric.key] || 0`
+      // quietly produced 0 for every employee in every month of the year, and
+      // the column read as a clean year rather than a broken report.
+      return leaveDetailRowFor(emp, att, dateList, holidayMap);
     });
     perEmp.push({ name: emp.name, months });
   }
