@@ -317,10 +317,28 @@ function clearLoginFailure_(username) {
 // A login that times out is a worse outcome than the weakness this fixes.
 //
 // 5,000 rounds should land comfortably inside a second there while multiplying
-// an attacker's work by 5,000. Time a real login after pasting this: if it is
-// quick, raise the number — thanks to the "v2$<rounds>$" prefix that costs
-// nothing and needs no migration, because every stored hash says how many
-// rounds made it, and the next login upgrades each row on its own.
+// an attacker's work by 5,000.
+//
+// Two corrections to what this comment used to claim, both of which matter
+// before anyone raises the number:
+//
+//   - The limit that bites is NOT Apps Script's execution limit. A login goes
+//     through apiFetch, which aborts each attempt at BACKEND_ATTEMPT_MS (8s)
+//     inside a BACKEND_BUDGET_MS (9s) total. Hashing that overruns 8s gets the
+//     attempt aborted and retried, and every retry hashes again — so the
+//     budget is spent without a single login ever completing. Keep hashing
+//     near a second, not near thirty.
+//
+//   - Raising this number does NOT re-hash anyone by itself. The upgrade at
+//     login fires on isLegacyPasswordHash_, which is only true for rows with
+//     no "v2$" prefix at all; a row already written as v2$5000$... keeps
+//     verifying at its own recorded 5,000 forever. Moving existing accounts up
+//     needs the upgrade to also fire when the stored rounds are below this
+//     constant. Until that is added, changing this only affects passwords set
+//     from then on.
+//
+// benchmarkPasswordHashing() measures the real per-round cost on this project;
+// run it before choosing a number rather than judging a login by feel.
 var PASSWORD_HASH_ROUNDS = 5000;
 var PASSWORD_HASH_PREFIX = 'v2';
 
@@ -955,6 +973,64 @@ function migrateEmployeesToPerRecordKeys() {
     '. employees left untouched as the pre-migration backup.';
   Logger.log(msg);
   return msg;
+}
+
+// What password hashing actually costs on this project, so the work factor is
+// chosen from a measurement rather than from how a login felt.
+//
+// Read-only in every sense that matters: it hashes a throwaway string, touches
+// no account, reads no employee data and writes nothing. Safe to run whenever.
+//
+// The number it is looking for is not the Apps Script execution limit but
+// BACKEND_ATTEMPT_MS in index.html — 8 seconds, after which apiFetch aborts the
+// login and retries, re-hashing each time. A login also has to carry real
+// network latency on a phone, so hashing gets a budget of about 1.5s and the
+// rest is left for the trip.
+function benchmarkPasswordHashing() {
+  var ATTEMPT_CAP_MS = 8000;   // BACKEND_ATTEMPT_MS in index.html
+  var HASH_BUDGET_MS = 1500;   // what hashing may take, leaving room for the network
+  var LEVELS = [1000, 5000, 20000, 50000, 100000, 200000];
+
+  // The first digest of a run pays one-off costs that would otherwise be
+  // charged to the smallest level and skew the per-round figure.
+  sha256Hex_('warm-up');
+
+  var out = ['Password hashing on this project', ''];
+  out.push('  ' + 'rounds'.padStart(8) + '  ' + 'time'.padStart(9) + '   verdict');
+  out.push('  ' + '-'.repeat(46));
+
+  var perRound = 0;
+  for (var i = 0; i < LEVELS.length; i++) {
+    var n = LEVELS[i];
+    var t0 = Date.now();
+    hashPassword_('benchmark-salt', 'not-a-real-password', n);
+    var ms = Math.round(Date.now() - t0);
+    perRound = ms / n;
+    var verdict = ms <= HASH_BUDGET_MS ? 'comfortable'
+      : ms <= ATTEMPT_CAP_MS / 2 ? 'usable, less room for the network'
+      : ms < ATTEMPT_CAP_MS ? 'TOO SLOW — no room for the network'
+      : 'WOULD FAIL — past the ' + (ATTEMPT_CAP_MS / 1000) + 's attempt cap';
+    out.push('  ' + String(n).padStart(8) + '  ' + (ms + ' ms').padStart(9) + '   ' + verdict);
+    // No point timing anything heavier once a level is already unusable.
+    if (ms >= ATTEMPT_CAP_MS) { out.push('  (stopped here — heavier settings can only be worse)'); break; }
+  }
+
+  var suggested = Math.floor((HASH_BUDGET_MS / perRound) / 1000) * 1000;
+  out.push('');
+  out.push('  cost per round      : ' + perRound.toFixed(4) + ' ms');
+  out.push('  currently set to    : ' + PASSWORD_HASH_ROUNDS + ' rounds (~' +
+    Math.round(PASSWORD_HASH_ROUNDS * perRound) + ' ms)');
+  out.push('  fits a ' + HASH_BUDGET_MS + 'ms budget : ' + suggested + ' rounds');
+  out.push('  would hit the ' + (ATTEMPT_CAP_MS / 1000) + 's cap : ' +
+    Math.round(ATTEMPT_CAP_MS / perRound) + ' rounds');
+  out.push('');
+  out.push('  Send this log back before the number is changed — raising it also');
+  out.push('  needs the login upgrade to re-hash rows already stored at ' +
+    PASSWORD_HASH_ROUNDS + '.');
+
+  var text = out.join('\n');
+  Logger.log(text);
+  return text;
 }
 
 // Read-only. Answers "where is the roster, then?" when both the per-employee
