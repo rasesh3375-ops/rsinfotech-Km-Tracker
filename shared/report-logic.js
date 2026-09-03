@@ -2482,13 +2482,38 @@ function finalSalarySheetCsv(employees, attByEmpId, dateList, monthDays, holiday
 // employee's own joining and leaving dates is not a day they were employed.
 const EL_QUALIFYING_DAY_VALUE = {
   P: 1, SHORT: 1, EL: 1, SL: 1,
-  // A Sunday or a declared holiday, resolved the same way every other report
-  // resolves one.
+  // 'H' is both a Sunday and a declared holiday — the stored code does not
+  // distinguish them, only what it READS does. Here it stands for the declared
+  // holiday alone: see elDayValue_, which takes a Sunday back off. A weekly
+  // off is not a day worked towards leave, which is what HR asked for; a
+  // declared holiday the company chose to close on still is.
   H: 1,
   HEL: 0.5, HSL: 0.5, HLP: 0.5
   // 'A' and 'LP' are absent from this table on purpose, and so is an unmarked
   // day: unpaid absence earns nothing.
 };
+
+// What one date is worth towards earned leave.
+//
+// Sundays earn nothing. They used to count 1 like any declared holiday,
+// because the resolved code for both is 'H' and nothing looked past that. HR
+// asked for the weekly off to stop earning: 25 qualifying days makes one day
+// of EL that carries into next year, and a day nobody was expected to work
+// should not be a quarter of one.
+//
+// A Sunday that also happens to be a declared holiday earns nothing either —
+// it is still the weekly off, and crediting it because a holiday was declared
+// on top would pay for the same day the rule is removing.
+//
+// Used for the sandwich subtraction as well as the count, so a date is always
+// taken off at exactly what it was put on at.
+function elDayValue_(att, dateStr, holidayMap){
+  const code = resolvedAttendanceCode_(att, dateStr, holidayMap);
+  // 'T00:00:00' makes this LOCAL midnight; a bare date-only string is UTC and
+  // slips a day — and a day either way here is a different day of the week.
+  if(code === 'H' && new Date(dateStr + 'T00:00:00').getDay() === 0) return 0;
+  return EL_QUALIFYING_DAY_VALUE[code] || 0;
+}
 
 // Every date from one day to another, built from local parts rather than by
 // parsing a date-only string, which lands on UTC midnight and slips a day in
@@ -2515,14 +2540,19 @@ function qualifyingPresentDays(emp, att, fromStr, toStr, holidayMap){
   const dates = datesBetween_(fromStr, end)
     .filter(d => employedDuringPeriod_(emp || {}, d, d));
   let total = 0;
-  dates.forEach(d => {
-    total += EL_QUALIFYING_DAY_VALUE[resolvedAttendanceCode_(att, d, holidayMap)] || 0;
+  dates.forEach(d => { total += elDayValue_(att, d, holidayMap); });
+  // A sandwiched day is charged as unpaid by sandwichDaysFor, so whatever it
+  // earned above has to come back off: what payroll does not pay for does not
+  // earn leave either.
+  //
+  // Subtracting exactly what was credited, rather than one per sandwiched
+  // date, is load-bearing now that Sundays earn nothing. A sandwiched Sunday
+  // is already worth 0 here, and taking a further 1 off for it would charge it
+  // twice and push the total below the days actually worked — quietly, and in
+  // the direction that costs the employee leave.
+  sandwichDaysFor(emp || {}, att, dates, holidayMap).forEach(d => {
+    total -= elDayValue_(att, d, holidayMap);
   });
-  // A sandwiched Sunday or holiday is charged as an unpaid day by
-  // sandwichDaysFor, and the table above has already counted it as one. Taking
-  // it off here keeps the two consistent: what payroll does not pay for does
-  // not earn leave either.
-  total -= sandwichDaysFor(emp || {}, att, dates, holidayMap).length;
   return Math.max(0, total);
 }
 
