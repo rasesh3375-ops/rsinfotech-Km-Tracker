@@ -3855,7 +3855,18 @@ async function remoteGetAllEmployees_(){
       return lastGoodEmployeesJson !== null ? { value: lastGoodEmployeesJson } : null;
     }
     if(data && data.error === 'unauthorized'){ onSessionExpired(); return null; }
-    if(!data || !data.ok) return lastGoodEmployeesJson !== null ? { value: lastGoodEmployeesJson } : null;
+    if(!data || !data.ok){
+      // Say what the backend said, rather than leaving the Dashboard's banner
+      // to report a bare "Could not load employees". employeesResponse_ in
+      // Code 2.js answers the un-migrated sheet with the exact instruction
+      // that fixes it — the reason that case is worth reporting at all is
+      // that it is otherwise indistinguishable from a company with no staff,
+      // and losing the message here would throw away the whole point of it.
+      lastBackendError = (data && data.message) ||
+        (data && data.error) ||
+        ('GET did not confirm ok (status ' + res.status + '): ' + text.slice(0, 200));
+      return lastGoodEmployeesJson !== null ? { value: lastGoodEmployeesJson } : null;
+    }
     lastGoodEmployeesJson = JSON.stringify(data.employees || []);
     return { value: lastGoodEmployeesJson };
   }catch(e){

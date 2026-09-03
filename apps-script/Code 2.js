@@ -692,6 +692,53 @@ function allEmployeesFromRows_(rows) {
   return list;
 }
 
+// The one answer the frontend cannot interpret on its own.
+//
+// An empty roster is either a company with no staff yet or a sheet where
+// migrateEmployeesToPerRecordKeys has never been run — and from the browser
+// those are the same response. {ok:true, employees:[]} is a SUCCESS, so
+// getEmployeesOrThrow_ has nothing to throw about, softly() has nothing to
+// mark degraded, and the Dashboard paints a calm, wrong "Employee Master: 0"
+// with no error banner at all. That is not hypothetical: it is what the live
+// site showed, with all ~40 records sitting safely in the legacy `employees`
+// row the whole time, and every report, sheet and export downstream of the
+// roster silently empty with it. The Birthday Report reading "No data yet"
+// was this, one screen along.
+//
+// The sheet itself can tell the two cases apart, because only the un-migrated
+// one still has a populated legacy `employees` array next to zero
+// employee:<id> rows. So it is reported as a real error, which is what turns
+// the silent 0 into "Some figures couldn't be loaded" naming the fix.
+//
+// Both getAllEmployees handlers (doGet and doPost) return this, so the guard
+// cannot be true on one door and not the other.
+function employeesResponse_(rows) {
+  var list = allEmployeesFromRows_(rows);
+  if (list.length) return { ok: true, employees: list };
+
+  // Read from the rows already in hand — no second whole-sheet read.
+  var legacyCount = 0;
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i][0] !== 'employees') continue;
+    try {
+      var legacy = JSON.parse(rows[i][1] || '[]');
+      if (legacy instanceof Array) legacyCount = legacy.length;
+    } catch (e) { /* unparseable legacy row: treat as no evidence either way */ }
+    break;
+  }
+  if (legacyCount > 0) {
+    // Kept under 180 characters on purpose: the Dashboard's degraded banner
+    // prints lastBackendError sliced to 180, and a message cut off mid-
+    // sentence would lose the one instruction that fixes it.
+    return { error: 'migration required',
+             message: legacyCount + ' record(s) still in the old format, none migrated yet. ' +
+               'Nothing is lost. In the sheet: Extensions > Apps Script > run ' +
+               'migrateEmployeesToPerRecordKeys, then reload this app.' };
+  }
+  // Genuinely nobody on file. A real, correct zero.
+  return { ok: true, employees: [] };
+}
+
 // An engineer's own employee id, so they can read their own attendance and
 // nobody else's. Cached briefly: this is on the path of every request they
 // make, and it is a whole-sheet read otherwise.
@@ -1038,7 +1085,7 @@ function doGet(e) {
     if (auth.role === 'engineer') return forbidden_();
     const sheet = getSheet_();
     const rows = sheet.getDataRange().getValues();
-    return jsonOut_({ ok: true, employees: allEmployeesFromRows_(rows) });
+    return jsonOut_(employeesResponse_(rows));
   }
 
   return jsonOut_({ error: 'unknown action' });
@@ -1086,7 +1133,7 @@ function doPost(e) {
   }
   if (body.action === 'getAllEmployees') {
     if (isEngineer) return forbidden_();
-    return jsonOut_({ ok: true, employees: allEmployeesFromRows_(getSheet_().getDataRange().getValues()) });
+    return jsonOut_(employeesResponse_(getSheet_().getDataRange().getValues()));
   }
 
   // The engineer app's own record, six fields, instead of the employees list.
