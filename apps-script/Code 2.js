@@ -255,6 +255,10 @@ function purgeExpiredSessions_(sheet) {
     for (let c = 0; c < WIDTH; c++) out.push(r[c] === undefined ? '' : r[c]);
     return out;
   });
+  // The header only gets written when the sheet is first created, and this
+  // sheet long predates createdAt — so label the new column here rather than
+  // leaving a blank cell above real data for whoever reads it next.
+  if (rect.length && !rect[0][4]) rect[0][4] = 'createdAt';
   sheet.getRange(1, 1, rect.length, WIDTH).setValues(rect);
   sheet.getRange(rect.length + 1, 1, data.length - rect.length, WIDTH).clearContent();
   return removed;
