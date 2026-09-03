@@ -30,6 +30,7 @@ const CHECKS = [
   ['check-attendance-columns.js', 'the emailed attendance sheet reports each figure once, not twice'],
   ['check-pf-agreement.js',     'the PF Return and Consultant Summary state one figure per PF account'],
   ['check-leave-detail-metrics.js', 'every Leave Detail column is a figure something actually produces'],
+  ['check-sequence-writes.js',   'a sequence change either happens or says plainly that it did not'],
 ];
 
 let failed = 0;

@@ -195,6 +195,27 @@ re-sort a roster you were given, and never fetch employees around those two
 functions.** A screen that sorts by name again is the one screen that stops
 following HR's order.
 
+**A sequence change writes one field, through `setSequence`.** The number HR
+types is read in `saveEmployeeForm`'s own collect block, with every other
+field, and never re-read from the DOM afterwards; `applySequenceChange_` then
+calls `saveSequenceOnly_`, which asks the backend to merge `seqNo` into
+whatever each row currently holds. Both halves fix a real failure. The target
+used to be read off `f_seqNo` *after* `await saveOneEmployee_`, so anything
+that re-rendered the modal in between — a salary-history row removed, an
+increment recorded, a document upload landing — rebuilt the input from the
+stored record and put the old number back; the read then found the number the
+employee already had, `changedSequenceRecords` correctly returned nothing, and
+the save reported a plain "Updated <name>" with no mention of the sequence.
+HR set somebody to 7, saw a clean save, and found them on 3 at the next login.
+And the write used to send each moved employee's **whole record**, which put a
+display-order change in front of the staleness guard that protects real edits:
+a record another device had saved since this browser read the roster was
+refused, while `setMany` reported every requested key as saved whether it
+wrote it or not — so a sequence change that skipped somebody reported complete
+success and left gaps and duplicates for the next renumber to build on. Never
+send a whole employee record to change the order, and never read the wanted
+number after an await. `tools/check-sequence-writes.js` asserts both.
+
 Two things it is deliberately not. It is **display order only** — the number
 reaches SR NO columns and row order, never a salary, an attendance day, a leave
 balance or anything stored. Changing it re-orders sheets and changes nothing on
