@@ -1619,7 +1619,18 @@ function doPost(e) {
       // Many keys, one request and one lock. Saving a month of attendance is
       // one write per employee, and the client sent them one at a time — a
       // dozen round trips to Apps Script, each paying script start-up and each
-      // queueing for this lock. The sheet is read once here and written once.
+      // queueing for this lock.
+      //
+      // The sheet is read once. It is now WRITTEN once too, or close to it:
+      // this used to be a setValue per key, so a ten-employee attendance save
+      // was ten round trips to the Sheets service, all of them holding the
+      // script-wide lock that every other write in this app queues on with a
+      // six-second patience. setSequence had the identical shape and it is
+      // what made HR's save fail with "the server did not respond" on a
+      // record that was perfectly fine. Same fix here, before it does the same
+      // thing on a busy attendance day: rows that already exist are grouped
+      // into contiguous runs and written a run at a time, and brand-new keys
+      // are appended together in one block instead of an appendRow each.
       var sheetM = getSheet_();
       var dataM = sheetM.getDataRange().getValues();
       var indexM = {};
@@ -1627,13 +1638,15 @@ function doPost(e) {
       var entries = body.entries || {};
       var savedKeys = [];
       var skippedKeys = [];
+      var updatesM = [];
+      var appendsM = [];
       for (var k in entries) {
         if (!indexM[k]) {
-          sheetM.appendRow([k, entries[k]]);
+          appendsM.push([k, entries[k]]);
           savedKeys.push(k);
         } else if (!isStaleEmployeeWrite_(k, entries[k], dataM[indexM[k] - 1][1]) &&
                    !isStalePayrollDocsWrite_(k, entries[k], dataM[indexM[k] - 1][1])) {
-          sheetM.getRange(indexM[k], 2).setValue(entries[k]);
+          updatesM.push({ row: indexM[k], value: entries[k] });
           savedKeys.push(k);
         } else {
           // A key the staleness guard refused. This used to be pushed into
@@ -1646,6 +1659,21 @@ function doPost(e) {
           // on that. Report it separately and let the client say so.
           skippedKeys.push(k);
         }
+      }
+      // Existing rows, a contiguous run at a time.
+      updatesM.sort(function (a, b) { return a.row - b.row; });
+      var runFrom = 0;
+      for (var ui = 1; ui <= updatesM.length; ui++) {
+        if (ui < updatesM.length && updatesM[ui].row === updatesM[ui - 1].row + 1) continue;
+        var runM = updatesM.slice(runFrom, ui);
+        sheetM.getRange(runM[0].row, 2, runM.length, 1)
+              .setValues(runM.map(function (u) { return [u.value]; }));
+        runFrom = ui;
+      }
+      // New keys, all in one block below the last row. dataM was read inside
+      // this same lock, so nothing can have appended underneath us since.
+      if (appendsM.length) {
+        sheetM.getRange(dataM.length + 1, 1, appendsM.length, 2).setValues(appendsM);
       }
       return jsonOut_({ ok: true, many: true, saved: savedKeys, skipped: skippedKeys });
     } else if (body.action === 'setSequence') {
