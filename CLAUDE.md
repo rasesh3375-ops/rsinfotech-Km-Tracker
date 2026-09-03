@@ -251,19 +251,23 @@ it; the employer's contributions sit on top of it.
   total across the financial year**, and **not floored**. 28 qualifying days is
   1.12 EL, and the remainder carries on accruing rather than being thrown away
   at a month boundary. There is one definition of a qualifying day —
-  `qualifyingPresentDays` — and every caller uses it: present (short leave
-  included), EL, SL, and a declared holiday the employee was in service for,
-  count 1; a half-day code counts 0.5; unpaid absence, an unmarked day and a
-  sandwiched day count nothing, because what payroll does not pay for does not
-  earn leave. **A Sunday counts nothing** — the weekly off is not a day worked
-  towards leave. It used to count 1, like any declared holiday, because the
-  resolved code for both is `'H'` and nothing looked past that; `elDayValue_`
-  is what now tells them apart, and a Sunday that also carries a declared
-  holiday still earns nothing rather than being paid for twice over. That
-  helper is used for the sandwich subtraction as well as the count, so a date
-  always comes off at exactly what it went on at — subtracting a flat 1 per
-  sandwiched date would charge a sandwiched Sunday twice, since it is already
-  worth nothing. It used to be computed twice from two rules that
+  `qualifyingPresentDays` — and every caller uses it. **It is the Attendance
+  Sheet's own Present column, summed month by month**, and nothing else: it
+  splits its range with `monthsBetween_` and adds up
+  `computeAttendanceSummary(...).present` for each month, so the figure HR
+  reads off the Attendance Sheet is the figure EL is earned from, by
+  construction rather than by two rules being kept in step. The month-by-month
+  split matters because the late-coming policy cut is a per-month rule (3 free
+  instances a month) — applied once across a whole year it would forgive
+  eleven months of lateness. Present counts a day present as 1 (short leave
+  included) and a half-day code as 0.5; **EL, SL, a declared holiday, a
+  Sunday, unpaid absence and an unmarked day all count nothing**, because none
+  of them is a day worked. This replaced a separate rule of its own where EL,
+  SL and declared holidays each earned 1 — HR's next-year EL never tied to the
+  Present column they were reading it against. There is deliberately **no
+  sandwich subtraction** here any more: Present already scores an absent or
+  sandwiched day at 0, so taking it off again would charge it twice. It used
+  to be computed twice from two rules that
   disagreed — `policyRowsFor` gave a half day nothing, `elFyRows` gave it 0.5
   and ignored SHORT — so the Attendance Sheet and the Encashment Report could
   report different EL for the same person in the same year. `elEarnedFrom` does

@@ -4612,10 +4612,10 @@ async function elFyRows(employees, startYear, upToDate){
   // One request for everyone's attendance before the loop; each read below
   // then comes from the primed cache instead of its own round trip.
   await getAttendanceMany(employees.map(e => e.id));
-  // Sundays and declared holidays count towards EL now, and a Sunday has no
-  // attendance record of its own — it is resolved from the calendar. So the
-  // holiday list has to be here, where this used to need nothing but the
-  // marked days.
+  // Sundays and declared holidays earn nothing, but the count still needs the
+  // calendar to know which days those are: qualifyingPresentDays is the
+  // Attendance Sheet's Present column, and a day with no marked record is only
+  // resolved as a holiday rather than an unmarked absence by this map.
   const holidayMap = await getHolidayMap_local();
   for(const emp of employees){
     const att = await getAttendance(emp.id);
@@ -18886,7 +18886,7 @@ async function renderLeaveBalanceNextYearReport(){
     </div>
     <p style="font-size:11px;color:var(--muted);margin:10px 0;line-height:1.6;">FY ${startYear}-${String(startYear+1).slice(2)}: ${fmtDateIN(fyStart)} to ${fmtDateIN(fyEnd)}.
       Resident Engineers are outside the leave rules and are not listed; every other heading is.
-      <br><strong style="color:var(--navy);">EL Earned</strong> = 1 day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} qualifying present days, counted as a running total across the whole financial year and <strong>not rounded down</strong> — 28 qualifying days earns ${elDisplay(28 / LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays)}, and the remainder carries on accruing instead of being lost at each month end. A qualifying day is a day present (including short leave), a day of EL or SL, a declared holiday the employee was in service for, or half a day for a half-day code. <strong>Sundays do not earn</strong> — the weekly off is not a day worked towards leave — and neither does unpaid absence or a sandwiched day. Earned this year, usable from next year, so it is never part of what this year pays out. Days that have not happened yet earn nothing, so a year still running counts only up to today.
+      <br><strong style="color:var(--navy);">EL Earned</strong> = 1 day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} qualifying present days, counted as a running total across the whole financial year and <strong>not rounded down</strong> — 28 qualifying days earns ${elDisplay(28 / LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays)}, and the remainder carries on accruing instead of being lost at each month end. A qualifying day is <strong>exactly the Present figure the Attendance Sheet prints</strong> for that person, added up month by month, so this report and the Attendance Sheet can never disagree: a day present counts 1 (short leave included), a half-day code counts 0.5, and the late-coming policy cut comes off the same way it does there. EL, SL, a declared holiday, a Sunday, unpaid absence and an unmarked day all count nothing — none of them is a day worked. Earned this year, usable from next year, so it is never part of what this year pays out. Days that have not happened yet earn nothing, so a year still running counts only up to today.
       <br><strong style="color:var(--navy);">Opening balances, EL used and encashment</strong> are no longer shown here — this report answers what was earned this year and nothing else. The Leave Encashment Report carries the money side in full.</p>
     <div class="row-inline" style="margin-bottom:0;">
       <button class="btn full" onclick='withBusy(this,"Working…",()=>openLeaveYearSl(${JSON.stringify(rows.filter(r=>r.slEligible).map(r=>({id:r.id,sl:r.slNext})))}, ${JSON.stringify(fyStart)}))'>Open leave year (SL)</button>
