@@ -1581,6 +1581,7 @@ function doPost(e) {
       var seqs = body.sequence || {};
       var seqSaved = [];
       var seqMissing = [];
+      var seqRows = [];
       for (var sid in seqs) {
         var rowKey = 'employee:' + sid;
         if (!indexQ[rowKey]) { seqMissing.push(sid); continue; }
@@ -1593,8 +1594,28 @@ function doPost(e) {
         var wantN = Number(seqs[sid]);
         if (!isFinite(wantN) || wantN <= 0) { seqMissing.push(sid); continue; }
         recQ.seqNo = wantN;
-        sheetQ.getRange(indexQ[rowKey], 2).setValue(JSON.stringify(recQ));
+        seqRows.push({ row: indexQ[rowKey], value: JSON.stringify(recQ) });
         seqSaved.push(sid);
+      }
+      // Written in contiguous runs, one setValues per run, NOT one setValue
+      // per employee. Moving somebody near the top of a roster of forty
+      // renumbers nearly all of them, and a setValue each was forty separate
+      // round trips to the Sheets service — held, the whole time, inside the
+      // script-wide lock every other write in the app is waiting on. That lock
+      // only waits 6 seconds, so the next save (HR pressing Save again, an
+      // engineer checking in) came back 'busy' and surfaced in the app as
+      // "Could not save — the server did not respond". Employee rows are
+      // created together and so are almost always adjacent, which makes this
+      // one write in practice; scattered rows degrade to one write per run
+      // rather than per row.
+      seqRows.sort(function (a, b) { return a.row - b.row; });
+      var runStart = 0;
+      for (var ri = 1; ri <= seqRows.length; ri++) {
+        if (ri < seqRows.length && seqRows[ri].row === seqRows[ri - 1].row + 1) continue;
+        var run = seqRows.slice(runStart, ri);
+        sheetQ.getRange(run[0].row, 2, run.length, 1)
+              .setValues(run.map(function (r) { return [r.value]; }));
+        runStart = ri;
       }
       return jsonOut_({ ok: true, sequenced: true, saved: seqSaved, missing: seqMissing });
     } else if (body.action === 'saveFile') {
