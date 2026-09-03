@@ -1606,6 +1606,36 @@
   .payroll-docs-month-row:hover{background:var(--cream);}
   .payroll-docs-search-filters{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;}
   .payroll-docs-search-filters .field{margin:0 0 3px;}
+
+/* ---- Office Old Documents ---- */
+.od-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;}
+.od-stat{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--card);}
+.od-stat-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+.od-stat-value{font-size:22px;font-weight:800;color:var(--navy);margin:4px 0 2px;font-variant-numeric:tabular-nums;}
+.od-stat-sub{font-size:11px;color:var(--muted);}
+/* The tree sits beside the table on a desktop and stacks above it on a phone,
+   which is the only layout that keeps a document table usable on both. */
+.od-layout{display:grid;grid-template-columns:minmax(200px,260px) 1fr;gap:14px;margin-top:14px;align-items:start;}
+@media (max-width:820px){ .od-layout{grid-template-columns:1fr;} }
+.od-tree{border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--card);}
+.od-folder{margin-bottom:2px;}
+.od-folder-head,.od-year{display:flex;align-items:center;gap:8px;width:100%;text-align:left;
+  background:none;border:0;cursor:pointer;padding:7px 8px;border-radius:8px;font:inherit;color:var(--ink);}
+.od-folder-head:hover,.od-year:hover{background:var(--sunk);}
+.od-folder-head.open{font-weight:700;color:var(--navy);}
+.od-caret{width:12px;color:var(--muted);}
+.od-folder-name{flex:1;}
+.od-folder-count{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;}
+.od-years{margin:2px 0 6px 18px;border-left:1px solid var(--line);padding-left:6px;}
+.od-year.active{background:var(--sunk);font-weight:700;color:var(--navy);}
+.od-main{border:1px solid var(--line);border-radius:10px;padding:14px;background:var(--card);min-width:0;}
+.od-main-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;}
+.od-main-title{font-size:16px;font-weight:800;color:var(--navy);}
+.od-main-sub{font-size:12px;color:var(--muted);margin-top:2px;}
+.od-table{margin-top:10px;}
+.od-table .od-name{font-weight:600;word-break:break-word;}
+.od-actions{white-space:nowrap;}
+.btn.tiny{padding:4px 9px;font-size:11px;min-height:0;}
 </style>
 </head>
 <body>
@@ -2902,7 +2932,21 @@
                 <span class="gen-accordion-desc">Enter a new employee's monthly CTC and see the Rate of Pay and Take Home Salary it works out to.</span></span>
               <span class="gen-accordion-chevron">▼</span>
             </button>
+            <button type="button" class="gen-accordion-header" data-target="genSecOfficeDocs" onclick="openOfficeDocsCard()" aria-expanded="false">
+              <span class="gen-accordion-num">18</span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Office Old Documents</strong>
+                <span class="gen-accordion-desc">The whole old-document archive — purchase, sales, consultant and anything else — filed by folder and year, managed entirely from here.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
+            </button>
           </div>
+        </div>
+
+        <div id="genSecOfficeDocs" class="hidden gen-accordion-body">
+        <section class="block">
+          <h2 style="margin:0 0 4px;">Office Old Documents</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Upload, search, view and manage the company's old-document archive from here. Files are stored on Google Drive under <strong>HR Management &gt; Office Old Documents &gt; folder &gt; year</strong>, and the folder is created the first time you file something into it — you never need to open Drive to upload or find a document.</p>
+          <div id="officeDocsBox"></div>
+        </section>
         </div>
 
         <div id="genSecRoleReports" class="hidden gen-accordion-body">
@@ -3793,15 +3837,28 @@ function hrSessionExpired_(){
   }
   return (Date.now() - startedAt) > HR_SESSION_MAX_AGE_MS;
 }
-function setSession(token, role){
+// Who is signed in, for the one thing that has to record it: the Uploaded By
+// column on the Office Old Documents archive. The session itself never carried
+// a name — only a token and a role — so a filed document had nobody's name
+// against it. Optional third argument, so every existing caller is unchanged
+// and a session restored from a previous visit simply reads back what was
+// stored then.
+let sessionUserName = localStorage.getItem('kmt_session_user') || '';
+function setSession(token, role, username){
   sessionToken = token; sessionRole = role;
   if(token){
     localStorage.setItem('kmt_session_token', token);
     localStorage.setItem('kmt_session_role', role);
+    if(username){
+      sessionUserName = username;
+      localStorage.setItem('kmt_session_user', username);
+    }
     if(role === 'hr') localStorage.setItem('kmt_hr_session_started_at', String(Date.now()));
   } else {
+    sessionUserName = '';
     localStorage.removeItem('kmt_session_token');
     localStorage.removeItem('kmt_session_role');
+    localStorage.removeItem('kmt_session_user');
     localStorage.removeItem('kmt_hr_session_started_at');
   }
 }
@@ -5539,7 +5596,7 @@ async function submitHrLogin(){
     msg.classList.add('error');
     return;
   }
-  setSession(result.token, 'hr');
+  setSession(result.token, 'hr', normUsername(username));
   await safeSet('hr_session', 'yes', false);
   msg.textContent = '';
   msg.classList.remove('error');
@@ -5576,7 +5633,7 @@ async function submitHrSetup(){
     return;
   }
   const loginResult = await serverLogin('hr', normUsername(username), pw);
-  if(loginResult && loginResult.ok) setSession(loginResult.token, 'hr');
+  if(loginResult && loginResult.ok) setSession(loginResult.token, 'hr', normUsername(username));
   await safeSet('hr_session', 'yes', false);
   msg.textContent = '';
   msg.classList.remove('error');
@@ -5752,7 +5809,7 @@ async function loginEngineer(){
     msg.classList.add('error');
     return;
   }
-  setSession(result.token, 'engineer');
+  setSession(result.token, 'engineer', normUsername(username));
   engineerName = normUsername(username);
   engineerDisplayName = result.displayName || engineerName;
   await safeSet('my_username', engineerName, false);
@@ -18020,6 +18077,14 @@ async function openLetterheadCard(){
 // here is saved anywhere. Deliberately no name field: this exists purely
 // to answer "what would this salary actually cost / actually pay out",
 // before there is an employee to attach the answer to.
+// The archive's entry point. openGeneratorCard is what the kmt history system
+// already brackets, so Back out of a document viewer opened from in here
+// returns to this card rather than the top of the Generator.
+function openOfficeDocsCard(){
+  openGeneratorCard('genSecOfficeDocs');
+  renderOfficeDocsModule_();
+}
+
 function openCtcCalculatorCard(){
   openGeneratorCard('genSecCtcCalculator');
   const sel = document.getElementById('ctcCalcHeading');
@@ -21886,6 +21951,540 @@ function payrollDocsFyOptions_(){
 // thing that can flip it is runPayrollDocsMigration_ below, which updates
 // this cache directly — so a cached `false` (or `true`) is never stale.
 let payrollDocsMigNeededCache_ = null;
+
+// ===== Office Old Documents =====
+//
+// The app is the document management system; Drive is only where the bytes
+// live. Nobody should have to open Drive to file or find anything, so every
+// screen here works off the app's own index and Drive is reached for exactly
+// two things: storing a file, and streaming one back to be viewed.
+//
+// Three decisions HR made, recorded here because each one changes what the
+// code has to do rather than just how it looks:
+//
+//  - A repeated file name keeps BOTH files. doUploadOfficeDoc_ in Code 2.js
+//    renames the newcomer "… (2)" instead of trashing the older one the way
+//    doUploadDocument_ does for replacement slots. An archive that quietly
+//    destroys the earlier "Purchase Invoice - Jan 2024.pdf" is worse than no
+//    archive.
+//  - HR adds folders themselves, so the list is stored, not hard-coded.
+//  - Plain calendar years from 2022, not financial years: an old document is
+//    filed under the year printed on it.
+const OFFICE_DOCS_FIRST_YEAR = 2022;
+const OFFICE_DOC_FOLDERS_KEY = 'office_doc_folders';
+const OFFICE_DOCS_INDEX_KEY = 'office_docs_index';
+const OFFICE_DOC_FOLDERS_DEFAULT = ['Purchase Documents', 'Employee Documents',
+  'Consultant Reports', 'Sales Documents'];
+// One employee record shares a 50,000-character cell with itself; so does one
+// of these shards. A record is name + Drive id + type + size + when + who,
+// which runs to roughly 280 characters at its worst, so 120 of them leaves
+// real headroom rather than sitting just under the line. Past that the shard
+// splits — office_docs:<slug>:<year>:<part> — and the index below records how
+// many parts a folder-year actually has, so nothing has to guess or probe.
+const OFFICE_DOCS_PER_PART = 120;
+
+function officeDocSlug_(folder){
+  return String(folder || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'folder';
+}
+function officeDocsYears_(){
+  const out = [];
+  for(let y = new Date().getFullYear(); y >= OFFICE_DOCS_FIRST_YEAR; y--) out.push(String(y));
+  return out;
+}
+function officeDocPartKey_(slug, year, part){
+  return 'office_docs:' + slug + ':' + year + ':' + part;
+}
+// Drive's own viewer URL, derived rather than stored. Keeping the full URL on
+// every record cost about sixty characters each and bought nothing — the id is
+// already there, and this is the only shape it is ever used in.
+function officeDocDriveUrl_(fileId){
+  return 'https://drive.google.com/file/d/' + encodeURIComponent(fileId) + '/view';
+}
+
+async function loadOfficeDocFolders_(){
+  const raw = await safeGet(OFFICE_DOC_FOLDERS_KEY, true);
+  let list = [];
+  try{ list = raw ? JSON.parse(raw) : []; }catch(e){ list = []; }
+  if(!Array.isArray(list) || !list.length) list = OFFICE_DOC_FOLDERS_DEFAULT.slice();
+  return list;
+}
+// The whole archive's shape in one small key: for each folder, for each year,
+// how many documents, how many bytes, and how many parts the records are split
+// across. The dashboard's four figures come from this alone, and so does
+// knowing which keys exist — which is what stops search having to probe for
+// shards that may not be there.
+async function loadOfficeDocIndex_(){
+  const raw = await safeGet(OFFICE_DOCS_INDEX_KEY, true);
+  try{ const v = raw ? JSON.parse(raw) : {}; return (v && typeof v === 'object') ? v : {}; }
+  catch(e){ return {}; }
+}
+async function saveOfficeDocIndex_(idx){
+  const ok = await remoteSet(OFFICE_DOCS_INDEX_KEY, JSON.stringify(idx));
+  if(!ok) throw new Error(lastBackendError || 'the server did not respond');
+}
+
+// Every record in one folder-year, read across however many parts it has.
+// Stored short — n/f/m/s/u/b — and widened here, so the rest of the app deals
+// in readable names and only the wire format is terse.
+function officeDocWiden_(r, folder, year){
+  return {
+    name: r.n || '', fileId: r.f || '', mimeType: r.m || '',
+    size: Number(r.s) || 0, uploadedAt: Number(r.u) || 0, uploadedBy: r.b || '',
+    folder: folder, year: String(year)
+  };
+}
+function officeDocNarrow_(d){
+  return { n: d.name, f: d.fileId, m: d.mimeType, s: d.size, u: d.uploadedAt, b: d.uploadedBy };
+}
+async function loadOfficeDocs_(folder, year, idx){
+  const slug = officeDocSlug_(folder);
+  const index = idx || await loadOfficeDocIndex_();
+  const parts = ((index[slug] || {}).years || {})[String(year)];
+  const count = parts ? (Number(parts.p) || 1) : 0;
+  if(!count) return [];
+  const keys = [];
+  for(let p = 0; p < count; p++) keys.push(officeDocPartKey_(slug, year, p));
+  const raws = await officeDocsReadKeys_(keys);
+  const out = [];
+  keys.forEach(k => {
+    let v = null;
+    try{ v = raws[k] ? JSON.parse(raws[k]) : null; }catch(e){ v = null; }
+    ((v && v.records) || []).forEach(r => out.push(officeDocWiden_(r, folder, year)));
+  });
+  return out;
+}
+// getBatch where the backend has it, one key at a time where it does not —
+// the same fallback shape getAttendanceMany already uses, for the same reason:
+// index.html is live within a minute of a push and Code 2.js is pasted by hand.
+async function officeDocsReadKeys_(keys){
+  const out = {};
+  if(!keys.length) return out;
+  try{
+    const data = await backendAction({ action: 'getBatch', keys });
+    if(data && data.batch && data.values){
+      keys.forEach(k => { out[k] = data.values[k] === undefined ? null : data.values[k]; });
+      return out;
+    }
+  }catch(e){}
+  await Promise.all(keys.map(async k => { out[k] = await safeGet(k, true); }));
+  return out;
+}
+
+// Appends to the last part that still has room and opens a new one when it
+// does not, then updates the index in the same breath. Writing the records
+// before the index is deliberate: an index that promises a part which does not
+// exist reads as an empty folder, where a part the index has not caught up
+// with is merely invisible until the next upload fixes the count.
+async function appendOfficeDocs_(folder, year, docs){
+  if(!docs.length) return;
+  const slug = officeDocSlug_(folder);
+  const idx = await loadOfficeDocIndex_();
+  idx[slug] = idx[slug] || { name: folder, years: {} };
+  idx[slug].name = folder;
+  idx[slug].years = idx[slug].years || {};
+  const y = idx[slug].years[String(year)] || { n: 0, b: 0, p: 0 };
+
+  const existingParts = Number(y.p) || 0;
+  let lastPart = Math.max(0, existingParts - 1);
+  let lastRecords = [];
+  if(existingParts){
+    const raw = (await officeDocsReadKeys_([officeDocPartKey_(slug, year, lastPart)]))[officeDocPartKey_(slug, year, lastPart)];
+    try{ const v = raw ? JSON.parse(raw) : null; lastRecords = (v && v.records) || []; }catch(e){ lastRecords = []; }
+  }
+
+  const entries = {};
+  let part = lastPart, bucket = lastRecords.slice();
+  docs.forEach(d => {
+    if(bucket.length >= OFFICE_DOCS_PER_PART){
+      entries[officeDocPartKey_(slug, year, part)] = JSON.stringify({ savedAt: Date.now(), records: bucket });
+      part++; bucket = [];
+    }
+    bucket.push(officeDocNarrow_(d));
+  });
+  entries[officeDocPartKey_(slug, year, part)] = JSON.stringify({ savedAt: Date.now(), records: bucket });
+
+  const saved = await remoteSetMany(entries);
+  if(!saved) throw new Error(lastBackendError || 'the server did not respond');
+  const missing = Object.keys(entries).filter(k => !saved.has(k));
+  if(missing.length) throw new Error(missing.length + ' part(s) of the archive index were not written — reload and try again');
+
+  y.n = (Number(y.n) || 0) + docs.length;
+  y.b = (Number(y.b) || 0) + docs.reduce((t, d) => t + (Number(d.size) || 0), 0);
+  y.p = part + 1;
+  idx[slug].years[String(year)] = y;
+  await saveOfficeDocIndex_(idx);
+}
+
+// Rewrites the folder-year's parts without one document. Compacted as it goes,
+// so deleting steadily does not leave a trail of half-empty shards behind.
+async function removeOfficeDoc_(folder, year, fileId){
+  const slug = officeDocSlug_(folder);
+  const idx = await loadOfficeDocIndex_();
+  const all = await loadOfficeDocs_(folder, year, idx);
+  const keep = all.filter(d => d.fileId !== fileId);
+  if(keep.length === all.length) return false;
+
+  const oldParts = Number((((idx[slug] || {}).years || {})[String(year)] || {}).p) || 0;
+  const entries = {};
+  let part = 0;
+  for(let i = 0; i < keep.length; i += OFFICE_DOCS_PER_PART){
+    entries[officeDocPartKey_(slug, year, part)] =
+      JSON.stringify({ savedAt: Date.now(), records: keep.slice(i, i + OFFICE_DOCS_PER_PART).map(officeDocNarrow_) });
+    part++;
+  }
+  if(!part){ entries[officeDocPartKey_(slug, year, 0)] = JSON.stringify({ savedAt: Date.now(), records: [] }); part = 1; }
+  // Parts that compaction made surplus are emptied rather than left holding
+  // documents the index no longer counts.
+  for(let p = part; p < oldParts; p++){
+    entries[officeDocPartKey_(slug, year, p)] = JSON.stringify({ savedAt: Date.now(), records: [] });
+  }
+  const saved = await remoteSetMany(entries);
+  if(!saved) throw new Error(lastBackendError || 'the server did not respond');
+
+  idx[slug] = idx[slug] || { name: folder, years: {} };
+  idx[slug].years[String(year)] = {
+    n: keep.length,
+    b: keep.reduce((t, d) => t + (Number(d.size) || 0), 0),
+    p: part
+  };
+  await saveOfficeDocIndex_(idx);
+  return true;
+}
+
+function officeDocSize_(bytes){
+  const b = Number(bytes) || 0;
+  if(b < 1024) return b + ' B';
+  if(b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+  if(b < 1024 * 1024 * 1024) return (b / (1024 * 1024)).toFixed(2) + ' MB';
+  return (b / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+}
+// What the Type column prints. The full MIME type is unreadable in a table and
+// the extension alone is what anyone actually recognises.
+function officeDocKind_(name, mime){
+  const ext = (String(name || '').match(/\.([a-z0-9]+)$/i) || [, ''])[1].toLowerCase();
+  const byExt = { pdf:'PDF', doc:'Word', docx:'Word', xls:'Excel', xlsx:'Excel', csv:'CSV',
+                  ppt:'PowerPoint', pptx:'PowerPoint', jpg:'Image', jpeg:'Image', png:'Image',
+                  gif:'Image', webp:'Image', heic:'Image', txt:'Text', zip:'Zip' };
+  if(byExt[ext]) return byExt[ext];
+  const m = String(mime || '');
+  if(m.indexOf('image/') === 0) return 'Image';
+  if(m.indexOf('pdf') !== -1) return 'PDF';
+  return ext ? ext.toUpperCase() : 'File';
+}
+
+
+// The screen itself. One folder-year is open at a time, which is what keeps
+// this readable on a phone as well as bounded on the wire: browsing never
+// fetches more than one folder-year's parts, however big the archive gets.
+let officeDocsState_ = { folder: null, year: null, query: '', results: null, busy: false };
+
+async function renderOfficeDocsModule_(){
+  const box = document.getElementById('officeDocsBox');
+  if(!box) return;
+  box.innerHTML = '<div class="empty">Loading the archive…</div>';
+  let folders, idx;
+  try{
+    folders = await loadOfficeDocFolders_();
+    idx = await loadOfficeDocIndex_();
+  }catch(err){
+    box.innerHTML = '<div class="empty error">Could not load the archive: ' +
+      escapeHtml((err && err.message) || 'the server did not respond') + '</div>';
+    return;
+  }
+  if(!officeDocsState_.folder) officeDocsState_.folder = folders[0] || null;
+  if(!officeDocsState_.year) officeDocsState_.year = officeDocsYears_()[0];
+
+  // The four figures across the top come from the index alone — no folder is
+  // read to draw them, so this stays instant however many documents there are.
+  let totalDocs = 0, totalBytes = 0, latest = 0, folderYears = 0;
+  Object.keys(idx).forEach(slug => {
+    const years = (idx[slug] || {}).years || {};
+    Object.keys(years).forEach(y => {
+      const v = years[y] || {};
+      totalDocs += Number(v.n) || 0;
+      totalBytes += Number(v.b) || 0;
+      if(Number(v.n) > 0) folderYears++;
+    });
+  });
+
+  const years = officeDocsYears_();
+  const countFor = (folder, year) => {
+    const v = (((idx[officeDocSlug_(folder)] || {}).years) || {})[String(year)];
+    return Number((v || {}).n) || 0;
+  };
+
+  const tree = folders.map(f => {
+    const open = f === officeDocsState_.folder;
+    const total = years.reduce((t, y) => t + countFor(f, y), 0);
+    return `<div class="od-folder">
+      <button type="button" class="od-folder-head${open ? ' open' : ''}" onclick="officeDocsPick_(${JSON.stringify(f).replace(/"/g, '&quot;')}, null)">
+        <span class="od-caret">${open ? '▾' : '▸'}</span>
+        <span class="od-folder-name">${escapeHtml(f)}</span>
+        <span class="od-folder-count">${total}</span>
+      </button>
+      ${open ? `<div class="od-years">${years.map(y => `
+        <button type="button" class="od-year${String(y) === String(officeDocsState_.year) ? ' active' : ''}"
+                onclick="officeDocsPick_(${JSON.stringify(f).replace(/"/g, '&quot;')}, '${y}')">
+          <span>${y}</span><span class="od-folder-count">${countFor(f, y)}</span>
+        </button>`).join('')}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  box.innerHTML = `
+    <div class="od-stats">
+      ${odStat_('Document folders', folders.length, 'Across all years')}
+      ${odStat_('Total documents', totalDocs.toLocaleString('en-IN'), 'In the archive')}
+      ${odStat_('Storage used', officeDocSize_(totalBytes), 'On Google Drive')}
+      ${odStat_('Folder-years in use', folderYears, 'Holding at least one file')}
+    </div>
+
+    <div class="row-inline" style="margin:14px 0 0;flex-wrap:wrap;gap:8px;">
+      <input id="odSearch" class="field-input" style="flex:2;min-width:200px;"
+             placeholder="Search by file name, folder, year or type…"
+             value="${escapeHtml(officeDocsState_.query)}"
+             onkeydown="if(event.key==='Enter')officeDocsSearch_()">
+      <button class="btn" style="flex:0 0 auto;" onclick="withBusy(this,'Searching…',officeDocsSearch_)">Search</button>
+      ${officeDocsState_.results ? `<button class="btn ghost" style="flex:0 0 auto;" onclick="officeDocsClearSearch_()">Clear</button>` : ''}
+      <button class="btn ghost" style="flex:0 0 auto;" onclick="officeDocsAddFolder_()">+ New folder</button>
+    </div>
+
+    <div class="od-layout">
+      <div class="od-tree">
+        <div class="sec-title" style="margin:0 0 8px;">Document folders</div>
+        ${tree || '<div class="empty">No folders yet.</div>'}
+        <p style="font-size:11px;color:var(--muted);margin:10px 0 0;line-height:1.5;">
+          Files are stored on Google Drive under <strong>HR Management &gt; Office Old Documents</strong>,
+          and managed entirely from here. You never need to open Drive to file or find one.</p>
+      </div>
+      <div class="od-main" id="odMain">${await officeDocsMainHtml_(idx)}</div>
+    </div>`;
+}
+
+function odStat_(label, value, sub){
+  return `<div class="od-stat">
+    <div class="od-stat-label">${escapeHtml(label)}</div>
+    <div class="od-stat-value">${escapeHtml(String(value))}</div>
+    <div class="od-stat-sub">${escapeHtml(sub)}</div>
+  </div>`;
+}
+
+async function officeDocsMainHtml_(idx){
+  const st = officeDocsState_;
+  if(st.results){
+    return odTableHtml_('Search results', st.results,
+      st.results.length + ' document(s) matching “' + escapeHtml(st.query) + '”', true);
+  }
+  if(!st.folder) return '<div class="empty">Add a folder to begin.</div>';
+  let docs = [];
+  try{ docs = await loadOfficeDocs_(st.folder, st.year, idx); }
+  catch(err){ return '<div class="empty error">Could not load this folder: ' +
+    escapeHtml((err && err.message) || 'the server did not respond') + '</div>'; }
+  docs.sort((a, b) => b.uploadedAt - a.uploadedAt);
+  const bytes = docs.reduce((t, d) => t + d.size, 0);
+  return odTableHtml_(escapeHtml(st.folder) + ' <span style="color:var(--muted);font-weight:400;">›</span> ' + st.year,
+    docs, docs.length + ' document(s) · ' + officeDocSize_(bytes), false);
+}
+
+function odTableHtml_(title, docs, sub, showWhere){
+  const rows = docs.map(d => `<tr>
+    <td class="od-name">${escapeHtml(d.name)}</td>
+    <td>${escapeHtml(officeDocKind_(d.name, d.mimeType))}</td>
+    <td>${escapeHtml(officeDocSize_(d.size))}</td>
+    <td>${d.uploadedAt ? escapeHtml(fmtDateIN(new Date(d.uploadedAt).toISOString().slice(0, 10))) : '—'}</td>
+    <td>${escapeHtml(d.uploadedBy || '—')}</td>
+    ${showWhere ? `<td>${escapeHtml(d.folder)} › ${escapeHtml(d.year)}</td>` : ''}
+    <td class="od-actions">
+      <button class="btn tiny" title="View in the app" onclick="officeDocView_('${d.fileId}', ${JSON.stringify(d.name).replace(/"/g, '&quot;')})">View</button>
+      <button class="btn tiny ghost" title="Open the original in Google Drive" onclick="window.open('${officeDocDriveUrl_(d.fileId)}','_blank','noopener')">Drive</button>
+      <button class="btn tiny ghost" title="Remove from the archive" onclick="officeDocDelete_(${JSON.stringify(d.folder).replace(/"/g, '&quot;')}, '${d.year}', '${d.fileId}', ${JSON.stringify(d.name).replace(/"/g, '&quot;')})">Delete</button>
+    </td>
+  </tr>`).join('');
+  return `
+    <div class="od-main-head">
+      <div>
+        <div class="od-main-title">${title}</div>
+        <div class="od-main-sub">${escapeHtml(sub)}</div>
+      </div>
+      ${showWhere ? '' : `<div class="row-inline" style="margin:0;gap:8px;">
+        <input type="file" id="odFiles" multiple style="display:none" onchange="officeDocsUpload_()">
+        <button class="btn" onclick="document.getElementById('odFiles').click()">Upload documents</button>
+      </div>`}
+    </div>
+    <div id="odUploadMsg" class="msg" style="margin:8px 0 0;"></div>
+    ${docs.length ? `<div class="table-wrap"><table class="tbl od-table">
+      <thead><tr>
+        <th>File name</th><th>Type</th><th>Size</th><th>Uploaded on</th><th>Uploaded by</th>
+        ${showWhere ? '<th>Where</th>' : ''}<th>Actions</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>` : `<div class="empty">${showWhere ? 'Nothing matched that search.' : 'No documents filed here yet — use Upload documents to add some.'}</div>`}`;
+}
+
+async function officeDocsPick_(folder, year){
+  officeDocsState_.folder = folder;
+  if(year) officeDocsState_.year = year;
+  officeDocsState_.results = null;
+  await renderOfficeDocsModule_();
+}
+function officeDocsClearSearch_(){
+  officeDocsState_.results = null;
+  officeDocsState_.query = '';
+  return renderOfficeDocsModule_();
+}
+
+// Searches every folder-year the index says holds anything, and nothing else —
+// the index is what makes that bounded rather than a probe across every key
+// that might exist. Name, folder, year and type all match the one box, because
+// HR looking for "2024 purchase" should not have to decide which field that is.
+async function officeDocsSearch_(){
+  const q = ((document.getElementById('odSearch') || {}).value || '').trim();
+  officeDocsState_.query = q;
+  if(!q){ officeDocsState_.results = null; return renderOfficeDocsModule_(); }
+  const idx = await loadOfficeDocIndex_();
+  const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const keys = [], where = {};
+  Object.keys(idx).forEach(slug => {
+    const folder = (idx[slug] || {}).name || slug;
+    const years = (idx[slug] || {}).years || {};
+    Object.keys(years).forEach(y => {
+      const parts = Number((years[y] || {}).p) || 0;
+      for(let p = 0; p < parts; p++){
+        const k = officeDocPartKey_(slug, y, p);
+        keys.push(k); where[k] = { folder: folder, year: y };
+      }
+    });
+  });
+  const raws = await officeDocsReadKeys_(keys);
+  const hits = [];
+  keys.forEach(k => {
+    let v = null;
+    try{ v = raws[k] ? JSON.parse(raws[k]) : null; }catch(e){ v = null; }
+    ((v && v.records) || []).forEach(r => {
+      const d = officeDocWiden_(r, where[k].folder, where[k].year);
+      const hay = (d.name + ' ' + d.folder + ' ' + d.year + ' ' +
+                   officeDocKind_(d.name, d.mimeType) + ' ' +
+                   (d.uploadedAt ? fmtDateIN(new Date(d.uploadedAt).toISOString().slice(0, 10)) : '')).toLowerCase();
+      if(terms.every(t => hay.indexOf(t) !== -1)) hits.push(d);
+    });
+  });
+  hits.sort((a, b) => b.uploadedAt - a.uploadedAt);
+  officeDocsState_.results = hits;
+  await renderOfficeDocsModule_();
+}
+
+async function officeDocsAddFolder_(){
+  const name = (prompt('Name the new document folder — for example "IT & Server Documents".') || '').trim();
+  if(!name) return;
+  const folders = await loadOfficeDocFolders_();
+  if(folders.some(f => f.toLowerCase() === name.toLowerCase())){
+    alert('There is already a folder called ' + name + '.');
+    return;
+  }
+  folders.push(name);
+  const ok = await remoteSet(OFFICE_DOC_FOLDERS_KEY, JSON.stringify(folders));
+  if(!ok){ alert('Could not add the folder: ' + (lastBackendError || 'the server did not respond')); return; }
+  await addActivityLog('Added the Office Old Documents folder "' + name + '"');
+  officeDocsState_.folder = name;
+  officeDocsState_.results = null;
+  await renderOfficeDocsModule_();
+}
+
+// One file per request, in order, with the count on screen as it goes. Apps
+// Script takes the bytes base64-encoded in the request body, so a dozen files
+// in one call is a timeout rather than a saving — and a part-finished batch
+// has to be able to say exactly how far it got.
+async function officeDocsUpload_(){
+  const input = document.getElementById('odFiles');
+  const msg = document.getElementById('odUploadMsg');
+  const files = Array.from((input && input.files) || []);
+  if(!files.length) return;
+  const st = officeDocsState_;
+  const say = (t, bad) => { if(msg){ msg.textContent = t; msg.classList.toggle('error', !!bad); } };
+  if(officeDocsState_.busy){ say('An upload is already running.', true); return; }
+  officeDocsState_.busy = true;
+
+  const folderPath = ['HR Management', 'Office Old Documents', st.folder, String(st.year)];
+  const done = [], failed = [], renamed = [];
+  for(let i = 0; i < files.length; i++){
+    const f = files[i];
+    say('Uploading ' + (i + 1) + ' of ' + files.length + ' — ' + f.name + '…');
+    try{
+      const dataUrl = await readDocForDrive(f);
+      const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl || '');
+      if(!m){ failed.push(f.name); continue; }
+      const data = await backendAction({
+        action: 'uploadOfficeDoc', folderPath: folderPath,
+        fileName: f.name, base64Data: m[2], mimeType: m[1] || f.type
+      });
+      if(!data || !data.ok || !data.fileId){ failed.push(f.name); continue; }
+      if(data.renamed) renamed.push(data.fileName);
+      done.push({
+        name: data.fileName || f.name, fileId: data.fileId,
+        mimeType: data.mimeType || m[1] || '', size: Number(data.size) || 0,
+        uploadedAt: Date.now(), uploadedBy: sessionUserName || sessionRole || 'HR'
+      });
+    }catch(err){ failed.push(f.name); }
+  }
+  if(input) input.value = '';
+
+  if(done.length){
+    try{
+      await appendOfficeDocs_(st.folder, st.year, done);
+      await addActivityLog('Filed ' + done.length + ' document(s) under Office Old Documents › ' +
+        st.folder + ' › ' + st.year);
+    }catch(err){
+      officeDocsState_.busy = false;
+      // The files ARE in Drive at this point; only the app's own record of them
+      // failed. Saying "upload failed" would send HR to upload them again and
+      // end up with two copies of each.
+      alert(done.length + ' file(s) reached Google Drive, but the archive index could not be updated — ' +
+        ((err && err.message) || 'the server did not respond') + '.\n\n' +
+        'Do NOT upload them again or you will have two copies. Reload the page and check the folder; ' +
+        'if they are not listed, use Upload documents once more.');
+      return;
+    }
+  }
+  officeDocsState_.busy = false;
+  await renderOfficeDocsModule_();
+  const parts = [];
+  if(done.length) parts.push(done.length + ' uploaded');
+  if(renamed.length) parts.push(renamed.length + ' renamed to avoid overwriting an existing file (' + renamed.join(', ') + ')');
+  if(failed.length) parts.push(failed.length + ' failed: ' + failed.join(', '));
+  const after = document.getElementById('odUploadMsg');
+  if(after){
+    after.textContent = parts.join(' · ') || 'Nothing to upload.';
+    after.classList.toggle('error', failed.length > 0);
+  }
+}
+
+// Streams the bytes back through the session rather than sending anyone to a
+// Drive link, which would need their own Google account to have been shared
+// that one file. Same viewer the employee documents already use.
+async function officeDocView_(fileId, name){
+  try{
+    // The viewer takes a Drive URL and pulls the id back out of it — the same
+    // entry point employee documents use, rather than a second copy of the
+    // fetch-and-render that would then have to be kept in step with it.
+    await viewEmployeeDocumentViaBackend_(officeDocDriveUrl_(fileId), name);
+  }catch(err){
+    alert('Could not open ' + name + ': ' + ((err && err.message) || 'the server did not respond') +
+      '\n\nUse the Drive button to open the original instead.');
+  }
+}
+
+async function officeDocDelete_(folder, year, fileId, name){
+  if(!confirm('Remove "' + name + '" from ' + folder + ' › ' + year + '?\n\n' +
+    'The file is moved to Google Drive\'s bin, where it can still be recovered for 30 days.')) return;
+  try{
+    await backendAction({ action: 'deleteOfficeDoc', fileId: fileId });
+    await removeOfficeDoc_(folder, year, fileId);
+    await addActivityLog('Removed "' + name + '" from Office Old Documents › ' + folder + ' › ' + year);
+  }catch(err){
+    alert('Could not remove it: ' + ((err && err.message) || 'the server did not respond'));
+  }
+  await renderOfficeDocsModule_();
+}
+
 async function renderPayrollDocsModule_(){
   const root = document.getElementById('payrollDocsRoot');
   if(!root) return;
