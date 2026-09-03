@@ -628,6 +628,64 @@ function doUploadDocument_(body) {
   return { ok: true, fileUrl: file.getUrl() };
 }
 
+// The archive's own upload, deliberately separate from doUploadDocument_ above.
+//
+// That one trashes whatever file already carries the name it is handed, which
+// is right for a replacement SLOT — the Employee Handbook, an employee's
+// Uniform/ID document — where a new upload IS the new version. An archive is
+// the opposite: a second "Purchase Invoice - Jan 2024.pdf" is a second
+// document, not a correction of the first, and silently binning the earlier
+// one is the worst thing a document archive could do. Repeating names are
+// normal here, so this never trashes: a clash gets " (2)", " (3)" and so on
+// before the extension, and both files stay.
+//
+// It also returns what the app's document table actually prints — id, size and
+// type — rather than just a URL. doUploadDocument_ returns a URL alone, which
+// is why every column beside the name would otherwise have to be guessed at,
+// and why View could not stream the bytes back through doGetDriveFile_.
+function doUploadOfficeDoc_(body) {
+  const folder = getOrCreateFolderPath_(body.folderPath || []);
+  let name = String(body.fileName || 'document');
+  if (folder.getFilesByName(name).hasNext()) {
+    const dot = name.lastIndexOf('.');
+    const stem = dot > 0 ? name.slice(0, dot) : name;
+    const ext = dot > 0 ? name.slice(dot) : '';
+    let n = 2;
+    while (folder.getFilesByName(stem + ' (' + n + ')' + ext).hasNext() && n < 500) n++;
+    name = stem + ' (' + n + ')' + ext;
+  }
+  const bytes = Utilities.base64Decode(body.base64Data);
+  const blob = Utilities.newBlob(bytes, body.mimeType || 'application/octet-stream', name);
+  const file = folder.createFile(blob);
+  return {
+    ok: true,
+    fileId: file.getId(),
+    fileName: name,
+    // Whether the name had to change is the app's to report, not something to
+    // discover later by comparing strings.
+    renamed: name !== String(body.fileName || ''),
+    size: file.getSize(),
+    mimeType: blob.getContentType(),
+    folderId: folder.getId(),
+    fileUrl: file.getUrl()
+  };
+}
+
+// Trashed rather than hard-deleted, so a document removed from the archive by
+// mistake is still recoverable from Drive's bin for thirty days. The app drops
+// its own record either way — a row pointing at a trashed file would show a
+// document that cannot be opened.
+function doDeleteOfficeDoc_(body) {
+  try {
+    DriveApp.getFileById(body.fileId).setTrashed(true);
+    return { ok: true };
+  } catch (err) {
+    // Already gone from Drive is not a failure: the caller's goal is that the
+    // file is not there, and it is not there.
+    return { ok: true, note: String(err) };
+  }
+}
+
 // Reads a document back out of Drive and hands its bytes to the app, so it
 // can be shown inside the app itself instead of sending whoever's looking
 // at it to a Drive link directly — which needs their own Google account
@@ -1504,6 +1562,18 @@ function doPost(e) {
       return forbidden_();
     }
     return jsonOut_(doUploadDocument_(body));
+  }
+
+  if (body.action === 'uploadOfficeDoc') {
+    // The Office Old Documents archive. HR only — every folder in it is
+    // company paperwork, and the engineer app has no business in any of it.
+    if (isEngineer) return forbidden_();
+    return jsonOut_(doUploadOfficeDoc_(body));
+  }
+
+  if (body.action === 'deleteOfficeDoc') {
+    if (isEngineer) return forbidden_();
+    return jsonOut_(doDeleteOfficeDoc_(body));
   }
 
   if (body.action === 'getDriveFile') {
