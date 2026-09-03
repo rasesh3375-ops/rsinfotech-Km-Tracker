@@ -252,10 +252,18 @@ it; the employer's contributions sit on top of it.
   1.12 EL, and the remainder carries on accruing rather than being thrown away
   at a month boundary. There is one definition of a qualifying day —
   `qualifyingPresentDays` — and every caller uses it: present (short leave
-  included), EL, SL, and a Sunday or declared holiday the employee was in
-  service for, count 1; a half-day code counts 0.5; unpaid absence, an unmarked
-  day and a sandwiched day count nothing, because what payroll does not pay for
-  does not earn leave. It used to be computed twice from two rules that
+  included), EL, SL, and a declared holiday the employee was in service for,
+  count 1; a half-day code counts 0.5; unpaid absence, an unmarked day and a
+  sandwiched day count nothing, because what payroll does not pay for does not
+  earn leave. **A Sunday counts nothing** — the weekly off is not a day worked
+  towards leave. It used to count 1, like any declared holiday, because the
+  resolved code for both is `'H'` and nothing looked past that; `elDayValue_`
+  is what now tells them apart, and a Sunday that also carries a declared
+  holiday still earns nothing rather than being paid for twice over. That
+  helper is used for the sandwich subtraction as well as the count, so a date
+  always comes off at exactly what it went on at — subtracting a flat 1 per
+  sandwiched date would charge a sandwiched Sunday twice, since it is already
+  worth nothing. It used to be computed twice from two rules that
   disagreed — `policyRowsFor` gave a half day nothing, `elFyRows` gave it 0.5
   and ignored SHORT — so the Attendance Sheet and the Encashment Report could
   report different EL for the same person in the same year. `elEarnedFrom` does
