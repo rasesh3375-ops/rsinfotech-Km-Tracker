@@ -27,11 +27,12 @@ const CHECKS = [
   ['check-wage-register.js',    'the wage register adds up the way the consultant\'s does'],
   ['check-tie-out.js',          'every printed sheet adds up as printed, and ESI rounds up'],
   ['check-el-accrual.js',       'EL accrues cumulatively at 1 per 25 days, not floored monthly'],
+  ['check-attendance-columns.js', 'the emailed attendance sheet reports each figure once, not twice'],
 ];
 
 let failed = 0;
 CHECKS.forEach(([file, what]) => {
-  const label = file.replace(/^check-|\.js$/g, '').padEnd(17);
+  const label = file.replace(/^check-|\.js$/g, '').padEnd(20);
   try {
     execFileSync(process.execPath, [path.join(__dirname, file)], { stdio: 'pipe' });
     console.log('  ok    ' + label + what);

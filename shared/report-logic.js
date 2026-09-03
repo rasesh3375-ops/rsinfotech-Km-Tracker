@@ -2714,9 +2714,17 @@ function attCodeText_(code, isPh){
 // same way the grid on screen resolves them, so a Sunday or a declared holiday
 // reads identically in both.
 function attendanceSheetCsv(employees, attByEmpId, dateList, holidayMap){
+  // Late Count, Short Leaves, Half Days and Sick Used used to sit in the policy
+  // block below, repeating Late, Short, Half and SL from the summary block
+  // above them — the same four numbers printed twice in one row, which HR read
+  // off the emailed copy and asked to have removed. They were not merely
+  // redundant: the two blocks count them in separate loops
+  // (computeAttendanceSummary and policyRowsFor), so they were four chances for
+  // one figure to be reported two different ways. The summary block's copies
+  // are the ones kept, because those are what the sheet shows on screen.
   const header = ['S.No','Name'].concat(dateList.map(d => parseInt(d.slice(8), 10))).concat(
     ['Present','Absent','EL','SL','LP','Half','Short','Late','Policy Cut',
-     'Employee Type','Late Count','Short Leaves','Half Days','Sick Used','Sick Balance',
+     'Employee Type','Sick Balance',
      'PL Earned','PL Used','PL Balance','LWP','Sandwich Days','Attendance Days','Overtime Minutes','Early Leaving Days',
      'Policy Rule Applied','Violation Reason']);
   const rows = [];
@@ -2742,8 +2750,10 @@ function attendanceSheetCsv(employees, attByEmpId, dateList, holidayMap){
     if(!rows[i]) return;
     rows[i].push(
       r.emp.employeeType === 'part' ? 'Part-time' : 'Full-time',
-      r.lateCount, r.shortLeaves, r.halfDays,
-      r.sickUsed, r.bal.sickLeft,
+      // r.lateCount, r.shortLeaves, r.halfDays and r.sickUsed are deliberately
+      // not printed here — see the header above. Sick BALANCE stays: it is what
+      // is left, which the summary block never carries.
+      r.bal.sickLeft,
       elDisplay(r.bal.plEarned), r.plUsed, elDisplay(r.bal.plLeft),
       r.lwp, r.sandwichDays || 0, r.attendanceDays, r.otMinutes || 0, r.earlyDays || 0,
       LEAVE_POLICY.version,
