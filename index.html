@@ -18900,6 +18900,32 @@ async function renderLeaveBalanceNextYearReport(){
   // already applies via ratePayAsOf. Reading the flat field here used to
   // apply today's heading to every FY ever reported, past or future.
   const slEligible = e => CONSULTANT_REPORT_HEADINGS.indexOf(ratePayAsOf(e, fyEnd).salaryHeading || 'managerial') !== -1 && e.employeeType !== 'wfh';
+
+  // Moving this year's earned EL into next year's opening is a year-END
+  // action, and the button says so before it is pressed rather than after.
+  // The figure above only counts days that have actually happened — that is
+  // the point of the up-to-month option — so pressing this in September would
+  // book everybody at about a third of what they will really earn and throw
+  // the rest of the year away. elOpening is also read live by the Salary
+  // Slip, the leave balance card and the Encashment Report, so writing next
+  // year's number early would change what the CURRENT year shows as well.
+  // Hence the one rule: not until the year being reported has actually ended.
+  const nextFy = fyOfStartYear(startYear + 1);
+  const elMoveOpen = todayStr() >= nextFy.from;
+  const elMoveLabel = elMoveOpen
+    ? 'Move EL earned this year into FY ' + nextFy.label + ' opening balance'
+    : 'Move EL into FY ' + nextFy.label + ' — available from ' + fmtDateIN(nextFy.from);
+  const elMoveNote = elMoveOpen
+    ? 'Sets each employee\'s EL opening balance for <strong>FY ' + nextFy.label + '</strong> to exactly the ' +
+      'EL Earned figure in the table above, and dates it from ' + fmtDateIN(nextFy.from) + ' so leave taken ' +
+      'before then is not charged against it. This is the policy\'s one-year lag — earned in one year, ' +
+      'usable from the next. Safe to press twice: it sets the balance to what was earned, it does not add ' +
+      'to it. It does not pay any cash; encashing unused leave is a separate action on the ' +
+      '<strong>Leave Encashment Report</strong>.'
+    : '<strong>Not yet.</strong> FY ' + startYear + '-' + String(startYear + 1).slice(2) + ' is still running, ' +
+      'so the EL Earned column above counts only up to today — pressing this now would book everybody at ' +
+      'part of a year and lose the rest. It unlocks on ' + fmtDateIN(nextFy.from) + ', once the year it is ' +
+      'moving has actually finished.';
   const elRows = await elFyRows(employees, startYear, upTo);
   const rows = elRows.map(r => {
     const eligible = slEligible(r.emp);
@@ -18963,9 +18989,13 @@ async function renderLeaveBalanceNextYearReport(){
       <br><strong style="color:var(--navy);">EL Earned</strong> = 1 day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} qualifying present days, counted as a running total across the whole financial year and <strong>not rounded down</strong> — 28 qualifying days earns ${elDisplay(28 / LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays)}, and the remainder carries on accruing instead of being lost at each month end. A qualifying day is <strong>exactly the Present figure the Attendance Sheet prints</strong> for that person, added up month by month, so this report and the Attendance Sheet can never disagree: a day present counts 1 (short leave included), a half-day code counts 0.5, and the late-coming policy cut comes off the same way it does there. EL, SL, a declared holiday, a Sunday, unpaid absence and an unmarked day all count nothing — none of them is a day worked. Earned this year, usable from next year, so it is never part of what this year pays out. Days that have not happened yet earn nothing, so a year still running counts only up to today.
       <br><strong style="color:var(--navy);">Opening balances, EL used and encashment</strong> are no longer shown here — this report answers what was earned this year and nothing else. The Leave Encashment Report carries the money side in full.</p>
     <div class="row-inline" style="margin-bottom:0;">
-      <button class="btn full" onclick='withBusy(this,"Working…",()=>openLeaveYearSl(${JSON.stringify(rows.filter(r=>r.slEligible).map(r=>({id:r.id,sl:r.slNext})))}, ${JSON.stringify(fyStart)}))'>Open leave year (SL)</button>
+      <button class="btn full" onclick='withBusy(this,"Working…",()=>moveEarnedElToNextYear(${JSON.stringify(rows.map(r=>({id:r.id,name:r.name,earned:r.earned})))}, ${startYear}))'>${elMoveLabel}</button>
     </div>
-    <p style="font-size:11px;color:var(--muted);margin:8px 0 0;">SL is a flat reset to each employee's yearly allowance, with no encashment option, per policy. The two EL year-end actions — encash unused leave, or carry the whole balance forward — are on the <strong>Leave Encashment Report</strong> now, beside the amounts they pay, rather than here where those amounts are no longer shown.</p>
+    <p style="font-size:11px;color:var(--muted);margin:8px 0 0;line-height:1.6;">${elMoveNote}</p>
+    <div class="row-inline" style="margin:14px 0 0;">
+      <button class="btn ghost full" onclick='withBusy(this,"Working…",()=>openLeaveYearSl(${JSON.stringify(rows.filter(r=>r.slEligible).map(r=>({id:r.id,sl:r.slNext})))}, ${JSON.stringify(fyStart)}))'>Open leave year (SL)</button>
+    </div>
+    <p style="font-size:11px;color:var(--muted);margin:8px 0 0;">SL is a flat reset to each employee's yearly allowance, with no encashment option, per policy. Encashing unused EL for cash is a separate action and stays on the <strong>Leave Encashment Report</strong>, beside the amounts it pays.</p>
   `;
   openFullscreenView(reportTitle, 'leaveBalanceNextYearBox');
 }
@@ -19022,6 +19052,64 @@ async function encashAndResetEl(list, nextFyStartMonth){
                        ' total, and opened next year\'s EL balance from what was earned this year');
   invalidateSharedRead('employees');
   showSavedToast('Encashed ₹' + fmtMoney(total) + ' — next year\'s EL balance opened automatically');
+  await renderLeaveBalanceNextYearReport();
+}
+
+// Moves what was earned in the reported year into the NEXT year's opening
+// balance, and nothing else — no cash, no closing-balance arithmetic. This is
+// the plain form of the policy's one-year lag: earned in year 1, usable from
+// year 2. encashAndResetEl does the same write as the last step of paying
+// people out; HR needed the same thing on its own for a year they are not
+// encashing.
+//
+// Two guards, both because elOpening is read live everywhere it appears.
+// First, the year has to have ended: the EL Earned figure only counts days
+// that have happened, so in September it is a third of a year, and writing it
+// forward would both under-credit next year and change what the current year
+// shows. Second, it SETS rather than adds, so pressing it twice on the same
+// year is harmless — an additive version would silently double everybody the
+// second time somebody clicked it.
+async function moveEarnedElToNextYear(list, startYear){
+  const nextFy = fyOfStartYear(startYear + 1);
+  if(todayStr() < nextFy.from){
+    alert('Not yet — FY ' + startYear + '-' + String(startYear + 1).slice(2) + ' is still running.\n\n' +
+      'The EL Earned figures on this report count only the days that have actually happened, so moving ' +
+      'them forward today would give everybody part of a year and lose the rest.\n\n' +
+      'This unlocks on ' + fmtDateIN(nextFy.from) + '.');
+    return;
+  }
+  const employees = await getEmployees();
+  const fromMonth = nextFy.from.slice(0, 7);
+  // Only what actually changes is written. Re-running after a fixed
+  // attendance correction should rewrite one record, not all forty.
+  const changed = [];
+  let unchanged = 0, totalDays = 0;
+  list.forEach(r => {
+    const emp = employees.find(e => e.id === r.id);
+    if(!emp) return;
+    const want = Number(r.earned) || 0;
+    totalDays += want;
+    if((Number(emp.elOpening) || 0) === want && emp.leaveOpeningFrom === fromMonth){ unchanged++; return; }
+    emp.elOpening = want;
+    emp.leaveOpeningFrom = fromMonth;
+    changed.push(emp);
+  });
+  if(!changed.length){
+    alert('Nothing to do — all ' + unchanged + ' employee(s) already open FY ' + nextFy.label +
+          ' at what they earned in FY ' + startYear + '-' + String(startYear + 1).slice(2) + '.');
+    return;
+  }
+  if(!confirm('Open FY ' + nextFy.label + ' with the EL earned in FY ' + startYear + '-' +
+      String(startYear + 1).slice(2) + '?\n\n' +
+      changed.length + ' employee(s) updated' + (unchanged ? ', ' + unchanged + ' already correct' : '') +
+      '.\nTotal carried forward: ' + elDisplay(totalDays) + ' day(s).\n\n' +
+      'Each balance is dated from ' + fmtDateIN(nextFy.from) + '. No cash is paid — encashment is a ' +
+      'separate action on the Leave Encashment Report.')) return;
+  await saveEmployees(changed);
+  await addActivityLog('Moved EL earned in FY ' + startYear + '-' + String(startYear + 1).slice(2) +
+    ' into FY ' + nextFy.label + ' opening balances — ' + changed.length + ' employee(s), ' +
+    elDisplay(totalDays) + ' day(s) in total');
+  showSavedToast('FY ' + nextFy.label + ' EL opened for ' + changed.length + ' employee(s)');
   await renderLeaveBalanceNextYearReport();
 }
 
