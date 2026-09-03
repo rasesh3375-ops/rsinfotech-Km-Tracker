@@ -420,5 +420,17 @@ change is worth testing this way.
   not reintroduce per-cell writes, and do not use `safeSet` where the caller
   needs to know whether the write succeeded — it swallows errors. Use
   `remoteSet`, which returns a boolean.
+- **One request is not one write.** `setMany` and `setSequence` both group the
+  rows they are changing into contiguous runs and write a run at a time, and
+  `setMany` appends brand-new keys in one block rather than an `appendRow`
+  each. This is not tidiness: every write in the app queues on one script-wide
+  lock that waits only **6 seconds** (`lock.waitLock(6000)` in `doPost`), so a
+  `setValue` per key holds it for as many round trips to the Sheets service as
+  there are keys. `setSequence` shipped that way, renumbering forty employees
+  took far longer than six seconds, and the next save — HR pressing Save again,
+  exactly as the error told them to — came back `busy` and reached them as
+  "Could not save — the server did not respond" on a record that was fine.
+  Never write a cell at a time inside that lock.
+  `tools/check-sequence-writes.js` asserts the write counts for both.
 - `position: sticky` works inside `.modal-box` because the overlay, not the
   box, is the scrolling element.

@@ -22,8 +22,10 @@
 //      duplicates, which the next renumber then built on.
 //
 // So this asserts the contract on both sides of the engine rather than the
-// engine again: what a no-op means, and that a partial write is never
-// reported as a whole one. Pure — no jsdom, no network.
+// engine again: what a no-op means, that a partial write is never reported as
+// a whole one, and that neither setSequence nor setMany goes back to one
+// Sheets call per key — which is what made a perfectly good save fail with
+// "the server did not respond". Pure — no jsdom, no network.
 const fs = require('fs'), vm = require('vm'), path = require('path');
 const R = path.join(__dirname, '..');
 
@@ -198,6 +200,27 @@ console.log('\nand it is written in runs, not one call per employee\n');
   // The shape the bug had: what it used to cost.
   check('the old way cost one call per employee, which is what broke it',
         adjacent.length, 40);
+
+  // setMany had the identical shape and was fixed the same way, before it
+  // could do the same thing on a busy attendance day. Its extra wrinkle is
+  // that a key with no row yet is appended rather than updated, and those
+  // used to be an appendRow each.
+  console.log('');
+  const setManyWrites = (existingRows, newKeys) => ({
+    updates: writesFor(existingRows),
+    appends: newKeys > 0 ? 1 : 0,          // one block, not one per key
+  });
+  // A month of attendance for ten staff, all of whom already have a row.
+  check('ten adjacent attendance rows are one write, not ten',
+        setManyWrites([12,13,14,15,16,17,18,19,20,21], 0), { updates: 1, appends: 0 });
+  // First save of a new financial year: nobody has a row for it yet.
+  check('ten brand-new keys are one appended block, not ten appendRows',
+        setManyWrites([], 10), { updates: 0, appends: 1 });
+  // The realistic middle: some rows exist, some are new.
+  check('a mix costs one write per run plus one block',
+        setManyWrites([12,13,14], 3), { updates: 1, appends: 1 });
+  check('and nothing at all costs nothing',
+        setManyWrites([], 0), { updates: 0, appends: 0 });
 }
 
 console.log('\n' + (fails.length ? fails.length + ' FAILURE(S):\n  ' + fails.join('\n  ') : 'PASS'));
