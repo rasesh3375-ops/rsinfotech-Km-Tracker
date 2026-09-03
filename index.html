@@ -3191,6 +3191,12 @@
             <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Filled in from the employee record for anyone already marked as left.</p>
             <div style="height:12px"></div>
           </div>
+          <div id="genSalaryMonthWrap" class="hidden">
+            <label class="field">Salary month (optional)</label>
+            <input type="month" id="genSalaryMonth" />
+            <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Leave blank for a slip built from the Rate of Pay — the full month, no attendance. Choose a month and the slip is built from that month's <strong>Attendance Sheet</strong> instead, exactly as the Salary Sheet pays it, and shows Working Days and Loss of Pay.</p>
+            <div style="height:12px"></div>
+          </div>
           <label class="field">Date of issue</label>
           <input type="date" id="genIssueDate" />
           </div>
@@ -23996,6 +24002,8 @@ async function toggleGeneratorFieldsForType(){
   // reappears still holds the right answer. The exception is the last working
   // date, which is not autofilled from the record for current staff and so is
   // cleared with the employee instead — see populateGeneratorEmployees.
+  const monthWrap = document.getElementById('genSalaryMonthWrap');
+  if(monthWrap) monthWrap.classList.toggle('hidden', type !== 'Salary Slip');
   const need = letterFieldsFor(type);
   [['genDesignationWrap', need.designation], ['genDepartmentWrap', need.department],
    ['genDojWrap', need.doj], ['genLwdWrap', need.lwd]].forEach(([id, on]) => {
@@ -24456,22 +24464,21 @@ function slipMoneyRow_(label, amount, note){
     <td class="slip-amt">${fmtMoney(v)}</td></tr>`;
 }
 
-function salarySlipHtml_(f, emp, company, monthLabel, monthDays, duration){
-  // Conveyance sits INSIDE the earnings total here, unlike the wage register
-  // where it is deliberately outside. A payslip's whole contract with the
-  // person reading it is that Net Pay equals Earnings minus Deductions, and
-  // conveyance is money they are actually handed — leaving it out of (A) would
-  // make that subtraction fail to reach the figure in their bank by exactly
-  // the conveyance. The note beside it says why the wage register differs.
+function salarySlipHtml_(f, emp, company, monthLabel, monthDays, duration, days){
+  // Conveyance is NOT in Gross Earnings — it is added back below, after Net
+  // Pay, exactly as the Salary Sheet reconciles it: consultantSalary is gross
+  // less deductions, and Net Salary is that plus conveyance. Keeping the same
+  // order here means the slip and the sheet can be read side by side, and
+  // (A) stays the wage PF, ESI and PT are actually charged on rather than a
+  // figure inflated by money for petrol.
   const earnRows = [
     slipMoneyRow_('Basic', f.basic),
     slipMoneyRow_('House Rent Allowance', f.hra),
     slipMoneyRow_('Leave Travel Allowance', f.lta),
-    slipMoneyRow_('Other allowances', f.other),
-    slipMoneyRow_('Conveyance', f.conveyance, '(paid on top, outside PF/ESI/PT)')
+    slipMoneyRow_('Other allowances', f.other)
   ].filter(Boolean).join('');
   const gross = Math.round((Number(f.basic)||0) + (Number(f.hra)||0) + (Number(f.lta)||0) +
-                           (Number(f.other)||0) + (Number(f.conveyance)||0));
+                           (Number(f.other)||0));
   const dedRows = [
     slipMoneyRow_('Provident Fund (Employee)', f.pf),
     slipMoneyRow_('ESIC (Employee)', f.esiDeduction),
@@ -24483,7 +24490,10 @@ function salarySlipHtml_(f, emp, company, monthLabel, monthDays, duration){
   ].filter(Boolean).join('');
   const deductions = Math.round((Number(f.pf)||0) + (Number(f.esiDeduction)||0) + (Number(f.pt)||0) +
     (Number(f.advanceTemp)||0) + (Number(f.advance)||0) + (Number(f.emi)||0) + (Number(f.retention)||0));
-  const net = gross - deductions;
+  const netPay = gross - deductions;
+  const conveyance = Math.round(Number(f.conveyance) || 0);
+  const directPaid = Math.round(Number(f.directPaid) || 0);
+  const takeHome = netPay + conveyance - directPaid;
 
   const left = [
     slipPair_('Employee Name', emp.name),
@@ -24499,6 +24509,11 @@ function salarySlipHtml_(f, emp, company, monthLabel, monthDays, duration){
     slipPair_('Salary Month', monthLabel),
     slipPair_('Duration', duration),
     slipPair_('Days in Month', monthDays),
+    // Only on a slip actually built from attendance. A Rate of Pay slip has no
+    // opinion on how many days were worked, and printing one would invite
+    // somebody to read a figure that had nothing to do with the amounts.
+    days ? slipPair_('Working Days', days.workingDays) : null,
+    days ? slipPair_('Loss of Pay (days)', days.lop) : null,
     slipPair_('PAN No', emp.pan),
     slipPair_('ESIC Number', emp.esiNumber)
   ].filter(Boolean);
@@ -24531,11 +24546,20 @@ function salarySlipHtml_(f, emp, company, monthLabel, monthDays, duration){
         <td><strong>Total Deductions (B)</strong></td><td class="slip-amt"><strong>${fmtMoney(deductions)}</strong></td>
       </tr></tfoot>
     </table>
-    <table class="slip-tbl slip-net"><tbody><tr>
-      <td class="slip-net-label"><strong>Net Pay (A − B)</strong></td>
-      <td class="slip-amt slip-net-amt"><strong>${fmtMoney(net)}</strong></td>
-      <td class="slip-words">${escapeHtml(amountInWords_(net))}</td>
-    </tr></tbody></table>
+    <table class="slip-tbl slip-net"><tbody>
+      <tr><td class="slip-net-label">Net Pay (A − B)</td>
+          <td class="slip-amt slip-net-amt">${fmtMoney(netPay)}</td>
+          <td class="slip-words" rowspan="${1 + (conveyance ? 1 : 0) + (directPaid ? 1 : 0)}">
+            ${escapeHtml(amountInWords_(takeHome))}</td></tr>
+      ${conveyance ? `<tr><td class="slip-net-label">Add: Conveyance
+          <span class="slip-note">(paid on top, outside PF/ESI/PT)</span></td>
+          <td class="slip-amt slip-net-amt">${fmtMoney(conveyance)}</td></tr>` : ''}
+      ${directPaid ? `<tr><td class="slip-net-label">Less: already paid directly</td>
+          <td class="slip-amt slip-net-amt">${fmtMoney(directPaid)}</td></tr>` : ''}
+    </tbody>
+    <tfoot><tr><td class="slip-net-label"><strong>Net Salary</strong></td>
+      <td class="slip-amt slip-net-amt"><strong>${fmtMoney(takeHome)}</strong></td>
+      <td class="slip-words"></td></tr></tfoot></table>
     <p class="slip-foot">This is a computer generated slip and does not require a signature.</p>
   </div>`;
 }
@@ -24782,7 +24806,36 @@ async function generateLetter(){
       f.existingAdvance = advanceBalanceAfterMonth(matched, ly, lm);
     }
   }
-  if(matched && type === 'Salary Slip'){
+  // A slip for a NAMED month is built from that month's attendance through
+  // computeSalaryForEmployee — the very function the Salary Sheet pays from —
+  // so the slip and the sheet cannot disagree about what somebody was paid.
+  // Without a month it stays the Rate of Pay template it has always been: a
+  // full month, no attendance, and no Working Days or Loss of Pay rows, since
+  // printing those would imply attendance had been looked at when it had not.
+  let slipDays = null;
+  const salaryMonth = ((document.getElementById('genSalaryMonth') || {}).value || '').trim();
+  if(matched && type === 'Salary Slip' && salaryMonth){
+    const [sy, sm] = salaryMonth.split('-').map(Number);
+    const monthDays = new Date(sy, sm, 0).getDate();
+    const dateList = datesBetween_(salaryMonth + '-01',
+      salaryMonth + '-' + String(monthDays).padStart(2, '0'));
+    const holidayMap = await getHolidayMap_local();
+    const sal = await computeSalaryForEmployee(matched, dateList, monthDays, holidayMap);
+    f.basic = Math.round(sal.basic); f.hra = Math.round(sal.hra); f.lta = Math.round(sal.lta);
+    f.other = 0; f.gross = Math.round(sal.gross); f.conveyance = Math.round(sal.conveyance);
+    f.pf = Math.round(sal.pf); f.esiDeduction = Math.round(sal.esi); f.pt = Math.round(sal.pt);
+    f.emi = Math.round(sal.loanEmi);
+    f.advanceTemp = Math.round(sal.advanceTemp); f.advance = Math.round(sal.advance);
+    f.retention = Math.round(sal.retention);
+    f.directPaid = Math.round(sal.directPaid || 0);
+    f.net = Math.round(sal.netSalary);
+    // leaveDays is the unpaid count the sheet actually docks — absence, leave
+    // without pay, the half days the late-coming policy imposes and any
+    // sandwiched day — so paid days are the rest of the month.
+    slipDays = { monthDays: monthDays, lop: sal.leaveDays,
+                 workingDays: Math.round((monthDays - sal.leaveDays) * 100) / 100 };
+    f.salaryMonth = salaryMonth;
+  } else if(matched && type === 'Salary Slip'){
     // Derived from Rate of Pay and the salary heading, not from stored Basic
     // and HRA — those are no longer typed, so a slip built on them printed
     // zeros for every employee taken on since Rate of Pay took over.
@@ -24816,13 +24869,17 @@ async function generateLetter(){
   // the plain-text version above is still what the emailed/copied body says.
   let bodyHtml;
   if(type === 'Salary Slip' && matched){
-    const d = f.issueDate ? new Date(f.issueDate + 'T00:00:00') : new Date();
+    // The chosen salary month if there is one, else the month the slip is
+    // being issued in — never a month nobody picked while figures came from
+    // another.
+    const d = f.salaryMonth ? new Date(f.salaryMonth + '-01T00:00:00')
+            : (f.issueDate ? new Date(f.issueDate + 'T00:00:00') : new Date());
     const y = d.getFullYear(), mo = d.getMonth() + 1;
     const monthDays = new Date(y, mo, 0).getDate();
     const ym = y + '-' + String(mo).padStart(2, '0');
     const monthLabel = d.toLocaleDateString('en-GB', { month: 'long' }) + '-' + y;
     const duration = fmtDateIN(ym + '-01') + ' to ' + fmtDateIN(ym + '-' + String(monthDays).padStart(2, '0'));
-    bodyHtml = salarySlipHtml_(f, matched, company, monthLabel, monthDays, duration);
+    bodyHtml = salarySlipHtml_(f, matched, company, monthLabel, monthDays, duration, slipDays);
   } else {
     bodyHtml = `<div class="rpt-body" style="white-space:pre-wrap;">${escapeHtml(text)}</div>`;
   }
