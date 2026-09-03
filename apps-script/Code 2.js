@@ -166,7 +166,7 @@ function getSessionSheet_() {
   let sheet = ss.getSheetByName(SESSION_SHEET_NAME);
   if (!sheet) {
     sheet = ss.insertSheet(SESSION_SHEET_NAME);
-    sheet.appendRow(['tokenHash', 'role', 'username', 'expiresAt']);
+    sheet.appendRow(['tokenHash', 'role', 'username', 'expiresAt', 'createdAt']);
   }
   return sheet;
 }
@@ -201,13 +201,28 @@ function purgeExpiredSessions_(sheet) {
   if (data.length < 2) return 0;
   const now = Date.now();
 
-  // Newest first, so capping below keeps the most recent logins and drops the
-  // oldest — the ones least likely to be a device anybody is still holding.
+  // Newest LOGIN first, so capping below keeps the most recent logins and drops
+  // the oldest — the ones least likely to be a device anybody is still holding.
+  //
+  // This used to sort on expiresAt, which ranks logins by recency only while
+  // every session has the same lifetime. HR's dropped to 24 hours while
+  // engineers' stayed at 30 days, and legacy HR rows written before that change
+  // still carry 30-day expiries. So a token created seconds ago expired soonest
+  // of the lot, sorted last, and was the FIRST thing this dropped — the purge
+  // deleted the session the very login that triggered it had just created, and
+  // kept five stale August ones instead. HR was signed out minutes after
+  // signing in, repeatedly, and apiFetch retrying a slow login made it worse by
+  // running this again for each retry. The diagnosis was six live hr/admin rows
+  // against a cap of five, none of them expiring within 24 hours.
+  //
+  // createdAt is written by createSession_ below. A row from before this
+  // existed has none, reads as 0, sorts oldest and is evicted first — which is
+  // exactly what should happen to the stale rows that caused this.
   const live = [];
   for (let i = 1; i < data.length; i++) {
     if (Number(data[i][3]) >= now) live.push(data[i]);
   }
-  live.sort(function (a, b) { return Number(b[3]) - Number(a[3]); });
+  live.sort(function (a, b) { return (Number(b[4]) || 0) - (Number(a[4]) || 0); });
 
   // Expiry alone was not the problem. On the real sheet 322 of 330 rows were
   // LIVE — an engineer session lasts 30 days and every login appends another
@@ -232,8 +247,16 @@ function purgeExpiredSessions_(sheet) {
 
   const removed = data.length - keep.length;
   if (!removed) return 0;
-  sheet.getRange(1, 1, keep.length, 4).setValues(keep);
-  sheet.getRange(keep.length + 1, 1, data.length - keep.length, 4).clearContent();
+  // Every row padded to the same width, or setValues rejects a ragged array —
+  // rows written before createdAt existed are four wide, new ones are five.
+  const WIDTH = 5;
+  const rect = keep.map(function (r) {
+    const out = [];
+    for (let c = 0; c < WIDTH; c++) out.push(r[c] === undefined ? '' : r[c]);
+    return out;
+  });
+  sheet.getRange(1, 1, rect.length, WIDTH).setValues(rect);
+  sheet.getRange(rect.length + 1, 1, data.length - rect.length, WIDTH).clearContent();
   return removed;
 }
 
@@ -249,8 +272,11 @@ function createSession_(role, username, ttlMs) {
     Logger.log('Session purge skipped: ' + err);
   }
   const token = Utilities.getUuid() + '-' + Utilities.getUuid();
-  const expiresAt = Date.now() + (ttlMs || SESSION_LIFETIME_MS);
-  sheet.appendRow([sha256Hex_(token), role, username, expiresAt]);
+  const createdAt = Date.now();
+  const expiresAt = createdAt + (ttlMs || SESSION_LIFETIME_MS);
+  // createdAt is what the purge ranks on. Expiry cannot stand in for it once
+  // two roles have different lifetimes — see purgeExpiredSessions_.
+  sheet.appendRow([sha256Hex_(token), role, username, expiresAt, createdAt]);
   return { token: token, expiresAt: expiresAt };
 }
 const RECOVERY_TOKEN_TTL_MS = 10 * 60 * 1000; // 10 minutes to finish a password reset
@@ -287,15 +313,15 @@ function diagnoseSessions() {
   var now = Date.now();
   Logger.log('SESSIONS sheet: ' + sheet.getName());
   Logger.log('rows incl. header: ' + data.length + '   columns: ' +
-             (data[0] ? data[0].length : 0) + '   (purge expects exactly 4)');
+             (data[0] ? data[0].length : 0) + '   (5 once createdAt is in use)');
   if (data[0]) Logger.log('header: ' + JSON.stringify(data[0]));
 
   // The purge rewrites this sheet with a 4-column setValues. A sheet that is
   // not 4 columns wide makes that throw, createSession_ swallows it, and the
   // sheet then grows without limit — which is worth knowing about.
-  if (data[0] && data[0].length !== 4) {
-    Logger.log('*** WIDTH MISMATCH — purgeExpiredSessions_ cannot rewrite this sheet,');
-    Logger.log('*** so it throws on every login and is silently skipped.');
+  if (data[0] && data[0].length > 5) {
+    Logger.log('*** WIDTH MISMATCH — more than 5 columns; purgeExpiredSessions_ pads to 5');
+    Logger.log('*** and would leave the extras behind.');
   }
 
   var live = 0, expired = 0, blank = 0, malformed = 0;
