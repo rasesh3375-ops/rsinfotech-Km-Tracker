@@ -11652,8 +11652,43 @@ async function applySequenceChange_(employees, empId, wanted){
   const after = resequenceEmployees(employees, empId, wanted);
   const changed = changedSequenceRecords(employees, after);
   if(!changed.length) return 0;
-  await saveEmployees(changed);
+  await saveSequenceOnly_(changed);
   return changed.length;
+}
+
+// Writes seqNo for a set of employees and nothing else.
+//
+// This used to hand the changed records to saveEmployees, which sends each
+// one's WHOLE record. That made a display-order change indistinguishable from
+// a real edit to the backend's staleness guard: if another device had saved
+// one of these people since this browser last read the roster, that person's
+// write was refused, and — because setMany reported every requested key as
+// saved whether it wrote it or not — the app said the sequence was updated
+// while some of it silently was not. The roster ended up with gaps and
+// duplicates, and the next renumber built on top of them. It was also
+// dangerous in the other direction: a forty-field record read minutes ago
+// overwriting a newer edit made elsewhere.
+//
+// setSequence merges the one field server-side against whatever the row holds
+// right now, so neither can happen. The fallback is the deploy order, not
+// belt-and-braces: index.html is live within a minute of a push and Code 2.js
+// is pasted in by hand, so there is always a window where this frontend talks
+// to a backend that has never heard of setSequence. It stops firing by itself
+// the moment the backend is pasted.
+async function saveSequenceOnly_(changed){
+  const sequence = {};
+  changed.forEach(e => { sequence[e.id] = seqNoOf(e); });
+  const data = await backendAction({ action: 'setSequence', sequence });
+  if(data && data.sequenced){
+    if((data.missing || []).length){
+      throw new Error((data.missing || []).length + ' employee record(s) could not be renumbered');
+    }
+    changed.forEach(e => invalidateSharedRead('employee:' + e.id));
+    invalidateSharedRead('employees');
+    return;
+  }
+  // Older backend — the whole-record write, exactly as before.
+  await saveEmployees(changed);
 }
 
 // Gives everybody a number in the order they are already listed in, which is
@@ -11692,7 +11727,18 @@ async function saveEmployees(list){
   // (leave rollover, EL encashment, document migration, always-present bulk)
   // that could report a clean success while some or all of it silently
   // failed to save.
-  if(!saved || saved.size !== Object.keys(entries).length) throw new Error('Could not save — the server did not respond.');
+  if(!saved) throw new Error('Could not save — the server did not respond.');
+  // Which keys came back unconfirmed, not just how many. The backend refuses
+  // a write whose record is older than the row already in the sheet (an edit
+  // made on another device since this browser last read the roster), and it
+  // now reports those separately instead of counting them as saved. Naming
+  // the employees is the difference between "try again" and knowing that
+  // reloading first is what will actually fix it.
+  const missing = Object.keys(entries).filter(k => !saved.has(k));
+  if(missing.length){
+    throw new Error(missing.length + ' record(s) were not written because a newer version is already ' +
+      'stored — reload the page so you are working from the current data, then try again');
+  }
   invalidateSharedRead('employees');
 }
 // Loan and advance requests, from the moment the form is generated to the
@@ -16788,6 +16834,21 @@ async function saveEmployeeForm(){
     draft.trackingUsername = draft.trackingUsername || '';
   }
 
+  // Read here, with every other field, and NOT later where it is used. The
+  // sequence used to be read off the DOM after `await saveOneEmployee_(...)`,
+  // and anything that re-rendered the modal in between — a salary-history
+  // row removed, an increment recorded, a document upload finishing — rebuilt
+  // this input from the stored record, putting the old number back. The read
+  // then found the number the employee already had, applySequenceChange_
+  // correctly decided nothing needed moving, and the save reported a plain
+  // "Updated <name>" with no mention of the sequence at all. HR set somebody
+  // to 7, saw a clean save, and found them back on 3 after logging in again.
+  // A blank box still means "no opinion, leave them where they are".
+  const wantedSeqRaw = (document.getElementById('f_seqNo') || {}).value;
+  const wantedSeq = Number(wantedSeqRaw);
+  const wantedSeqGiven = String(wantedSeqRaw || '').trim() !== '' &&
+                         isFinite(wantedSeq) && wantedSeq > 0;
+
   Object.assign(draft, {
     id, name,
     salutation: document.getElementById('f_salutation').value,
@@ -16889,7 +16950,7 @@ async function saveEmployeeForm(){
   // twenty staff that was around thirty sequential calls to Apps Script for a
   // single save. Those screens rebuild when they are next opened instead.
   const isNew = !editingEmployeeId;
-  let saved = false, seqMoved = 0, seqNoteFailed = false;
+  let saved = false, seqMoved = 0, seqNoteFailed = false, seqFailReason = '';
   let droppedDocs = [];
   try{
     // Whatever failed to reach Drive the first time — a network blip while
@@ -16926,12 +16987,12 @@ async function saveEmployeeForm(){
     try{
       // `employees` already has toStore in it — pushed for a new employee,
       // replaced in place for an existing one, a few lines above.
-      const wantSeq = Number((document.getElementById('f_seqNo') || {}).value);
-      const target = (isFinite(wantSeq) && wantSeq > 0) ? wantSeq
+      const target = wantedSeqGiven ? wantedSeq
         : (seqNoOf(toStore) === Infinity ? employees.length : seqNoOf(toStore));
       seqMoved = await applySequenceChange_(employees, toStore.id, target);
     }catch(err){
       seqNoteFailed = true;
+      seqFailReason = (err && err.message) || 'the server did not respond';
     }
   }catch(err){
     showEmpSaveError('Could not save: ' + (err && err.message ? err.message : 'the server did not respond') + '. Nothing was lost — press Save again.');
@@ -16952,9 +17013,22 @@ async function saveEmployeeForm(){
   // to reopen the very form that was just successfully saved and closed.
   kmtBack();
   showSavedToast((isNew ? 'Added ' : 'Updated ') + name + ' (' + id + ')' +
-    (seqNoteFailed ? ' — saved, but the sequence could not be updated; set it again'
+    (seqNoteFailed ? ' — saved, but the sequence could not be updated'
      : seqMoved > 1 ? ' — sequence updated, ' + (seqMoved - 1) + ' other(s) moved'
      : seqMoved === 1 ? ' — sequence updated' : ''));
+  // A sequence that did not move is the one failure HR cannot see for
+  // themselves: the record saved, the form closed, and the only sign was a
+  // clause on a toast that fades in a few seconds. HR set somebody to 7,
+  // read "Updated <name>", and only found out at the next login. Same
+  // treatment as a dropped document — an alert that has to be dismissed.
+  if(seqNoteFailed){
+    alert(name + ' was saved, but the sequence number was NOT changed' +
+      (seqFailReason ? ' — ' + seqFailReason : '') + '.\n\n' +
+      'Everything else about this employee is saved. Open ' + name +
+      ' and set the Sequence No. again.\n\n' +
+      'If it keeps failing, run Settings → Number everyone in sequence first — ' +
+      'that repairs a roster with gaps or duplicates, which is what usually blocks a move.');
+  }
   // A toast fades on its own in a few seconds — fine for confirming the
   // save, not for telling HR a document silently didn't make it in. This
   // needs to actually be seen and acted on, so it's a real alert instead.

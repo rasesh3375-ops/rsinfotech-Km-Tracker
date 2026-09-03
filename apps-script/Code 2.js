@@ -1446,6 +1446,11 @@ function doPost(e) {
       if (body.key !== 'leave_requests') return forbidden_();
     } else if (body.action === 'saveFile') {
       return forbidden_();
+    } else if (body.action === 'setSequence') {
+      // The roster's display order is HR's, like every other employee: field.
+      // Named explicitly rather than left to fall through — a write action
+      // nobody has listed is refused, not allowed.
+      return forbidden_();
     }
   }
 
@@ -1531,16 +1536,67 @@ function doPost(e) {
       for (var mi = 1; mi < dataM.length; mi++) indexM[dataM[mi][0]] = mi + 1;
       var entries = body.entries || {};
       var savedKeys = [];
+      var skippedKeys = [];
       for (var k in entries) {
         if (!indexM[k]) {
           sheetM.appendRow([k, entries[k]]);
+          savedKeys.push(k);
         } else if (!isStaleEmployeeWrite_(k, entries[k], dataM[indexM[k] - 1][1]) &&
                    !isStalePayrollDocsWrite_(k, entries[k], dataM[indexM[k] - 1][1])) {
           sheetM.getRange(indexM[k], 2).setValue(entries[k]);
+          savedKeys.push(k);
+        } else {
+          // A key the staleness guard refused. This used to be pushed into
+          // savedKeys anyway, alongside the rows that really were written —
+          // so saveEmployees' deliberate "every key requested must actually
+          // come back confirmed" check (index.html), which exists precisely
+          // to catch a partial bulk save, could never see it. A sequence
+          // change that skipped somebody reported complete success and left
+          // the roster with gaps and duplicates, and the next renumber built
+          // on that. Report it separately and let the client say so.
+          skippedKeys.push(k);
         }
-        savedKeys.push(k);
       }
-      return jsonOut_({ ok: true, many: true, saved: savedKeys });
+      return jsonOut_({ ok: true, many: true, saved: savedKeys, skipped: skippedKeys });
+    } else if (body.action === 'setSequence') {
+      // The central sequence, and nothing else. applySequenceChange_ used to
+      // send each moved employee's WHOLE record back just to change seqNo,
+      // which put a display-order change in front of the staleness guard that
+      // protects real edits: if another device had saved that employee since
+      // this browser last read the roster, the write was refused and the
+      // person silently kept their old number. Worse, had the guard let it
+      // through, a forty-field record read minutes ago would have overwritten
+      // that other device's edit.
+      //
+      // Merging the one field here, inside the lock, against whatever the row
+      // holds right now, removes both problems at once: nothing else in the
+      // record is touched, so there is nothing to clobber and nothing to be
+      // stale about. It also makes true what index.html has always claimed —
+      // "the only field written is seqNo. That is why it is safe to run on
+      // every save."
+      var sheetQ = getSheet_();
+      var dataQ = sheetQ.getDataRange().getValues();
+      var indexQ = {};
+      for (var qi = 1; qi < dataQ.length; qi++) indexQ[dataQ[qi][0]] = qi + 1;
+      var seqs = body.sequence || {};
+      var seqSaved = [];
+      var seqMissing = [];
+      for (var sid in seqs) {
+        var rowKey = 'employee:' + sid;
+        if (!indexQ[rowKey]) { seqMissing.push(sid); continue; }
+        var recQ;
+        try { recQ = JSON.parse(dataQ[indexQ[rowKey] - 1][1]); } catch (eQ) { recQ = null; }
+        // A row that will not parse is left exactly as it is rather than
+        // replaced with a record built from nothing — the same fail-open the
+        // staleness guards use.
+        if (!recQ || typeof recQ !== 'object') { seqMissing.push(sid); continue; }
+        var wantN = Number(seqs[sid]);
+        if (!isFinite(wantN) || wantN <= 0) { seqMissing.push(sid); continue; }
+        recQ.seqNo = wantN;
+        sheetQ.getRange(indexQ[rowKey], 2).setValue(JSON.stringify(recQ));
+        seqSaved.push(sid);
+      }
+      return jsonOut_({ ok: true, sequenced: true, saved: seqSaved, missing: seqMissing });
     } else if (body.action === 'saveFile') {
       // dedupeTail is only ever sent for the one-time HR letters — see
       // deleteAcrossYearFolders_ above. Every other caller omits it and this
