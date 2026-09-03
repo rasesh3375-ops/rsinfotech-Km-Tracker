@@ -46,11 +46,23 @@ const mark = (att, from, to, code) => {
   return att;
 };
 
-console.log('25 qualifying days is one day of leave, and it is not floored\n');
+// HR's rule: whole days, rounded to the NEAREST one. Leave is granted and
+// encashed in days, so a fractional balance was a number nobody could act on.
+// Nearest rather than floored is the deliberate half of it — on 24.5 days
+// floor pays nothing for a year of work.
+console.log('25 qualifying days is one day of leave, and the answer is whole\n');
 check('25 qualifying days', L.elEarnedFrom(25), 1);
-check('28 qualifying days is the worked example', L.elDisplay(L.elEarnedFrom(28)), 1.12);
-check('24 earns something, not nothing', L.elDisplay(L.elEarnedFrom(24)), 0.96);
 check('50 earns two', L.elEarnedFrom(50), 2);
+check('28 rounds down to 1, not 1.12', L.elEarnedFrom(28), 1);
+check('37 rounds down to 1 — just under the half', L.elEarnedFrom(37), 1);
+check('38 rounds up to 2 — just over it', L.elEarnedFrom(38), 2);
+check('24 still earns the day it nearly made', L.elEarnedFrom(24), 1);
+// The case that decided nearest over floor: a part-year joiner on 24.5 days.
+check('12 earns nothing — under half of a day', L.elEarnedFrom(12), 0);
+check('13 earns one — over half', L.elEarnedFrom(13), 1);
+check('nothing worked earns nothing', L.elEarnedFrom(0), 0);
+check('every answer is a whole number',
+      [0, 12, 13, 24, 25, 28, 37, 38, 130, 313].every(d => Number.isInteger(L.elEarnedFrom(d))), true);
 check('the divisor comes from config, not a literal', PER, 25);
 
 console.log('\nwhat one day is worth — 2025-06-10 is a working Tuesday\n');
@@ -127,7 +139,7 @@ MONTHS.forEach(([name, from, to]) => {
   check('  ' + name + ' ties to its own Present figure', q, s.present);
 });
 const ytd = L.qualifyingPresentDays(emp, att, '2026-04-01', '2026-08-31', holidayMap);
-console.log('  April-August: ' + ytd + ' days → ' + L.elDisplay(L.elEarnedFrom(ytd)) + ' EL');
+console.log('  April-August: ' + ytd + ' days → ' + L.elEarnedFrom(ytd) + ' EL (whole days)');
 check('the year to date is those months added up', ytd, summed);
 
 console.log('\nthe late-coming Policy Cut comes off, and monthly\n');
@@ -159,17 +171,25 @@ L.datesBetween_('2025-04-01', '2025-05-31').forEach(d => {
 });
 const apr = L.qualifyingPresentDays(emp, clean, '2025-04-01', '2025-04-30', {});
 const may = L.qualifyingPresentDays(emp, clean, '2025-04-01', '2025-05-31', {});
-console.log('  April alone: ' + apr + ' → ' + L.elDisplay(L.elEarnedFrom(apr)) + ' EL');
-console.log('  April + May: ' + may + ' → ' + L.elDisplay(L.elEarnedFrom(may)) + ' EL');
+console.log('  April alone: ' + apr + ' → ' + L.elEarnedFrom(apr) + ' EL');
+console.log('  April + May: ' + may + ' → ' + L.elEarnedFrom(may) + ' EL');
 const sundaysIn = (from, to) => L.datesBetween_(from, to)
   .filter(d => new Date(d + 'T00:00:00').getDay() === 0).length;
 check('April is the month less its Sundays', apr, 30 - sundaysIn('2025-04-01', '2025-04-30'));
 check('two months accumulate rather than starting again',
       may, 61 - sundaysIn('2025-04-01', '2025-05-31'));
-check('and the remainder is not lost at the month boundary',
-      L.elDisplay(L.elEarnedFrom(may)), L.elDisplay(may / PER));
-check('which is more than flooring each month separately would give',
-      L.elEarnedFrom(may) > Math.floor(apr / PER) + Math.floor((may - apr) / PER), true);
+// The rounding is applied ONCE, to the year's running total — never per
+// month. This is the whole reason qualifyingPresentDays is cumulative, and
+// the difference is not small: twelve months of 24 qualifying days each is
+// 288 days, which is 12 whole days of leave from the running total and
+// nothing whatsoever if each month were settled on its own.
+check('the year is rounded once, from the running total',
+      L.elEarnedFrom(may), Math.round(may / PER));
+const twelveMonthsOf24 = 24 * 12;
+check('a year of 24-day months earns 12 days from the running total',
+      L.elEarnedFrom(twelveMonthsOf24), 12);
+check('and would earn nothing at all if each month were floored on its own',
+      Array.from({ length: 12 }, () => Math.floor(24 / PER)).reduce((a, b) => a + b, 0), 0);
 
 console.log('\nunpaid days earn nothing\n');
 const absent = mark({}, '2025-06-02', '2025-06-30', 'P');
@@ -205,15 +225,20 @@ console.log('\nthe Attendance Sheet reports the year to date, not the month\n');
 const dateList = L.datesBetween_('2025-05-01', '2025-05-31');
 const rows = L.policyRowsFor([emp], { '1': clean }, dateList, {});
 console.log('  May\'s row: ' + rows[0].attendanceDays + ' qualifying days, ' +
-            L.elDisplay(rows[0].bal.plEarned) + ' EL earned');
+            rows[0].bal.plEarned + ' EL earned');
 check('the qualifying days on May\'s row are April + May', rows[0].attendanceDays, may);
-check('so the EL on it is the year to date', L.elDisplay(rows[0].bal.plEarned),
-      L.elDisplay(may / PER));
+check('so the EL on it is the year to date', rows[0].bal.plEarned, L.elEarnedFrom(may));
 
-console.log('\nthe balance keeps its decimals\n');
+// The balance an employee is shown, and the one encashment pays out, is the
+// same whole number — leaveBalances reads through elEarnedFrom rather than
+// keeping a fraction of its own.
+console.log('\nthe balance HR sees is the same whole number\n');
 const bal = L.leaveBalances({ employeeType: 'office' }, { sick: 0, pl: 1, attendanceDays: 28 });
-check('earned', L.elDisplay(bal.plEarned), 1.12);
-check('left, after one day taken', L.elDisplay(bal.plLeft), 0.12);
+check('28 days earns 1 whole day', bal.plEarned, 1);
+check('and taking one leaves none', bal.plLeft, 0);
+const bal2 = L.leaveBalances({ employeeType: 'office' }, { sick: 0, pl: 1, attendanceDays: 63 });
+check('63 days earns 3, not 2.52', bal2.plEarned, 3);
+check('less the day taken, 2 left', bal2.plLeft, 2);
 check('and it never goes below nil',
       L.leaveBalances({ employeeType: 'office' }, { pl: 5, attendanceDays: 28 }).plLeft, 0);
 

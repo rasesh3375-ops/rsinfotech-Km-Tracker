@@ -410,9 +410,11 @@ add(table(['', 'Rule'], [
   ['<b>Sick leave</b>', '7 days a year, or 4 for Work From Home. Not carried forward. '
    'A medical certificate is required.'],
   ['<b>Earned leave</b>', 'One day per 25 qualifying present days, as a running total across '
-   'the whole financial year — it does not start again each month, and it is not rounded down. '
-   '28 qualifying days earns 1.12 days, and the remainder keeps accruing. Not carried forward: '
-   'what is earned in one year becomes next year\'s opening balance.'],
+   'the whole financial year — it does not start again each month. The total is rounded to the '
+   'nearest whole day at the end of the year: 28 qualifying days earns 1 day, 12 days earns '
+   'nothing and 13 earns a full day. The rounding happens once, on the year\'s total, so the '
+   'remainder still carries from month to month. Not carried forward: what is earned in one '
+   'year becomes next year\'s opening balance.'],
   ['<b>A qualifying day</b>', 'Exactly the Present figure the Attendance Sheet prints for that '
    'person, added up month by month, so the two can never disagree. A day present counts 1 '
    '(short leave included) and a half-day code counts 0.5, with the late-coming policy cut '

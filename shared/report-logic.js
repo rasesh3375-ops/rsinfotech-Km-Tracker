@@ -2562,10 +2562,31 @@ function qualifyingPresentDays(emp, att, fromStr, toStr, holidayMap){
 // Days to leave. Kept separate from the counting so the divisor is read from
 // config in one place and cannot drift from the encashment day divisor beside
 // it in LEAVE_POLICY.
+// Whole days, rounded to the nearest one — HR's decision, and a change from
+// the fractional figure this used to return.
+//
+// Leave is taken in days and half days, never in hundredths, so 5.32 was a
+// number nobody could act on: it could not be granted, and at encashment it
+// paid a fraction of a day at 70% of Basic + HRA. Nearest rather than floored,
+// deliberately: on 24.5 qualifying days floor pays nothing at all for a year
+// of work, where nearest gives the one day that is obviously meant. It costs
+// up to half a day nobody quite earned, and HR chose that over the reverse.
+//
+// The rounding happens HERE, once, and not at the display boundary, because
+// this is now the real balance — what carries into next year's opening and
+// what encashment pays out. That is the one place in this file where a figure
+// is deliberately not kept at full precision, and it is why every caller gets
+// the same whole number rather than each rounding its own way.
+//
+// What did NOT change: the days going in are still a running total across the
+// whole financial year (see qualifyingPresentDays), so the remainder still
+// accrues from month to month instead of being thrown away at each boundary.
+// Only the final division is rounded — rounding per month would lose a day a
+// year to twelve separate remainders.
 function elEarnedFrom(qualifyingDays, P){
   P = P || LEAVE_POLICY;
   const per = P.privilegeLeave.earnedPerAttendanceDays;
-  return per > 0 ? (Number(qualifyingDays) || 0) / per : 0;
+  return per > 0 ? Math.round((Number(qualifyingDays) || 0) / per) : 0;
 }
 
 // Two decimals, for anything that prints an EL figure. The value itself keeps
@@ -2583,8 +2604,11 @@ function leaveBalances(emp, used, P){
     : (emp.employeeType === 'part' ? 'part' : 'full');
   const sickTotal = P.sickLeave.perYear[type];
   const sickLeft = Math.max(0, sickTotal - (used.sick || 0));
-  // Not floored, and `attendanceDays` is the running total for the financial
-  // year to date rather than this month's count — see qualifyingPresentDays.
+  // Whole days, rounded to nearest in elEarnedFrom, and `attendanceDays` is the
+  // running total for the financial year to date rather than this month's
+  // count — see qualifyingPresentDays. The running total is what makes the
+  // single rounding at the end correct: rounding each month separately would
+  // lose a day a year to twelve remainders.
   const plEarned = elEarnedFrom(used.attendanceDays, P);
   const plUsable = P.privilegeLeave.usableInFirstYear || !emp.isFirstFinancialYear;
   return {

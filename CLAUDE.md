@@ -269,9 +269,21 @@ it; the employer's contributions sit on top of it.
   forward. PL is encashable at 70% of Basic + HRA, a day being a twenty-fifth
   of that. SL requires a medical certificate.
 - **EL/PL accrual** — one day per 25 qualifying present days, as a **running
-  total across the financial year**, and **not floored**. 28 qualifying days is
-  1.12 EL, and the remainder carries on accruing rather than being thrown away
-  at a month boundary. There is one definition of a qualifying day —
+  total across the financial year**, in **whole days rounded to the nearest
+  one**. 28 qualifying days is 1 EL, 12 days is nothing and 13 is a full day.
+  HR chose nearest over floored deliberately: leave is granted and encashed in
+  days, so a fractional balance was a number nobody could act on, and on 24.5
+  days flooring pays nothing at all for a year of work. It costs up to half a
+  day nobody quite earned, and that was the accepted trade.
+  `elEarnedFrom` is where the rounding happens — **once, on the year's running
+  total, never per month**. That is what the running total is for: twelve
+  months of 24 qualifying days is 288 days and 12 whole days of leave, but
+  nothing whatever if each month were settled on its own. This is the one
+  figure in `shared/report-logic.js` deliberately not kept at full precision,
+  because it *is* the real balance — what carries into next year's opening and
+  what encashment pays at 70% of Basic + HRA — rather than a display of one.
+  `elDisplay` still exists and is now a no-op on whole days.
+  There is one definition of a qualifying day —
   `qualifyingPresentDays` — and every caller uses it. **It is the Attendance
   Sheet's own Present column, summed month by month**, and nothing else: it
   splits its range with `monthsBetween_` and adds up
@@ -291,9 +303,8 @@ it; the employer's contributions sit on top of it.
   to be computed twice from two rules that
   disagreed — `policyRowsFor` gave a half day nothing, `elFyRows` gave it 0.5
   and ignored SHORT — so the Attendance Sheet and the Encashment Report could
-  report different EL for the same person in the same year. `elEarnedFrom` does
-  the division and `elDisplay` rounds to two decimals at the display boundary
-  only; the value itself keeps full precision like every other figure here.
+  report different EL for the same person in the same year. `elEarnedFrom` does the division and the rounding, and is the single
+  place either happens.
 - **Late coming** — 15 minutes grace, then 3 free instances a month. Past
   that, each late arrival is judged by its own instance number, not a flat
   rate: the 4th is a warning with no deduction, the 5th costs half a day, the
