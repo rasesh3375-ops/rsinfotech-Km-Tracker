@@ -3094,14 +3094,25 @@ function consultantSummaryTotals(employees, attByEmpId, dateList, monthDays, hol
     // additionally covers an employee-level pfEligible:'no' or a not-yet-
     // configured contribution type, either of which means nothing to add.
     if(heading.pf && s.pfApplicable){
-      // Every account is the sum of the per-member amounts actually filed,
-      // rounded first — the challan has to equal what the ECR lists, and a
-      // rounded exact total does not. Account 10 read 10,801 against the
-      // consultant's 10,802, which is 1,250 + 1,133 + 1,198 + 1,250 + 1,176 +
-      // 1,045 + 1,250 + 1,250 + 1,250 added up.
-      pf.count++; pf.wage += Rup_(s.pfWage); pf.epfWage += Rup_(s.pfEpfWage);
-      pf.empEmployee += Rup_(s.pf); pf.empEmployer += Rup_(s.employerPf);
-      pf.admin += Rup_(s.pfAdmin); pf.eps += Rup_(s.pen); pf.edli += Rup_(s.edli);
+      // Accumulated at full precision and rounded once where it is printed,
+      // which is what the PF Return's own GRAND TOTAL row does — so the two
+      // reports state one figure for each account rather than two.
+      //
+      // This used to round each member first and add the rounded amounts,
+      // because that is what the consultant's challan is: his 10,802 for
+      // Account 10 was his listed members added up, where a rounded exact
+      // total came to 10,801. The two differ by a rupee or two per account.
+      // HR compared the emailed Consultant Final Summary against the emailed
+      // PF Return, found Accounts 2, 10, 21 and the grand total disagreeing,
+      // and chose the PF Return as the figure both should carry.
+      //
+      // Worth knowing if this is ever revisited: the PF Return's per-member
+      // column still rounds each row, so adding that column up by hand gives
+      // the old sum-of-rounded figure rather than the total printed beneath
+      // it. Whichever way this goes, those two want to be the same decision.
+      pf.count++; pf.wage += s.pfWage; pf.epfWage += s.pfEpfWage;
+      pf.empEmployee += s.pf; pf.empEmployer += s.employerPf;
+      pf.admin += s.pfAdmin; pf.eps += s.pen; pf.edli += s.edli;
     }
     if(heading.esi){
       const r = computeEsi(s.gross, {
@@ -3134,7 +3145,13 @@ function consultantSummaryTotals(employees, attByEmpId, dateList, monthDays, hol
   const acct1 = pfAccount1(pf.empEmployee, pf.empEmployer);
   const acct22 = 0;   // EDLI admin charge — not levied, kept as a named zero
   const lwf = 0;      // Labour Welfare Fund — not tracked, same
-  const pfTotal = acct1 + pf.admin + pf.eps + pf.edli + acct22;
+  // Added from the five account figures AS PRINTED, not from their unrounded
+  // originals. Now that each account is rounded at the moment it is printed
+  // (see the accumulation above), summing the unrounded ones underneath gave a
+  // Total P.F. a rupee off the five lines directly above it — a consultant
+  // adding up the page by hand would find it wrong, which is exactly the
+  // complaint this whole change came out of.
+  const pfTotal = Rup_(acct1) + Rup_(pf.admin) + Rup_(pf.eps) + Rup_(pf.edli) + Rup_(acct22);
   const esiTotal = esiT.employee + esiT.employer;
   const alwTotal = alw.basic + alw.hra + alw.conveyance + alw.lta;
   const dedTotal = ded.pf + ded.pt + ded.adv + lwf + ded.loan + ded.esi;

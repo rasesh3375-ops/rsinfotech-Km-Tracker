@@ -28,6 +28,7 @@ const CHECKS = [
   ['check-tie-out.js',          'every printed sheet adds up as printed, and ESI rounds up'],
   ['check-el-accrual.js',       'EL accrues cumulatively at 1 per 25 days, not floored monthly'],
   ['check-attendance-columns.js', 'the emailed attendance sheet reports each figure once, not twice'],
+  ['check-pf-agreement.js',     'the PF Return and Consultant Summary state one figure per PF account'],
 ];
 
 let failed = 0;
