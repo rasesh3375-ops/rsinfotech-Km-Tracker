@@ -18611,9 +18611,32 @@ async function renderLeaveEncashmentReport(){
   const B = LEAVE_POLICY.privilegeLeave.salaryBasis;
   const rows = await elFyRows(employees, startYear);
   const payable = rows.filter(r => r.pending > 0);
+  // The two year-end EL actions live on this report, next to the money they
+  // pay. They used to sit on the Leave Balance Next Year Report, which now
+  // shows only what was earned this year — so the encash button was offering
+  // to pay amounts that report no longer printed.
+  //
+  // Both act on `rows`, deliberately NOT on `payable`: encashAndResetEl pays
+  // cash AND opens next year's balance at what was earned this year, and
+  // somebody with nothing left to encash may still have earned plenty. Handing
+  // it the filtered list would pay the right people and quietly deny everyone
+  // else their opening balance for the new year.
+  const nextFyStart = fyOfStartYear(startYear + 1).from.slice(0, 7);
+  const elYearEndButtons = `
+    <div class="row-inline" style="margin:14px 0 0;">
+      <button class="btn" style="flex:1;" onclick='withBusy(this,"Working…",()=>encashAndResetEl(${JSON.stringify(rows.map(r=>({id:r.id,amount:r.amount,nextOpening:r.nextOpening})))}, ${JSON.stringify(nextFyStart)}))'>Encash unused EL &amp; open next year automatically</button>
+      <button class="btn ghost" style="flex:1;" onclick='withBusy(this,"Working…",()=>applyElClosingAsNextOpening(${JSON.stringify(rows.map(r=>({id:r.id,closing:r.closing})))}))'>Carry whole EL balance forward (no cash)</button>
+    </div>
+    <p style="font-size:11px;color:var(--muted);margin:8px 0 0;">The first button pays the amounts in the table above, then sets each employee's EL opening balance for FY ${fyOfStartYear(startYear + 1).label} to what they earned this year — the one-year lag the policy describes, in one step rather than two. It covers all ${rows.length} employee(s) on file, not only the ${payable.length} being paid, so everybody's new year opens correctly. Carrying the whole balance forward instead is kept for years already run that way; the written policy is to encash.</p>`;
   if(!payable.length){
-    box.innerHTML = `${reportLogoHeader('Leave Encashment — FY ' + fyLabel)}
-      <div class="empty">Nobody has unused privilege leave as at ${fmtDateIN(asAt)}. Nothing to encash.</div>`;
+    // Still show the buttons: there is no cash to pay, but next year's opening
+    // balances have to be set from what was earned, and this is now the only
+    // screen that can do it.
+    box.innerHTML = `${reportActionBar('Leave Encashment — FY ' + fyLabel, 'encashBox')}
+      ${reportLogoHeader('Leave Encashment — FY ' + fyLabel)}
+      <div class="empty">Nobody has unused privilege leave as at ${fmtDateIN(asAt)}. Nothing to encash.</div>
+      ${elYearEndButtons}`;
+    openFullscreenView('Leave Encashment — FY ' + fyLabel, 'encashBox');
     return;
   }
 
@@ -18715,7 +18738,8 @@ async function renderLeaveEncashmentReport(){
       <tbody>${bodyRows}</tbody></table>`}
     </div>
     ${nil ? `<p style="font-size:11.5px;color:var(--muted);margin:10px 0 0;">${nil} employee(s) have no leave left to encash and are not listed.</p>` : ''}
-    <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(asAt))} &gt; Reports &gt; Leave Encashment. Use <em>Encash unused EL &amp; open next year automatically</em> on the Leave Balance Next Year Report once these have been paid.</p>`;
+    <p style="font-size:11px;color:var(--muted);margin:10px 0 0;">Saved to Drive under HR Management &gt; ${escapeHtml(financialYearLabel(asAt))} &gt; Reports &gt; Leave Encashment. Pay these through the bank as you would the bonus, then press the button below.</p>
+    ${elYearEndButtons}`;
   openFullscreenView('Leave Encashment — FY ' + fyLabel, 'encashBox');
 }
 
@@ -18763,13 +18787,10 @@ async function renderLeaveBalanceNextYearReport(){
       slNext: eligible ? P.sickLeave.perYear[r.emp.employeeType === 'part' ? 'part' : 'full'] : null
     });
   });
-  // No grand total and no salaryBasis here any more: the encashment money is
-  // not on this report. The per-row amount/closing/nextOpening figures are
-  // still computed above, because the three buttons below still act on them.
-  // The FY this report is closing opens the NEXT one — earned this year,
-  // usable from next year — so the automatic buttons need to know which
-  // month that new year's leaveOpeningFrom baseline should start from.
-  const nextFyStart = fyOfStartYear(startYear + 1).from.slice(0, 7);
+  // No grand total, no salaryBasis and no next-FY month here any more: the
+  // encashment money and the two EL year-end buttons that act on it moved to
+  // the Leave Encashment Report. Only the SL button is left, and it needs
+  // nothing but this year's start.
 
   const reportTitle = 'Leave Balance Next Year Report — FY ' + startYear + '-' + String(startYear+1).slice(2);
   {
@@ -18810,14 +18831,10 @@ async function renderLeaveBalanceNextYearReport(){
       Resident Engineers are outside the leave rules and are not listed; every other heading is.
       <br><strong style="color:var(--navy);">EL Earned</strong> = 1 day per ${LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays} qualifying present days, counted as a running total across the whole financial year and <strong>not rounded down</strong> — 28 qualifying days earns ${elDisplay(28 / LEAVE_POLICY.privilegeLeave.earnedPerAttendanceDays)}, and the remainder carries on accruing instead of being lost at each month end. A qualifying day is a day present (including short leave), a day of EL or SL, a Sunday or declared holiday the employee was in service for, or half a day for a half-day code; unpaid absence and sandwiched days earn nothing. Earned this year, usable from next year, so it is never part of what this year pays out. Days that have not happened yet earn nothing, so a year still running counts only up to today.
       <br><strong style="color:var(--navy);">Opening balances, EL used and encashment</strong> are no longer shown here — this report answers what was earned this year and nothing else. The Leave Encashment Report carries the money side in full.</p>
-    <div class="row-inline" style="margin-bottom:8px;">
+    <div class="row-inline" style="margin-bottom:0;">
       <button class="btn full" onclick='withBusy(this,"Working…",()=>openLeaveYearSl(${JSON.stringify(rows.filter(r=>r.slEligible).map(r=>({id:r.id,sl:r.slNext})))}, ${JSON.stringify(fyStart)}))'>Open leave year (SL)</button>
     </div>
-    <div class="row-inline" style="margin-bottom:0;">
-      <button class="btn" style="flex:1;" onclick='withBusy(this,"Working…",()=>encashAndResetEl(${JSON.stringify(rows.map(r=>({id:r.id,amount:r.amount,nextOpening:r.nextOpening})))}, ${JSON.stringify(nextFyStart)}))'>Encash unused EL &amp; open next year automatically</button>
-      <button class="btn ghost" style="flex:1;" onclick='withBusy(this,"Working…",()=>applyElClosingAsNextOpening(${JSON.stringify(rows.map(r=>({id:r.id,closing:r.closing})))}))'>Carry whole EL balance forward (no cash)</button>
-    </div>
-    <p style="font-size:11px;color:var(--muted);margin:8px 0 0;">SL is a flat reset with no encashment option, per policy. For EL, the first button pays cash for Unused Opening only, then automatically sets next year's EL opening balance to what was earned this year (EL Earned column) — the one-year lag the policy describes, applied without a second manual step. Carrying the whole EL balance forward is kept for years already run that way; the written policy is to encash.</p>
+    <p style="font-size:11px;color:var(--muted);margin:8px 0 0;">SL is a flat reset to each employee's yearly allowance, with no encashment option, per policy. The two EL year-end actions — encash unused leave, or carry the whole balance forward — are on the <strong>Leave Encashment Report</strong> now, beside the amounts they pay, rather than here where those amounts are no longer shown.</p>
   `;
   openFullscreenView(reportTitle, 'leaveBalanceNextYearBox');
 }
