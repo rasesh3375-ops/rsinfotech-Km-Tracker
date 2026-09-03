@@ -270,6 +270,66 @@ function validateSession_(token) {
   return null;
 }
 
+// Read-only. Says what state the SESSIONS sheet is actually in, so a spurious
+// "Your session has expired" can be diagnosed instead of guessed at.
+//
+// Written after HR was logged out four minutes after logging in, twice, on a
+// 24-hour session. Every 'unauthorized' the backend can return comes from
+// validateSession_ failing to find the token, so the question is only ever
+// "what does that sheet look like right now" — and there was no way to ask.
+//
+// Prints NO token hashes and NO usernames beyond a count per role. Safe to run
+// and safe to paste back: pick it in the function dropdown and press Run, then
+// read the log (View → Executions, or Ctrl+Enter).
+function diagnoseSessions() {
+  var sheet = getSessionSheet_();
+  var data = sheet.getDataRange().getValues();
+  var now = Date.now();
+  Logger.log('SESSIONS sheet: ' + sheet.getName());
+  Logger.log('rows incl. header: ' + data.length + '   columns: ' +
+             (data[0] ? data[0].length : 0) + '   (purge expects exactly 4)');
+  if (data[0]) Logger.log('header: ' + JSON.stringify(data[0]));
+
+  // The purge rewrites this sheet with a 4-column setValues. A sheet that is
+  // not 4 columns wide makes that throw, createSession_ swallows it, and the
+  // sheet then grows without limit — which is worth knowing about.
+  if (data[0] && data[0].length !== 4) {
+    Logger.log('*** WIDTH MISMATCH — purgeExpiredSessions_ cannot rewrite this sheet,');
+    Logger.log('*** so it throws on every login and is silently skipped.');
+  }
+
+  var live = 0, expired = 0, blank = 0, malformed = 0;
+  var perRole = {};
+  var newest = {};
+  for (var i = 1; i < data.length; i++) {
+    var h = data[i][0], role = String(data[i][1] || ''), who = String(data[i][2] || '');
+    var exp = Number(data[i][3]);
+    if (!h && !role && !who) { blank++; continue; }
+    if (!h || !isFinite(exp) || exp <= 0) { malformed++; continue; }
+    var key = role + ' / ' + who;
+    perRole[key] = (perRole[key] || 0) + 1;
+    if (exp < now) { expired++; } else {
+      live++;
+      if (!newest[key] || exp > newest[key]) newest[key] = exp;
+    }
+  }
+  Logger.log('live: ' + live + '   expired-but-still-present: ' + expired +
+             '   blank rows: ' + blank + '   malformed: ' + malformed);
+  Logger.log('cap is ' + MAX_SESSIONS_PER_USER + ' live session(s) per person');
+  Object.keys(perRole).forEach(function (k) {
+    var n = newest[k];
+    Logger.log('  ' + k + ' — ' + perRole[k] + ' row(s)' +
+      (n ? ', newest expires ' + new Date(n).toString() +
+           ' (' + Math.round((n - now) / 60000) + ' min from now)'
+         : ', NONE live'));
+  });
+  if (expired > 0) {
+    Logger.log('NOTE: expired rows are only cleared on login. Rows above the cap are');
+    Logger.log('      dropped oldest-first, so a 6th login evicts the 1st.');
+  }
+  Logger.log('now: ' + new Date(now).toString());
+}
+
 function deleteSession_(token) {
   const sheet = getSessionSheet_();
   const data = sheet.getDataRange().getValues();
