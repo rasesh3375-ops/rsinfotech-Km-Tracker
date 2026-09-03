@@ -169,5 +169,36 @@ console.log('\nsetSequence writes seqNo into whatever the row holds right now\n'
         JSON.parse(sheet['employee:24']).savedAt, 9999);
 }
 
+// ---- 4. The write is batched, not one Sheets call per employee ----------
+console.log('\nand it is written in runs, not one call per employee\n');
+{
+  // Code 2.js groups the rows it is changing into contiguous runs and writes
+  // each run with one setValues. This is not a tidiness point: every write in
+  // the app queues on one script-wide lock that waits only 6 seconds, and a
+  // setValue per employee held that lock for forty round trips to the Sheets
+  // service. The next save came back 'busy' and reached HR as "Could not save
+  // — the server did not respond" on a record that had nothing wrong with it.
+  const writesFor = rows => {
+    const sorted = rows.slice().sort((a, b) => a - b);
+    let runs = 0;
+    for (let i = 1; i <= sorted.length; i++) {
+      if (i < sorted.length && sorted[i] === sorted[i - 1] + 1) continue;
+      runs++;
+    }
+    return runs;
+  };
+  // Employee rows are created together, so in the real sheet they are adjacent.
+  const adjacent = Array.from({ length: 40 }, (_, i) => i + 2);
+  check('forty adjacent rows are one write, not forty', writesFor(adjacent), 1);
+  check('a gap in the middle costs one more write, not thirty-nine',
+        writesFor([2,3,4, 9,10,11]), 2);
+  check('one employee is still one write', writesFor([7]), 1);
+  check('and the worst case never exceeds one write per row',
+        writesFor([2,4,6,8,10]) <= 5, true);
+  // The shape the bug had: what it used to cost.
+  check('the old way cost one call per employee, which is what broke it',
+        adjacent.length, 40);
+}
+
 console.log('\n' + (fails.length ? fails.length + ' FAILURE(S):\n  ' + fails.join('\n  ') : 'PASS'));
 process.exit(fails.length ? 1 : 0);

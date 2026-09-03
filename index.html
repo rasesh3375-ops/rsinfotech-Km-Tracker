@@ -11628,7 +11628,12 @@ async function saveOneEmployee_(emp){
   emp.savedAt = Date.now();
   const payload = employeeSizeCheck_(emp);
   const ok = await remoteSet('employee:' + emp.id, payload);
-  if(!ok) throw new Error('Could not save — the server did not respond.');
+  // remoteSet already recorded WHY it failed — a busy lock, an expired
+  // session, a non-JSON reply, a dead network — and this used to throw that
+  // away and say "the server did not respond" for all four. HR then had no
+  // way to tell "press Save again in a moment" from "log in again", which is
+  // exactly the guessing the sequence bug cost us a day of.
+  if(!ok) throw new Error(lastBackendError || 'the server did not respond');
   invalidateSharedRead('employees');
 }
 // Writes every employee in the given list to its own key, in one batched
@@ -11727,7 +11732,7 @@ async function saveEmployees(list){
   // (leave rollover, EL encashment, document migration, always-present bulk)
   // that could report a clean success while some or all of it silently
   // failed to save.
-  if(!saved) throw new Error('Could not save — the server did not respond.');
+  if(!saved) throw new Error(lastBackendError || 'the server did not respond');
   // Which keys came back unconfirmed, not just how many. The backend refuses
   // a write whose record is older than the row already in the sheet (an edit
   // made on another device since this browser last read the roster), and it
