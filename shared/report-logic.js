@@ -2475,45 +2475,38 @@ function finalSalarySheetCsv(employees, attByEmpId, dateList, monthDays, holiday
 // therefore report different EL for the same person in the same year, which is
 // exactly the drift "one function per domain concept" exists to stop.
 //
-// Sundays and declared holidays count. They are paid days the employee was in
-// service for, so they qualify — with two exceptions that follow from rules
-// already in force rather than being new ones: a day charged as a sandwich day
-// is unpaid by definition and cannot earn leave, and a day outside the
-// employee's own joining and leaving dates is not a day they were employed.
-const EL_QUALIFYING_DAY_VALUE = {
-  P: 1, SHORT: 1, EL: 1, SL: 1,
-  // 'H' is both a Sunday and a declared holiday — the stored code does not
-  // distinguish them, only what it READS does. Here it stands for the declared
-  // holiday alone: see elDayValue_, which takes a Sunday back off. A weekly
-  // off is not a day worked towards leave, which is what HR asked for; a
-  // declared holiday the company chose to close on still is.
-  H: 1,
-  HEL: 0.5, HSL: 0.5, HLP: 0.5
-  // 'A' and 'LP' are absent from this table on purpose, and so is an unmarked
-  // day: unpaid absence earns nothing.
-};
-
-// What one date is worth towards earned leave.
+// It is the Attendance Sheet's OWN Present column, summed month by month.
 //
-// Sundays earn nothing. They used to count 1 like any declared holiday,
-// because the resolved code for both is 'H' and nothing looked past that. HR
-// asked for the weekly off to stop earning: 25 qualifying days makes one day
-// of EL that carries into next year, and a day nobody was expected to work
-// should not be a quarter of one.
+// HR reconciles the Leave Balance Next Year Report against the Present figures
+// already read off the Attendance Sheet, and the two kept their own counts, so
+// they agreed only on a clean month. They now cannot disagree: this asks
+// computeAttendanceSummary for each month and adds up what it reports as
+// Present, which is the number the sheet prints.
 //
-// A Sunday that also happens to be a declared holiday earns nothing either —
-// it is still the weekly off, and crediting it because a holiday was declared
-// on top would pay for the same day the rule is removing.
+// What that means, and it is a real narrowing of what earns:
 //
-// Used for the sandwich subtraction as well as the count, so a date is always
-// taken off at exactly what it was put on at.
-function elDayValue_(att, dateStr, holidayMap){
-  const code = resolvedAttendanceCode_(att, dateStr, holidayMap);
-  // 'T00:00:00' makes this LOCAL midnight; a bare date-only string is UTC and
-  // slips a day — and a day either way here is a different day of the week.
-  if(code === 'H' && new Date(dateStr + 'T00:00:00').getDay() === 0) return 0;
-  return EL_QUALIFYING_DAY_VALUE[code] || 0;
-}
+//   - A day present counts 1, and so does a day of short leave.
+//   - A half-day code counts 0.5 — the worked half is genuine attendance.
+//   - A day of EL or SL counts NOTHING. Present deliberately keeps approved
+//     leave out: "a day of Earned Leave is not a day the person was at work"
+//     is HR's own wording on that line. Somebody on approved sick leave
+//     accrues nothing for those days.
+//   - A Sunday or a declared holiday counts nothing — neither is a day worked.
+//   - Absence, leave without pay and unmarked days count nothing, as before.
+//   - The late-coming Policy Cut comes OFF, because Present is net of it.
+//
+// Month by month is load-bearing, not tidiness. The late-coming allowance is
+// three free instances PER MONTH, so handing policyHalfDaysFor a whole
+// financial year in one call would grant three for the year and under-charge
+// the other eleven months.
+//
+// There is no sandwich subtraction any more, and there must not be one. A
+// sandwiched day is a Sunday or holiday between two absences, and Present
+// already scores all three at nothing — taking a further day off would charge
+// it twice and cost leave that was genuinely worked.
+//
+// A day outside the employee's own joining and leaving dates is still not a
+// day they were employed, and nothing is earned for days not yet happened.
 
 // Every date from one day to another, built from local parts rather than by
 // parsing a date-only string, which lands on UTC midnight and slips a day in
@@ -2534,24 +2527,34 @@ function datesBetween_(fromStr, toStr){
 // past today: a future Sunday is not a day anybody has worked yet, and before
 // this counted whole dates rather than only the marked ones, nothing needed to
 // say so.
+// The [from, to] range split into whole months, each clipped to the range, so
+// a per-month rule is applied per month rather than once across the lot.
+function monthsBetween_(fromStr, toStr){
+  const out = [];
+  let y = Number(fromStr.slice(0, 4)), m = Number(fromStr.slice(5, 7));
+  while(out.length < 600){
+    const first = y + '-' + String(m).padStart(2, '0') + '-01';
+    if(first > toStr) break;
+    const lastDay = new Date(y, m, 0).getDate();
+    const last = y + '-' + String(m).padStart(2, '0') + '-' + String(lastDay).padStart(2, '0');
+    out.push({ from: first < fromStr ? fromStr : first, to: last > toStr ? toStr : last });
+    m++; if(m > 12){ m = 1; y++; }
+  }
+  return out;
+}
+
 function qualifyingPresentDays(emp, att, fromStr, toStr, holidayMap){
   const today = todayStr();
   const end = (toStr && toStr < today) ? toStr : today;
-  const dates = datesBetween_(fromStr, end)
-    .filter(d => employedDuringPeriod_(emp || {}, d, d));
+  if(!fromStr || !end || end < fromStr) return 0;
   let total = 0;
-  dates.forEach(d => { total += elDayValue_(att, d, holidayMap); });
-  // A sandwiched day is charged as unpaid by sandwichDaysFor, so whatever it
-  // earned above has to come back off: what payroll does not pay for does not
-  // earn leave either.
-  //
-  // Subtracting exactly what was credited, rather than one per sandwiched
-  // date, is load-bearing now that Sundays earn nothing. A sandwiched Sunday
-  // is already worth 0 here, and taking a further 1 off for it would charge it
-  // twice and push the total below the days actually worked — quietly, and in
-  // the direction that costs the employee leave.
-  sandwichDaysFor(emp || {}, att, dates, holidayMap).forEach(d => {
-    total -= elDayValue_(att, d, holidayMap);
+  monthsBetween_(fromStr, end).forEach(span => {
+    // Clipped to the days this person was actually employed, so a joiner earns
+    // from their joining date rather than from 1 April.
+    const dateList = datesBetween_(span.from, span.to)
+      .filter(d => employedDuringPeriod_(emp || {}, d, d));
+    if(!dateList.length) return;
+    total += computeAttendanceSummary(att, emp || {}, dateList, holidayMap).present;
   });
   return Math.max(0, total);
 }

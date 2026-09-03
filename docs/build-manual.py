@@ -413,10 +413,11 @@ add(table(['', 'Rule'], [
    'the whole financial year — it does not start again each month, and it is not rounded down. '
    '28 qualifying days earns 1.12 days, and the remainder keeps accruing. Not carried forward: '
    'what is earned in one year becomes next year\'s opening balance.'],
-  ['<b>A qualifying day</b>', 'A day present (short leave included), a day of EL or SL, and a '
-   'Sunday or declared holiday the employee was in service for, each count 1. A half-day code '
-   'counts 0.5. Unpaid absence, an unmarked day and a sandwiched day count nothing — what '
-   'payroll does not pay for does not earn leave.'],
+  ['<b>A qualifying day</b>', 'Exactly the Present figure the Attendance Sheet prints for that '
+   'person, added up month by month, so the two can never disagree. A day present counts 1 '
+   '(short leave included) and a half-day code counts 0.5, with the late-coming policy cut '
+   'taken off the same way it is there. EL, SL, a declared holiday, a Sunday, unpaid absence '
+   'and an unmarked day all count nothing — none of them is a day worked.'],
   ['<b>Encashment</b>', 'Earned leave is encashable at 70% of Basic + HRA, a day being a '
    'twenty-fifth of that.'],
   ['<b>Resident Engineers</b>', 'Outside the leave scheme entirely. Their leave columns read NA.'],

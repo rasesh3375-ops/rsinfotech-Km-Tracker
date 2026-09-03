@@ -1,16 +1,22 @@
-// Earned Leave: one day per 25 qualifying present days, cumulative, not floored.
+// Earned Leave: the Attendance Sheet's Present column, month by month, at one
+// day of EL per 25 of them — cumulative across the financial year and not
+// floored.
 //
-// EL used to be worked out twice from two different rules. policyRowsFor
-// counted P, SHORT, EL and SL and gave a half day nothing; elFyRows counted
-// P, EL and SL, gave a half day 0.5 and ignored SHORT — so the Attendance
-// Sheet and the Leave Encashment Report could report different EL for the same
-// person in the same year. Both also floored inside their own window, so the
-// days past a multiple of 25 were thrown away rather than carrying on
-// accruing.
+// EL used to be counted its own way, from its own table of day codes, and only
+// matched the Present column HR reads off the Attendance Sheet on a clean
+// month. Any month with approved leave, a declared holiday or a late-coming
+// deduction in it drifted, and HR reconciles the Leave Balance Next Year
+// Report against exactly that column. qualifyingPresentDays now IS that
+// column, summed per month, so the two cannot disagree.
 //
-// This asserts the rule as HR stated it: a running total across the financial
-// year, decimals kept, Sundays and declared holidays counted, and unpaid days
-// earning nothing.
+// The narrowing that came with it, all asserted below: a day of EL or SL earns
+// nothing (Present keeps approved leave out — "a day of Earned Leave is not a
+// day the person was at work"), a Sunday or declared holiday earns nothing,
+// and the late-coming Policy Cut comes off.
+//
+// Month by month rather than one call across the year: the late-coming
+// allowance is three free instances PER MONTH, and a single call spanning a
+// financial year would hand out three for the whole of it.
 const fs = require('fs'), vm = require('vm'), path = require('path');
 const R = path.join(__dirname, '..');
 
@@ -19,7 +25,8 @@ const sb = { JSON, Math, Date, String, Number, Boolean, Array, Object, RegExp,
 vm.createContext(sb);
 vm.runInContext(fs.readFileSync(R + '/shared/report-logic.js', 'utf8'), sb);
 const L = vm.runInContext('({qualifyingPresentDays, elEarnedFrom, elDisplay, leaveBalances,' +
-  ' policyRowsFor, LEAVE_POLICY, datesBetween_, financialYearStart})', sb);
+  ' policyRowsFor, LEAVE_POLICY, datesBetween_, financialYearStart, computeAttendanceSummary,' +
+  ' monthsBetween_})', sb);
 
 const fails = [];
 const check = (label, got, want) => {
@@ -39,121 +46,149 @@ const mark = (att, from, to, code) => {
   return att;
 };
 
-console.log('HR\'s rule: 25 qualifying days is one day of leave, and it is not floored\n');
+console.log('25 qualifying days is one day of leave, and it is not floored\n');
 check('25 qualifying days', L.elEarnedFrom(25), 1);
 check('28 qualifying days is the worked example', L.elDisplay(L.elEarnedFrom(28)), 1.12);
 check('24 earns something, not nothing', L.elDisplay(L.elEarnedFrom(24)), 0.96);
 check('50 earns two', L.elEarnedFrom(50), 2);
 check('the divisor comes from config, not a literal', PER, 25);
 
-console.log('\nwhat counts as a qualifying day\n');
+console.log('\nwhat one day is worth — 2025-06-10 is a working Tuesday\n');
 const one = (code, holiday) => {
   const att = {};
   if (code) att['2025-06-10'] = { code };
   return L.qualifyingPresentDays(emp, att, '2025-06-10', '2025-06-10',
                                  holiday ? { '2025-06-10': true } : {});
 };
-[['P', 1], ['SHORT', 1], ['EL', 1], ['SL', 1],
+[['P', 1], ['SHORT', 1],
+ // Approved leave earns NOTHING now. The Present column keeps it out — "a day
+ // of Earned Leave is not a day the person was at work" — and EL earning is
+ // that column. This is the change HR asked for and the one most worth
+ // pinning: it means somebody on sick leave accrues nothing for those days.
+ ['EL', 0], ['SL', 0],
+ // A half-day code is half a day worked, so half a day earned — the same 0.5
+ // Present credits, whichever kind of half day it is.
  ['HEL', 0.5], ['HSL', 0.5], ['HLP', 0.5],
  ['A', 0], ['LP', 0]].forEach(([c, want]) => check('a day marked ' + c, one(c), want));
 check('an unmarked ordinary day earns nothing', one(null, false), 0);
+check('a declared holiday earns nothing either', one(null, true), 0);
 
-// The weekly off does not earn leave. A declared holiday still does.
-//
-// Both resolve to the same stored code, 'H' — only what it READS differs — so
-// nothing told them apart and a Sunday counted like any other paid day off.
-// HR asked for that to stop: 25 qualifying days makes one day of EL carried
-// into next year, and a day nobody was expected to work should not be a
-// quarter of one.
+console.log('\nneither the weekly off nor a declared holiday is a day worked\n');
+// 2025-06-08 is a Sunday; 2025-06-18 is a working Wednesday.
 const around = (day, holiday) => {
-  const a = mark({}, '2025-06-02', '2025-06-30', 'P');   // a full working month
-  delete a[day];                                          // the day itself unmarked
+  const a = mark({}, '2025-06-02', '2025-06-30', 'P');   // every day marked present
+  delete a[day];                                          // the day itself left unmarked
   return L.qualifyingPresentDays(emp, a, '2025-06-01', '2025-06-30',
                                  holiday ? { [day]: true } : {});
 };
 const baseline = L.qualifyingPresentDays(emp, mark({}, '2025-06-02', '2025-06-30', 'P'),
                                          '2025-06-01', '2025-06-30', {});
-// 2025-06-08 is a Sunday; 2025-06-18 is a working Wednesday.
 check('an unworked Sunday earns nothing', around('2025-06-08', false), baseline - 1);
-check('a declared holiday still earns', around('2025-06-18', true), baseline);
-check('a Sunday on its own earns nothing either',
+check('an unmarked declared holiday earns nothing', around('2025-06-18', true), baseline - 1);
+check('a Sunday on its own earns nothing', 
       L.qualifyingPresentDays(emp, {}, '2025-06-08', '2025-06-08', {}), 0);
-// Somebody who genuinely worked a Sunday has it marked P, which is a present
-// day like any other — the rule takes away the OFF day, not the worked one.
-// Measured inside a worked fortnight, not in isolation: a lone Sunday with
-// nothing marked either side is sandwiched between two absences and the
-// sandwich rule takes it off again, which would make this prove nothing.
-{
-  const worked = mark({}, '2025-06-02', '2025-06-14', 'P');   // Sunday the 8th marked P
-  const off = mark({}, '2025-06-02', '2025-06-14', 'P');
-  delete off['2025-06-08'];                                    // the same Sunday left as the weekly off
-  check('but a Sunday actually worked and marked present does earn',
-        L.qualifyingPresentDays(emp, worked, '2025-06-02', '2025-06-14', {}) -
-        L.qualifyingPresentDays(emp, off,    '2025-06-02', '2025-06-14', {}), 1);
-}
-// A Sunday with a holiday declared on it is still the weekly off. Crediting it
-// because a holiday landed there would pay for the day this rule removes.
-check('a Sunday that is also a declared holiday still earns nothing',
+check('a Sunday that is also a declared holiday earns nothing',
       L.qualifyingPresentDays(emp, {}, '2025-06-08', '2025-06-08',
                               { '2025-06-08': true }), 0);
+// The rule takes away the day off, not a day somebody actually worked.
+check('but a Sunday marked present does earn',
+      L.qualifyingPresentDays(emp, { '2025-06-08': { code: 'P' } },
+                              '2025-06-08', '2025-06-08', {}), 1);
+
+console.log('\nit IS the Attendance Sheet\'s Present column, month by month\n');
+// The whole point of the change: HR reconciles against that column, so any
+// month where the two differ is a month their spreadsheet will not match.
+const holidayMap = { '2026-08-15': true, '2026-06-18': true };
+const att = {};
+L.datesBetween_('2026-04-01', '2026-08-31').forEach(d => {
+  if (new Date(d + 'T00:00:00').getDay() !== 0) {
+    att[d] = { code: 'P', checkinTime: '09:20', checkoutTime: '18:30' };
+  }
+});
+att['2026-05-06'] = { code: 'EL' };  att['2026-05-07'] = { code: 'SL' };
+att['2026-06-10'] = { code: 'A' };   att['2026-06-11'] = { code: 'LP' };
+att['2026-07-14'] = { code: 'HEL' }; att['2026-07-15'] = { code: 'HSL' };
+delete att['2026-06-18'];            // an unmarked declared holiday
+// Five late arrivals in one month, so the monthly allowance really bites.
+['2026-08-10','2026-08-11','2026-08-12','2026-08-13','2026-08-14'].forEach(d => {
+  att[d] = { code: 'P', lateFlag: true, checkinTime: '09:50', checkoutTime: '18:30' };
+});
+const MONTHS = [['April','2026-04-01','2026-04-30'], ['May','2026-05-01','2026-05-31'],
+                ['June','2026-06-01','2026-06-30'],  ['July','2026-07-01','2026-07-31'],
+                ['August','2026-08-01','2026-08-31']];
+let summed = 0;
+MONTHS.forEach(([name, from, to]) => {
+  const s = L.computeAttendanceSummary(att, emp, L.datesBetween_(from, to), holidayMap);
+  const q = L.qualifyingPresentDays(emp, att, from, to, holidayMap);
+  summed += s.present;
+  console.log('  ' + name.padEnd(8) + 'Present ' + String(s.present).padStart(6) +
+              '   EL days ' + String(q).padStart(6) +
+              '   (EL ' + s.elUsed + ', SL ' + s.slUsed + ', cut ' + s.policyCut + ')');
+  check('  ' + name + ' ties to its own Present figure', q, s.present);
+});
+const ytd = L.qualifyingPresentDays(emp, att, '2026-04-01', '2026-08-31', holidayMap);
+console.log('  April-August: ' + ytd + ' days → ' + L.elDisplay(L.elEarnedFrom(ytd)) + ' EL');
+check('the year to date is those months added up', ytd, summed);
+
+console.log('\nthe late-coming Policy Cut comes off, and monthly\n');
+const augS = L.computeAttendanceSummary(att, emp, L.datesBetween_('2026-08-01','2026-08-31'), holidayMap);
+check('August carries a policy cut at all, so this proves something', augS.policyCut > 0, true);
+check('  and August\'s EL days are net of it', 
+      L.qualifyingPresentDays(emp, att, '2026-08-01', '2026-08-31', holidayMap), augS.present);
+// Three free late arrivals PER MONTH. Splitting the year into months is what
+// keeps that allowance monthly; one call across the whole year would grant
+// three for the year and undercharge the rest.
+check('the range really is split into months', L.monthsBetween_('2026-04-01','2026-08-31').length, 5);
+check('  first month starts at the range start', L.monthsBetween_('2026-04-10','2026-06-20')[0].from, '2026-04-10');
+check('  last month ends at the range end', L.monthsBetween_('2026-04-10','2026-06-20')[2].to, '2026-06-20');
+check('  and a whole month in between is whole', L.monthsBetween_('2026-04-10','2026-06-20')[1],
+      { from: '2026-05-01', to: '2026-05-31' });
+
+console.log('\napproved leave costs earning, which is the point of the change\n');
+const worked = {}; Object.keys(att).forEach(k => { worked[k] = att[k]; });
+worked['2026-05-06'] = { code: 'P', checkinTime: '09:20', checkoutTime: '18:30' };
+worked['2026-05-07'] = { code: 'P', checkinTime: '09:20', checkoutTime: '18:30' };
+check('a day of EL and a day of SL earn two days less than working them',
+      L.qualifyingPresentDays(emp, worked, '2026-05-01', '2026-05-31', holidayMap) -
+      L.qualifyingPresentDays(emp, att,    '2026-05-01', '2026-05-31', holidayMap), 2);
 
 console.log('\nthe total runs across months and does not reset\n');
-// A full April, then a full May: every weekday present, Sundays left to resolve
-// on their own.
-const att = {};
+const clean = {};
 L.datesBetween_('2025-04-01', '2025-05-31').forEach(d => {
-  if (new Date(d + 'T00:00:00').getDay() !== 0) att[d] = { code: 'P' };
+  if (new Date(d + 'T00:00:00').getDay() !== 0) clean[d] = { code: 'P' };
 });
-const apr = L.qualifyingPresentDays(emp, att, '2025-04-01', '2025-04-30', {});
-const may = L.qualifyingPresentDays(emp, att, '2025-04-01', '2025-05-31', {});
-console.log('  April alone: ' + apr + ' qualifying days → ' + L.elDisplay(L.elEarnedFrom(apr)) + ' EL');
-console.log('  April + May: ' + may + ' qualifying days → ' + L.elDisplay(L.elEarnedFrom(may)) + ' EL');
-// Derived from the calendar rather than typed in, so the day these months are
-// re-counted the expectation moves with them instead of going stale.
+const apr = L.qualifyingPresentDays(emp, clean, '2025-04-01', '2025-04-30', {});
+const may = L.qualifyingPresentDays(emp, clean, '2025-04-01', '2025-05-31', {});
+console.log('  April alone: ' + apr + ' → ' + L.elDisplay(L.elEarnedFrom(apr)) + ' EL');
+console.log('  April + May: ' + may + ' → ' + L.elDisplay(L.elEarnedFrom(may)) + ' EL');
 const sundaysIn = (from, to) => L.datesBetween_(from, to)
   .filter(d => new Date(d + 'T00:00:00').getDay() === 0).length;
 check('April is the month less its Sundays', apr, 30 - sundaysIn('2025-04-01', '2025-04-30'));
 check('two months accumulate rather than starting again',
       may, 61 - sundaysIn('2025-04-01', '2025-05-31'));
-check('  and that is 8 Sundays gone across the two', 61 - may, 8);
 check('and the remainder is not lost at the month boundary',
       L.elDisplay(L.elEarnedFrom(may)), L.elDisplay(may / PER));
 check('which is more than flooring each month separately would give',
-      L.elEarnedFrom(may) > Math.floor(30 / PER) + Math.floor(31 / PER), true);
+      L.elEarnedFrom(may) > Math.floor(apr / PER) + Math.floor((may - apr) / PER), true);
 
 console.log('\nunpaid days earn nothing\n');
 const absent = mark({}, '2025-06-02', '2025-06-30', 'P');
 absent['2025-06-10'] = { code: 'A' };
 absent['2025-06-11'] = { code: 'LP' };
-const withAbs = L.qualifyingPresentDays(emp, absent, '2025-06-01', '2025-06-30', {});
 const allP = L.qualifyingPresentDays(emp, mark({}, '2025-06-02', '2025-06-30', 'P'),
                                      '2025-06-01', '2025-06-30', {});
-check('two unpaid days cost two qualifying days', allP - withAbs, 2);
-
-// A Sunday sandwiched between two unpaid days is charged as unpaid by payroll,
-// so it must not earn leave either. 2025-06-15 is a Sunday.
+check('two unpaid days cost two qualifying days',
+      allP - L.qualifyingPresentDays(emp, absent, '2025-06-01', '2025-06-30', {}), 2);
+// There is no sandwich subtraction any more and there must not be one: a
+// sandwiched Sunday is already worth nothing, so taking a further day off
+// would charge it twice and cost leave that was actually worked.
 const sand = mark({}, '2025-06-02', '2025-06-30', 'P');
 sand['2025-06-14'] = { code: 'A' };
 sand['2025-06-16'] = { code: 'A' };
-const sandDays = L.qualifyingPresentDays(emp, sand, '2025-06-01', '2025-06-30', {});
-check('a sandwiched Sunday earns nothing, the way payroll does not pay for it',
-      allP - sandDays, 3);
-// And it is charged exactly once. The sandwich subtraction takes a date off at
-// whatever it was credited, not a flat 1 — a sandwiched Sunday is already
-// worth nothing now, so a flat subtraction would charge it a second time and
-// quietly cost leave that was genuinely worked. The two absences either side
-// account for the whole difference; the Sunday between them adds nothing more.
-check('  and only once — not credited nil and then charged again',
-      allP - sandDays, 2 /* the two absences */ + 1 /* the Sunday, once */);
-{
-  // The same month with the Sunday left alone: the two absences on their own
-  // cost exactly two, which pins the figure above to 2 + 1 rather than 2 + 2.
-  const twoAbs = mark({}, '2025-06-02', '2025-06-30', 'P');
-  twoAbs['2025-06-16'] = { code: 'A' };
-  twoAbs['2025-06-17'] = { code: 'A' };
-  check('  two absences that sandwich nothing cost two, no more',
-        allP - L.qualifyingPresentDays(emp, twoAbs, '2025-06-01', '2025-06-30', {}), 2);
-}
+delete sand['2025-06-15'];            // the Sunday between them, left as the weekly off
+check('a Sunday sandwiched between two absences is charged once, not twice',
+      allP - L.qualifyingPresentDays(emp, sand, '2025-06-01', '2025-06-30', {}),
+      2 /* the two absences */ + 1 /* the Sunday, which was worth 1 as a marked P */);
 
 console.log('\nsomebody who joined part way through earns only from their joining date\n');
 const joiner = Object.assign({}, emp, { doj: '2025-06-16' });
@@ -163,20 +198,17 @@ check('nothing is earned before the date of joining', joinerDays < allP, true);
 check('and it is the days from the 16th on', joinerDays, 15);
 
 console.log('\nnothing is earned for days that have not happened yet\n');
-const future = L.qualifyingPresentDays(emp, {}, '2099-01-01', '2099-01-31', {});
-check('a future month earns nothing', future, 0);
+check('a future month earns nothing',
+      L.qualifyingPresentDays(emp, {}, '2099-01-01', '2099-01-31', {}), 0);
 
-console.log('\nthe Attendance Sheet now reports the year to date, not the month\n');
+console.log('\nthe Attendance Sheet reports the year to date, not the month\n');
 const dateList = L.datesBetween_('2025-05-01', '2025-05-31');
-const rows = L.policyRowsFor([emp], { '1': att }, dateList, {});
+const rows = L.policyRowsFor([emp], { '1': clean }, dateList, {});
 console.log('  May\'s row: ' + rows[0].attendanceDays + ' qualifying days, ' +
             L.elDisplay(rows[0].bal.plEarned) + ' EL earned');
-check('the qualifying days on May\'s row are April + May',
-      rows[0].attendanceDays, may);
+check('the qualifying days on May\'s row are April + May', rows[0].attendanceDays, may);
 check('so the EL on it is the year to date', L.elDisplay(rows[0].bal.plEarned),
       L.elDisplay(may / PER));
-check('and it is not the month on its own',
-      rows[0].attendanceDays === 31, false);
 
 console.log('\nthe balance keeps its decimals\n');
 const bal = L.leaveBalances({ employeeType: 'office' }, { sick: 0, pl: 1, attendanceDays: 28 });
