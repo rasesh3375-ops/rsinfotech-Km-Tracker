@@ -1607,6 +1607,29 @@
   .payroll-docs-search-filters{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;}
   .payroll-docs-search-filters .field{margin:0 0 3px;}
 
+/* ---- Salary Slip ---- */
+/* --navy for the rules, not --line: a payslip's boxes have to read as a form,
+   and the app's hairline rule is too faint to survive being printed or
+   photographed on a phone, which is how engineers actually receive these. */
+.slip{font-size:12px;color:var(--navy);}
+.slip-title{text-align:center;font-weight:800;font-size:15px;padding:8px;
+  border:1px solid var(--navy);border-bottom:0;background:var(--cream);}
+.slip-info th{width:15%;}
+.slip-info td{width:35%;}
+.slip-tbl{width:100%;border-collapse:collapse;}
+.slip-tbl th,.slip-tbl td{border:1px solid var(--navy);padding:5px 8px;text-align:left;
+  vertical-align:top;font-weight:400;}
+.slip-tbl th{font-weight:700;white-space:nowrap;}
+.slip-head{text-align:center;background:var(--cream);}
+.slip-money thead th{font-weight:700;}
+.slip-amt{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.slip-tbl tfoot td{background:var(--cream);font-weight:700;}
+.slip-note{color:var(--muted);font-size:10px;}
+.slip-net .slip-net-label{width:28%;}
+.slip-net .slip-net-amt{width:18%;font-size:14px;}
+.slip-words{font-size:11px;color:var(--muted);}
+.slip-foot{text-align:center;font-size:10px;color:var(--muted);margin:6px 0 0;}
+
 /* ---- Office Old Documents ---- */
 .od-folder-row{display:flex;align-items:center;gap:2px;}
 .od-folder-row .od-folder-head{flex:1;min-width:0;}
@@ -24361,6 +24384,162 @@ function niceDate_(isoStr){
 // (.rpt-head/.rpt-logo/.rpt-company/...) rather than the compact strip every
 // day-to-day report shares, since a signed letter reads as a document, not a
 // dashboard printout.
+
+// ---- Salary Slip ----
+// A boxed slip in the shape HR's engineers are used to seeing, rather than the
+// block of plain text this used to print. NOT a recalculation: every figure
+// still comes from monthlyPayFor, the one function the Salary Report and the
+// dashboard already read, so a slip cannot disagree with them.
+//
+// Only rows we actually hold are printed. The layout it was modelled on
+// carries a Business Unit, Total Arrear Days, a Provident Fund account number,
+// an Employee Welfare Fund and a Doctor Consult deduction — none of which
+// exist in this company or in Employee Master, and a payslip is the wrong
+// place to invent a field. Each block below drops out when its value is empty,
+// so a slip for somebody with no UAN simply has no UAN line rather than a
+// blank one.
+const EMPLOYEE_TYPE_LABELS = { field:'Field Engineer', office:'Office Staff',
+                               wfh:'Work From Home', resident:'Resident Engineer' };
+
+// Indian numbering, because a payslip that reads "Eighteen Thousand Five
+// Hundred Ninety Seven Rupees Only" is the one line an engineer checks against
+// what actually reached their bank.
+function amountInWords_(n){
+  const num = Math.round(Math.abs(Number(n) || 0));
+  if(!num) return 'Zero Rupees Only';
+  const ones = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten',
+    'Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+  const tens = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+  const under100 = v => v < 20 ? ones[v] : (tens[Math.floor(v / 10)] + (v % 10 ? ' ' + ones[v % 10] : ''));
+  const under1000 = v => (v >= 100 ? ones[Math.floor(v / 100)] + ' Hundred' + (v % 100 ? ' ' : '') : '') +
+                         (v % 100 ? under100(v % 100) : '');
+  // Crore, lakh, thousand, hundred — not the western thousand/million, which
+  // would read wrong to everyone who has to check it.
+  const parts = [];
+  const crore = Math.floor(num / 10000000);
+  const lakh = Math.floor((num % 10000000) / 100000);
+  const thousand = Math.floor((num % 100000) / 1000);
+  const rest = num % 1000;
+  if(crore) parts.push(under1000(crore) + ' Crore');
+  if(lakh) parts.push(under1000(lakh) + ' Lakh');
+  if(thousand) parts.push(under1000(thousand) + ' Thousand');
+  if(rest) parts.push(under1000(rest));
+  return parts.join(' ').replace(/\s+/g, ' ').trim() + ' Rupees Only';
+}
+
+// Label/value pairs, dropped when empty — the caller builds two lists and
+// slipInfoTable_ zips them into one grid.
+function slipPair_(label, value){
+  if(value === undefined || value === null || value === '') return null;
+  return [label, String(value)];
+}
+// ONE table of four columns rather than two tables side by side. Two tables
+// each size their own rows, so the left and right halves drifted apart as soon
+// as they held a different number of entries, and a form whose rules do not
+// meet across the middle reads as broken. Whichever side is shorter gets empty
+// cells, exactly as the printed slips this was modelled on do.
+function slipInfoTable_(left, right){
+  const rows = [];
+  for(let i = 0; i < Math.max(left.length, right.length); i++){
+    const l = left[i], r = right[i];
+    rows.push('<tr>' +
+      (l ? `<th>${escapeHtml(l[0])}</th><td>${escapeHtml(l[1])}</td>` : '<th></th><td></td>') +
+      (r ? `<th>${escapeHtml(r[0])}</th><td>${escapeHtml(r[1])}</td>` : '<th></th><td></td>') +
+      '</tr>');
+  }
+  return `<table class="slip-tbl slip-info"><tbody>${rows.join('')}</tbody></table>`;
+}
+function slipMoneyRow_(label, amount, note){
+  const v = Math.round(Number(amount) || 0);
+  if(!v) return '';
+  return `<tr><td>${escapeHtml(label)}${note ? ' <span class="slip-note">' + escapeHtml(note) + '</span>' : ''}</td>
+    <td class="slip-amt">${fmtMoney(v)}</td></tr>`;
+}
+
+function salarySlipHtml_(f, emp, company, monthLabel, monthDays, duration){
+  // Conveyance sits INSIDE the earnings total here, unlike the wage register
+  // where it is deliberately outside. A payslip's whole contract with the
+  // person reading it is that Net Pay equals Earnings minus Deductions, and
+  // conveyance is money they are actually handed — leaving it out of (A) would
+  // make that subtraction fail to reach the figure in their bank by exactly
+  // the conveyance. The note beside it says why the wage register differs.
+  const earnRows = [
+    slipMoneyRow_('Basic', f.basic),
+    slipMoneyRow_('House Rent Allowance', f.hra),
+    slipMoneyRow_('Leave Travel Allowance', f.lta),
+    slipMoneyRow_('Other allowances', f.other),
+    slipMoneyRow_('Conveyance', f.conveyance, '(paid on top, outside PF/ESI/PT)')
+  ].filter(Boolean).join('');
+  const gross = Math.round((Number(f.basic)||0) + (Number(f.hra)||0) + (Number(f.lta)||0) +
+                           (Number(f.other)||0) + (Number(f.conveyance)||0));
+  const dedRows = [
+    slipMoneyRow_('Provident Fund (Employee)', f.pf),
+    slipMoneyRow_('ESIC (Employee)', f.esiDeduction),
+    slipMoneyRow_('Professional Tax', f.pt),
+    slipMoneyRow_('Advance — temporary', f.advanceTemp),
+    slipMoneyRow_('Advance', f.advance),
+    slipMoneyRow_('Loan instalment', f.emi),
+    slipMoneyRow_('Retention money', f.retention)
+  ].filter(Boolean).join('');
+  const deductions = Math.round((Number(f.pf)||0) + (Number(f.esiDeduction)||0) + (Number(f.pt)||0) +
+    (Number(f.advanceTemp)||0) + (Number(f.advance)||0) + (Number(f.emi)||0) + (Number(f.retention)||0));
+  const net = gross - deductions;
+
+  const left = [
+    slipPair_('Employee Name', emp.name),
+    slipPair_('Designation', emp.designation),
+    slipPair_('Department', emp.department),
+    slipPair_('Date of Joining', emp.doj ? fmtDateIN(emp.doj) : ''),
+    slipPair_('Work Location', emp.workLocation),
+    slipPair_('UAN No', emp.uan)
+  ].filter(Boolean);
+  const right = [
+    slipPair_('Employee Code', emp.id),
+    slipPair_('Employee Type', EMPLOYEE_TYPE_LABELS[emp.employeeType] || ''),
+    slipPair_('Salary Month', monthLabel),
+    slipPair_('Duration', duration),
+    slipPair_('Days in Month', monthDays),
+    slipPair_('PAN No', emp.pan),
+    slipPair_('ESIC Number', emp.esiNumber)
+  ].filter(Boolean);
+
+  // Earnings and Deductions are one table too, for the same reason: the two
+  // sides almost never have the same number of lines, and separate tables put
+  // Gross Earnings and Total Deductions on different heights.
+  const earn = earnRows, ded = dedRows;
+  const rowsOf = h => (h.match(/<tr>[\s\S]*?<\/tr>/g) || []);
+  const eL = rowsOf(earn), dL = rowsOf(ded);
+  const blank = '<td></td><td class="slip-amt"></td>';
+  const strip = r => r.replace(/^<tr>/, '').replace(/<\/tr>$/, '');
+  const body = [];
+  for(let i = 0; i < Math.max(eL.length, dL.length); i++){
+    body.push('<tr>' + (eL[i] ? strip(eL[i]) : blank) + (dL[i] ? strip(dL[i]) : blank) + '</tr>');
+  }
+
+  return `<div class="slip">
+    <div class="slip-title">Salary Slip for ${escapeHtml(monthLabel)}</div>
+    ${slipInfoTable_(left, right)}
+    <table class="slip-tbl slip-money">
+      <thead>
+        <tr><th colspan="2" class="slip-head">Earnings</th><th colspan="2" class="slip-head">Deductions</th></tr>
+        <tr><th>Components</th><th class="slip-amt">Amount (₹)</th>
+            <th>Components</th><th class="slip-amt">Amount (₹)</th></tr>
+      </thead>
+      <tbody>${body.join('') || '<tr>' + blank + blank + '</tr>'}</tbody>
+      <tfoot><tr>
+        <td><strong>Gross Earnings (A)</strong></td><td class="slip-amt"><strong>${fmtMoney(gross)}</strong></td>
+        <td><strong>Total Deductions (B)</strong></td><td class="slip-amt"><strong>${fmtMoney(deductions)}</strong></td>
+      </tr></tfoot>
+    </table>
+    <table class="slip-tbl slip-net"><tbody><tr>
+      <td class="slip-net-label"><strong>Net Pay (A − B)</strong></td>
+      <td class="slip-amt slip-net-amt"><strong>${fmtMoney(net)}</strong></td>
+      <td class="slip-words">${escapeHtml(amountInWords_(net))}</td>
+    </tr></tbody></table>
+    <p class="slip-foot">This is a computer generated slip and does not require a signature.</p>
+  </div>`;
+}
+
 function letterHeader(company, title, dateStr){
   const logo = (document.querySelector('header.top .brand img') || {}).src || '';
   const contact = [
@@ -24631,9 +24810,25 @@ async function generateLetter(){
   // run for this letter, but nothing here should paint over what is
   // actually on screen right now.
   const stillCurrent = myToken === generateLetterToken;
+  // The Salary Slip is a form, not a letter — it prints as a boxed slip rather
+  // than the pre-wrapped text every other type uses. The figures are the same
+  // ones letterTemplate would have printed; only the presentation differs, so
+  // the plain-text version above is still what the emailed/copied body says.
+  let bodyHtml;
+  if(type === 'Salary Slip' && matched){
+    const d = f.issueDate ? new Date(f.issueDate + 'T00:00:00') : new Date();
+    const y = d.getFullYear(), mo = d.getMonth() + 1;
+    const monthDays = new Date(y, mo, 0).getDate();
+    const ym = y + '-' + String(mo).padStart(2, '0');
+    const monthLabel = d.toLocaleDateString('en-GB', { month: 'long' }) + '-' + y;
+    const duration = fmtDateIN(ym + '-01') + ' to ' + fmtDateIN(ym + '-' + String(monthDays).padStart(2, '0'));
+    bodyHtml = salarySlipHtml_(f, matched, company, monthLabel, monthDays, duration);
+  } else {
+    bodyHtml = `<div class="rpt-body" style="white-space:pre-wrap;">${escapeHtml(text)}</div>`;
+  }
   if(stillCurrent) document.getElementById('letterPaper').innerHTML = `<div class="rpt-wrap"><div class="rpt-page">
     ${letterHeader(company, type, niceDate_(f.issueDate) || f.issueDate)}
-    <div class="rpt-body" style="white-space:pre-wrap;">${escapeHtml(text)}</div>
+    ${bodyHtml}
     ${signOff}
     ${roleReportFooter(company, 1, 1)}
   </div></div>`;
