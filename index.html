@@ -1642,8 +1642,15 @@
 .od-icon-btn{border:0;background:none;cursor:pointer;padding:6px 5px;border-radius:6px;
   font-size:13px;line-height:1;color:var(--muted);opacity:.55;}
 .od-icon-btn:hover{opacity:1;background:var(--cream);color:var(--navy);}
+/* The one-off offer to move the Apprentice Documents module into the archive.
+   Amber rather than the usual card border: it is a one-time action on real
+   paperwork, and it should not read as another row in the list below it. */
+.od-merge-offer{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  border:1px solid var(--amber);background:#FEF8EC;border-radius:10px;
+  padding:12px 14px;margin:0 0 14px;}
+.od-merge-offer>div{flex:1;min-width:200px;}
 .od-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;}
-.od-stat{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--card);}
+.od-stat{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--paper);}
 .od-stat-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
 .od-stat-value{font-size:22px;font-weight:800;color:var(--navy);margin:4px 0 2px;font-variant-numeric:tabular-nums;}
 .od-stat-sub{font-size:11px;color:var(--muted);}
@@ -1651,24 +1658,30 @@
    which is the only layout that keeps a document table usable on both. */
 .od-layout{display:grid;grid-template-columns:minmax(200px,260px) 1fr;gap:14px;margin-top:14px;align-items:start;}
 @media (max-width:820px){ .od-layout{grid-template-columns:1fr;} }
-.od-tree{border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--card);}
+.od-tree{border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--paper);}
 .od-folder{margin-bottom:2px;}
 .od-folder-head,.od-year{display:flex;align-items:center;gap:8px;width:100%;text-align:left;
-  background:none;border:0;cursor:pointer;padding:7px 8px;border-radius:8px;font:inherit;color:var(--ink);}
+  background:none;border:0;cursor:pointer;padding:7px 8px;border-radius:8px;font:inherit;color:var(--navy);}
 .od-folder-head:hover,.od-year:hover{background:var(--cream);}
 .od-folder-head.open{font-weight:700;color:var(--navy);}
 .od-caret-btn{border:0;background:none;cursor:pointer;font:inherit;font-size:11px;line-height:1;
   color:var(--muted);width:22px;min-width:22px;padding:8px 4px;border-radius:6px;text-align:center;}
 .od-caret-btn:hover{background:var(--cream);color:var(--navy);}
-/* A folder with no years has nothing to open, so its marker is not a control
-   and must not look like one. */
+/* A folder with no years and no sub-folders has nothing to open, so its marker
+   is not a control and must not look like one. */
 .od-leaf{cursor:default;opacity:.5;display:inline-block;}
 .od-leaf:hover{background:none;color:var(--muted);}
 .od-folder-name{flex:1;}
 .od-folder-count{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;}
-.od-years{margin:2px 0 6px 18px;border-left:1px solid var(--line);padding-left:6px;}
+.od-years,.od-children{margin:2px 0 6px 18px;border-left:1px solid var(--line);padding-left:6px;}
+/* A sub-folder's own count is a subtree total, so it must not read as though
+   the parent itself holds them. */
+.od-folder-count.rolled{font-style:italic;opacity:.8;}
+.od-add-sub{border:1px dashed var(--line);background:none;cursor:pointer;font:inherit;
+  font-size:11px;color:var(--muted);padding:5px 8px;border-radius:8px;width:100%;margin-top:4px;}
+.od-add-sub:hover{border-color:var(--navy);color:var(--navy);}
 .od-year.active{background:var(--cream);font-weight:700;color:var(--navy);}
-.od-main{border:1px solid var(--line);border-radius:10px;padding:14px;background:var(--card);min-width:0;}
+.od-main{border:1px solid var(--line);border-radius:10px;padding:14px;background:var(--paper);min-width:0;}
 .od-main-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;}
 .od-main-title{font-size:16px;font-weight:800;color:var(--navy);}
 .od-main-sub{font-size:12px;color:var(--muted);margin-top:2px;}
@@ -3273,6 +3286,11 @@
           <p class="empty" id="apprenticeListCount" style="margin:8px 0 0;"></p>
           <div style="height:18px"></div>
 
+          <!-- Hidden wholesale once these documents have moved into the Office
+               Old Documents archive: a second upload form filing into a Drive
+               folder the archive does not read is how two screens showing the
+               same paperwork started in the first place. -->
+          <div id="apprenticeDocUploadForm">
           <label class="field">Category</label>
           <select class="field-input" id="apprenticeDocCategory">
             <option value="Apprentice Claim Document">Apprentice Claim Document</option>
@@ -3294,6 +3312,7 @@
           <div style="height:12px"></div>
           <button class="btn full" onclick="withBusy(this,'Uploading…',uploadApprenticeDoc)">Upload document</button>
           <div class="msg" id="apprenticeDocMsg"></div>
+          </div>
           <div style="height:14px"></div>
           <div id="apprenticeDocList"></div>
         </section>
@@ -4355,6 +4374,8 @@ const LONG_READ_TTL_MS = {
   office_doc_folders: 600000,
   office_docs_index: 600000,
   office_apprentice_docs: 600000,
+  // Written once, ever, and read on every render of the apprentice card.
+  office_apprentice_docs_merged: 900000,
   office_checklist_docs: 600000,
   company_profile: 900000,        // 15 minutes
   employee_handbook: 900000,
@@ -22057,6 +22078,11 @@ function officeDocFoldersFrom_(raw){
   if(!Array.isArray(list) || !list.length) list = OFFICE_DOC_FOLDERS_DEFAULT.slice();
   return list.map(f => (f && typeof f === 'object')
     ? { id: f.id || officeDocSlug_(f.name), name: f.name || f.id,
+        // A sub-folder is just a folder that names its parent. Deliberately
+        // NOT a nested structure: every storage key stays office_docs:<id>:
+        // <year>:<part> exactly as it was, so nesting needed no migration and
+        // works to any depth without the key shape knowing about it.
+        parentId: f.parentId || undefined,
         years: Array.isArray(f.years) ? f.years : undefined }
     : { id: officeDocSlug_(f), name: String(f) });
 }
@@ -22094,10 +22120,22 @@ function officeDocsUsesYears_(folder){
 // The Drive path for a folder-year, with the year level left out entirely when
 // the folder does not use years — rather than a folder literally called "all"
 // sitting in Drive for somebody to wonder about.
-function officeDocsDrivePath_(folder, year){
-  const base = ['HR Management', 'Office Old Documents', folder.name];
+function officeDocsDrivePath_(folder, year, folders){
+  // Every parent above it, so Drive shows the same shape the app does rather
+  // than a flat list of sub-folder names with no clue what they belong to.
+  const chain = [];
+  let cur = folder, guard = 0;
+  while(cur && guard++ < 20){
+    chain.unshift(cur.name);
+    cur = cur.parentId ? (folders || []).find(f => f.id === cur.parentId) : null;
+  }
+  const base = ['HR Management', 'Office Old Documents'].concat(chain);
   return (officeDocsUsesYears_(folder) && year && year !== OFFICE_DOCS_NO_YEAR)
     ? base.concat([String(year)]) : base;
+}
+// The folders directly under one parent, in the order they were created.
+function officeDocsChildrenOf_(folders, parentId){
+  return (folders || []).filter(f => (f.parentId || null) === (parentId || null));
 }
 function officeDocPartKey_(slug, year, part){
   return 'office_docs:' + slug + ':' + year + ':' + part;
@@ -22396,37 +22434,69 @@ function officeDocsRepaintTree_(){
   holder.innerHTML = officeDocsTreeHtml_(officeDocsCache_.folders, officeDocsCache_.idx);
 }
 
-function officeDocsTreeHtml_(folders, idx){
+// Sub-folders are drawn by recursion over parentId, not by a second pass over a
+// second list: a folder names its parent and nothing else, so
+// Apprentice Documents › Claim Documents › 2024 comes out of the same code that
+// drew a flat list, to any depth, and every storage key stays
+// office_docs:<id>:<year>:<part> exactly as it was.
+//
+// The depth guard is not paranoia. parentId is stored data an HR action writes,
+// and a folder that ended up naming its own descendant would hang the archive
+// screen outright rather than merely draw a wrong tree.
+const OFFICE_DOCS_MAX_DEPTH = 8;
+function officeDocsTreeHtml_(folders, idx, parentId, depth){
+  depth = depth || 0;
+  if(depth > OFFICE_DOCS_MAX_DEPTH) return '';
   const countFor = (folderId, year) => {
     const v = (((idx[folderId] || {}).years) || {})[String(year)];
     return Number((v || {}).n) || 0;
   };
-  return folders.map(f => {
+  // What a folder holds, plus everything filed anywhere beneath it. A parent
+  // like Apprentice Documents holds nothing of its own, and a bare 0 beside it
+  // while collapsed would read as an empty folder rather than a full one.
+  const ownTotal = f => {
+    const yrs = officeDocsYearsFor_(f);
+    return yrs.length ? yrs.reduce((t, y) => t + countFor(f.id, y), 0)
+                      : countFor(f.id, OFFICE_DOCS_NO_YEAR);
+  };
+  const subtreeTotal = (f, d) => {
+    let n = ownTotal(f);
+    if(d > OFFICE_DOCS_MAX_DEPTH) return n;
+    officeDocsChildrenOf_(folders, f.id).forEach(c => { n += subtreeTotal(c, d + 1); });
+    return n;
+  };
+  return officeDocsChildrenOf_(folders, parentId || null).map(f => {
     const fYears = officeDocsYearsFor_(f);
     const usesYears = fYears.length > 0;
-    // A folder with no years has nothing to expand, so it gets a leaf marker
-    // rather than an arrow that would do nothing when pressed.
-    const open = usesYears && officeDocsExpanded_.has(f.id);
+    const kids = officeDocsChildrenOf_(folders, f.id);
+    // A folder with neither years nor sub-folders has nothing to expand, so it
+    // gets a leaf marker rather than an arrow that would do nothing when pressed.
+    const expandable = usesYears || kids.length > 0;
+    const open = expandable && officeDocsExpanded_.has(f.id);
     const selected = f.id === officeDocsState_.folderId;
-    const total = usesYears ? fYears.reduce((t, y) => t + countFor(f.id, y), 0)
-                            : countFor(f.id, OFFICE_DOCS_NO_YEAR);
+    const total = subtreeTotal(f, depth);
+    const rolled = kids.length > 0 && total !== ownTotal(f);
     const q = v => JSON.stringify(v).replace(/"/g, '&quot;');
     return `<div class="od-folder">
       <div class="od-folder-row">
-        ${usesYears
+        ${expandable
           ? `<button type="button" class="od-caret-btn" aria-expanded="${open}"
                      title="${open ? 'Collapse' : 'Expand'} ${escapeHtml(f.name)}"
                      onclick="officeDocsToggleFolder_(${q(f.id)})">${open ? '▾' : '▸'}</button>`
           : '<span class="od-caret-btn od-leaf" aria-hidden="true">•</span>'}
         <button type="button" class="od-folder-head${selected ? ' open' : ''}" onclick="officeDocsPick_(${q(f.id)}, null)">
           <span class="od-folder-name">${escapeHtml(f.name)}</span>
-          <span class="od-folder-count">${total}</span>
+          <span class="od-folder-count${rolled ? ' rolled' : ''}"
+                title="${rolled ? 'Including everything in its sub-folders' : 'Documents in this folder'}">${total}</span>
         </button>
         <button type="button" class="od-icon-btn" title="Rename this folder"
                 onclick="officeDocsRenameFolder_(${q(f.id)})">✎</button>
         <button type="button" class="od-icon-btn" title="Delete this folder"
                 onclick="officeDocsDeleteFolder_(${q(f.id)})">🗑</button>
       </div>
+      ${open && kids.length
+        ? `<div class="od-children">${officeDocsTreeHtml_(folders, idx, f.id, depth + 1)}</div>`
+        : ''}
       ${open ? `<div class="od-years">${fYears.map(y => `
         <div class="od-year-row">
           <button type="button" class="od-year${selected && String(y) === String(officeDocsState_.year) ? ' active' : ''}"
@@ -22437,9 +22507,23 @@ function officeDocsTreeHtml_(folders, idx){
                   onclick="officeDocsDeleteYear_(${q(f.id)}, '${y}')">🗑</button>
         </div>`).join('')}
         <button type="button" class="od-add-year" onclick="officeDocsAddYear_(${q(f.id)})">+ Add year</button>
+        ${depth < OFFICE_DOCS_MAX_DEPTH
+          ? `<button type="button" class="od-add-sub" onclick="officeDocsAddFolder_(${q(f.id)})">+ Sub-folder inside ${escapeHtml(f.name)}</button>`
+          : ''}
       </div>` : ''}
-      ${!usesYears && selected
+      ${selected && !usesYears && !kids.length
         ? '<p class="od-noyear">Filed without years — documents sit directly in this folder.</p>' : ''}
+      ${/* A folder with no years and no sub-folders has no arrow, so the two
+            add controls that normally live behind it have nowhere to be. They
+            were unreachable: a folder whose last year had been removed could
+            never get one back, which is the very folder most likely to need
+            one. Shown under it while it is the selected folder instead. */
+        selected && !expandable ? `<div class="od-years" style="border-left:0;padding-left:0;margin-left:22px;">
+        <button type="button" class="od-add-year" onclick="officeDocsAddYear_(${q(f.id)})">+ Add year</button>
+        ${depth < OFFICE_DOCS_MAX_DEPTH
+          ? `<button type="button" class="od-add-sub" onclick="officeDocsAddFolder_(${q(f.id)})">+ Sub-folder inside ${escapeHtml(f.name)}</button>`
+          : ''}
+      </div>` : ''}
     </div>`;
   }).join('');
 }
@@ -22663,21 +22747,37 @@ async function officeDocsSearch_(){
   await officeDocsApply_(null);
 }
 
-async function officeDocsAddFolder_(){
-  const name = (prompt('Name the new document folder — for example "IT & Server Documents".') || '').trim();
-  if(!name) return;
+// With no parentId this adds a top-level folder, exactly as it always did.
+// Given one it adds a sub-folder inside that folder — the same record with one
+// more field, which is why sub-folders needed no migration and no second list.
+async function officeDocsAddFolder_(parentId){
   const folders = await loadOfficeDocFolders_();
-  if(folders.some(f => f.name.toLowerCase() === name.toLowerCase())){
-    alert('There is already a folder called ' + name + '.');
+  const parent = parentId ? folders.find(f => f.id === parentId) : null;
+  if(parentId && !parent) return;
+  const name = (prompt(parent
+    ? 'Name the new folder inside “' + parent.name + '”.'
+    : 'Name the new document folder — for example "IT & Server Documents".') || '').trim();
+  if(!name) return;
+  // Scoped to its own siblings, not the whole archive: two different parents
+  // are each entitled to a folder called Contracts, and they land in different
+  // Drive paths, so a global check would refuse a name that is not a clash.
+  if(officeDocsChildrenOf_(folders, parentId || null)
+       .some(f => f.name.toLowerCase() === name.toLowerCase())){
+    alert('There is already a folder called ' + name +
+      (parent ? ' inside “' + parent.name + '”.' : '.'));
     return;
   }
   const id = officeDocNewId_(name, folders);
-  folders.push({ id: id, name: name });
+  folders.push(parent ? { id: id, name: name, parentId: parent.id } : { id: id, name: name });
   try{ await saveOfficeDocFolders_(folders); }
   catch(err){ alert('Could not add the folder: ' + ((err && err.message) || 'the server did not respond')); return; }
-  addActivityLog('Added the Office Old Documents folder "' + name + '"').catch(() => {});
+  addActivityLog('Added the Office Old Documents folder "' + name + '"' +
+    (parent ? ' inside "' + parent.name + '"' : '')).catch(() => {});
   officeDocsState_.folderId = id;
   officeDocsExpanded_.add(id);
+  // The parent has to be open too, or the folder just created is selected
+  // somewhere the tree is not showing.
+  if(parent) officeDocsExpanded_.add(parent.id);
   officeDocsSaveOpen_();
   officeDocsState_.results = null;
   await officeDocsApply_({ folders: folders });
@@ -22800,6 +22900,18 @@ async function officeDocsDeleteFolder_(folderId){
       'documents in it would leave them stranded in Google Drive.');
     return;
   }
+  // A parent may be empty itself and still be holding a full sub-folder. Left
+  // to delete, its children would keep a parentId naming a folder that no
+  // longer exists — they would vanish from the tree while their documents sat
+  // in Drive, which is the same stranding the count guard above exists to stop.
+  const kids = officeDocsChildrenOf_(folders, folderId);
+  if(kids.length){
+    alert('“' + folder.name + '” has ' + kids.length + ' folder(s) inside it: ' +
+      kids.map(k => k.name).join(', ') + '.\n\n' +
+      'Delete or empty those first. Deleting a folder that still has folders inside ' +
+      'it would leave their documents stranded in Google Drive.');
+    return;
+  }
   if(!confirm('Delete the empty folder “' + folder.name + '”?')) return;
   const left = folders.filter(f => f.id !== folderId);
   try{ await saveOfficeDocFolders_(left); }
@@ -22869,7 +22981,7 @@ async function officeDocsUpload_(){
   const folders = await loadOfficeDocFolders_();
   const folder = folders.find(f => f.id === st.folderId);
   if(!folder){ say('That folder no longer exists — reload the page.', true); officeDocsState_.busy = false; return; }
-  const folderPath = officeDocsDrivePath_(folder, st.year);
+  const folderPath = officeDocsDrivePath_(folder, st.year, folders);
   const done = [], failed = [], renamed = [];
   let uploadedIdx = null;
   for(let i = 0; i < files.length; i++){
@@ -24018,6 +24130,25 @@ function switchApprenticeDocTab_(key){
 }
 async function renderApprenticeDocList(){
   const box = document.getElementById('apprenticeDocList');
+  if(!box) return;
+  // Once the merge has run this module is a shortcut to the archive and
+  // nothing else. The list is not shown again: two screens listing the same
+  // documents is what the merge existed to end, and a second Upload form here
+  // would file into a Drive folder the archive does not read.
+  if(await apprenticeMergeDone_()){
+    box.innerHTML = `<div class="empty" style="text-align:left;line-height:1.6;">
+      <strong>These have moved.</strong><br>
+      Every apprentice document is now filed under
+      <strong>Office Old Documents › ${escapeHtml(APPRENTICE_MERGE_PARENT_)}</strong>,
+      with claims and stipend payments filed by year, and searchable alongside the rest of
+      the company's paperwork.
+      <div style="margin-top:12px;">
+        <button type="button" class="btn" onclick="openOfficeDocsCard()">Open Office Old Documents</button>
+      </div></div>`;
+    const form = document.getElementById('apprenticeDocUploadForm');
+    if(form) form.classList.add('hidden');
+    return;
+  }
   const list = await getApprenticeDocs();
   const knownKeys = APPRENTICE_DOC_TABS_.map(t => t.key);
   // The upload form's Category dropdown only ever writes one of the keys
@@ -24031,7 +24162,20 @@ async function renderApprenticeDocList(){
   APPRENTICE_DOC_TABS_.forEach(t => { tabCounts[t.key] = 0; });
   list.forEach(d => { tabCounts[tabOf(d)]++; });
 
-  const tabsHtml = '<div class="payroll-docs-tabs" style="margin-bottom:12px;">' +
+  // Offered rather than done automatically. It moves real paperwork in Drive
+  // and cannot be undone from here, so HR sees the exact breakdown in the
+  // confirm before anything is written.
+  const mergeHtml = list.length ? `<div class="od-merge-offer">
+      <div><strong>Move these into Office Old Documents</strong>
+      <div style="font-size:12px;color:var(--muted);margin-top:3px;line-height:1.5;">
+        All ${list.length} document(s) become folders in the archive —
+        claims and stipend payments filed by year, contracts and important documents without —
+        searchable alongside the rest of the company's paperwork. Done once.</div></div>
+      <button type="button" class="btn" style="flex:0 0 auto;"
+              onclick="withBusy(this,'Moving…',mergeApprenticeDocsIntoArchive_)">Move to archive</button>
+    </div>` : '';
+
+  const tabsHtml = mergeHtml + '<div class="payroll-docs-tabs" style="margin-bottom:12px;">' +
     APPRENTICE_DOC_TABS_.map(t => `<button type="button" class="payroll-docs-tab ${apprenticeDocTab_===t.key?'active':''}" onclick="switchApprenticeDocTab_('${t.key}')">${escapeHtml(t.label)} (${tabCounts[t.key]})</button>`).join('') +
     '</div>';
 
@@ -24055,6 +24199,263 @@ async function deleteApprenticeDoc(id){
   let list = await getApprenticeDocs();
   list = list.filter(d => d.id !== id);
   await saveApprenticeDocs(list);
+  await renderApprenticeDocList();
+}
+
+// ---- Moving Apprentice Documents into the Office Old Documents archive ----
+//
+// This module and the archive were two answers to the same question, built a
+// year apart. This one files four fixed categories in a flat list with no
+// years, no search, no size or type, and no way to add a fifth category. The
+// archive does all of that for every other kind of company paperwork. Keeping
+// both means HR has to remember which screen a document was filed on, which is
+// exactly the drift the rest of this app is built to avoid.
+//
+// So the apprentice categories become folders in the archive, once, and the
+// module goes. Each category's shape here is HR's own, not a translation:
+// claims and stipends are filed by year, contracts and the important-documents
+// catch-all are not, and there is a fifth folder for the accountant that starts
+// empty because nothing existing belongs in it.
+//
+// The `from` key is the CATEGORY STRING already stored on every record, not a
+// label — it is what the old upload form wrote and what tabOf still reads, so
+// it is fixed. The `name` is the archive folder's display name and is free to
+// change afterwards, exactly like any other folder's.
+const APPRENTICE_MERGE_PARENT_ = 'Apprentice Documents';
+const APPRENTICE_MERGE_PLAN_ = [
+  { name: 'Apprentice Claim Documents',       from: 'Apprentice Claim Document',           years: true  },
+  { name: 'Contracts',                        from: 'Apprentice Contract',                 years: false },
+  { name: 'Monthly Stipend Payments',         from: 'Apprentice Stipend Payment Document', years: true  },
+  { name: 'Important Apprentice Documents',   from: 'Other Apprentice Document',           years: false },
+  { name: 'Stipend Documents for Accountant', from: null,                                  years: true  },
+];
+// Set once the merge has run, and checked before it can run again. Two runs
+// would file every document twice — the archive has no idea it has seen a
+// Drive id before, and nor should it: two scans of the same invoice are two
+// documents everywhere else in it.
+const APPRENTICE_MERGE_FLAG_KEY = 'office_apprentice_docs_merged';
+async function apprenticeMergeDone_(){
+  const v = await safeGet(APPRENTICE_MERGE_FLAG_KEY, true);
+  try{ return !!(v && JSON.parse(v).merged); }catch(e){ return false; }
+}
+
+// The year a document belongs to, read from what HR actually typed.
+//
+// There is no year on these records — the old form never asked for one — so it
+// has to come from the note, which is where HR has been writing it all along
+// ("NAPS claim for Q2 2024", "Stipend for August 2026"). A note that does not
+// say gets no year at all rather than a guessed one: the upload date is when
+// the scan was filed, not what period it covers, and a claim scanned in April
+// for the previous quarter would land in the wrong year every time.
+//
+// The file name is tried second because the old upload built it from the
+// employee's name and the category, so a year in it was typed by HR too.
+function apprenticeDocYear_(d){
+  const from = text => {
+    const s = String(text || '');
+    // A four-digit year written out, which is how most of them read.
+    const m = /\b(20\d{2})\b/.exec(s);
+    if(m) return m[1];
+    // "Aug 26", "August-26", "Sept 25" — a named month beside two digits is
+    // still a year, and shortening it that way is normal on a stipend note.
+    const m2 = /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[^a-z0-9]{0,3}(\d{2})\b/i.exec(s);
+    if(m2) return '20' + m2[1];
+    return null;
+  };
+  return from(d && d.note) || from(d && d.fileName) || null;
+}
+// Drive's own file URL is what the old module stored; the archive stores the id
+// on its own. Everything else about a record — View, Rename, Delete — works off
+// that id, so a record whose URL does not yield one cannot be filed at all.
+function apprenticeDocFileId_(d){
+  const m = /\/d\/([^/?#]+)/.exec((d && d.url) || '');
+  return m ? m[1] : '';
+}
+
+// Groups every apprentice document by the archive folder and year it will land
+// in, without writing anything. Split out from the merge itself so the summary
+// HR confirms is built by the same code that then does the work — a preview
+// that is assembled separately is a preview of something else.
+function apprenticeMergeBuckets_(list){
+  const known = APPRENTICE_MERGE_PLAN_.filter(p => p.from).map(p => p.from);
+  const buckets = [];    // [{childName, years, year, label, docs:[]}]
+  const find = (childName, year) => buckets.find(b => b.childName === childName && b.year === year);
+  const skipped = [];
+  list.forEach(d => {
+    const fileId = apprenticeDocFileId_(d);
+    if(!fileId){ skipped.push(d); return; }
+    // Same catch-all rule the tabs already use, so a record with a category
+    // string nothing recognises lands where it has always been shown rather
+    // than disappearing in the move.
+    const cat = known.indexOf(d.category) !== -1 ? d.category : 'Other Apprentice Document';
+    const plan = APPRENTICE_MERGE_PLAN_.find(p => p.from === cat);
+    // A year-wise folder with no readable year files into an Unsorted
+    // sub-folder of its own rather than a made-up year: it is visible, it is
+    // one click from where it belongs, and HR can see at a glance how many
+    // need a second look. Years stay strictly four digits, which is what lets
+    // 'all' mean "this folder has none".
+    const year = plan.years ? apprenticeDocYear_(d) : OFFICE_DOCS_NO_YEAR;
+    const key = year || 'UNSORTED';
+    let b = find(plan.name, key);
+    if(!b){
+      b = { childName: plan.name, years: plan.years, year: key,
+            unsorted: !year && plan.years, docs: [] };
+      buckets.push(b);
+    }
+    b.docs.push(Object.assign({ fileId: fileId }, d));
+  });
+  // Folders in the order they are listed above and years newest first, so the
+  // summary HR confirms reads down the tree it is about to create rather than
+  // alphabetically. Unsorted sits last in its folder, where a leftover belongs.
+  const order = APPRENTICE_MERGE_PLAN_.map(p => p.name);
+  buckets.sort((a, b) => (order.indexOf(a.childName) - order.indexOf(b.childName)) ||
+                         ((a.unsorted ? 1 : 0) - (b.unsorted ? 1 : 0)) ||
+                         String(b.year).localeCompare(String(a.year)));
+  return { buckets: buckets, skipped: skipped };
+}
+
+async function mergeApprenticeDocsIntoArchive_(){
+  const msg = document.getElementById('apprenticeDocMsg');
+  const say = (t, bad) => { if(msg){ msg.textContent = t; msg.classList.toggle('error', !!bad); } };
+  if(await apprenticeMergeDone_()){
+    alert('These documents have already been moved into Office Old Documents.');
+    return;
+  }
+  const list = await getApprenticeDocs();
+  if(!list.length){ say('There is nothing here to move.', true); return; }
+  const { buckets, skipped } = apprenticeMergeBuckets_(list);
+  const total = buckets.reduce((t, b) => t + b.docs.length, 0);
+
+  const lines = buckets.map(b => '  • ' + APPRENTICE_MERGE_PARENT_ + ' › ' + b.childName +
+    (b.years ? ' › ' + (b.unsorted ? 'Unsorted' : b.year) : '') + '  —  ' + b.docs.length + ' document(s)');
+  if(!confirm('Move ' + total + ' apprentice document(s) into Office Old Documents?\n\n' +
+      lines.join('\n') + '\n\n' +
+      (skipped.length ? skipped.length + ' record(s) have no usable Drive link and will be left here.\n\n' : '') +
+      'The files themselves move in Google Drive too, so the archive and Drive stay the same shape. ' +
+      'Nothing is deleted, and this can only be done once.')) return;
+
+  say('Reading file sizes from Drive…');
+  // Size and type are columns the archive prints and this module never stored.
+  // One request for the lot — see doGetDriveFileMeta_ for why asking the
+  // file-reading action instead would move hundreds of megabytes to learn them.
+  let meta = {};
+  try{
+    const ids = buckets.reduce((a, b) => a.concat(b.docs.map(d => d.fileId)), []);
+    const res = await backendAction({ action: 'getDriveFileMeta', fileIds: ids });
+    if(res && res.ok && res.meta) meta = res.meta;
+  }catch(err){ /* a missing size prints as 0 B, which is better than not filing it */ }
+
+  say('Creating the archive folders…');
+  let folders = await loadOfficeDocFolders_();
+  // Reuses a folder of the same name at the same level if HR already made one
+  // by hand, rather than creating a second one beside it that looks identical.
+  const ensure = (name, parentId, years) => {
+    let f = officeDocsChildrenOf_(folders, parentId || null)
+              .find(x => x.name.toLowerCase() === name.toLowerCase());
+    if(f){
+      if(years && !Array.isArray(f.years)) f.years = years;
+      else if(years) years.forEach(y => { if(f.years.indexOf(y) === -1) f.years.push(y); });
+      if(years) f.years.sort((a, b) => Number(b) - Number(a));
+      return f;
+    }
+    f = { id: officeDocNewId_(name, folders), name: name };
+    if(parentId) f.parentId = parentId;
+    // A year-wise folder gets exactly the years its documents turned out to
+    // need. Left undefined it would inherit the standard 2022-to-now run and
+    // show HR five empty years beside the two that hold anything.
+    if(years) f.years = years.slice().sort((a, b) => Number(b) - Number(a));
+    else if(years === null) f.years = [];   // deliberately no years at all
+    folders.push(f);
+    return f;
+  };
+
+  const parent = ensure(APPRENTICE_MERGE_PARENT_, null, null);
+  const targets = [];   // [{bucket, folder, year}]
+  APPRENTICE_MERGE_PLAN_.forEach(p => {
+    const mine = buckets.filter(b => b.childName === p.name);
+    const years = p.years
+      ? mine.filter(b => !b.unsorted).map(b => String(b.year))
+      : null;
+    // The accountant's folder is the one nothing merges into, and it must
+    // still appear — HR files into it from now on, year by year. With no
+    // documents to take years from it keeps the standard run.
+    const child = ensure(p.name, parent.id,
+      p.years ? (years.length ? years : officeDocsYears_()) : null);
+    mine.forEach(b => {
+      if(b.unsorted){
+        const un = ensure('Unsorted', child.id, null);
+        targets.push({ bucket: b, folder: un, year: OFFICE_DOCS_NO_YEAR });
+      }else{
+        targets.push({ bucket: b, folder: child, year: b.year });
+      }
+    });
+  });
+
+  try{ await saveOfficeDocFolders_(folders); }
+  catch(err){ say('Could not create the archive folders: ' + ((err && err.message) || 'the server did not respond'), true); return; }
+
+  say('Moving ' + total + ' file(s) in Google Drive…');
+  // One request for every move. Each is independent on the backend, so a file
+  // somebody has already tidied away in Drive is reported and skipped rather
+  // than stopping the ones after it.
+  let notMoved = [];
+  try{
+    const moves = targets.reduce((a, t) => a.concat(t.bucket.docs.map(d => ({
+      fileId: d.fileId, folderPath: officeDocsDrivePath_(t.folder, t.year, folders)
+    }))), []);
+    const res = await backendAction({ action: 'moveOfficeDocs', moves: moves });
+    notMoved = res && res.failed ? Object.keys(res.failed) : [];
+  }catch(err){
+    // Filing goes ahead anyway: every record is keyed on the Drive id, so a
+    // document the app can find and open is filed correctly whether or not its
+    // file changed folders. Reported at the end so it can be put right.
+    notMoved = targets.reduce((a, t) => a.concat(t.bucket.docs.map(d => d.fileId)), []);
+  }
+
+  let filed = 0, idx = null;
+  const problems = [];
+  for(let i = 0; i < targets.length; i++){
+    const t = targets[i];
+    say('Filing ' + t.folder.name + (t.year === OFFICE_DOCS_NO_YEAR ? '' : ' › ' + t.year) +
+        ' (' + (i + 1) + ' of ' + targets.length + ')…');
+    const docs = t.bucket.docs.map(d => {
+      const m = meta[d.fileId] || {};
+      return {
+        // The Drive name, where Drive gave one: it is what the file is actually
+        // called, and the stored fileName can be out of date if it was renamed.
+        name: m.name || d.fileName || d.category || 'Document',
+        fileId: d.fileId, mimeType: m.mimeType || '', size: Number(m.size) || 0,
+        uploadedAt: Date.parse(d.uploadedAt) || 0,
+        // Who filed it was never recorded here, so the employee it belongs to
+        // and the note HR wrote go in instead — losing them would throw away
+        // the only thing that says which apprentice a claim is for.
+        uploadedBy: [d.employeeName, d.note].filter(Boolean).join(' · ') || 'HR'
+      };
+    });
+    // Reuses the archive's own append path rather than a bulk writer of its
+    // own: it is the code every upload already goes through, it shards and
+    // indexes correctly, and a one-off is not worth a second version of it.
+    try{ idx = await appendOfficeDocs_(t.folder.id, t.folder.name, t.year, docs); filed += docs.length; }
+    catch(err){ problems.push(t.folder.name + (t.year === OFFICE_DOCS_NO_YEAR ? '' : ' › ' + t.year) +
+      ': ' + ((err && err.message) || 'the server did not respond')); }
+  }
+
+  if(filed){
+    // Set only after something was actually filed, so a merge that failed
+    // outright can be run again rather than being locked out by its own flag.
+    try{ await remoteSet(APPRENTICE_MERGE_FLAG_KEY, JSON.stringify({ merged: true, at: Date.now(), filed: filed })); }
+    catch(err){}
+    addActivityLog('Moved ' + filed + ' apprentice document(s) into Office Old Documents › ' +
+      APPRENTICE_MERGE_PARENT_).catch(() => {});
+  }
+
+  officeDocsCache_ = null;   // the archive's folders and index both changed
+  const notes = [filed + ' document(s) filed under Office Old Documents › ' + APPRENTICE_MERGE_PARENT_ + '.'];
+  if(skipped.length) notes.push(skipped.length + ' record(s) had no usable Drive link and were left here.');
+  if(notMoved.length) notes.push(notMoved.length + ' file(s) could not be moved in Drive — they are filed and open ' +
+    'correctly, but still sit in the old Drive folder.');
+  if(problems.length) notes.push('Not filed: ' + problems.join('; '));
+  alert(notes.join('\n\n'));
   await renderApprenticeDocList();
 }
 

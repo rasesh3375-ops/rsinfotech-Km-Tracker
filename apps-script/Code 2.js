@@ -727,6 +727,70 @@ function doRenameOfficeDoc_(body) {
   }
 }
 
+// Size and type for a list of files, in ONE request — never the bytes.
+//
+// doGetDriveFile_ reads the whole file and base64-encodes it, which is right
+// for showing a document and completely wrong for filling in a Size column:
+// asking it about forty-five files would move a few hundred megabytes to learn
+// a few hundred bytes. This reads the metadata only, and takes the whole list
+// at once so the archive merge is a single call rather than one per document.
+//
+// A file that has been trashed or whose id no longer resolves is skipped
+// rather than failing the batch — the caller wants what is knowable about the
+// rest, not an error because one document was tidied away in Drive months ago.
+function doGetDriveFileMeta_(body) {
+  var out = {};
+  var ids = body.fileIds || [];
+  for (var i = 0; i < ids.length; i++) {
+    try {
+      var f = DriveApp.getFileById(ids[i]);
+      out[ids[i]] = { size: f.getSize(), mimeType: f.getMimeType(), name: f.getName() };
+    } catch (err) { /* gone from Drive — leave it out */ }
+  }
+  return { ok: true, meta: out };
+}
+
+// Moves files into an archive folder, a whole list at a time.
+//
+// Written for the one-off merge of the Apprentice Documents module into the
+// Office Old Documents archive. The app could have simply re-filed the records
+// and left the files where they were — every record is keyed on a Drive file id
+// and View, Rename and Delete all work on the id alone, so nothing would have
+// broken. But the archive's whole promise is "you never need to open Drive to
+// find one", and it cannot be kept by a folder in Drive that shows only the
+// documents filed since the merge while the rest sit somewhere else entirely.
+// So the files move too, and the two stay one thing.
+//
+// Batched because it is under the same six-second lock every other write is:
+// fifty-five separate requests would each pay a round trip, where this pays one.
+// Each move is independent — a file already gone from Drive is reported and
+// skipped, never allowed to fail the ones after it, because a merge that
+// stops half way is far worse than one that names what it could not carry.
+function doMoveOfficeDocs_(body) {
+  var moves = body.moves || [];
+  var moved = [], failed = {};
+  // Folders are resolved once per distinct path rather than per file: a merge
+  // of fifty files into five folders should create and look up five folders.
+  var folderCache = {};
+  for (var i = 0; i < moves.length; i++) {
+    var m = moves[i] || {};
+    try {
+      var pathKey = (m.folderPath || []).join(' ');
+      var folder = folderCache[pathKey];
+      if (!folder) { folder = getOrCreateFolderPath_(m.folderPath || []); folderCache[pathKey] = folder; }
+      var file = DriveApp.getFileById(m.fileId);
+      // moveTo replaces every parent in one call. Adding the new parent and
+      // removing the old ones by hand is the same thing done in three steps,
+      // with a window in the middle where a failure leaves the file in both.
+      file.moveTo(folder);
+      moved.push(m.fileId);
+    } catch (err) {
+      failed[m.fileId] = String(err);
+    }
+  }
+  return { ok: true, moved: moved, failed: failed };
+}
+
 // Trashed rather than hard-deleted, so a document removed from the archive by
 // mistake is still recoverable from Drive's bin for thirty days. The app drops
 // its own record either way — a row pointing at a trashed file would show a
@@ -1640,6 +1704,16 @@ function doPost(e) {
   if (body.action === 'renameOfficeDoc') {
     if (isEngineer) return forbidden_();
     return jsonOut_(doRenameOfficeDoc_(body));
+  }
+
+  if (body.action === 'getDriveFileMeta') {
+    if (isEngineer) return forbidden_();
+    return jsonOut_(doGetDriveFileMeta_(body));
+  }
+
+  if (body.action === 'moveOfficeDocs') {
+    if (isEngineer) return forbidden_();
+    return jsonOut_(doMoveOfficeDocs_(body));
   }
 
   if (body.action === 'getDriveFile') {
