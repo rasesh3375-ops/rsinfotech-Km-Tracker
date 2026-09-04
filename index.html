@@ -22349,6 +22349,43 @@ function officeDocDriveUrl_(fileId){
 async function loadOfficeDocFolders_(){
   return officeDocFoldersFrom_(await safeGetOrThrow_(OFFICE_DOC_FOLDERS_KEY));
 }
+// The folder list and the index, in ONE request instead of two.
+//
+// Opening the archive read them one after the other and only then read the
+// selected folder's documents — three round trips to Apps Script, in series,
+// before a single pixel could be drawn, each one paying its own queue behind
+// the script-wide lock. That was tolerable at four folders. At a hundred and
+// twenty, on mobile data, it is the whole of "Loading the archive…".
+//
+// Both are needed together and neither depends on the other, so they go up
+// together. Keeps every property safeGetOrThrow_ has: a cache hit is used, a
+// real answer is remembered, and a failed CALL is raised rather than answered
+// as an empty archive. Falls back to the two separate reads on a backend that
+// does not know getBatch — index.html is live within a minute of a push and
+// Code 2.js is pasted by hand, so that gap is real.
+async function loadOfficeDocsConfig_(){
+  const fKey = OFFICE_DOC_FOLDERS_KEY, iKey = OFFICE_DOCS_INDEX_KEY;
+  const asIdx = raw => {
+    try{ const v = raw ? JSON.parse(raw) : {}; return (v && typeof v === 'object') ? v : {}; }
+    catch(e){ return {}; }
+  };
+  const now = Date.now();
+  const fHit = sharedReadCache.get(fKey), iHit = sharedReadCache.get(iKey);
+  if(fHit && iHit && now < fHit.until && now < iHit.until){
+    return { folders: officeDocFoldersFrom_(fHit.value), idx: asIdx(iHit.value) };
+  }
+  let data = null;
+  try{ data = await backendAction({ action: 'getBatch', keys: [fKey, iKey] }); }
+  catch(err){ data = null; }
+  if(data && data.batch && data.values){
+    const f = data.values[fKey] === undefined ? null : data.values[fKey];
+    const i = data.values[iKey] === undefined ? null : data.values[iKey];
+    primeSharedRead(fKey, f);
+    primeSharedRead(iKey, i);
+    return { folders: officeDocFoldersFrom_(f), idx: asIdx(i) };
+  }
+  return { folders: await loadOfficeDocFolders_(), idx: await loadOfficeDocIndex_() };
+}
 async function saveOfficeDocFolders_(folders){
   const json = JSON.stringify(folders);
   const ok = await remoteSet(OFFICE_DOC_FOLDERS_KEY, json, OFFICE_DOCS_WRITE_FETCH);
@@ -23188,8 +23225,8 @@ async function renderOfficeDocsModule_(){
   box.innerHTML = '<div class="empty">Loading the archive…</div>';
   let folders, idx;
   try{
-    folders = await loadOfficeDocFolders_();
-    idx = await loadOfficeDocIndex_();
+    const cfg = await loadOfficeDocsConfig_();
+    folders = cfg.folders; idx = cfg.idx;
     officeDocsCache_ = { folders: folders, idx: idx };
   }catch(err){
     // With a Try again button, because this is now a screen HR can land on for
@@ -23269,8 +23306,16 @@ async function renderOfficeDocsModule_(){
           Files are stored on Google Drive under <strong>HR Management &gt; Office Documents</strong>,
           and managed entirely from here. You never need to open Drive to file or find one.</p>
       </div>
-      <div class="od-main" id="odMain">${await officeDocsMainHtml_(idx, current)}</div>
+      <div class="od-main" id="odMain"><div class="empty">Loading documents…</div></div>
     </div>`;
+
+  // The stats, the tree and the toolbar are all known the moment the two config
+  // keys arrive; only the document table needs a third read. Painting them now
+  // and filling the table in after means HR sees the archive after one round
+  // trip rather than two — and can already open a different folder while the
+  // first one is still arriving.
+  const main = document.getElementById('odMain');
+  if(main) main.innerHTML = await officeDocsMainHtml_(idx, current);
 }
 
 function odStat_(label, value, sub){
