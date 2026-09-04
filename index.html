@@ -22318,6 +22318,144 @@ async function removeOfficeDoc_(folderId, year, fileId){
   return idx;
 }
 
+// How many filed documents have no size recorded, from the index alone.
+//
+// A folder-year that holds documents but reports zero bytes has never had its
+// sizes filled in — which is exactly what the apprentice merge produced when
+// the backend it ran against did not yet have getDriveFileMeta. It fails
+// quietly by design there (a document filed with no size is far better than
+// one not filed at all), so something has to say so afterwards, and the index
+// already knows without reading a single record.
+function officeDocsUnsizedCount_(idx){
+  let n = 0;
+  Object.keys(idx || {}).forEach(slug => {
+    const years = (idx[slug] || {}).years || {};
+    Object.keys(years).forEach(y => {
+      const v = years[y] || {};
+      if(Number(v.n) > 0 && !(Number(v.b) > 0)) n += Number(v.n) || 0;
+    });
+  });
+  return n;
+}
+// Reads every filed record's size and type back from Drive.
+//
+// Size and type are the only two columns the archive prints that it does not
+// know on its own — they belong to Drive, and a record written without them
+// (a merge against an older backend, a file replaced in Drive directly) shows
+// a blank Size and a Storage Used of 0 B for ever, because nothing re-reads
+// them. This is that re-read, for the whole archive at once.
+//
+// Deliberately does NOT touch the file name, though Drive is asked for it in
+// the same breath: HR renames documents from inside the app, and quietly
+// replacing fifty display names as a side effect of "refresh sizes" is not
+// something a button with that label should do.
+//
+// Nor does it delete anything. A file that has been trashed in Drive comes
+// back missing from the metadata, and that is reported as a count — a row
+// that cannot be opened is worth knowing about, but removing records on the
+// strength of one Drive lookup is not a decision to take without being asked.
+const OFFICE_DOCS_META_CHUNK = 200;   // file ids per getDriveFileMeta call
+const OFFICE_DOCS_PART_CHUNK = 20;    // shard keys per getBatch call
+async function officeDocsRefreshSizes_(){
+  const idx = await loadOfficeDocIndex_();
+  // Every shard the index says exists, and which folder-year it belongs to.
+  const shards = [];
+  Object.keys(idx).forEach(slug => {
+    const years = (idx[slug] || {}).years || {};
+    Object.keys(years).forEach(y => {
+      const parts = Number((years[y] || {}).p) || 0;
+      for(let p = 0; p < parts; p++){
+        shards.push({ key: officeDocPartKey_(slug, y, p), slug: slug, year: y });
+      }
+    });
+  });
+  if(!shards.length){ alert('There is nothing filed in the archive yet.'); return; }
+
+  // Read in chunks rather than one enormous getBatch: a full shard is 120
+  // records, and asking for the whole archive in one response is how a
+  // perfectly good request starts timing out once the archive is large.
+  const raws = {};
+  for(let i = 0; i < shards.length; i += OFFICE_DOCS_PART_CHUNK){
+    const keys = shards.slice(i, i + OFFICE_DOCS_PART_CHUNK).map(s => s.key);
+    Object.assign(raws, await officeDocsReadKeys_(keys));
+  }
+  const loaded = shards.map(s => {
+    let v = null;
+    try{ v = raws[s.key] ? JSON.parse(raws[s.key]) : null; }catch(e){ v = null; }
+    return { shard: s, records: (v && v.records) || [] };
+  });
+
+  const ids = [];
+  loaded.forEach(l => l.records.forEach(r => { if(r.f) ids.push(r.f); }));
+  if(!ids.length){ alert('There is nothing filed in the archive yet.'); return; }
+
+  let meta = {};
+  for(let i = 0; i < ids.length; i += OFFICE_DOCS_META_CHUNK){
+    let res = null;
+    try{ res = await backendAction({ action: 'getDriveFileMeta', fileIds: ids.slice(i, i + OFFICE_DOCS_META_CHUNK) }); }
+    catch(err){ res = null; }
+    // An older backend answers ok with no meta at all rather than an error,
+    // which would otherwise look like "every file has gone from Drive".
+    if(!res || !res.ok || !res.meta){
+      alert('The server could not read file sizes from Drive.\n\n' +
+        'This needs the getDriveFileMeta action in the Apps Script backend — paste the ' +
+        'latest Code 2.js and save a new version of the existing deployment, then try again.\n\n' +
+        'Nothing was changed.');
+      return;
+    }
+    Object.assign(meta, res.meta);
+  }
+
+  const entries = {};
+  const totals = {};      // slug|year -> bytes, recomputed from the records
+  let changed = 0, missing = 0;
+  loaded.forEach(l => {
+    const tKey = l.shard.slug + '|' + l.shard.year;
+    let dirty = false;
+    l.records.forEach(r => {
+      const m = meta[r.f];
+      if(!m){ missing++; }
+      else{
+        const size = Number(m.size) || 0, mime = m.mimeType || '';
+        if(Number(r.s) !== size || (r.m || '') !== mime){ r.s = size; r.m = mime; dirty = true; changed++; }
+      }
+      totals[tKey] = (totals[tKey] || 0) + (Number(r.s) || 0);
+    });
+    if(dirty) entries[l.shard.key] = JSON.stringify({ savedAt: Date.now(), records: l.records });
+  });
+
+  if(Object.keys(entries).length){
+    const saved = await remoteSetMany(entries);
+    if(!saved){ alert('Could not save the sizes: ' + (lastBackendError || 'the server did not respond')); return; }
+    const notSaved = Object.keys(entries).filter(k => !saved.has(k));
+    if(notSaved.length){
+      alert(notSaved.length + ' shard(s) of the archive could not be written — ' +
+        'reload and run this again. Nothing was lost.');
+      return;
+    }
+  }
+  // The index's own byte total is recomputed from the records rather than
+  // added up as it goes, so a run after a partly-successful one lands on the
+  // right figure instead of counting the same file twice.
+  Object.keys(totals).forEach(t => {
+    const bar = t.lastIndexOf('|'), slug = t.slice(0, bar), year = t.slice(bar + 1);
+    if(idx[slug] && idx[slug].years && idx[slug].years[year]) idx[slug].years[year].b = totals[t];
+  });
+  try{ await saveOfficeDocIndex_(idx); }
+  catch(err){ alert('The sizes were saved but the archive index was not: ' +
+    ((err && err.message) || 'the server did not respond') + '\n\nReload and run this again.'); return; }
+
+  if(changed) addActivityLog('Refreshed size and type from Drive for ' + changed +
+    ' document(s) in Office Old Documents').catch(() => {});
+  await officeDocsApply_({ idx: idx });
+  alert(changed
+    ? changed + ' document(s) updated from Google Drive.' +
+      (missing ? '\n\n' + missing + ' file(s) could not be found in Drive — they may have been ' +
+                 'trashed there. Their rows are still listed and nothing was removed.' : '')
+    : 'Every document already had its size and type.' +
+      (missing ? '\n\n' + missing + ' file(s) could not be found in Drive.' : ''));
+}
+
 function officeDocSize_(bytes){
   const b = Number(bytes) || 0;
   if(b < 1024) return b + ' B';
@@ -22438,6 +22576,25 @@ function officeDocsRepaintStats_(folders, idx){
     odStat_('Total documents', totalDocs.toLocaleString('en-IN'), 'In the archive') +
     odStat_('Storage used', officeDocSize_(totalBytes), 'On Google Drive') +
     odStat_('Folder-years in use', folderYears, 'Holding at least one file');
+  const note = document.getElementById('odUnsized');
+  if(note) note.innerHTML = officeDocsUnsizedHtml_(idx);
+}
+// Shown only while there is something to fix, and gone the moment there is
+// not — a 0 B "Storage used" beside fifty-five documents is the kind of wrong
+// figure somebody quietly stops trusting the rest of the screen over, so it
+// says what happened and offers the one button that puts it right.
+function officeDocsUnsizedHtml_(idx){
+  const n = officeDocsUnsizedCount_(idx);
+  if(!n) return '';
+  return `<div class="od-merge-offer" style="margin:14px 0 0;">
+    <div><strong>${n} document(s) have no size or type recorded</strong>
+    <div style="font-size:12px;color:var(--muted);margin-top:3px;line-height:1.5;">
+      They are filed and open correctly — only the Size and Type columns, and Storage Used,
+      are blank. Reading them back from Google Drive fills them in. Nothing is renamed,
+      moved or deleted.</div></div>
+    <button type="button" class="btn" style="flex:0 0 auto;"
+            onclick="withBusy(this,'Reading Drive…',officeDocsRefreshSizes_)">Refresh from Drive</button>
+  </div>`;
 }
 function officeDocsRepaintTree_(){
   const holder = document.querySelector('#officeDocsBox .od-tree-list');
@@ -22585,6 +22742,7 @@ async function renderOfficeDocsModule_(){
       ${odStat_('Storage used', officeDocSize_(totalBytes), 'On Google Drive')}
       ${odStat_('Folder-years in use', folderYears, 'Holding at least one file')}
     </div>
+    <div id="odUnsized">${officeDocsUnsizedHtml_(idx)}</div>
 
     <div class="row-inline" style="margin:14px 0 0;flex-wrap:wrap;gap:8px;">
       <input id="odSearch" class="field-input" style="flex:2;min-width:200px;"
@@ -22594,6 +22752,12 @@ async function renderOfficeDocsModule_(){
       <button class="btn" style="flex:0 0 auto;" onclick="withBusy(this,'Searching…',officeDocsSearch_)">Search</button>
       ${officeDocsState_.results ? `<button class="btn ghost" style="flex:0 0 auto;" onclick="officeDocsClearSearch_()">Clear</button>` : ''}
       <button class="btn ghost" style="flex:0 0 auto;" onclick="officeDocsAddFolder_()">+ New folder</button>
+      <!-- Also here, not only in the notice above it, because the notice can
+           only appear for a folder-year whose sizes are ALL missing. A file
+           replaced in Drive directly leaves one row stale among many, which
+           the index cannot see, and this is the only way to put it right. -->
+      <button class="btn ghost" style="flex:0 0 auto;" title="Read every document's size and type back from Google Drive"
+              onclick="withBusy(this,'Reading Drive…',officeDocsRefreshSizes_)">Refresh sizes</button>
     </div>
 
     <div class="od-layout">
