@@ -22158,8 +22158,54 @@ function officeDocDriveUrl_(fileId){
   return 'https://drive.google.com/file/d/' + encodeURIComponent(fileId) + '/view';
 }
 
+// Reads one of the archive's two config keys, and THROWS if the read failed
+// rather than answering null.
+//
+// safeGet cannot tell those apart. It returns null both when a key has never
+// been set and when the call itself did not get through — which is right for
+// almost everything (a missing km rate and an unreachable server both mean "no
+// km rate"), and catastrophic for these two. A failed read of the folder list
+// falls through officeDocFoldersFrom_'s empty-list branch to the four starter
+// folders, and a failed read of the index answers {} — so a moment's trouble
+// reaching Apps Script drew a brand-new, empty archive over twelve folders and
+// fifty-five documents, with nothing on screen to say a read had failed.
+//
+// It looked like the archive had been wiped. It had not: nothing was deleted
+// and every record was still on the sheet. But the next thing HR pressed would
+// have made it real — + New folder reads the list, appends to it and saves it
+// back, and the list it had read was the four defaults.
+//
+// So these two go through remoteGet, which answers null ONLY when the call
+// failed, and a failure is raised. renderOfficeDocsModule_ already has an
+// error box for exactly this, and every action that writes the folder list
+// stops before it can write a made-up one.
+async function officeDocsConfigOrThrow_(key){
+  const hit = sharedReadCache.get(key);
+  if(hit && Date.now() < hit.until) return hit.value;
+  const r = await remoteGet(key);
+  if(!r){
+    // Marked so the listener below can tell this apart from any other
+    // rejection and say something useful about it. Twenty places call these
+    // loaders from an onclick, and a rejection out of an onclick goes nowhere
+    // at all — the write is correctly prevented either way, but a button that
+    // silently does nothing is its own bug.
+    const err = new Error(lastBackendError || 'the server did not respond');
+    err.officeDocsRead = true;
+    throw err;
+  }
+  const value = (r.value === undefined || r.value === null) ? null : r.value;
+  primeSharedRead(key, value);
+  return value;
+}
+window.addEventListener('unhandledrejection', ev => {
+  if(!ev.reason || !ev.reason.officeDocsRead) return;
+  ev.preventDefault();
+  alert('Could not read the document archive: ' + ev.reason.message + '\n\n' +
+    'Nothing was changed — no folder, year or document has been altered. ' +
+    'Check your connection and reload the page.');
+});
 async function loadOfficeDocFolders_(){
-  return officeDocFoldersFrom_(await safeGet(OFFICE_DOC_FOLDERS_KEY, true));
+  return officeDocFoldersFrom_(await officeDocsConfigOrThrow_(OFFICE_DOC_FOLDERS_KEY));
 }
 async function saveOfficeDocFolders_(folders){
   const json = JSON.stringify(folders);
@@ -22176,7 +22222,10 @@ async function saveOfficeDocFolders_(folders){
 // knowing which keys exist — which is what stops search having to probe for
 // shards that may not be there.
 async function loadOfficeDocIndex_(){
-  const raw = await safeGet(OFFICE_DOCS_INDEX_KEY, true);
+  const raw = await officeDocsConfigOrThrow_(OFFICE_DOCS_INDEX_KEY);
+  // Unreadable JSON is still an answer from the server and still means the
+  // archive is empty as far as anything here can tell — it is only a failed
+  // CALL that must never be mistaken for one.
   try{ const v = raw ? JSON.parse(raw) : {}; return (v && typeof v === 'object') ? v : {}; }
   catch(e){ return {}; }
 }
