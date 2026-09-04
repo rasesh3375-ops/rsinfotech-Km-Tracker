@@ -1687,6 +1687,16 @@
 .od-caret-btn{border:0;background:none;cursor:pointer;font:inherit;font-size:11px;line-height:1;
   color:var(--muted);width:22px;min-width:22px;padding:8px 4px;border-radius:6px;text-align:center;}
 .od-caret-btn:hover{background:var(--cream);color:var(--navy);}
+/* On a touch screen the arrow was a 22x27px target sitting immediately beside
+   the folder name, which is a large and obvious one. A tap fourteen pixels off
+   centre — ordinary finger error — landed on the name instead, and selecting a
+   folder EXPANDS it, so a near-miss did not merely fail to collapse the folder,
+   it re-opened it. HR pressed the arrow on JIO VERIFICATION and watched nothing
+   happen. 44px is Apple's own minimum and the tree is full width on a phone,
+   so there is room for it. */
+@media (pointer: coarse){
+  .od-caret-btn{width:44px;min-width:44px;min-height:44px;font-size:13px;}
+}
 /* A folder with no years and no sub-folders has nothing to open, so its marker
    is not a control and must not look like one. */
 .od-leaf{cursor:default;opacity:.5;display:inline-block;}
@@ -23146,6 +23156,30 @@ function odTableHtml_(title, docs, sub, showWhere){
 // An empty folder-year costs no network at all now: the index already says it
 // holds nothing, and loadOfficeDocs_ returns straight away without asking.
 async function officeDocsPick_(folderId, year){
+  // A second tap on the folder you are already in closes it, exactly as a
+  // second tap on an open Generator card's header does.
+  //
+  // Without this, the name beside the arrow was the one control that could
+  // only ever open. Selecting a folder expands it, so tapping the name of an
+  // already-open folder re-added it to the expanded set and nothing moved —
+  // and since the name sits right next to a small arrow, that is what a finger
+  // aiming at the arrow usually hit. The arrow looked broken because the thing
+  // most likely to be pressed instead of it did the opposite.
+  if(!year && folderId && folderId === officeDocsState_.folderId &&
+     officeDocsExpanded_.has(folderId)){
+    const f = ((officeDocsCache_ || {}).folders || []).find(x => x.id === folderId);
+    // Only when there is something to close. A folder with no years and no
+    // sub-folders draws no arrow, and "collapsing" it would look like the tap
+    // was ignored.
+    const collapsible = f && (officeDocsUsesYears_(f) ||
+      officeDocsChildrenOf_(officeDocsCache_.folders, f.id).length > 0);
+    if(collapsible){
+      officeDocsExpanded_.delete(folderId);
+      officeDocsSaveOpen_();
+      officeDocsRepaintTree_();
+      return;
+    }
+  }
   officeDocsState_.folderId = folderId;
   // Choosing a folder opens it — otherwise picking one from collapsed would
   // select a folder whose years you then could not see to click.
