@@ -156,7 +156,8 @@
      sliding left/right under a normal left-right touch drag, on forms with no
      intentional side-scroll at all, like Add Employee. The deliberate
      horizontal scrollers (.att-sheet-wrap, .rpt-wrap, .hr-tabs, etc.) each
-     scope their own overflow-x:auto already, so they're unaffected. */
+     scope their own overflow-x:auto already, so they're unaffected.
+ */
   body{
     margin:0;
     overscroll-behavior-y:contain;
@@ -894,6 +895,14 @@
      much as inside a modal. */
   html.kmt-zoomed .modal-overlay{overflow-x:auto;}
   html.kmt-zoomed, html.kmt-zoomed body{overflow-x:auto;}
+  /* The fullscreen viewer was left out of that, and it is the one place it
+     mattered most. Its content box IS scaled by the rule above, but the fixed
+     shell around it stays exactly viewport-sized and is a flex column with no
+     horizontal overflow of its own — so at 200% a PF receipt was rendered
+     twice the width of the screen with its right-hand half simply gone, no
+     scrollbar, no pan, nothing. Modals got this fix; this never did. */
+  html.kmt-zoomed #fullscreenSheetRoot{overflow-x:auto;}
+  html.kmt-zoomed #fullscreenSheetRoot > *{min-width:min-content;}
   .modal-box h2{margin:0 0 6px;font-size:19px;}
   /* Title bar that stays put. The overlay is the scrolling element, so sticky
      children of the box pin against it without the box having to become its own
