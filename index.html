@@ -4279,11 +4279,15 @@ async function uploadDocumentToDrive(folderPath, fileName, file){
     const outName = properExt && !new RegExp('\\.' + properExt + '$', 'i').test(fileName)
       ? fileName.replace(/\.[^.]+$/, '') + '.' + properExt
       : fileName;
+    // Sized to the file rather than to the nine seconds a key read needs, and
+    // allowed a second go because doUploadDocument_ trashes a same-named file
+    // before writing — so a retry replaces rather than duplicates.
+    const o = uploadFetchOpts_(base64Data.length, true);
     const res = await apiFetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'uploadDocument', folderPath, fileName: outName, base64Data, mimeType, token: sessionToken })
-    });
+    }, o.tries, o.budgetMs, o.attemptMs);
     const data = await res.json();
     return data && data.fileUrl ? data.fileUrl : null;
   }catch(e){
@@ -4623,6 +4627,34 @@ async function recordCheckin(name){
 // is forty round trips inside one request, and the default nine seconds is not
 // a budget it can finish in. It came back as "Fetch is aborted" and the caller
 // could not tell that from the backend refusing.
+// How long an upload is allowed, and how many goes it gets.
+//
+// Every upload in this app went out on apiFetch's default nine-second budget
+// with three attempts — the budget sized for reading one key. A 4 MB scan is
+// about 5.5 MB once base64 has added its third, and on mobile data that is not
+// a nine-second request. It aborted, retried, aborted, retried, aborted, and
+// reached HR as "Upload failed — check your connection and try again" on a
+// connection that was working.
+//
+// So the budget is sized to the payload rather than fixed: thirty seconds
+// plus twenty-five per megabyte, capped at five minutes, which is where Apps
+// Script's own limit is anyway.
+//
+// The attempt count matters more than the budget. apiFetch's retry re-sends
+// the whole body, and an upload aborted on THIS side may already have arrived
+// on the other — doUploadOfficeDoc_ deliberately never trashes a file whose
+// name it already holds, it renames the newcomer "(2)", because in an archive
+// a repeated name is a second document and not a correction. So retrying a
+// slow archive upload does not recover it, it quietly files it twice. One
+// attempt, and a failure HR can act on, is the honest version of that.
+//
+// doUploadDocument_ is the opposite: it trashes a same-named file before
+// writing, so its uploads ARE idempotent and can afford a second go.
+function uploadFetchOpts_(base64Length, idempotent){
+  const mb = (Number(base64Length) || 0) / (1024 * 1024);
+  const ms = Math.min(300000, Math.round(30000 + mb * 25000));
+  return { tries: idempotent ? 2 : 1, budgetMs: ms, attemptMs: ms };
+}
 async function backendAction(payload, opts){
   opts = opts || {};
   try{
@@ -23514,7 +23546,9 @@ async function officeDocsUpload_(){
   const folder = folders.find(f => f.id === st.folderId);
   if(!folder){ say('That folder no longer exists — reload the page.', true); officeDocsState_.busy = false; return; }
   const folderPath = officeDocsDrivePath_(folder, st.year, folders);
-  const done = [], failed = [], renamed = [];
+  // `failed` is Drive saying no; `unsure` is the call not getting through,
+  // which may have left a file behind. Two different things to tell HR.
+  const done = [], failed = [], unsure = [], renamed = [];
   let uploadedIdx = null;
   for(let i = 0; i < files.length; i++){
     const f = files[i];
@@ -23523,11 +23557,17 @@ async function officeDocsUpload_(){
       const dataUrl = await readDocForDrive(f);
       const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl || '');
       if(!m){ failed.push(f.name); continue; }
+      // One attempt, on a budget sized to the file — see uploadFetchOpts_ for
+      // why a retry here files the document twice instead of rescuing it.
       const data = await backendAction({
         action: 'uploadOfficeDoc', folderPath: folderPath,
         fileName: f.name, base64Data: m[2], mimeType: m[1] || f.type
-      });
-      if(!data || !data.ok || !data.fileId){ failed.push(f.name); continue; }
+      }, uploadFetchOpts_(m[2].length, false));
+      // A null answer is the call not getting through; an answer without a
+      // fileId is Drive refusing. Only the first can have left a file behind,
+      // and that is the one HR has to be told about before pressing again.
+      if(!data){ unsure.push(f.name); continue; }
+      if(!data.ok || !data.fileId){ failed.push(f.name); continue; }
       if(data.renamed) renamed.push(data.fileName);
       done.push({
         name: data.fileName || f.name, fileId: data.fileId,
@@ -23560,11 +23600,23 @@ async function officeDocsUpload_(){
   const parts = [];
   if(done.length) parts.push(done.length + ' uploaded');
   if(renamed.length) parts.push(renamed.length + ' renamed to avoid overwriting an existing file (' + renamed.join(', ') + ')');
-  if(failed.length) parts.push(failed.length + ' failed: ' + failed.join(', '));
+  if(failed.length) parts.push(failed.length + ' refused by Drive: ' + failed.join(', '));
+  if(unsure.length) parts.push(unsure.length + ' did not get through: ' + unsure.join(', '));
   const after = document.getElementById('odUploadMsg');
   if(after){
     after.textContent = parts.join(' · ') || 'Nothing to upload.';
-    after.classList.toggle('error', failed.length > 0);
+    after.classList.toggle('error', failed.length + unsure.length > 0);
+  }
+  // Said properly rather than left in a status line, because the safe next
+  // step is not the obvious one. A request that never came back may still
+  // have reached Drive, and the archive files a repeated name as a second
+  // document rather than replacing the first — so uploading again without
+  // looking is how one document becomes two.
+  if(unsure.length){
+    alert(unsure.length + ' file(s) did not get through: ' + unsure.join(', ') + '.\n\n' +
+      'They may still have reached Google Drive. Check this folder first — the list ' +
+      'above refreshes — and only upload again if they are not there. Uploading again ' +
+      'blind would file a second copy rather than replacing the first.');
   }
 }
 
