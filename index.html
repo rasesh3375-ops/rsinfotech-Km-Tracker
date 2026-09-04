@@ -1633,6 +1633,12 @@
 /* ---- Office Old Documents ---- */
 .od-folder-row{display:flex;align-items:center;gap:2px;}
 .od-folder-row .od-folder-head{flex:1;min-width:0;}
+.od-year-row{display:flex;align-items:center;gap:2px;}
+.od-year-row .od-year{flex:1;min-width:0;}
+.od-add-year{border:1px dashed var(--line);background:none;cursor:pointer;font:inherit;
+  font-size:11px;color:var(--muted);padding:5px 8px;border-radius:8px;width:100%;margin-top:4px;}
+.od-add-year:hover{border-color:var(--navy);color:var(--navy);}
+.od-noyear{font-size:11px;color:var(--muted);margin:6px 0 0;line-height:1.4;}
 .od-icon-btn{border:0;background:none;cursor:pointer;padding:6px 5px;border-radius:6px;
   font-size:13px;line-height:1;color:var(--muted);opacity:.55;}
 .od-icon-btn:hover{opacity:1;background:var(--sunk);color:var(--navy);}
@@ -22038,7 +22044,8 @@ function officeDocFoldersFrom_(raw){
   try{ list = raw ? JSON.parse(raw) : []; }catch(e){ list = []; }
   if(!Array.isArray(list) || !list.length) list = OFFICE_DOC_FOLDERS_DEFAULT.slice();
   return list.map(f => (f && typeof f === 'object')
-    ? { id: f.id || officeDocSlug_(f.name), name: f.name || f.id }
+    ? { id: f.id || officeDocSlug_(f.name), name: f.name || f.id,
+        years: Array.isArray(f.years) ? f.years : undefined }
     : { id: officeDocSlug_(f), name: String(f) });
 }
 // A new folder's id has to be unique among the folders that already exist,
@@ -22055,6 +22062,30 @@ function officeDocsYears_(){
   const out = [];
   for(let y = new Date().getFullYear(); y >= OFFICE_DOCS_FIRST_YEAR; y--) out.push(String(y));
   return out;
+}
+// Each folder keeps its own years, because not every kind of document is filed
+// by year. An SOP is current or it is superseded — it does not belong to 2024 —
+// so a folder is allowed to have NO years at all, and its documents sit
+// directly under it. A folder that has never been given a list gets the
+// standard run, which is what every folder had before this existed.
+//
+// The no-year case still needs a storage key and a Drive folder, so it uses
+// the literal 'all' in place of a year. Years are four digits, so that can
+// never collide with a real one.
+const OFFICE_DOCS_NO_YEAR = 'all';
+function officeDocsYearsFor_(folder){
+  return Array.isArray((folder || {}).years) ? folder.years.slice() : officeDocsYears_();
+}
+function officeDocsUsesYears_(folder){
+  return officeDocsYearsFor_(folder).length > 0;
+}
+// The Drive path for a folder-year, with the year level left out entirely when
+// the folder does not use years — rather than a folder literally called "all"
+// sitting in Drive for somebody to wonder about.
+function officeDocsDrivePath_(folder, year){
+  const base = ['HR Management', 'Office Old Documents', folder.name];
+  return (officeDocsUsesYears_(folder) && year && year !== OFFICE_DOCS_NO_YEAR)
+    ? base.concat([String(year)]) : base;
 }
 function officeDocPartKey_(slug, year, part){
   return 'office_docs:' + slug + ':' + year + ':' + part;
@@ -22262,8 +22293,12 @@ async function renderOfficeDocsModule_(){
   if(!officeDocsState_.folderId || !folders.some(f => f.id === officeDocsState_.folderId)){
     officeDocsState_.folderId = (folders[0] || {}).id || null;
   }
-  if(!officeDocsState_.year) officeDocsState_.year = officeDocsYears_()[0];
   const current = folders.find(f => f.id === officeDocsState_.folderId) || null;
+  // The year has to belong to the folder being looked at, or a folder that
+  // does not use 2024 would try to open a bucket it has no year for.
+  const curYears = current ? officeDocsYearsFor_(current) : [];
+  if(!curYears.length) officeDocsState_.year = OFFICE_DOCS_NO_YEAR;
+  else if(curYears.indexOf(String(officeDocsState_.year)) === -1) officeDocsState_.year = curYears[0];
 
   // The four figures across the top come from the index alone — no folder is
   // read to draw them, so this stays instant however many documents there are.
@@ -22278,7 +22313,6 @@ async function renderOfficeDocsModule_(){
     });
   });
 
-  const years = officeDocsYears_();
   const countFor = (folderId, year) => {
     const v = (((idx[folderId] || {}).years) || {})[String(year)];
     return Number((v || {}).n) || 0;
@@ -22286,12 +22320,15 @@ async function renderOfficeDocsModule_(){
 
   const tree = folders.map(f => {
     const open = f.id === officeDocsState_.folderId;
-    const total = years.reduce((t, y) => t + countFor(f.id, y), 0);
+    const fYears = officeDocsYearsFor_(f);
+    const usesYears = fYears.length > 0;
+    const total = usesYears ? fYears.reduce((t, y) => t + countFor(f.id, y), 0)
+                            : countFor(f.id, OFFICE_DOCS_NO_YEAR);
     const q = v => JSON.stringify(v).replace(/"/g, '&quot;');
     return `<div class="od-folder">
       <div class="od-folder-row">
         <button type="button" class="od-folder-head${open ? ' open' : ''}" onclick="officeDocsPick_(${q(f.id)}, null)">
-          <span class="od-caret">${open ? '▾' : '▸'}</span>
+          <span class="od-caret">${usesYears ? (open ? '▾' : '▸') : '•'}</span>
           <span class="od-folder-name">${escapeHtml(f.name)}</span>
           <span class="od-folder-count">${total}</span>
         </button>
@@ -22300,11 +22337,18 @@ async function renderOfficeDocsModule_(){
         <button type="button" class="od-icon-btn" title="Delete this folder"
                 onclick="officeDocsDeleteFolder_(${q(f.id)})">🗑</button>
       </div>
-      ${open ? `<div class="od-years">${years.map(y => `
-        <button type="button" class="od-year${String(y) === String(officeDocsState_.year) ? ' active' : ''}"
-                onclick="officeDocsPick_(${q(f.id)}, '${y}')">
-          <span>${y}</span><span class="od-folder-count">${countFor(f.id, y)}</span>
-        </button>`).join('')}</div>` : ''}
+      ${open ? `<div class="od-years">${fYears.map(y => `
+        <div class="od-year-row">
+          <button type="button" class="od-year${String(y) === String(officeDocsState_.year) ? ' active' : ''}"
+                  onclick="officeDocsPick_(${q(f.id)}, '${y}')">
+            <span>${y}</span><span class="od-folder-count">${countFor(f.id, y)}</span>
+          </button>
+          <button type="button" class="od-icon-btn" title="Remove ${y} from this folder"
+                  onclick="officeDocsDeleteYear_(${q(f.id)}, '${y}')">🗑</button>
+        </div>`).join('')}
+        <button type="button" class="od-add-year" onclick="officeDocsAddYear_(${q(f.id)})">+ Add year</button>
+        ${usesYears ? '' : '<p class="od-noyear">Filed without years — documents sit directly in this folder.</p>'}
+      </div>` : ''}
     </div>`;
   }).join('');
 
@@ -22359,8 +22403,10 @@ async function officeDocsMainHtml_(idx, folder){
     escapeHtml((err && err.message) || 'the server did not respond') + '</div>'; }
   docs.sort((a, b) => b.uploadedAt - a.uploadedAt);
   const bytes = docs.reduce((t, d) => t + d.size, 0);
-  return odTableHtml_(escapeHtml(folder.name) + ' <span style="color:var(--muted);font-weight:400;">›</span> ' + st.year,
-    docs, docs.length + ' document(s) · ' + officeDocSize_(bytes), false);
+  const title = officeDocsUsesYears_(folder)
+    ? escapeHtml(folder.name) + ' <span style="color:var(--muted);font-weight:400;">›</span> ' + st.year
+    : escapeHtml(folder.name);
+  return odTableHtml_(title, docs, docs.length + ' document(s) · ' + officeDocSize_(bytes), false);
 }
 
 function odTableHtml_(title, docs, sub, showWhere){
@@ -22402,6 +22448,7 @@ function odTableHtml_(title, docs, sub, showWhere){
 async function officeDocsPick_(folderId, year){
   officeDocsState_.folderId = folderId;
   if(year) officeDocsState_.year = year;
+  else officeDocsState_.year = null;   // resolved against the folder's own list
   officeDocsState_.results = null;
   await renderOfficeDocsModule_();
 }
@@ -22509,6 +22556,61 @@ async function officeDocsRenameFolder_(folderId){
   await renderOfficeDocsModule_();
 }
 
+// Adds one year to this folder's own list. The first year added to a folder
+// that has none turns the year level back on for it; until then its documents
+// sit directly in the folder.
+async function officeDocsAddYear_(folderId){
+  const folders = await loadOfficeDocFolders_();
+  const folder = folders.find(f => f.id === folderId);
+  if(!folder) return;
+  const years = officeDocsYearsFor_(folder);
+  const answer = (prompt('Add a year to “' + folder.name + '”.', String(new Date().getFullYear())) || '').trim();
+  if(!answer) return;
+  if(!/^\d{4}$/.test(answer)){ alert('Enter a four-digit year, for example 2024.'); return; }
+  if(years.indexOf(answer) !== -1){ alert('“' + folder.name + '” already has ' + answer + '.'); return; }
+  years.push(answer);
+  // Newest first, matching the standard list, so a year added later does not
+  // land at the bottom of an otherwise descending run.
+  years.sort((a, b) => Number(b) - Number(a));
+  folder.years = years;
+  try{ await saveOfficeDocFolders_(folders); }
+  catch(err){ alert('Could not add the year: ' + ((err && err.message) || 'the server did not respond')); return; }
+  await addActivityLog('Added ' + answer + ' to the Office Old Documents folder "' + folder.name + '"');
+  officeDocsState_.folderId = folderId;
+  officeDocsState_.year = answer;
+  await renderOfficeDocsModule_();
+}
+
+// Removing a folder's last year is how a folder like SOP stops being filed by
+// year at all — its documents then sit directly in the folder. Same rule as
+// deleting a folder: only when the year is empty, because the alternative is
+// documents stranded in Drive under a year the app no longer lists.
+async function officeDocsDeleteYear_(folderId, year){
+  const folders = await loadOfficeDocFolders_();
+  const folder = folders.find(f => f.id === folderId);
+  if(!folder) return;
+  const idx = await loadOfficeDocIndex_();
+  const held = Number((((idx[folderId] || {}).years || {})[String(year)] || {}).n) || 0;
+  if(held){
+    alert(folder.name + ' › ' + year + ' still holds ' + held + ' document(s).\n\n' +
+      'Remove them first. Deleting a year that still has documents in it would leave ' +
+      'them stranded in Google Drive.');
+    return;
+  }
+  const years = officeDocsYearsFor_(folder).filter(y => String(y) !== String(year));
+  const lastOne = years.length === 0;
+  if(!confirm('Remove ' + year + ' from “' + folder.name + '”?' +
+    (lastOne ? '\n\nThis is its last year, so documents will be filed directly in the folder with no year at all — which is what you want for something like an SOP.' : ''))) return;
+  folder.years = years;
+  try{ await saveOfficeDocFolders_(folders); }
+  catch(err){ alert('Could not remove the year: ' + ((err && err.message) || 'the server did not respond')); return; }
+  await addActivityLog('Removed ' + year + ' from the Office Old Documents folder "' + folder.name + '"' +
+    (lastOne ? ' — it is no longer filed by year' : ''));
+  officeDocsState_.folderId = folderId;
+  officeDocsState_.year = null;
+  await renderOfficeDocsModule_();
+}
+
 // Only an empty folder can go. Deleting one with documents in it would either
 // orphan them in Drive or destroy them, and neither is something to offer
 // behind a single confirm on an archive.
@@ -22517,6 +22619,9 @@ async function officeDocsDeleteFolder_(folderId){
   const folder = folders.find(f => f.id === folderId);
   if(!folder) return;
   const idx = await loadOfficeDocIndex_();
+  // Counts every bucket the index knows about for this folder, including the
+  // 'all' one a folder without years uses — otherwise a folder full of
+  // year-less documents would look empty and be deletable.
   const years = ((idx[folderId] || {}).years) || {};
   const held = Object.keys(years).reduce((t, y) => t + (Number((years[y] || {}).n) || 0), 0);
   if(held){
@@ -22594,7 +22699,7 @@ async function officeDocsUpload_(){
   const folders = await loadOfficeDocFolders_();
   const folder = folders.find(f => f.id === st.folderId);
   if(!folder){ say('That folder no longer exists — reload the page.', true); officeDocsState_.busy = false; return; }
-  const folderPath = ['HR Management', 'Office Old Documents', folder.name, String(st.year)];
+  const folderPath = officeDocsDrivePath_(folder, st.year);
   const done = [], failed = [], renamed = [];
   for(let i = 0; i < files.length; i++){
     const f = files[i];
