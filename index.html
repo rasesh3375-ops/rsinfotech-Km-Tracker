@@ -4342,6 +4342,12 @@ const LONG_READ_TTL_MS = {
   ATTENDANCE: 90000,
   holidays: 600000,               // 10 minutes
   office_payroll_docs: 600000,
+  // The folder list and the archive index change only when HR changes them,
+  // and both writes clear their own key — so an 8-second default meant every
+  // click on a year after eight seconds of reading the screen paid two fresh
+  // round trips to Apps Script before anything could be drawn.
+  office_doc_folders: 600000,
+  office_docs_index: 600000,
   office_apprentice_docs: 600000,
   office_checklist_docs: 600000,
   company_profile: 900000,        // 15 minutes
@@ -22276,49 +22282,22 @@ function officeDocKind_(name, mime){
 // The folder is held as its ID, never its name — so a rename changes what is
 // on screen and nothing about what is being looked at.
 let officeDocsState_ = { folderId: null, year: null, query: '', results: null, busy: false };
+// What the last full render loaded. Switching folder or year repaints from
+// this rather than re-reading the folder list and the index, which is what
+// made a click on 2025 sit on "Loading the archive…" for a round trip to Apps
+// Script. Cleared by anything that changes either of them, so a repaint can
+// never show a folder that has been renamed or a count that has moved.
+let officeDocsCache_ = null;
 
-async function renderOfficeDocsModule_(){
-  const box = document.getElementById('officeDocsBox');
-  if(!box) return;
-  box.innerHTML = '<div class="empty">Loading the archive…</div>';
-  let folders, idx;
-  try{
-    folders = await loadOfficeDocFolders_();
-    idx = await loadOfficeDocIndex_();
-  }catch(err){
-    box.innerHTML = '<div class="empty error">Could not load the archive: ' +
-      escapeHtml((err && err.message) || 'the server did not respond') + '</div>';
-    return;
-  }
-  if(!officeDocsState_.folderId || !folders.some(f => f.id === officeDocsState_.folderId)){
-    officeDocsState_.folderId = (folders[0] || {}).id || null;
-  }
-  const current = folders.find(f => f.id === officeDocsState_.folderId) || null;
-  // The year has to belong to the folder being looked at, or a folder that
-  // does not use 2024 would try to open a bucket it has no year for.
-  const curYears = current ? officeDocsYearsFor_(current) : [];
-  if(!curYears.length) officeDocsState_.year = OFFICE_DOCS_NO_YEAR;
-  else if(curYears.indexOf(String(officeDocsState_.year)) === -1) officeDocsState_.year = curYears[0];
-
-  // The four figures across the top come from the index alone — no folder is
-  // read to draw them, so this stays instant however many documents there are.
-  let totalDocs = 0, totalBytes = 0, latest = 0, folderYears = 0;
-  Object.keys(idx).forEach(slug => {
-    const years = (idx[slug] || {}).years || {};
-    Object.keys(years).forEach(y => {
-      const v = years[y] || {};
-      totalDocs += Number(v.n) || 0;
-      totalBytes += Number(v.b) || 0;
-      if(Number(v.n) > 0) folderYears++;
-    });
-  });
-
+// Split out of renderOfficeDocsModule_ so switching folder or year repaints
+// from what is already in hand instead of rebuilding the whole screen. Pure:
+// it reads the folder list and index it is given and touches nothing else.
+function officeDocsTreeHtml_(folders, idx){
   const countFor = (folderId, year) => {
     const v = (((idx[folderId] || {}).years) || {})[String(year)];
     return Number((v || {}).n) || 0;
   };
-
-  const tree = folders.map(f => {
+  return folders.map(f => {
     const open = f.id === officeDocsState_.folderId;
     const fYears = officeDocsYearsFor_(f);
     const usesYears = fYears.length > 0;
@@ -22351,6 +22330,46 @@ async function renderOfficeDocsModule_(){
       </div>` : ''}
     </div>`;
   }).join('');
+}
+
+async function renderOfficeDocsModule_(){
+  const box = document.getElementById('officeDocsBox');
+  if(!box) return;
+  box.innerHTML = '<div class="empty">Loading the archive…</div>';
+  let folders, idx;
+  try{
+    folders = await loadOfficeDocFolders_();
+    idx = await loadOfficeDocIndex_();
+    officeDocsCache_ = { folders: folders, idx: idx };
+  }catch(err){
+    box.innerHTML = '<div class="empty error">Could not load the archive: ' +
+      escapeHtml((err && err.message) || 'the server did not respond') + '</div>';
+    return;
+  }
+  if(!officeDocsState_.folderId || !folders.some(f => f.id === officeDocsState_.folderId)){
+    officeDocsState_.folderId = (folders[0] || {}).id || null;
+  }
+  const current = folders.find(f => f.id === officeDocsState_.folderId) || null;
+  // The year has to belong to the folder being looked at, or a folder that
+  // does not use 2024 would try to open a bucket it has no year for.
+  const curYears = current ? officeDocsYearsFor_(current) : [];
+  if(!curYears.length) officeDocsState_.year = OFFICE_DOCS_NO_YEAR;
+  else if(curYears.indexOf(String(officeDocsState_.year)) === -1) officeDocsState_.year = curYears[0];
+
+  // The four figures across the top come from the index alone — no folder is
+  // read to draw them, so this stays instant however many documents there are.
+  let totalDocs = 0, totalBytes = 0, latest = 0, folderYears = 0;
+  Object.keys(idx).forEach(slug => {
+    const years = (idx[slug] || {}).years || {};
+    Object.keys(years).forEach(y => {
+      const v = years[y] || {};
+      totalDocs += Number(v.n) || 0;
+      totalBytes += Number(v.b) || 0;
+      if(Number(v.n) > 0) folderYears++;
+    });
+  });
+
+  const tree = officeDocsTreeHtml_(folders, idx);
 
   box.innerHTML = `
     <div class="od-stats">
@@ -22373,7 +22392,7 @@ async function renderOfficeDocsModule_(){
     <div class="od-layout">
       <div class="od-tree">
         <div class="sec-title" style="margin:0 0 8px;">Document folders</div>
-        ${tree || '<div class="empty">No folders yet.</div>'}
+        <div class="od-tree-list">${tree || '<div class="empty">No folders yet.</div>'}</div>
         <p style="font-size:11px;color:var(--muted);margin:10px 0 0;line-height:1.5;">
           Files are stored on Google Drive under <strong>HR Management &gt; Office Old Documents</strong>,
           and managed entirely from here. You never need to open Drive to file or find one.</p>
@@ -22445,12 +22464,38 @@ function odTableHtml_(title, docs, sub, showWhere){
     </table></div>` : `<div class="empty">${showWhere ? 'Nothing matched that search.' : 'No documents filed here yet — use Upload documents to add some.'}</div>`}`;
 }
 
+// Switching folder or year repaints the tree and the panel from the cache and
+// nothing else. The tree, the stat cards and the search box do not change, so
+// blanking the whole box to "Loading the archive…" and rebuilding it — two
+// backend reads before a single pixel could be drawn — was the entire delay.
+//
+// An empty folder-year costs no network at all now: the index already says it
+// holds nothing, and loadOfficeDocs_ returns straight away without asking.
 async function officeDocsPick_(folderId, year){
   officeDocsState_.folderId = folderId;
-  if(year) officeDocsState_.year = year;
-  else officeDocsState_.year = null;   // resolved against the folder's own list
+  officeDocsState_.year = year || null;   // resolved against the folder's own list
   officeDocsState_.results = null;
-  await renderOfficeDocsModule_();
+  if(!officeDocsCache_) return renderOfficeDocsModule_();
+
+  const folders = officeDocsCache_.folders, idx = officeDocsCache_.idx;
+  const folder = folders.find(f => f.id === folderId) || null;
+  // Same resolution the full render does, so a folder whose years differ from
+  // the one just left opens on a year it actually has.
+  const yrs = folder ? officeDocsYearsFor_(folder) : [];
+  if(!yrs.length) officeDocsState_.year = OFFICE_DOCS_NO_YEAR;
+  else if(yrs.indexOf(String(officeDocsState_.year)) === -1) officeDocsState_.year = yrs[0];
+
+  const treeBox = document.querySelector('#officeDocsBox .od-tree');
+  if(treeBox){
+    // Everything after the heading is the tree itself; the heading and the
+    // footnote either side of it are static.
+    const rebuilt = officeDocsTreeHtml_(folders, idx);
+    const holder = treeBox.querySelector('.od-tree-list');
+    if(holder) holder.innerHTML = rebuilt;
+  }
+  const main = document.getElementById('odMain');
+  if(!main) return renderOfficeDocsModule_();
+  main.innerHTML = await officeDocsMainHtml_(idx, folder);
 }
 function officeDocsClearSearch_(){
   officeDocsState_.results = null;
@@ -22495,6 +22540,7 @@ async function officeDocsSearch_(){
   });
   hits.sort((a, b) => b.uploadedAt - a.uploadedAt);
   officeDocsState_.results = hits;
+  officeDocsCache_ = null;
   await renderOfficeDocsModule_();
 }
 
@@ -22513,6 +22559,7 @@ async function officeDocsAddFolder_(){
   await addActivityLog('Added the Office Old Documents folder "' + name + '"');
   officeDocsState_.folderId = id;
   officeDocsState_.results = null;
+  officeDocsCache_ = null;
   await renderOfficeDocsModule_();
 }
 
@@ -22553,6 +22600,7 @@ async function officeDocsRenameFolder_(folderId){
     if(idx[folderId]){ idx[folderId].name = name; await saveOfficeDocIndex_(idx); }
   }catch(err){}
   await addActivityLog('Renamed the Office Old Documents folder "' + was + '" to "' + name + '"');
+  officeDocsCache_ = null;
   await renderOfficeDocsModule_();
 }
 
@@ -22578,6 +22626,7 @@ async function officeDocsAddYear_(folderId){
   await addActivityLog('Added ' + answer + ' to the Office Old Documents folder "' + folder.name + '"');
   officeDocsState_.folderId = folderId;
   officeDocsState_.year = answer;
+  officeDocsCache_ = null;
   await renderOfficeDocsModule_();
 }
 
@@ -22608,6 +22657,7 @@ async function officeDocsDeleteYear_(folderId, year){
     (lastOne ? ' — it is no longer filed by year' : ''));
   officeDocsState_.folderId = folderId;
   officeDocsState_.year = null;
+  officeDocsCache_ = null;
   await renderOfficeDocsModule_();
 }
 
@@ -22636,6 +22686,7 @@ async function officeDocsDeleteFolder_(folderId){
   catch(err){ alert('Could not delete the folder: ' + ((err && err.message) || 'the server did not respond')); return; }
   await addActivityLog('Deleted the empty Office Old Documents folder "' + folder.name + '"');
   officeDocsState_.folderId = null;
+  officeDocsCache_ = null;
   await renderOfficeDocsModule_();
 }
 
@@ -22679,6 +22730,7 @@ async function officeDocRename_(folderId, year, fileId, currentName){
       finalName + '” instead — nothing was overwritten.');
   }
   await addActivityLog('Renamed "' + currentName + '" to "' + finalName + '" in Office Old Documents');
+  officeDocsCache_ = null;
   await renderOfficeDocsModule_();
 }
 
@@ -22741,6 +22793,7 @@ async function officeDocsUpload_(){
     }
   }
   officeDocsState_.busy = false;
+  officeDocsCache_ = null;
   await renderOfficeDocsModule_();
   const parts = [];
   if(done.length) parts.push(done.length + ' uploaded');
@@ -22778,6 +22831,7 @@ async function officeDocDelete_(folderId, year, fileId, name){
   }catch(err){
     alert('Could not remove it: ' + ((err && err.message) || 'the server did not respond'));
   }
+  officeDocsCache_ = null;
   await renderOfficeDocsModule_();
 }
 
