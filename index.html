@@ -888,6 +888,12 @@
   .modal-overlay > .modal-box,
   .gs-overlay > .gs-panel,
   #fullscreenSheetRoot > *{ zoom:var(--kmt-fixed-zoom, 1); }
+  /* ...except the document viewer, which is deliberately exempt — see
+     --kmt-doc-unzoom in kmtApplyZoom_. A report inside this shell is app
+     content and should scale with the app; a scanned PF receipt is not, and
+     has its own zoom for the job. More specific than the rule above so it
+     wins, rather than needing !important. */
+  #fullscreenSheetRoot #docViewerRoot{ zoom:var(--kmt-doc-unzoom, 1); }
   /* Only once actually zoomed. At 100% the deliberate overflow-x:hidden
      above stays exactly as it was (it is the anti-rubber-band fix, see its
      own comment); zoomed in, a box wider than the screen has to be
@@ -902,7 +908,18 @@
      twice the width of the screen with its right-hand half simply gone, no
      scrollbar, no pan, nothing. Modals got this fix; this never did. */
   html.kmt-zoomed #fullscreenSheetRoot{overflow-x:auto;}
-  html.kmt-zoomed #fullscreenSheetRoot > *{min-width:min-content;}
+  /* ...but not when the box on show scrolls its own content. That rule is for
+     a report table wider than the screen; the document viewer already has its
+     own scroller (.doc-view-scroll), and letting the shell grow around it was
+     a feedback loop rather than a cosmetic problem. A PDF canvas drawn at 8x
+     made #fullscreenBody 2540px wide, which made .doc-view-scroll 2540px wide
+     — and that box is exactly what the NEXT render fits the page to. Pressing
+     Fit redrew the page at 2540px and still called it 100%, so a document that
+     had once been zoomed in could never be made small again, and the toolbar
+     sat off the side of the screen. Toggled in openFullscreenView rather than
+     written as :has(), which iOS 15.3 and earlier would drop the whole rule
+     for. */
+  html.kmt-zoomed #fullscreenSheetRoot:not(.fs-self-scroll) > *{min-width:min-content;}
   .modal-box h2{margin:0 0 6px;font-size:19px;}
   /* Title bar that stays put. The overlay is the scrolling element, so sticky
      children of the box pin against it without the box having to become its own
@@ -8702,8 +8719,16 @@ if(!window.KMT_ZOOM_ARMED_){
     // Where fixed descendants are NOT scaled by the line above, each
     // overlay's own content box carries the zoom itself — see the
     // --kmt-fixed-zoom rule in the stylesheet.
-    root.style.setProperty('--kmt-fixed-zoom',
-      kmtFixedInheritsZoom_() === false ? String(kmtZoomLevel_) : '1');
+    const fixedByCss = kmtFixedInheritsZoom_() === false;
+    root.style.setProperty('--kmt-fixed-zoom', fixedByCss ? String(kmtZoomLevel_) : '1');
+    // The document viewer takes NONE of it. It is a document surface with a
+    // zoom of its own, and scaling it by the app's zoom as well is what left a
+    // receipt unreadable at 200%: the chrome doubled, the page doubled, and the
+    // two zooms fought each other instead of one of them simply working.
+    // Whichever way this browser handles fixed descendants, the value here is
+    // the one that leaves the viewer at its true size.
+    root.style.setProperty('--kmt-doc-unzoom',
+      fixedByCss ? '1' : String(1 / kmtZoomLevel_));
     root.classList.toggle('kmt-zoomed', kmtZoomLevel_ !== 1);
     kmtSyncZoomChip_();
     // Debounced, deliberately not written on every call: a live pinch runs
@@ -8804,11 +8829,16 @@ if(!window.KMT_ZOOM_ARMED_){
   // receipt. Routing the gesture is the fix; the buttons stay for the PDF case,
   // where an <embed> swallows the touches before this ever sees them.
   const kmtPinchTarget_ = () => {
-    const el = document.getElementById('docViewContent');
+    // Either shape of document: a rendered PDF is #docViewPages, an image or
+    // the <embed> fallback is #docViewContent. Checking only the second meant
+    // a pinch over a rendered PDF — the case this exists for — still went to
+    // the app and scaled the whole interface instead.
+    const el = document.getElementById('docViewPages') ||
+               document.getElementById('docViewContent');
     return el && el.offsetParent !== null ? 'doc' : 'app';
   };
   const kmtZoomFor_ = (where, level) =>
-    where === 'doc' ? docViewerApplyZoom_(level) : kmtApplyZoom_(level, false);
+    where === 'doc' ? docViewerPreviewZoom_(level) : kmtApplyZoom_(level, false);
   function kmtBeginPinch_(touches){
     const d = kmtTouchDist_(touches);
     if(d < 1) return false;            // both fingers on the same spot — nothing to measure yet
@@ -8835,8 +8865,15 @@ if(!window.KMT_ZOOM_ARMED_){
     kmtZoomFor_(kmtPinchOnDoc_ ? 'doc' : 'app',
                 kmtPinchStartZoom_ * (kmtTouchDist_(e.touches) / kmtPinchStartDist_));
   }, { passive:false });
-  document.addEventListener('touchend', e => { if(e.touches.length < 2) kmtPinchStartDist_ = null; }, { passive:true });
-  document.addEventListener('touchcancel', () => { kmtPinchStartDist_ = null; }, { passive:true });
+  document.addEventListener('touchend', e => {
+    if(e.touches.length >= 2) return;
+    kmtPinchStartDist_ = null;
+    if(kmtPinchOnDoc_){ kmtPinchOnDoc_ = false; docViewerCommitPreview_(); }
+  }, { passive:true });
+  document.addEventListener('touchcancel', () => {
+    kmtPinchStartDist_ = null;
+    if(kmtPinchOnDoc_){ kmtPinchOnDoc_ = false; docViewerCommitPreview_(); }
+  }, { passive:true });
 
   // iOS Safari emits its own proprietary gesture events for a pinch,
   // carrying the scale factor directly. Deliberately a fallback, not the
@@ -8860,6 +8897,7 @@ if(!window.KMT_ZOOM_ARMED_){
   }, { passive:false });
   document.addEventListener('gestureend', e => {
     if(e.cancelable) e.preventDefault();
+    if(kmtGestureOnDoc_){ kmtGestureOnDoc_ = false; docViewerCommitPreview_(); }
   }, { passive:false });
 }
 
@@ -9089,7 +9127,13 @@ function openFullscreenView(title, sourceId){
   fullscreenActiveId = sourceId;
   document.getElementById('fullscreenTitle').textContent = title;
   fsBody.appendChild(el);
-  document.getElementById('fullscreenSheetRoot').classList.remove('hidden');
+  const fsRoot = document.getElementById('fullscreenSheetRoot');
+  // The two boxes here that scroll their own content rather than needing the
+  // shell to widen for them, which at app zoom would feed their own width back
+  // into the next render — see the .fs-self-scroll rule's comment.
+  fsRoot.classList.toggle('fs-self-scroll',
+    sourceId === 'docViewerRoot' || sourceId === 'payrollDocsRoot');
+  fsRoot.classList.remove('hidden');
   kmtLockBodyScroll('fullscreen');
   resettleFixedOverlays_();
   // #fullscreenBody is one element reused for every report and letter — it
@@ -15732,6 +15776,7 @@ function renderDocInViewer_(box, data, label, retryOnclick){
         : `<img id="docViewContent" src="${objectUrl}" alt="${escapeHtml(label)}" style="width:100%;height:auto;border-radius:8px;border:1px solid var(--line);">`}
     </div>
   </div>`;
+  docViewerWatchResize_();
   if(isPdf) docViewerOpenPdf_(objectUrl, label);
 }
 
@@ -15787,28 +15832,66 @@ async function docViewerOpenPdf_(objectUrl, label){
 }
 // Redrawn at each zoom rather than scaled after the fact, so the text stays
 // sharp instead of turning into an enlarged photograph of itself.
+//
+// A phone will not give you an unlimited canvas. iOS caps the total pixel area
+// a canvas may hold and hands back a BLANK one past the cap rather than an
+// error, which is exactly what "when I zoom the PDF contents went away" was:
+// asking for the on-screen size times the device pixel ratio meant an A4 page
+// at 8x on a 3x screen wanted about 84 million pixels, some twenty times what
+// the phone will actually paint. So the drawing resolution is capped by area
+// instead. Past the cap the page is drawn at the best resolution that fits and
+// stretched to the size asked for — soft rather than empty, and still far
+// sharper than the fit-width render it replaces. It is also what made zooming
+// feel stuck: even where the canvas did paint, 84 megapixels took seconds.
+const DOC_VIEW_MAX_CANVAS_PX = 12e6;   // one page
+const DOC_VIEW_MAX_TOTAL_PX = 36e6;    // every page in the document together
 let docViewerRenderSeq_ = 0;
+let docViewerRenderTask_ = null;
 async function docViewerRenderPdf_(){
   const holder = document.getElementById('docViewPages');
   if(!holder || !docViewerPdf_) return;
   const seq = ++docViewerRenderSeq_;
+  // Whatever the last zoom started drawing is now megapixels nobody will see.
+  // Left running it competes with this pass for the one thread that matters.
+  if(docViewerRenderTask_){ try{ docViewerRenderTask_.cancel(); }catch(err){} }
   const scroll = holder.closest('.doc-view-scroll');
   const boxWidth = Math.max(200, (scroll ? scroll.clientWidth : 320) - 4);
   const dpr = Math.min(3, window.devicePixelRatio || 1);
+  // Read once, not per page: a zoom landing mid-pass would otherwise leave a
+  // two-page document with its two pages at different sizes.
+  const zoom = docViewerZoom_;
   const pages = Math.min(docViewerPdf_.numPages, 40);
+  const budget = Math.max(2e6, Math.min(DOC_VIEW_MAX_CANVAS_PX, DOC_VIEW_MAX_TOTAL_PX / pages));
   const made = [];
   for(let i = 1; i <= pages; i++){
     const page = await docViewerPdf_.getPage(i);
+    if(seq !== docViewerRenderSeq_) return;
     // 100% means "the page fits the box", which is what Fit has to mean for a
     // document whose own page size nobody here knows or cares about.
     const base = page.getViewport({ scale: 1 });
-    const viewport = page.getViewport({ scale: (boxWidth / base.width) * docViewerZoom_ * dpr });
+    const fit = (boxWidth / base.width) * zoom;
+    const cssW = base.width * fit, cssH = base.height * fit;
+    const ratio = Math.max(0.4, Math.min(dpr, Math.sqrt(budget / (cssW * cssH))));
+    const viewport = page.getViewport({ scale: fit * ratio });
     const canvas = document.createElement('canvas');
     canvas.className = 'doc-view-page';
     canvas.width = Math.round(viewport.width);
     canvas.height = Math.round(viewport.height);
-    canvas.style.width = Math.round(viewport.width / dpr) + 'px';
-    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    // Set explicitly rather than left to the canvas's own aspect, because past
+    // the area cap it holds fewer pixels than the space it has to fill.
+    canvas.style.width = Math.round(cssW) + 'px';
+    canvas.style.height = Math.round(cssH) + 'px';
+    const task = page.render({ canvasContext: canvas.getContext('2d'), viewport });
+    docViewerRenderTask_ = task;
+    try{
+      await task.promise;
+    }catch(err){
+      // Cancelled by a newer zoom, or the canvas was refused after all. Either
+      // way the pages already on screen are better than a blank holder.
+      if(docViewerRenderTask_ === task) docViewerRenderTask_ = null;
+      return;
+    }
+    if(docViewerRenderTask_ === task) docViewerRenderTask_ = null;
     // A newer zoom started while this page was drawing — throw this one away
     // rather than painting a stale size over it.
     if(seq !== docViewerRenderSeq_) return;
@@ -15816,6 +15899,28 @@ async function docViewerRenderPdf_(){
   }
   holder.innerHTML = '';
   made.forEach(c => holder.appendChild(c));
+}
+// The box the page is fitted to changes for reasons that are not a zoom press:
+// turning the phone, the app's own zoom changing how much room the viewer gets,
+// the on-screen keyboard. Without this the pages keep whatever width they were
+// last drawn at and quietly stop fitting — which reads as the document being
+// off-centre or overflowing for no reason anybody did anything to cause.
+let docViewerResizeObs_ = null, docViewerFittedTo_ = 0;
+function docViewerWatchResize_(){
+  const scroll = document.querySelector('.doc-view-scroll');
+  if(!scroll || typeof ResizeObserver === 'undefined') return;
+  if(docViewerResizeObs_) docViewerResizeObs_.disconnect();
+  docViewerFittedTo_ = Math.round(scroll.clientWidth);
+  docViewerResizeObs_ = new ResizeObserver(() => {
+    const w = Math.round(scroll.clientWidth);
+    // Only a real change of the box. Redrawing at a new zoom changes what is
+    // inside it, and reacting to that would be a loop.
+    if(!docViewerPdf_ || Math.abs(w - docViewerFittedTo_) < 8) return;
+    docViewerFittedTo_ = w;
+    clearTimeout(docViewerZoomTimer_);
+    docViewerZoomTimer_ = setTimeout(() => { docViewerRenderPdf_(); }, 150);
+  });
+  docViewerResizeObs_.observe(scroll);
 }
 function base64ToBytes_(b64){
   const bin = atob(String(b64 || ''));
@@ -15839,9 +15944,17 @@ function base64ToBytes_(b64){
 // scrolls. A PDF's height is scaled with it, or zooming in would only ever
 // widen a page that stayed the same height.
 let docViewerZoom_ = 1;
-const DOC_VIEW_ZOOM_STEPS = [0.25, 0.4, 0.5, 0.75, 1, 1.5, 2, 3, 4];
+// Up to 8x, because "100%" here means the page fits the width of a phone —
+// which for an A4 receipt is text about a millimetre tall. Fitting the page was
+// never the same thing as being able to read it, and 4x was still short.
+const DOC_VIEW_ZOOM_STEPS = [0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8];
+const DOC_VIEW_ZOOM_MAX = 8, DOC_VIEW_ZOOM_MIN = 0.5;
 function docViewerApplyZoom_(z){
-  docViewerZoom_ = Math.min(4, Math.max(0.25, Number(z) || 1));
+  docViewerZoom_ = Math.min(DOC_VIEW_ZOOM_MAX, Math.max(DOC_VIEW_ZOOM_MIN, Number(z) || 1));
+  // Whatever a live pinch was showing is now baked into the render.
+  const pagesEl = document.getElementById('docViewPages');
+  if(pagesEl){ pagesEl.style.transform = ''; pagesEl.style.transformOrigin = ''; }
+  docViewerPreviewAt_ = null;
   const lbl = document.getElementById('docViewZoomLabel');
   if(lbl) lbl.textContent = Math.round(docViewerZoom_ * 100) + '%';
   // A rendered PDF is redrawn at the new size. Debounced, because a live pinch
@@ -15862,6 +15975,35 @@ function docViewerApplyZoom_(z){
   }
 }
 let docViewerZoomTimer_ = null;
+// A live pinch, shown as it happens and committed when the fingers lift.
+//
+// Re-rasterising every page on every frame is not something a phone can do, so
+// a pinch used to wait on a debounce and the document sat still while the
+// fingers moved — which reads as broken, not as slow. So the drawn pages are
+// scaled with a CSS transform for the duration of the gesture, which is free
+// and immediate, and re-rendered once at the end so the text comes back sharp
+// instead of staying an enlarged photograph. This is what a document viewer on
+// a phone is expected to feel like.
+let docViewerPreviewAt_ = null;
+function docViewerPreviewZoom_(level){
+  const want = Math.min(DOC_VIEW_ZOOM_MAX, Math.max(DOC_VIEW_ZOOM_MIN, Number(level) || 1));
+  const pages = document.getElementById('docViewPages');
+  const lbl = document.getElementById('docViewZoomLabel');
+  if(lbl) lbl.textContent = Math.round(want * 100) + '%';
+  if(!pages || !docViewerPdf_){ docViewerApplyZoom_(want); return; }
+  docViewerPreviewAt_ = want;
+  // Relative to what is actually drawn, not to 100% — the pages on screen were
+  // rendered at docViewerZoom_.
+  pages.style.transformOrigin = 'center top';
+  pages.style.transform = 'scale(' + (want / docViewerZoom_) + ')';
+}
+// Fingers lifted: draw it properly at whatever the pinch settled on.
+function docViewerCommitPreview_(){
+  if(docViewerPreviewAt_ === null) return;
+  const level = docViewerPreviewAt_;
+  docViewerPreviewAt_ = null;
+  docViewerApplyZoom_(level);
+}
 // Steps rather than a fixed multiplier, so zooming out goes 100 → 75 → 50 → 40
 // → 25 instead of creeping toward zero and never arriving.
 function docViewerZoomBy_(dir){
