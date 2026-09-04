@@ -4461,6 +4461,59 @@ async function safeGet(key, shared){
     finally{ inFlightReads.delete(key); }
   }catch(e){ return null; }
 }
+// safeGet, but a failed CALL is raised instead of answered as "nothing there".
+//
+// safeGet cannot tell those apart, and returns null for both. That is right for
+// almost everything — a missing km rate and an unreachable server both mean "no
+// km rate", and a screen that shows a dash either way is honest enough. It is
+// catastrophic for anything that is READ, CHANGED AND WRITTEN BACK, because
+// there the empty answer does not stay on screen: it becomes the new value.
+//
+// That is not hypothetical. The document archive's folder list did exactly
+// this. A moment's trouble reaching Apps Script drew four starter folders over
+// twelve real ones, and the next press of + New folder would have read those
+// four, appended to them and saved them — leaving fifty-five documents filed
+// under folders that no longer existed. Nothing had failed loudly enough for
+// anyone to stop.
+//
+// So every list of that shape reads through here. The shared cache is still
+// used, because a cache hit is an answer that already came back.
+async function safeGetOrThrow_(key){
+  const hit = sharedReadCache.get(key);
+  if(hit && Date.now() < hit.until) return hit.value;
+  // remoteGet returns an object when the backend answered — including when it
+  // answered "no such key" — and null only when the call itself failed.
+  const r = await remoteGet(key);
+  if(!r){
+    const err = new Error(lastBackendError || 'the server did not respond');
+    // Marked so the listener below can tell it apart from any other rejection
+    // and say something useful. Most of these are called straight from an
+    // onclick, where a rejection goes nowhere at all — the bad write is
+    // correctly prevented either way, but a button that silently does nothing
+    // is its own bug.
+    err.readFailed = true;
+    throw err;
+  }
+  const value = (r.value === undefined || r.value === null) ? null : r.value;
+  primeSharedRead(key, value);
+  return value;
+}
+// Both halves of a read-change-write now refuse rather than pretend, and both
+// are usually reached from an onclick, where a rejection goes nowhere at all.
+// Neither can go back to being silent — the whole point of raising them was
+// that somebody finds out.
+window.addEventListener('unhandledrejection', ev => {
+  const e = ev.reason;
+  if(!e || !(e.readFailed || e.writeFailed)) return;
+  ev.preventDefault();
+  alert(e.readFailed
+    ? 'Could not read that list from the server: ' + e.message + '\n\n' +
+      'Nothing was changed. Check your connection and try again.'
+    : 'Could not save that change to the server: ' + e.message + '\n\n' +
+      'It was NOT saved. Check your connection and try again. If you were ' +
+      'uploading, the file did reach Google Drive — try the upload once more ' +
+      'and remove the duplicate afterwards if you end up with two.');
+});
 async function safeSet(key, value, shared){
   try{
     if(!shared){
@@ -4967,37 +5020,63 @@ async function getPayrollDocs(){
   const v = await safeGet('office_payroll_docs', true);
   return v ? JSON.parse(v) : [];
 }
-// The filled-in, signed scans of the two printed checklists. One flat list,
-// the same shape and the same reasoning as the apprentice documents above: the
-// file itself lives in Drive and this keeps only the link, the employee it
-// belongs to and when it was filed.
+// The four lists below are all the same thing: one flat list of documents whose
+// files live in Drive, keeping only the link, who it belongs to and when it was
+// filed. Every one of them is read, changed and written back — upload appends,
+// remove filters — so both halves of that round trip have to be honest, and
+// neither was.
+//
+// The READ went through safeGet, which answers null when the call failed just
+// as it does when the key is empty. An upload during a moment's trouble
+// reaching Apps Script would have appended one document to an empty list and
+// saved that over everything already filed. This is the same failure the
+// document archive actually suffered, in four more places that had not been
+// noticed yet, and it goes through safeGetOrThrow_ for the same reason.
+//
+// The WRITE went through safeSet, which swallows its errors whole. HR would be
+// told "Uploaded." on a save that never reached the sheet — the file really is
+// in Drive, so it is not lost, but nothing lists it and nobody knows to look.
+// remoteSet returns whether it worked, which is the whole point of using it.
+function docListFrom_(raw){
+  try{ const v = raw ? JSON.parse(raw) : []; return Array.isArray(v) ? v : []; }
+  catch(e){ return []; }
+}
+async function docListSave_(key, list){
+  const json = JSON.stringify(list);
+  const ok = await remoteSet(key, json);
+  if(!ok){
+    const err = new Error(lastBackendError || 'the server did not respond');
+    err.writeFailed = true;
+    throw err;
+  }
+  // remoteSet clears the key so nobody serves a stale copy; we are the ones who
+  // changed it and know what it now holds, so put that back rather than making
+  // the next read fetch what we just sent.
+  primeSharedRead(key, json);
+}
 async function getChecklistDocs(){
-  const v = await safeGet('office_checklist_docs', true);
-  return v ? JSON.parse(v) : [];
+  return docListFrom_(await safeGetOrThrow_('office_checklist_docs'));
 }
 async function saveChecklistDocs(list){
-  await safeSet('office_checklist_docs', JSON.stringify(list), true);
+  await docListSave_('office_checklist_docs', list);
 }
 async function getApprenticeDocs(){
-  const v = await safeGet('office_apprentice_docs', true);
-  return v ? JSON.parse(v) : [];
+  return docListFrom_(await safeGetOrThrow_('office_apprentice_docs'));
 }
 async function saveApprenticeDocs(list){
-  await safeSet('office_apprentice_docs', JSON.stringify(list), true);
+  await docListSave_('office_apprentice_docs', list);
 }
 async function getCompanyDocs(category){
-  const v = await safeGet('office_company_docs:' + category, true);
-  return v ? JSON.parse(v) : [];
+  return docListFrom_(await safeGetOrThrow_('office_company_docs:' + category));
 }
 async function saveCompanyDocs(category, list){
-  await safeSet('office_company_docs:' + category, JSON.stringify(list), true);
+  await docListSave_('office_company_docs:' + category, list);
 }
 async function getUniformIdList(){
-  const v = await safeGet('uniform_id_list', true);
-  return v ? JSON.parse(v) : [];
+  return docListFrom_(await safeGetOrThrow_('uniform_id_list'));
 }
 async function saveUniformIdList(list){
-  await safeSet('uniform_id_list', JSON.stringify(list), true);
+  await docListSave_('uniform_id_list', list);
 }
 
 // ---- employee handbook (full doc for Field/WFH; resident policy text for Resident) ----
@@ -22158,54 +22237,13 @@ function officeDocDriveUrl_(fileId){
   return 'https://drive.google.com/file/d/' + encodeURIComponent(fileId) + '/view';
 }
 
-// Reads one of the archive's two config keys, and THROWS if the read failed
-// rather than answering null.
-//
-// safeGet cannot tell those apart. It returns null both when a key has never
-// been set and when the call itself did not get through — which is right for
-// almost everything (a missing km rate and an unreachable server both mean "no
-// km rate"), and catastrophic for these two. A failed read of the folder list
-// falls through officeDocFoldersFrom_'s empty-list branch to the four starter
-// folders, and a failed read of the index answers {} — so a moment's trouble
-// reaching Apps Script drew a brand-new, empty archive over twelve folders and
-// fifty-five documents, with nothing on screen to say a read had failed.
-//
-// It looked like the archive had been wiped. It had not: nothing was deleted
-// and every record was still on the sheet. But the next thing HR pressed would
-// have made it real — + New folder reads the list, appends to it and saves it
-// back, and the list it had read was the four defaults.
-//
-// So these two go through remoteGet, which answers null ONLY when the call
-// failed, and a failure is raised. renderOfficeDocsModule_ already has an
-// error box for exactly this, and every action that writes the folder list
-// stops before it can write a made-up one.
-async function officeDocsConfigOrThrow_(key){
-  const hit = sharedReadCache.get(key);
-  if(hit && Date.now() < hit.until) return hit.value;
-  const r = await remoteGet(key);
-  if(!r){
-    // Marked so the listener below can tell this apart from any other
-    // rejection and say something useful about it. Twenty places call these
-    // loaders from an onclick, and a rejection out of an onclick goes nowhere
-    // at all — the write is correctly prevented either way, but a button that
-    // silently does nothing is its own bug.
-    const err = new Error(lastBackendError || 'the server did not respond');
-    err.officeDocsRead = true;
-    throw err;
-  }
-  const value = (r.value === undefined || r.value === null) ? null : r.value;
-  primeSharedRead(key, value);
-  return value;
-}
-window.addEventListener('unhandledrejection', ev => {
-  if(!ev.reason || !ev.reason.officeDocsRead) return;
-  ev.preventDefault();
-  alert('Could not read the document archive: ' + ev.reason.message + '\n\n' +
-    'Nothing was changed — no folder, year or document has been altered. ' +
-    'Check your connection and reload the page.');
-});
+// Both of the archive's config keys are read, changed and written back, so
+// both go through safeGetOrThrow_ — see the comment there for the failure that
+// put them on it. renderOfficeDocsModule_ already had an error box for exactly
+// this case and now gets to use it, and every action that writes the folder
+// list stops at its first read rather than writing a made-up one.
 async function loadOfficeDocFolders_(){
-  return officeDocFoldersFrom_(await officeDocsConfigOrThrow_(OFFICE_DOC_FOLDERS_KEY));
+  return officeDocFoldersFrom_(await safeGetOrThrow_(OFFICE_DOC_FOLDERS_KEY));
 }
 async function saveOfficeDocFolders_(folders){
   const json = JSON.stringify(folders);
@@ -22222,7 +22260,7 @@ async function saveOfficeDocFolders_(folders){
 // knowing which keys exist — which is what stops search having to probe for
 // shards that may not be there.
 async function loadOfficeDocIndex_(){
-  const raw = await officeDocsConfigOrThrow_(OFFICE_DOCS_INDEX_KEY);
+  const raw = await safeGetOrThrow_(OFFICE_DOCS_INDEX_KEY);
   // Unreadable JSON is still an answer from the server and still means the
   // archive is empty as far as anything here can tell — it is only a failed
   // CALL that must never be mistaken for one.
