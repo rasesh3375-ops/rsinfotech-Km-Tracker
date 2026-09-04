@@ -3030,7 +3030,7 @@
         <div id="genSecOfficeDocs" class="hidden gen-accordion-body">
         <section class="block">
           <h2 style="margin:0 0 4px;">Office Documents</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Upload, search, view and manage the company's old-document archive from here. Files are stored on Google Drive under <strong>HR Management &gt; Office Old Documents &gt; folder &gt; year</strong> — the Drive folder keeps its original name, because that is where every document already sits. The folder for each year is created the first time you file something into it, and you never need to open Drive to upload or find a document.</p>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Upload, search, view and manage the company's old-document archive from here. Files are stored on Google Drive under <strong>HR Management &gt; Office Documents &gt; folder &gt; year</strong>, and the folder for each year is created the first time you file something into it — you never need to open Drive to upload or find a document.</p>
           <div id="officeDocsBox"></div>
         </section>
         </div>
@@ -22182,19 +22182,24 @@ let payrollDocsMigNeededCache_ = null;
 //  - Plain calendar years from 2022, not financial years: an old document is
 //    filed under the year printed on it.
 const OFFICE_DOCS_FIRST_YEAR = 2022;
-// The Google Drive folder every document in the archive physically sits in.
+// The path segment the backend recognises as "the archive's root folder".
 //
-// DELIBERATELY NOT the name HR sees. The screen was renamed from "Office Old
-// Documents" to "Office Documents" because that is what HR calls it, and the
-// Drive folder was left alone because it already holds the files: changing this
-// string alone does not rename anything in Drive, it makes getOrCreateFolderPath_
-// create a second, empty folder beside the first, and the archive splits in two
-// with the older half invisible to every future upload.
+// DELIBERATELY still the old name, and it must stay that way. The Drive folder
+// is now called "Office Documents" — officeArchiveRoot_ in Code 2.js renames it
+// on the first archive action and maps EITHER name onto it — but this file goes
+// live within a minute of a push while Code 2.js is pasted by hand, so for a
+// while an older backend may be the one answering, and an older backend takes
+// this literally. "Office Old Documents" is understood by both: the new backend
+// maps it onto the archive root it has renamed, and the old one finds the folder
+// still called exactly that.
 //
-// So it is named rather than written inline, to be found and left alone. To
-// change it for real: rename the folder in Drive first, then change this to
-// match, in that order.
-const OFFICE_DOCS_DRIVE_FOLDER = 'Office Old Documents';
+// Sending the new name instead would be correct only after the paste, and wrong
+// before it — getOrCreateFolderPath_ would create a second, empty folder beside
+// the real one and every upload until the paste would be filed where none of
+// the existing documents are. There is no version of this worth the risk: the
+// segment costs nothing to leave alone, and the name HR sees is set by the
+// screen text, not by this.
+const OFFICE_DOCS_ROOT_SEGMENT = 'Office Old Documents';
 const OFFICE_DOC_FOLDERS_KEY = 'office_doc_folders';
 const OFFICE_DOCS_INDEX_KEY = 'office_docs_index';
 const OFFICE_DOC_FOLDERS_DEFAULT = ['Purchase Documents', 'Employee Documents',
@@ -22280,7 +22285,7 @@ function officeDocsDrivePath_(folder, year, folders){
     chain.unshift(cur.name);
     cur = cur.parentId ? (folders || []).find(f => f.id === cur.parentId) : null;
   }
-  const base = ['HR Management', OFFICE_DOCS_DRIVE_FOLDER].concat(chain);
+  const base = ['HR Management', OFFICE_DOCS_ROOT_SEGMENT].concat(chain);
   return (officeDocsUsesYears_(folder) && year && year !== OFFICE_DOCS_NO_YEAR)
     ? base.concat([String(year)]) : base;
 }
@@ -23061,9 +23066,8 @@ async function renderOfficeDocsModule_(){
         <div class="sec-title" style="margin:0 0 8px;">Document folders</div>
         <div class="od-tree-list">${tree || '<div class="empty">No folders yet.</div>'}</div>
         <p style="font-size:11px;color:var(--muted);margin:10px 0 0;line-height:1.5;">
-          Files are stored on Google Drive under <strong>HR Management &gt; Office Old Documents</strong>
-          — the Drive folder keeps its original name — and are managed entirely from here.
-          You never need to open Drive to file or find one.</p>
+          Files are stored on Google Drive under <strong>HR Management &gt; Office Documents</strong>,
+          and managed entirely from here. You never need to open Drive to file or find one.</p>
       </div>
       <div class="od-main" id="odMain">${await officeDocsMainHtml_(idx, current)}</div>
     </div>`;

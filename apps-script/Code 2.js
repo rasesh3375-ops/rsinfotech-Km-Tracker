@@ -628,6 +628,76 @@ function doUploadDocument_(body) {
   return { ok: true, fileUrl: file.getUrl() };
 }
 
+// The archive's root folder in Drive, renamed in place the first time anything
+// asks for it.
+//
+// The screen was renamed from "Office Old Documents" to "Office Documents"
+// because that is what HR calls it, and the Drive folder has to follow or the
+// two stop matching. Doing that as a one-off somebody runs would put the whole
+// thing on an ordering nothing can enforce: index.html is live within a minute
+// of a push and this file is pasted by hand, so there is a window between them
+// where one side asks for a folder the other has not made yet,
+// getOrCreateFolderPath_ obligingly creates an empty one, and every upload in
+// that window is filed where none of the existing documents are. The archive
+// splits in two and the older half is invisible to everything after it.
+//
+// So the rename happens here, on whichever call arrives first, and the order
+// stops mattering. It only ever renames — no file is moved or copied, so
+// nothing can be lost by it — and it is idempotent: once the folder carries the
+// new name the first lookup finds it and nothing else happens.
+const OFFICE_ARCHIVE_FOLDER = 'Office Documents';
+const OFFICE_ARCHIVE_FOLDER_WAS = 'Office Old Documents';
+function officeArchiveRoot_() {
+  const hr = getOrCreateFolderPath_(['HR Management']);
+  const current = hr.getFoldersByName(OFFICE_ARCHIVE_FOLDER);
+  if (current.hasNext()) return current.next();
+  const old = hr.getFoldersByName(OFFICE_ARCHIVE_FOLDER_WAS);
+  if (old.hasNext()) {
+    const f = old.next();
+    f.setName(OFFICE_ARCHIVE_FOLDER);
+    return f;
+  }
+  return hr.createFolder(OFFICE_ARCHIVE_FOLDER);
+}
+
+// Resolves a folder path sent by the app, using the archive's own root whenever
+// the path is one of the archive's — under EITHER name, because the app may be
+// a version older or newer than this file.
+//
+// Everything else goes through getOrCreateFolderPath_ unchanged. That includes
+// the year-scoped "Office Documents" the older modules use
+// (HR Management / 2026-27 / Office Documents / ...), which is a different
+// folder inside each financial year and must not be confused with this one:
+// the guard below only matches when the archive root is the SECOND segment.
+function officeDocFolderFromPath_(folderPath) {
+  const p = (folderPath || []).slice();
+  if (p.length >= 2 && String(p[0]) === 'HR Management' &&
+      (String(p[1]) === OFFICE_ARCHIVE_FOLDER || String(p[1]) === OFFICE_ARCHIVE_FOLDER_WAS)) {
+    let folder = officeArchiveRoot_();
+    for (let i = 2; i < p.length; i++) {
+      const it = folder.getFoldersByName(String(p[i]));
+      folder = it.hasNext() ? it.next() : folder.createFolder(String(p[i]));
+    }
+    return folder;
+  }
+  return getOrCreateFolderPath_(p);
+}
+
+// The same rename, on demand, so it can be done deliberately and seen to have
+// worked rather than waited for. Safe to run at any time and as often as you
+// like — it is the same idempotent lookup every archive action already does.
+// Extensions > Apps Script > pick this in the dropdown > Run, then View > Logs.
+function renameOfficeArchiveFolder() {
+  const hr = getOrCreateFolderPath_(['HR Management']);
+  const already = hr.getFoldersByName(OFFICE_ARCHIVE_FOLDER).hasNext();
+  const folder = officeArchiveRoot_();
+  let n = 0;
+  const kids = folder.getFolders();
+  while (kids.hasNext()) { kids.next(); n++; }
+  Logger.log((already ? 'Already named "' : 'Renamed to "') + OFFICE_ARCHIVE_FOLDER +
+    '". It holds ' + n + ' document folder(s). Drive id: ' + folder.getId());
+}
+
 // The archive's own upload, deliberately separate from doUploadDocument_ above.
 //
 // That one trashes whatever file already carries the name it is handed, which
@@ -644,7 +714,7 @@ function doUploadDocument_(body) {
 // is why every column beside the name would otherwise have to be guessed at,
 // and why View could not stream the bytes back through doGetDriveFile_.
 function doUploadOfficeDoc_(body) {
-  const folder = getOrCreateFolderPath_(body.folderPath || []);
+  const folder = officeDocFolderFromPath_(body.folderPath);
   let name = String(body.fileName || 'document');
   if (folder.getFilesByName(name).hasNext()) {
     const dot = name.lastIndexOf('.');
@@ -678,7 +748,7 @@ function doUploadOfficeDoc_(body) {
 // and therefore has no Drive folder, is a success rather than an error.
 function doRenameOfficeFolder_(body) {
   try {
-    const parent = getOrCreateFolderPath_(['HR Management', 'Office Old Documents']);
+    const parent = officeArchiveRoot_();
     const it = parent.getFoldersByName(String(body.oldName || ''));
     if (!it.hasNext()) return { ok: true, note: 'no Drive folder yet' };
     // A folder already carrying the new name would leave two folders HR cannot
@@ -777,7 +847,7 @@ function doMoveOfficeDocs_(body) {
     try {
       var pathKey = (m.folderPath || []).join(' ');
       var folder = folderCache[pathKey];
-      if (!folder) { folder = getOrCreateFolderPath_(m.folderPath || []); folderCache[pathKey] = folder; }
+      if (!folder) { folder = officeDocFolderFromPath_(m.folderPath); folderCache[pathKey] = folder; }
       var file = DriveApp.getFileById(m.fileId);
       // A file already sitting exactly where it is wanted is reported and left
       // alone. This is what makes the whole thing safe to run over the entire
