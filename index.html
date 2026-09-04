@@ -22113,8 +22113,13 @@ async function loadOfficeDocFolders_(){
   return officeDocFoldersFrom_(await safeGet(OFFICE_DOC_FOLDERS_KEY, true));
 }
 async function saveOfficeDocFolders_(folders){
-  const ok = await remoteSet(OFFICE_DOC_FOLDERS_KEY, JSON.stringify(folders));
+  const json = JSON.stringify(folders);
+  const ok = await remoteSet(OFFICE_DOC_FOLDERS_KEY, json);
   if(!ok) throw new Error(lastBackendError || 'the server did not respond');
+  // remoteSet clears this key so nobody serves a stale copy. We are the ones
+  // who changed it and know exactly what it now holds, so put that back rather
+  // than making the next read fetch what we just sent.
+  primeSharedRead(OFFICE_DOC_FOLDERS_KEY, json);
 }
 // The whole archive's shape in one small key: for each folder, for each year,
 // how many documents, how many bytes, and how many parts the records are split
@@ -22127,8 +22132,10 @@ async function loadOfficeDocIndex_(){
   catch(e){ return {}; }
 }
 async function saveOfficeDocIndex_(idx){
-  const ok = await remoteSet(OFFICE_DOCS_INDEX_KEY, JSON.stringify(idx));
+  const json = JSON.stringify(idx);
+  const ok = await remoteSet(OFFICE_DOCS_INDEX_KEY, json);
   if(!ok) throw new Error(lastBackendError || 'the server did not respond');
+  primeSharedRead(OFFICE_DOCS_INDEX_KEY, json);
 }
 
 // Every record in one folder-year, read across however many parts it has.
@@ -22222,6 +22229,8 @@ async function appendOfficeDocs_(folderId, folderName, year, docs){
   y.p = part + 1;
   idx[slug].years[String(year)] = y;
   await saveOfficeDocIndex_(idx);
+  // Handed back so the caller can repaint from it instead of reading it again.
+  return idx;
 }
 
 // Rewrites the folder-year's parts without one document. Compacted as it goes,
@@ -22231,7 +22240,7 @@ async function removeOfficeDoc_(folderId, year, fileId){
   const idx = await loadOfficeDocIndex_();
   const all = await loadOfficeDocs_(folderId, year, idx);
   const keep = all.filter(d => d.fileId !== fileId);
-  if(keep.length === all.length) return false;
+  if(keep.length === all.length) return null;
 
   const oldParts = Number((((idx[slug] || {}).years || {})[String(year)] || {}).p) || 0;
   const entries = {};
@@ -22257,7 +22266,7 @@ async function removeOfficeDoc_(folderId, year, fileId){
     p: part
   };
   await saveOfficeDocIndex_(idx);
-  return true;
+  return idx;
 }
 
 function officeDocSize_(bytes){
@@ -22329,6 +22338,57 @@ function officeDocsToggleFolder_(folderId){
   else officeDocsExpanded_.add(folderId);
   officeDocsSaveOpen_();
   officeDocsRepaintTree_();
+}
+// Applies what a change already produced and repaints, instead of throwing the
+// cache away and rebuilding the screen from two fresh backend reads.
+//
+// Deleting a folder was the worst of it: the write itself is one call, and then
+// the screen blanked to "Loading the archive…" while it re-read the folder list
+// and the index it had just finished changing. Every one of these knows exactly
+// what it changed — the new folder list, or the new index — so it hands that
+// over and nothing is read back at all.
+//
+// Falls back to a full render when there is no cache to patch, which is the
+// only case that can genuinely need one.
+async function officeDocsApply_(patch){
+  if(!officeDocsCache_){ return renderOfficeDocsModule_(); }
+  if(patch && patch.folders) officeDocsCache_.folders = patch.folders;
+  if(patch && patch.idx) officeDocsCache_.idx = patch.idx;
+  const folders = officeDocsCache_.folders, idx = officeDocsCache_.idx;
+  // The selected folder may have just been deleted, or its years may have
+  // changed under the year being viewed.
+  let folder = folders.find(f => f.id === officeDocsState_.folderId) || null;
+  if(!folder){ folder = folders[0] || null; officeDocsState_.folderId = folder ? folder.id : null; }
+  const yrs = folder ? officeDocsYearsFor_(folder) : [];
+  if(!yrs.length) officeDocsState_.year = OFFICE_DOCS_NO_YEAR;
+  else if(yrs.indexOf(String(officeDocsState_.year)) === -1) officeDocsState_.year = yrs[0];
+
+  officeDocsRepaintStats_(folders, idx);
+  officeDocsRepaintTree_();
+  const main = document.getElementById('odMain');
+  if(main) main.innerHTML = await officeDocsMainHtml_(idx, folder);
+}
+// The four figures across the top move when a folder or a document does, and
+// they come from the index alone — so they are repainted from it rather than
+// left showing a count that no longer matches the tree beside them.
+function officeDocsRepaintStats_(folders, idx){
+  const box = document.querySelector('#officeDocsBox .od-stats');
+  if(!box) return;
+  let totalDocs = 0, totalBytes = 0, folderYears = 0;
+  Object.keys(idx).forEach(slug => {
+    const years = (idx[slug] || {}).years || {};
+    Object.keys(years).forEach(y => {
+      const v = years[y] || {};
+      totalDocs += Number(v.n) || 0;
+      totalBytes += Number(v.b) || 0;
+      if(Number(v.n) > 0) folderYears++;
+    });
+  });
+  box.innerHTML =
+    odStat_('Document folders', folders.length, 'Across all years') +
+    odStat_('Total documents', totalDocs.toLocaleString('en-IN'), 'In the archive') +
+    odStat_('Storage used', officeDocSize_(totalBytes), 'On Google Drive') +
+    odStat_('Folder-years in use', folderYears, 'Holding at least one file');
 }
 function officeDocsRepaintTree_(){
   const holder = document.querySelector('#officeDocsBox .od-tree-list');
@@ -22558,7 +22618,9 @@ async function officeDocsPick_(folderId, year){
 function officeDocsClearSearch_(){
   officeDocsState_.results = null;
   officeDocsState_.query = '';
-  return renderOfficeDocsModule_();
+  const box = document.getElementById('odSearch');
+  if(box) box.value = '';
+  return officeDocsApply_(null);
 }
 
 // Searches every folder-year the index says holds anything, and nothing else —
@@ -22598,8 +22660,7 @@ async function officeDocsSearch_(){
   });
   hits.sort((a, b) => b.uploadedAt - a.uploadedAt);
   officeDocsState_.results = hits;
-  officeDocsCache_ = null;
-  await renderOfficeDocsModule_();
+  await officeDocsApply_(null);
 }
 
 async function officeDocsAddFolder_(){
@@ -22614,13 +22675,12 @@ async function officeDocsAddFolder_(){
   folders.push({ id: id, name: name });
   try{ await saveOfficeDocFolders_(folders); }
   catch(err){ alert('Could not add the folder: ' + ((err && err.message) || 'the server did not respond')); return; }
-  await addActivityLog('Added the Office Old Documents folder "' + name + '"');
+  addActivityLog('Added the Office Old Documents folder "' + name + '"').catch(() => {});
   officeDocsState_.folderId = id;
   officeDocsExpanded_.add(id);
   officeDocsSaveOpen_();
   officeDocsState_.results = null;
-  officeDocsCache_ = null;
-  await renderOfficeDocsModule_();
+  await officeDocsApply_({ folders: folders });
 }
 
 // Renaming changes the label and the Drive folder, and NOTHING else. Every
@@ -22655,13 +22715,13 @@ async function officeDocsRenameFolder_(folderId){
     ((err && err.message) || 'the server did not respond') + '\n\nReload and try again.'); return; }
   // The index carries the display name too, for the search results' Where
   // column — left behind, it would keep printing the old one.
+  let newIdx = null;
   try{
     const idx = await loadOfficeDocIndex_();
-    if(idx[folderId]){ idx[folderId].name = name; await saveOfficeDocIndex_(idx); }
+    if(idx[folderId]){ idx[folderId].name = name; await saveOfficeDocIndex_(idx); newIdx = idx; }
   }catch(err){}
-  await addActivityLog('Renamed the Office Old Documents folder "' + was + '" to "' + name + '"');
-  officeDocsCache_ = null;
-  await renderOfficeDocsModule_();
+  addActivityLog('Renamed the Office Old Documents folder "' + was + '" to "' + name + '"').catch(() => {});
+  await officeDocsApply_({ folders: folders, idx: newIdx || undefined });
 }
 
 // Adds one year to this folder's own list. The first year added to a folder
@@ -22683,13 +22743,12 @@ async function officeDocsAddYear_(folderId){
   folder.years = years;
   try{ await saveOfficeDocFolders_(folders); }
   catch(err){ alert('Could not add the year: ' + ((err && err.message) || 'the server did not respond')); return; }
-  await addActivityLog('Added ' + answer + ' to the Office Old Documents folder "' + folder.name + '"');
+  addActivityLog('Added ' + answer + ' to the Office Old Documents folder "' + folder.name + '"').catch(() => {});
   officeDocsState_.folderId = folderId;
   officeDocsExpanded_.add(folderId);
   officeDocsSaveOpen_();
   officeDocsState_.year = answer;
-  officeDocsCache_ = null;
-  await renderOfficeDocsModule_();
+  await officeDocsApply_({ folders: folders });
 }
 
 // Removing a folder's last year is how a folder like SOP stops being filed by
@@ -22715,12 +22774,11 @@ async function officeDocsDeleteYear_(folderId, year){
   folder.years = years;
   try{ await saveOfficeDocFolders_(folders); }
   catch(err){ alert('Could not remove the year: ' + ((err && err.message) || 'the server did not respond')); return; }
-  await addActivityLog('Removed ' + year + ' from the Office Old Documents folder "' + folder.name + '"' +
-    (lastOne ? ' — it is no longer filed by year' : ''));
+  addActivityLog('Removed ' + year + ' from the Office Old Documents folder "' + folder.name + '"' +
+    (lastOne ? ' — it is no longer filed by year' : '')).catch(() => {});
   officeDocsState_.folderId = folderId;
   officeDocsState_.year = null;
-  officeDocsCache_ = null;
-  await renderOfficeDocsModule_();
+  await officeDocsApply_({ folders: folders });
 }
 
 // Only an empty folder can go. Deleting one with documents in it would either
@@ -22746,10 +22804,9 @@ async function officeDocsDeleteFolder_(folderId){
   const left = folders.filter(f => f.id !== folderId);
   try{ await saveOfficeDocFolders_(left); }
   catch(err){ alert('Could not delete the folder: ' + ((err && err.message) || 'the server did not respond')); return; }
-  await addActivityLog('Deleted the empty Office Old Documents folder "' + folder.name + '"');
+  addActivityLog('Deleted the empty Office Old Documents folder "' + folder.name + '"').catch(() => {});
   officeDocsState_.folderId = null;
-  officeDocsCache_ = null;
-  await renderOfficeDocsModule_();
+  await officeDocsApply_({ folders: left });
 }
 
 // Renames one filed document. Drive decides the final name — it applies the
@@ -22791,9 +22848,8 @@ async function officeDocRename_(folderId, year, fileId, currentName){
     alert('A file called “' + name + '” was already in this folder, so it was saved as “' +
       finalName + '” instead — nothing was overwritten.');
   }
-  await addActivityLog('Renamed "' + currentName + '" to "' + finalName + '" in Office Old Documents');
-  officeDocsCache_ = null;
-  await renderOfficeDocsModule_();
+  addActivityLog('Renamed "' + currentName + '" to "' + finalName + '" in Office Old Documents').catch(() => {});
+  await officeDocsApply_(null);
 }
 
 // One file per request, in order, with the count on screen as it goes. Apps
@@ -22815,6 +22871,7 @@ async function officeDocsUpload_(){
   if(!folder){ say('That folder no longer exists — reload the page.', true); officeDocsState_.busy = false; return; }
   const folderPath = officeDocsDrivePath_(folder, st.year);
   const done = [], failed = [], renamed = [];
+  let uploadedIdx = null;
   for(let i = 0; i < files.length; i++){
     const f = files[i];
     say('Uploading ' + (i + 1) + ' of ' + files.length + ' — ' + f.name + '…');
@@ -22839,9 +22896,9 @@ async function officeDocsUpload_(){
 
   if(done.length){
     try{
-      await appendOfficeDocs_(folder.id, folder.name, st.year, done);
-      await addActivityLog('Filed ' + done.length + ' document(s) under Office Old Documents › ' +
-        folder.name + ' › ' + st.year);
+      uploadedIdx = await appendOfficeDocs_(folder.id, folder.name, st.year, done);
+      addActivityLog('Filed ' + done.length + ' document(s) under Office Old Documents › ' +
+        folder.name + ' › ' + st.year).catch(() => {});
     }catch(err){
       officeDocsState_.busy = false;
       // The files ARE in Drive at this point; only the app's own record of them
@@ -22855,8 +22912,7 @@ async function officeDocsUpload_(){
     }
   }
   officeDocsState_.busy = false;
-  officeDocsCache_ = null;
-  await renderOfficeDocsModule_();
+  await officeDocsApply_(uploadedIdx ? { idx: uploadedIdx } : null);
   const parts = [];
   if(done.length) parts.push(done.length + ' uploaded');
   if(renamed.length) parts.push(renamed.length + ' renamed to avoid overwriting an existing file (' + renamed.join(', ') + ')');
@@ -22884,17 +22940,17 @@ async function officeDocView_(fileId, name){
 }
 
 async function officeDocDelete_(folderId, year, fileId, name){
+  let removedIdx = null;
   if(!confirm('Remove "' + name + '" from this folder?\n\n' +
     'The file is moved to Google Drive\'s bin, where it can still be recovered for 30 days.')) return;
   try{
     await backendAction({ action: 'deleteOfficeDoc', fileId: fileId });
-    await removeOfficeDoc_(folderId, year, fileId);
-    await addActivityLog('Removed "' + name + '" from Office Old Documents › ' + folderId + ' › ' + year);
+    removedIdx = await removeOfficeDoc_(folderId, year, fileId);
+    addActivityLog('Removed "' + name + '" from Office Old Documents › ' + folderId + ' › ' + year).catch(() => {});
   }catch(err){
     alert('Could not remove it: ' + ((err && err.message) || 'the server did not respond'));
   }
-  officeDocsCache_ = null;
-  await renderOfficeDocsModule_();
+  await officeDocsApply_(removedIdx ? { idx: removedIdx } : null);
 }
 
 async function renderPayrollDocsModule_(){
