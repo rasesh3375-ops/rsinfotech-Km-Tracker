@@ -1654,6 +1654,11 @@
 .doc-view-scroll{flex:1;overflow:auto;display:block;text-align:center;
   -webkit-overflow-scrolling:touch;}
 .doc-view-scroll > *{display:block;margin:0 auto;}
+/* One canvas per page, stacked. Each carries its own width in CSS pixels from
+   the render, so the browser is never asked to rescale what was just drawn. */
+#docViewPages{display:flex;flex-direction:column;align-items:center;gap:10px;}
+.doc-view-page{border:1px solid var(--line);border-radius:8px;background:var(--paper);
+  height:auto;max-width:none;}
 
 /* ---- Office Documents ---- */
 .od-folder-row{display:flex;align-items:center;gap:2px;}
@@ -15662,6 +15667,8 @@ function renderDocInViewer_(box, data, label, retryOnclick){
   const objectUrl = URL.createObjectURL(base64ToBlob_(data.base64Data, data.mimeType));
   const isPdf = /pdf/.test(data.mimeType);
   docViewerZoom_ = 1;
+  docViewerPdf_ = null;
+  docViewerPdfBytes_ = isPdf ? data.base64Data : null;
   box.innerHTML = `<div style="padding:16px;display:flex;flex-direction:column;gap:12px;height:100%;box-sizing:border-box;">
     <div class="doc-view-bar">
       <a class="btn ghost" href="${objectUrl}" download="${escapeHtml(data.fileName || label)}">⬇ Download</a>
@@ -15674,10 +15681,100 @@ function renderDocInViewer_(box, data, label, retryOnclick){
     </div>
     <div class="doc-view-scroll">
       ${isPdf
-        ? `<embed id="docViewContent" src="${objectUrl}" type="application/pdf" style="width:100%;height:70vh;border:1px solid var(--line);border-radius:8px;">`
+        ? `<div id="docViewPages"><div class="empty">Opening…</div></div>`
         : `<img id="docViewContent" src="${objectUrl}" alt="${escapeHtml(label)}" style="width:100%;height:auto;border-radius:8px;border:1px solid var(--line);">`}
     </div>
   </div>`;
+  if(isPdf) docViewerOpenPdf_(objectUrl, label);
+}
+
+// PDFs are drawn to a canvas rather than handed to <embed>.
+//
+// <embed> looked like the simple answer and is not one on an iPhone. It hands
+// the file to a native view that lays the page out at its own scale inside
+// whatever box it is given: making the box bigger — which is all a zoom button
+// can do to it — grew the empty area around a receipt that stayed exactly the
+// same size, and left it stranded in a corner of a tall white rectangle. It
+// also swallows every touch, which is why a pinch over a PDF reaches nothing.
+//
+// Rendering it ourselves settles all of that: the page is drawn at the size we
+// ask for, so zoom is exact, the layout is the document's own, and the result
+// is an ordinary canvas that scrolls and pinches like anything else.
+const PDFJS_VERSION_ = '3.11.174';
+const PDFJS_BASE_ = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/' + PDFJS_VERSION_ + '/';
+let pdfjsPromise_ = null, docViewerPdf_ = null, docViewerPdfBytes_ = null;
+function loadPdfJs_(){
+  if(pdfjsPromise_) return pdfjsPromise_;
+  pdfjsPromise_ = new Promise((resolve, reject) => {
+    if(window.pdfjsLib) return resolve(window.pdfjsLib);
+    const s = document.createElement('script');
+    s.src = PDFJS_BASE_ + 'pdf.min.js';
+    s.onload = () => {
+      if(!window.pdfjsLib) return reject(new Error('the PDF viewer did not load'));
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_BASE_ + 'pdf.worker.min.js';
+      resolve(window.pdfjsLib);
+    };
+    s.onerror = () => reject(new Error('could not reach the PDF viewer'));
+    document.head.appendChild(s);
+  });
+  return pdfjsPromise_;
+}
+async function docViewerOpenPdf_(objectUrl, label){
+  const holder = document.getElementById('docViewPages');
+  if(!holder) return;
+  try{
+    const lib = await loadPdfJs_();
+    docViewerPdf_ = await lib.getDocument({ data: base64ToBytes_(docViewerPdfBytes_) }).promise;
+    await docViewerRenderPdf_();
+  }catch(err){
+    // Falls back to what it did before rather than to nothing. <embed> lays a
+    // PDF out badly on a phone; it still shows the document, which beats an
+    // error message when the only thing that failed was reaching a CDN.
+    docViewerPdf_ = null;
+    holder.innerHTML = `<div class="od-note" style="font-size:12px;color:var(--muted);margin:0 0 8px;">
+        Showing the basic view — the zoom buttons will not resize this one.
+        Use Download to open it full size.</div>
+      <embed id="docViewContent" src="${objectUrl}" type="application/pdf"
+             style="width:100%;height:70vh;border:1px solid var(--line);border-radius:8px;">`;
+  }
+}
+// Redrawn at each zoom rather than scaled after the fact, so the text stays
+// sharp instead of turning into an enlarged photograph of itself.
+let docViewerRenderSeq_ = 0;
+async function docViewerRenderPdf_(){
+  const holder = document.getElementById('docViewPages');
+  if(!holder || !docViewerPdf_) return;
+  const seq = ++docViewerRenderSeq_;
+  const scroll = holder.closest('.doc-view-scroll');
+  const boxWidth = Math.max(200, (scroll ? scroll.clientWidth : 320) - 4);
+  const dpr = Math.min(3, window.devicePixelRatio || 1);
+  const pages = Math.min(docViewerPdf_.numPages, 40);
+  const made = [];
+  for(let i = 1; i <= pages; i++){
+    const page = await docViewerPdf_.getPage(i);
+    // 100% means "the page fits the box", which is what Fit has to mean for a
+    // document whose own page size nobody here knows or cares about.
+    const base = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: (boxWidth / base.width) * docViewerZoom_ * dpr });
+    const canvas = document.createElement('canvas');
+    canvas.className = 'doc-view-page';
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    canvas.style.width = Math.round(viewport.width / dpr) + 'px';
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    // A newer zoom started while this page was drawing — throw this one away
+    // rather than painting a stale size over it.
+    if(seq !== docViewerRenderSeq_) return;
+    made.push(canvas);
+  }
+  holder.innerHTML = '';
+  made.forEach(c => holder.appendChild(c));
+}
+function base64ToBytes_(b64){
+  const bin = atob(String(b64 || ''));
+  const out = new Uint8Array(bin.length);
+  for(let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
 }
 // The document viewer's own zoom, because nothing else can reach in here.
 //
@@ -15698,15 +15795,26 @@ let docViewerZoom_ = 1;
 const DOC_VIEW_ZOOM_STEPS = [0.25, 0.4, 0.5, 0.75, 1, 1.5, 2, 3, 4];
 function docViewerApplyZoom_(z){
   docViewerZoom_ = Math.min(4, Math.max(0.25, Number(z) || 1));
+  const lbl = document.getElementById('docViewZoomLabel');
+  if(lbl) lbl.textContent = Math.round(docViewerZoom_ * 100) + '%';
+  // A rendered PDF is redrawn at the new size. Debounced, because a live pinch
+  // calls this once a frame and re-rasterising every page per frame is how a
+  // zoom turns into a slideshow.
+  if(docViewerPdf_){
+    clearTimeout(docViewerZoomTimer_);
+    docViewerZoomTimer_ = setTimeout(() => { docViewerRenderPdf_(); }, 90);
+    return;
+  }
   const el = document.getElementById('docViewContent');
   if(el){
     el.style.width = (docViewerZoom_ * 100) + '%';
     el.style.maxWidth = 'none';
+    // Only reached by the <embed> fallback, where growing the box is all that
+    // can be done and does not scale the page inside it — hence the note there.
     if(el.tagName === 'EMBED') el.style.height = (docViewerZoom_ * 70) + 'vh';
   }
-  const lbl = document.getElementById('docViewZoomLabel');
-  if(lbl) lbl.textContent = Math.round(docViewerZoom_ * 100) + '%';
 }
+let docViewerZoomTimer_ = null;
 // Steps rather than a fixed multiplier, so zooming out goes 100 → 75 → 50 → 40
 // → 25 instead of creeping toward zero and never arriving.
 function docViewerZoomBy_(dir){
