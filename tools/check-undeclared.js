@@ -48,7 +48,8 @@ const BUILTINS = new Set((
   'fetch alert confirm prompt FormData FileReader Blob URL Image XMLHttpRequest Event CustomEvent ' +
   'crypto btoa atob structuredClone Intl arguments this globalThis L html2canvas jspdf ' +
   'HTMLElement Node NodeList Element CanvasRenderingContext2D AbortController TextEncoder Uint8Array ' +
-  'ArrayBuffer DataView Reflect Proxy BigInt eval print history screen top parent self frames' ).split(/\s+/));
+  'ArrayBuffer DataView Reflect Proxy BigInt eval print history screen top parent self frames ' +
+  'ResizeObserver' ).split(/\s+/));
 
 const problems = [];
 
