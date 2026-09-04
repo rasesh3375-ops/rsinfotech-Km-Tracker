@@ -1743,16 +1743,54 @@ function doPost(e) {
       }
     }
     // Many keys, one request. The client used to fetch attendance one employee
-    // at a time, so a twenty-person report meant twenty round trips; the sheet
-    // is read once here and every requested key answered from it.
+    // at a time, so a twenty-person report meant twenty round trips.
+    //
+    // It used to answer them from getDataRange().getValues() — the whole sheet,
+    // every cell. That is fine while the rows are small and ruinous once they
+    // are not: a row here holds up to 50,000 characters, and the archive alone
+    // now has a couple of hundred of them, so asking for TWO keys was reading
+    // tens of megabytes to find them. Opening Office Documents was slow for
+    // exactly this reason, and so was everything else that reads in batches.
+    //
+    // Column A is short strings and cheap to read whole. Everything else is
+    // fetched only for the rows actually asked for, grouped into contiguous
+    // runs — the same trick setMany already uses for writes, for the same
+    // reason: the cost here is round trips to the Sheets service, not rows.
     var sheetB = getSheet_();
-    var rows = sheetB.getDataRange().getValues();
-    var map = {};
-    for (var i = 0; i < rows.length; i++) map[rows[i][0]] = rows[i][1];
+    var lastB = sheetB.getLastRow();
     var keys = body.keys || [];
     var values = {};
-    for (var j = 0; j < keys.length; j++) {
-      values[keys[j]] = map[keys[j]] !== undefined ? map[keys[j]] : null;
+    for (var j = 0; j < keys.length; j++) values[keys[j]] = null;
+    if (lastB >= 1 && keys.length) {
+      var colA = sheetB.getRange(1, 1, lastB, 1).getValues();
+      var rowOf = {};
+      for (var i = 0; i < colA.length; i++) {
+        if (colA[i][0] !== '' && rowOf[colA[i][0]] === undefined) rowOf[colA[i][0]] = i + 1;
+      }
+      var wantedRows = [];
+      for (var k = 0; k < keys.length; k++) {
+        if (rowOf[keys[k]] !== undefined) wantedRows.push(rowOf[keys[k]]);
+      }
+      wantedRows.sort(function (x, y) { return x - y; });
+      var runStart = -1, prev = -1;
+      var readRun = function (start, end) {
+        var vals = sheetB.getRange(start, 2, end - start + 1, 1).getValues();
+        for (var q = 0; q < vals.length; q++) {
+          var keyAt = colA[start + q - 1][0];
+          values[keyAt] = vals[q][0];
+        }
+      };
+      for (var r = 0; r < wantedRows.length; r++) {
+        if (wantedRows[r] === prev) continue;           // the same key twice
+        if (runStart === -1) { runStart = wantedRows[r]; }
+        else if (wantedRows[r] !== prev + 1) { readRun(runStart, prev); runStart = wantedRows[r]; }
+        prev = wantedRows[r];
+      }
+      if (runStart !== -1) readRun(runStart, prev);
+      // A key that exists nowhere stays null, which is what it meant before.
+      for (var m = 0; m < keys.length; m++) {
+        if (values[keys[m]] === undefined) values[keys[m]] = null;
+      }
     }
     return jsonOut_({ ok: true, batch: true, values: values });
   }
