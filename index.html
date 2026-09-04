@@ -4409,6 +4409,8 @@ const LONG_READ_TTL_MS = {
   office_apprentice_docs: 600000,
   // Written once, ever, and read on every render of the apprentice card.
   office_apprentice_docs_merged: 900000,
+  // Written once, ever, and read on every render of the payroll card.
+  payroll_docs_merged: 900000,
   office_checklist_docs: 600000,
   company_profile: 900000,        // 15 minutes
   employee_handbook: 900000,
@@ -23598,6 +23600,21 @@ async function officeDocDelete_(folderId, year, fileId, name){
 async function renderPayrollDocsModule_(){
   const root = document.getElementById('payrollDocsRoot');
   if(!root) return;
+  // Once the merge has run this module is a shortcut to the archive and nothing
+  // else. The tabs are not shown again: two screens listing the same documents
+  // is what the merge existed to end, and its Upload form would file into a
+  // Drive folder the archive does not read.
+  if(await payrollMergeDone_()){
+    root.innerHTML = `<div class="empty" style="text-align:left;line-height:1.6;">
+      <strong>These have moved.</strong><br>
+      Every payroll document is now filed under
+      <strong>Office Documents › ${escapeHtml(PAYROLL_MERGE_PARENT_)}</strong>, by financial year,
+      then category, then month — and searchable alongside the rest of the company's paperwork.
+      <div style="margin-top:12px;">
+        <button type="button" class="btn" onclick="openOfficeDocsCard()">Open Office Documents</button>
+      </div></div>`;
+    return;
+  }
   if(payrollDocsMigNeededCache_ === null) payrollDocsMigNeededCache_ = await payrollDocsMigrationNeeded_();
   const migNeeded = payrollDocsMigNeededCache_;
   root.innerHTML = `
@@ -23606,6 +23623,20 @@ async function renderPayrollDocsModule_(){
           <span>Older payroll documents from before this upgrade haven't been sorted into the new Financial Year → Month → Category → Document Type structure yet.</span>
           <button type="button" class="btn" onclick="withBusy(this,'Migrating…',runPayrollDocsMigration_)">Migrate existing documents</button>
         </div>` : ''}
+      <!-- Offered, not done automatically: it moves real paperwork in Drive and
+           cannot be undone from here, so the confirm shows the exact breakdown
+           first. Below the migrate banner deliberately — anything still
+           unsorted should be sorted before it is moved. -->
+      <div class="od-merge-offer">
+        <div><strong>Move these into Office Documents</strong>
+        <div style="font-size:12px;color:var(--muted);margin-top:3px;line-height:1.5;">
+          Every payroll document becomes a folder in the archive — financial year, then
+          category, then month — searchable alongside the rest of the company's paperwork.
+          Only the current version of each is filed; replaced files stay in Drive. Done once.</div>
+        <div class="msg" id="payrollMergeMsg" style="margin-top:6px;"></div></div>
+        <button type="button" class="btn" style="flex:0 0 auto;"
+                onclick="withBusy(this,'Moving…',mergePayrollDocsIntoArchive_)">Move to archive</button>
+      </div>
       <div class="payroll-docs-toolbar">
         <div class="payroll-docs-tabs">
           <button type="button" class="payroll-docs-tab ${payrollDocsState_.view==='dashboard'?'active':''}" onclick="switchPayrollDocsView_('dashboard')">Dashboard</button>
@@ -24730,6 +24761,226 @@ async function deleteApprenticeDoc(id){
   list = list.filter(d => d.id !== id);
   await saveApprenticeDocs(list);
   await renderApprenticeDocList();
+}
+
+// ---- Moving Payroll Documents into the Office Documents archive ----
+//
+// Same reasoning as the apprentice merge below, one module further on: two
+// screens filing company paperwork, and HR having to remember which one a
+// document went to. This module is the more capable of the two — it knows
+// financial years, months, categories, document types and versions — so what
+// moves is its documents, not its structure, and the structure it had is
+// rebuilt as folders the archive already understands.
+//
+// The shape HR asked for, and the one thing worth saying about it: the year
+// comes FIRST and the month comes LAST, which is the opposite of how the files
+// sit in Drive today (Payroll Documents / <month> / <category>, inside a
+// financial-year folder). So this is a genuine re-filing, not a relabelling.
+//
+//   Payroll Documents
+//     2026-27
+//       PF                 April, May, June, ...
+//       ESI                ...
+//       Professional Tax   ...
+//       Wages & Salary     ...
+//       Payslip            ...
+//     2025-26
+//       ...
+//     Unclassified         no year, no category, nothing assigned yet
+//
+// The financial year is a SUB-FOLDER, not the archive's year level. That level
+// takes four digits, and a payroll year is 2026-27: April 2026 and March 2027
+// are one financial year and two calendar ones, so "2026" would be wrong for
+// nine months of it and actively misleading for three.
+const PAYROLL_MERGE_PARENT_ = 'Payroll Documents';
+const PAYROLL_MERGE_UNCLASSIFIED_ = 'Unclassified';
+const PAYROLL_MERGE_FLAG_KEY = 'payroll_docs_merged';
+async function payrollMergeDone_(){
+  const v = await safeGet(PAYROLL_MERGE_FLAG_KEY, true);
+  try{ return !!(v && JSON.parse(v).merged); }catch(e){ return false; }
+}
+
+// Groups every payroll document by the folder it will land in, writing nothing.
+// Split out so the summary HR confirms is built by the code that then does the
+// work — a preview assembled separately is a preview of something else.
+//
+// Only the CURRENT version of a document is filed. A record that has been
+// replaced keeps its earlier file in Drive, reachable from this module's
+// History; the archive has no version history, so filing all three would put
+// three rows in one month folder with nothing to say which is in force. The
+// older files are not deleted — they stay in Drive exactly where they are.
+function payrollMergeBuckets_(byFy, unclassified){
+  const buckets = [];
+  const find = (path) => buckets.find(b => b.path.join('/') === path.join('/'));
+  const skipped = [];
+  const add = (path, doc) => {
+    let b = find(path);
+    if(!b){ b = { path: path, docs: [] }; buckets.push(b); }
+    b.docs.push(doc);
+  };
+  Object.keys(byFy).forEach(fy => {
+    (byFy[fy] || []).forEach(r => {
+      // Anything not active is a superseded or removed version, and this files
+      // what is in force.
+      if(r.status && r.status !== 'active') return;
+      const fileId = apprenticeDocFileId_(r);
+      if(!fileId){ skipped.push(r); return; }
+      const cat = payrollDocCategoryByKey_(r.category);
+      const monthLabel = r.monthLabel ||
+        (r.month ? payrollDocMonthLabel_(Number(r.month)) : '');
+      // A record whose category or month no longer resolves has nowhere in the
+      // new shape to go. Filed under Unclassified rather than dropped — that is
+      // the folder for exactly this, and losing it silently is the one outcome
+      // worth ruling out.
+      const path = (cat && monthLabel)
+        ? [fy, cat.label, monthLabel]
+        : [PAYROLL_MERGE_UNCLASSIFIED_];
+      add(path, Object.assign({ fileId: fileId }, r));
+    });
+  });
+  (unclassified || []).forEach(r => {
+    const fileId = apprenticeDocFileId_(r);
+    if(!fileId){ skipped.push(r); return; }
+    add([PAYROLL_MERGE_UNCLASSIFIED_], Object.assign({ fileId: fileId }, r));
+  });
+  // Years newest first, then categories in the order the config lists them —
+  // the order HR reads them in on the dashboard — then months in financial-year
+  // order, April first. Unclassified sits last, where a leftover belongs.
+  const catOrder = PAYROLL_DOC_CATEGORIES.map(c => c.label);
+  const monthOrder = FY_MONTH_ORDER.map(m => payrollDocMonthLabel_(m));
+  buckets.sort((a, b) => {
+    const au = a.path[0] === PAYROLL_MERGE_UNCLASSIFIED_, bu = b.path[0] === PAYROLL_MERGE_UNCLASSIFIED_;
+    if(au !== bu) return au ? 1 : -1;
+    if(a.path[0] !== b.path[0]) return String(b.path[0]).localeCompare(String(a.path[0]));
+    const ac = catOrder.indexOf(a.path[1]), bc = catOrder.indexOf(b.path[1]);
+    if(ac !== bc) return ac - bc;
+    return monthOrder.indexOf(a.path[2]) - monthOrder.indexOf(b.path[2]);
+  });
+  return { buckets: buckets, skipped: skipped };
+}
+
+async function mergePayrollDocsIntoArchive_(){
+  if(await payrollMergeDone_()){
+    alert('Payroll documents have already been moved into Office Documents.');
+    return;
+  }
+  const fys = await getPayrollDocsFyIndex_();
+  if(!fys.length){ alert('There are no payroll documents to move.'); return; }
+  const byFy = await getPayrollDocsBatch_(fys);
+  const unclassified = await getPayrollDocsUnclassified_();
+  const { buckets, skipped } = payrollMergeBuckets_(byFy, unclassified);
+  const total = buckets.reduce((t, b) => t + b.docs.length, 0);
+  if(!total){ alert('There are no payroll documents to move.'); return; }
+
+  const lines = buckets.map(b => '  • ' + PAYROLL_MERGE_PARENT_ + ' › ' + b.path.join(' › ') +
+    '  —  ' + b.docs.length + ' document(s)');
+  if(!confirm('Move ' + total + ' payroll document(s) into Office Documents?\n\n' +
+      lines.join('\n') + '\n\n' +
+      (skipped.length ? skipped.length + ' record(s) have no usable Drive link and will be left here.\n\n' : '') +
+      'Only the current version of each document is filed — files replaced earlier stay in ' +
+      'Drive and are not deleted. The files themselves move in Drive too. Done once.')) return;
+
+  const say = t => { const el = document.getElementById('payrollMergeMsg'); if(el) el.textContent = t; };
+
+  say('Reading file sizes from Drive…');
+  let meta = {};
+  const allIds = buckets.reduce((a, b) => a.concat(b.docs.map(d => d.fileId)), []);
+  for(let i = 0; i < allIds.length; i += OFFICE_DOCS_META_CHUNK){
+    try{
+      const res = await backendAction({ action: 'getDriveFileMeta',
+        fileIds: allIds.slice(i, i + OFFICE_DOCS_META_CHUNK) }, OFFICE_DOCS_DRIVE_FETCH);
+      if(res && res.meta) Object.assign(meta, res.meta);
+    }catch(err){ /* a missing size prints as 0 B, which beats not filing it */ }
+  }
+
+  say('Creating the archive folders…');
+  let folders = await loadOfficeDocFolders_();
+  // Every folder in this shape is a plain sub-folder with no years of its own:
+  // the year is a folder here, not the archive's year level. ensure() is by
+  // NAME within a parent, so a second run of the same path reuses what the
+  // first made rather than building a parallel tree beside it.
+  const ensure = (name, parentId) => {
+    let f = officeDocsChildrenOf_(folders, parentId || null)
+              .find(x => x.name.toLowerCase() === String(name).toLowerCase());
+    if(f){ if(!Array.isArray(f.years)) f.years = []; return f; }
+    f = { id: officeDocNewId_(name, folders), name: String(name), years: [] };
+    if(parentId) f.parentId = parentId;
+    folders.push(f);
+    return f;
+  };
+  const parent = ensure(PAYROLL_MERGE_PARENT_, null);
+  const targets = buckets.map(b => {
+    let node = parent;
+    b.path.forEach(seg => { node = ensure(seg, node.id); });
+    return { bucket: b, folder: node };
+  });
+  try{ await saveOfficeDocFolders_(folders); }
+  catch(err){ alert('Could not create the archive folders: ' +
+    ((err && err.message) || 'the server did not respond')); return; }
+
+  say('Moving ' + total + ' file(s) in Google Drive…');
+  const moves = targets.reduce((a, t) => a.concat(t.bucket.docs.map(d => ({
+    fileId: d.fileId, folderPath: officeDocsDrivePath_(t.folder, OFFICE_DOCS_NO_YEAR, folders)
+  }))), []);
+  let notMoved = 0;
+  for(let i = 0; i < moves.length; i += OFFICE_DOCS_MOVE_CHUNK){
+    say('Moving files in Google Drive — ' + Math.min(i + OFFICE_DOCS_MOVE_CHUNK, moves.length) +
+        ' of ' + moves.length + '…');
+    let res = null;
+    try{ res = await backendAction({ action: 'moveOfficeDocs',
+      moves: moves.slice(i, i + OFFICE_DOCS_MOVE_CHUNK) }, OFFICE_DOCS_DRIVE_FETCH); }
+    catch(err){ res = null; }
+    // Filing goes ahead either way: every record is keyed on the Drive id, so a
+    // document the app can find and open is filed correctly whether or not its
+    // file changed folders. Counted and reported at the end instead.
+    if(!res || !Array.isArray(res.moved)) notMoved += moves.slice(i, i + OFFICE_DOCS_MOVE_CHUNK).length;
+    else notMoved += Object.keys(res.failed || {}).length;
+  }
+
+  let filed = 0, idx = null;
+  const problems = [];
+  for(let i = 0; i < targets.length; i++){
+    const t = targets[i];
+    say('Filing ' + t.bucket.path.join(' › ') + ' (' + (i + 1) + ' of ' + targets.length + ')…');
+    const docs = t.bucket.docs.map(d => {
+      const m = meta[d.fileId] || {};
+      return {
+        // The record's own fileName is the clean, spec-format name HR reads on
+        // the dashboard; the Drive file carries a random suffix so a replace
+        // could never trash the wrong file. The clean one is what belongs in a
+        // document list, so Drive's name is only a fallback here — the reverse
+        // of the apprentice merge, where the record's name was the weaker one.
+        name: d.fileName || m.name || d.docName || 'Document',
+        fileId: d.fileId, mimeType: m.mimeType || '', size: Number(m.size) || 0,
+        uploadedAt: Date.parse(d.uploadedAt) || 0,
+        // Who uploaded it was recorded here, unlike the apprentice module, so
+        // it carries across as itself. The document type and any remark go with
+        // it because a month folder holds several kinds of document and the
+        // file name alone does not always separate them.
+        uploadedBy: [d.uploadedBy || 'HR', d.docTypeLabel, d.remarks].filter(Boolean).join(' · ')
+      };
+    });
+    try{ idx = await appendOfficeDocs_(t.folder.id, t.folder.name, OFFICE_DOCS_NO_YEAR, docs); filed += docs.length; }
+    catch(err){ problems.push(t.bucket.path.join(' › ') + ': ' +
+      ((err && err.message) || 'the server did not respond')); }
+  }
+
+  if(filed){
+    // Only after something was actually filed, so a merge that failed outright
+    // can be run again rather than being locked out by its own flag.
+    try{ await remoteSet(PAYROLL_MERGE_FLAG_KEY,
+      JSON.stringify({ merged: true, at: Date.now(), filed: filed })); }catch(err){}
+    addActivityLog('Moved ' + filed + ' payroll document(s) into Office Documents › ' +
+      PAYROLL_MERGE_PARENT_).catch(() => {});
+  }
+  officeDocsCache_ = null;
+  const notes = [filed + ' document(s) filed under Office Documents › ' + PAYROLL_MERGE_PARENT_ + '.'];
+  if(skipped.length) notes.push(skipped.length + ' record(s) had no usable Drive link and were left here.');
+  if(notMoved) notes.push(notMoved + ' file(s) could not be moved in Drive — they are filed and open ' +
+    'correctly, but still sit in their old Drive folder. Office Documents › Tidy Drive will retry them.');
+  if(problems.length) notes.push('Not filed: ' + problems.join('; '));
+  alert(notes.join('\n\n'));
+  await renderPayrollDocsModule_();
 }
 
 // ---- Moving Apprentice Documents into the Office Documents archive ----
