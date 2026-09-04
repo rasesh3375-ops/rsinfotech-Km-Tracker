@@ -901,6 +901,15 @@
      much as inside a modal. */
   html.kmt-zoomed .modal-overlay{overflow-x:auto;}
   html.kmt-zoomed, html.kmt-zoomed body{overflow-x:auto;}
+  /* #hrContent clips its own x-axis on purpose — no screen may scroll sideways
+     as a whole, wide content scrolls inside its own box (see that rule). At
+     100% that is right. Zoomed in it is the same fault the modals and the
+     fullscreen shell were fixed for and this one was not: the page is wider
+     than the screen by definition, so hiding the overflow does not tidy
+     anything away, it puts the right-hand edge of every ordinary screen out of
+     reach with no scrollbar and nothing to pan. Office Documents' folder tree
+     was found 245px past the edge with no way to get to it. */
+  html.kmt-zoomed #hrContent{overflow-x:auto;}
   /* The fullscreen viewer was left out of that, and it is the one place it
      mattered most. Its content box IS scaled by the rule above, but the fixed
      shell around it stays exactly viewport-sized and is a flex column with no
@@ -1743,7 +1752,11 @@
   .od-stat-value{font-size:18px;}
   .od-stat-label,.od-stat-sub{font-size:10px;}
 }
-.od-stat{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--paper);}
+/* min-width:0 for the same reason .od-tree has it — a grid item will not shrink
+   below its own min-content, so at two columns on a narrow (or zoomed) screen
+   these four cards pushed the row wider than the screen instead of letting
+   "Folder-years in use" wrap onto a second line. */
+.od-stat{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--paper);min-width:0;}
 .od-stat-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
 .od-stat-value{font-size:22px;font-weight:800;color:var(--navy);margin:4px 0 2px;font-variant-numeric:tabular-nums;}
 .od-stat-sub{font-size:11px;color:var(--muted);}
@@ -1751,7 +1764,13 @@
    which is the only layout that keeps a document table usable on both. */
 .od-layout{display:grid;grid-template-columns:minmax(200px,260px) 1fr;gap:14px;margin-top:14px;align-items:start;}
 @media (max-width:820px){ .od-layout{grid-template-columns:1fr;} }
-.od-tree{border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--paper);}
+/* min-width:0 for the same reason .od-main has it. A grid item refuses by
+   default to shrink below its content's min-content width, and a folder tree of
+   nested sub-folders with nowrap action buttons has a wide one — so the tree
+   pushed its own column out to 537px inside a 194px box, and #hrContent clipped
+   what would not fit. Its own name column already shrinks (.od-folder-head), so
+   all this does is let it. */
+.od-tree{border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--paper);min-width:0;}
 .od-folder{margin-bottom:2px;}
 .od-folder-head,.od-year{display:flex;align-items:center;gap:8px;width:100%;text-align:left;
   background:none;border:0;cursor:pointer;padding:7px 8px;border-radius:8px;font:inherit;color:var(--navy);}
@@ -1774,7 +1793,11 @@
    is not a control and must not look like one. */
 .od-leaf{cursor:default;opacity:.5;display:inline-block;}
 .od-leaf:hover{background:none;color:var(--muted);}
-.od-folder-name{flex:1;}
+/* Same again, for a flex item: without min-width:0 a folder named "Legal &
+   Statutory Correspondence" refused to wrap and hung 40px outside the tree it
+   is drawn in. overflow-wrap so a single long word breaks rather than doing the
+   same thing on its own. */
+.od-folder-name{flex:1;min-width:0;overflow-wrap:anywhere;}
 .od-folder-count{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;}
 .od-years,.od-children{margin:2px 0 6px 18px;border-left:1px solid var(--line);padding-left:6px;}
 /* A sub-folder's own count is a subtree total, so it must not read as though
