@@ -1634,7 +1634,11 @@
    and the zoom controls each keep a tappable size instead of being squeezed
    onto one line. */
 .doc-view-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
-.doc-view-zoom{display:flex;align-items:center;gap:6px;}
+/* Wraps in its own right, not just as a block. The app's own zoom persists and
+   can be well above 100%, and at that size the four controls ran off the right
+   edge with Fit half cut off — the row wrapping as a unit does not help when
+   the unit is itself wider than the screen. */
+.doc-view-zoom{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;}
 /* Sized past .btn.tiny's own padding rather than relying on it — these are the
    controls the whole fix exists for, and a 24px target on a phone is not one. */
 .doc-view-zoom .btn.tiny{min-width:44px;height:40px;padding:0 10px;font-size:15px;}
@@ -8739,13 +8743,26 @@ if(!window.KMT_ZOOM_ARMED_){
   // amount of finger movement zoomed anything. preventDefault right at
   // touchstart, the moment a second finger arrives, claims the gesture
   // up front and settles it deterministically instead of by race.
-  let kmtPinchStartDist_ = null, kmtPinchStartZoom_ = 1;
+  let kmtPinchStartDist_ = null, kmtPinchStartZoom_ = 1, kmtPinchOnDoc_ = false;
   const kmtTouchDist_ = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  // With a document open, a pinch means the DOCUMENT — which is what somebody
+  // pinching a document is asking for, and what they were getting instead was
+  // the whole app scaled up and left that way, because the app's zoom persists.
+  // HR ended up with a stuck, enormous interface after trying to read a PF
+  // receipt. Routing the gesture is the fix; the buttons stay for the PDF case,
+  // where an <embed> swallows the touches before this ever sees them.
+  const kmtPinchTarget_ = () => {
+    const el = document.getElementById('docViewContent');
+    return el && el.offsetParent !== null ? 'doc' : 'app';
+  };
+  const kmtZoomFor_ = (where, level) =>
+    where === 'doc' ? docViewerApplyZoom_(level) : kmtApplyZoom_(level, false);
   function kmtBeginPinch_(touches){
     const d = kmtTouchDist_(touches);
     if(d < 1) return false;            // both fingers on the same spot — nothing to measure yet
     kmtPinchStartDist_ = d;
-    kmtPinchStartZoom_ = kmtZoomLevel_;
+    kmtPinchOnDoc_ = kmtPinchTarget_() === 'doc';
+    kmtPinchStartZoom_ = kmtPinchOnDoc_ ? docViewerZoom_ : kmtZoomLevel_;
     return true;
   }
   document.addEventListener('touchstart', e => {
@@ -8763,7 +8780,8 @@ if(!window.KMT_ZOOM_ARMED_){
     // than staying dead until every finger lifts and the user tries again.
     if(kmtPinchStartDist_ === null && !kmtBeginPinch_(e.touches)) return;
     if(e.cancelable) e.preventDefault();
-    kmtApplyZoom_(kmtPinchStartZoom_ * (kmtTouchDist_(e.touches) / kmtPinchStartDist_), false);
+    kmtZoomFor_(kmtPinchOnDoc_ ? 'doc' : 'app',
+                kmtPinchStartZoom_ * (kmtTouchDist_(e.touches) / kmtPinchStartDist_));
   }, { passive:false });
   document.addEventListener('touchend', e => { if(e.touches.length < 2) kmtPinchStartDist_ = null; }, { passive:true });
   document.addEventListener('touchcancel', () => { kmtPinchStartDist_ = null; }, { passive:true });
@@ -8776,16 +8794,17 @@ if(!window.KMT_ZOOM_ARMED_){
   // where WebKit decided to report the pinch only as a gesture event and
   // the touch path never saw a clean two-finger sequence at all — the
   // other half of the same intermittency.
-  let kmtGestureStartZoom_ = 1;
+  let kmtGestureStartZoom_ = 1, kmtGestureOnDoc_ = false;
   document.addEventListener('gesturestart', e => {
     if(kmtPinchStartDist_ !== null) return;
     if(e.cancelable) e.preventDefault();
-    kmtGestureStartZoom_ = kmtZoomLevel_;
+    kmtGestureOnDoc_ = kmtPinchTarget_() === 'doc';
+    kmtGestureStartZoom_ = kmtGestureOnDoc_ ? docViewerZoom_ : kmtZoomLevel_;
   }, { passive:false });
   document.addEventListener('gesturechange', e => {
     if(kmtPinchStartDist_ !== null) return;
     if(e.cancelable) e.preventDefault();
-    if(e.scale > 0) kmtApplyZoom_(kmtGestureStartZoom_ * e.scale, false);
+    if(e.scale > 0) kmtZoomFor_(kmtGestureOnDoc_ ? 'doc' : 'app', kmtGestureStartZoom_ * e.scale);
   }, { passive:false });
   document.addEventListener('gestureend', e => {
     if(e.cancelable) e.preventDefault();
