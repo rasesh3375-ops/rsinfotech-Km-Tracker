@@ -4098,13 +4098,17 @@ async function remoteGet(key){
     return (data && data.value !== undefined) ? data : null;
   }catch(e){ lastBackendError = 'GET network error: ' + e.message; return null; }
 }
-async function remoteSet(key, value){
+// opts, for a caller whose value is genuinely large. Both actions overwrite a
+// key outright, so a retry re-sends the same thing and lands in the same place
+// — they are safe to retry in a way an upload is not.
+async function remoteSet(key, value, opts){
+  opts = opts || {};
   try{
     const res = await apiFetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'set', key, value, token: sessionToken })
-    });
+    }, opts.tries, opts.budgetMs, opts.attemptMs);
     const text = await res.text();
     try{
       const data = JSON.parse(text);
@@ -4127,10 +4131,10 @@ async function remoteSet(key, value){
 // a time as before. Saving a month of attendance is one write per employee,
 // and doing those one after another meant a dozen sequential round trips, each
 // paying Apps Script's start-up cost and each queueing for the script lock.
-async function remoteSetMany(entries){
+async function remoteSetMany(entries, opts){
   const keys = Object.keys(entries);
   if(!keys.length) return new Set();
-  const data = await backendAction({ action: 'setMany', entries });
+  const data = await backendAction({ action: 'setMany', entries }, opts);
   if(!data || !data.many) return null;
   keys.forEach(invalidateSharedRead);
   return new Set(data.saved || []);
@@ -22347,7 +22351,7 @@ async function loadOfficeDocFolders_(){
 }
 async function saveOfficeDocFolders_(folders){
   const json = JSON.stringify(folders);
-  const ok = await remoteSet(OFFICE_DOC_FOLDERS_KEY, json);
+  const ok = await remoteSet(OFFICE_DOC_FOLDERS_KEY, json, OFFICE_DOCS_WRITE_FETCH);
   if(!ok) throw new Error(lastBackendError || 'the server did not respond');
   // remoteSet clears this key so nobody serves a stale copy. We are the ones
   // who changed it and know exactly what it now holds, so put that back rather
@@ -22369,7 +22373,7 @@ async function loadOfficeDocIndex_(){
 }
 async function saveOfficeDocIndex_(idx){
   const json = JSON.stringify(idx);
-  const ok = await remoteSet(OFFICE_DOCS_INDEX_KEY, json);
+  const ok = await remoteSet(OFFICE_DOCS_INDEX_KEY, json, OFFICE_DOCS_WRITE_FETCH);
   if(!ok) throw new Error(lastBackendError || 'the server did not respond');
   primeSharedRead(OFFICE_DOCS_INDEX_KEY, json);
 }
@@ -22455,7 +22459,7 @@ async function appendOfficeDocs_(folderId, folderName, year, docs){
   });
   entries[officeDocPartKey_(slug, year, part)] = JSON.stringify({ savedAt: Date.now(), records: bucket });
 
-  const saved = await remoteSetMany(entries);
+  const saved = await remoteSetMany(entries, OFFICE_DOCS_WRITE_FETCH);
   if(!saved) throw new Error(lastBackendError || 'the server did not respond');
   const missing = Object.keys(entries).filter(k => !saved.has(k));
   if(missing.length) throw new Error(missing.length + ' part(s) of the archive index were not written — reload and try again');
@@ -22492,7 +22496,7 @@ async function removeOfficeDoc_(folderId, year, fileId){
   for(let p = part; p < oldParts; p++){
     entries[officeDocPartKey_(slug, year, p)] = JSON.stringify({ savedAt: Date.now(), records: [] });
   }
-  const saved = await remoteSetMany(entries);
+  const saved = await remoteSetMany(entries, OFFICE_DOCS_WRITE_FETCH);
   if(!saved) throw new Error(lastBackendError || 'the server did not respond');
 
   idx[slug] = idx[slug] || { name: slug, years: {} };
@@ -22562,10 +22566,24 @@ function officeDocsUnsizedCount_(idx){
 // findRow per key, far cheaper — so it keeps its own larger chunk.
 const OFFICE_DOCS_META_CHUNK = 25;    // file ids per getDriveFileMeta call
 const OFFICE_DOCS_PART_CHUNK = 20;    // shard keys per getBatch call
-const OFFICE_DOCS_MOVE_CHUNK = 25;    // files per moveOfficeDocs call
+// Ten, not twenty-five. Twenty-five was sized by guesswork and 271 real
+// documents disproved it: the backend pays getParents AND moveTo per file, plus
+// a folder lookup or creation for every level of a path four deep, so a chunk
+// is nearer a hundred Drive round trips than fifty. 175 files came back
+// "signal is aborted without reason".
+const OFFICE_DOCS_MOVE_CHUNK = 10;    // files per moveOfficeDocs call
 // One chunk of Drive work, with the room it actually needs. Three attempts
 // inside forty-five seconds, any one of which may take thirty.
-const OFFICE_DOCS_DRIVE_FETCH = { budgetMs: 45000, attemptMs: 30000 };
+const OFFICE_DOCS_DRIVE_FETCH = { budgetMs: 90000, attemptMs: 75000 };
+// The archive's own writes to the sheet. A shard is up to 120 records and the
+// index grows with every folder-year in it, so these are tens of kilobytes
+// going up — not the single small value apiFetch's nine-second default is
+// sized for — and each queues behind the script-wide lock as well. A merge of
+// 271 documents is where that showed: whole folder-months came back "POST
+// network error: signal is aborted without reason" and were left unfiled.
+// Retried, which is safe because both actions overwrite a key outright rather
+// than appending to it.
+const OFFICE_DOCS_WRITE_FETCH = { tries: 2, budgetMs: 60000, attemptMs: 45000 };
 // Every record in the whole archive, shard by shard, with the folder-year each
 // shard belongs to. The two maintenance actions below both need exactly this
 // and nothing else — one to write sizes into the records, one to read file ids
@@ -22655,7 +22673,7 @@ async function officeDocsRefreshSizes_(){
   });
 
   if(Object.keys(entries).length){
-    const saved = await remoteSetMany(entries);
+    const saved = await remoteSetMany(entries, OFFICE_DOCS_WRITE_FETCH);
     if(!saved){ alert('Could not save the sizes: ' + (lastBackendError || 'the server did not respond')); return; }
     const notSaved = Object.keys(entries).filter(k => !saved.has(k));
     if(notSaved.length){
@@ -23662,9 +23680,16 @@ async function renderPayrollDocsModule_(){
       Every payroll document is now filed under
       <strong>Office Documents › ${escapeHtml(PAYROLL_MERGE_PARENT_)}</strong>, by financial year,
       then category, then month — and searchable alongside the rest of the company's paperwork.
-      <div style="margin-top:12px;">
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
         <button type="button" class="btn" onclick="openOfficeDocsCard()">Open Office Documents</button>
-      </div></div>`;
+        <button type="button" class="btn ghost"
+                title="Use this if the move reported folders it could not write"
+                onclick="payrollMergeReopen_()">Run the move again</button>
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-top:10px;line-height:1.5;">
+        Nothing here is deleted — the records are still stored. If the move reported folders it
+        could not write, run it again: anything already filed is skipped, so a document cannot
+        be filed twice.</div></div>`;
     return;
   }
   if(payrollDocsMigNeededCache_ === null) payrollDocsMigNeededCache_ = await payrollDocsMigrationNeeded_();
@@ -24851,6 +24876,22 @@ async function payrollMergeDone_(){
   const v = await safeGet(PAYROLL_MERGE_FLAG_KEY, true);
   try{ return !!(v && JSON.parse(v).merged); }catch(e){ return false; }
 }
+// Clears the "already merged" flag so the merge can be run again.
+//
+// A flag that only ever gets set is fine right up until it is set on a merge
+// that did not finish — which is what happened on the first real run: 271
+// documents filed, several folder-months not, and the module then refused to
+// try again with no way to say otherwise. The merge skips whatever is already
+// in the archive, so running it again can only ever add what is missing; the
+// flag is the one thing standing in the way, and this is the door out.
+async function payrollMergeReopen_(){
+  if(!confirm('Run the move again?\n\n' +
+    'Any document already in the archive is skipped, so nothing can be filed twice. ' +
+    'Use this if the last run reported folders it could not write.')) return;
+  try{ await remoteSet(PAYROLL_MERGE_FLAG_KEY, JSON.stringify({ merged: false, reopenedAt: Date.now() })); }
+  catch(err){ alert('Could not reopen the move: ' + ((err && err.message) || 'the server did not respond')); return; }
+  await renderPayrollDocsModule_();
+}
 
 // Every financial year that might hold payroll documents — not just the ones
 // the registry happens to know about.
@@ -24991,6 +25032,23 @@ async function mergePayrollDocsIntoArchive_(){
     }catch(err){ /* a missing size prints as 0 B, which beats not filing it */ }
   }
 
+  // What the archive already holds, so a second run finishes the job instead
+  // of doing it twice. The first real run filed 271 documents and left several
+  // folder-months unfiled — recoverable in itself, except the flag then said
+  // "merged" and the module refused to try again. Skipping by Drive file id
+  // makes running it again the ordinary way to finish.
+  say('Checking what is already filed…');
+  const alreadyFiled = new Set();
+  try{
+    const shards = await officeDocsAllShards_(await loadOfficeDocIndex_());
+    shards.forEach(sh => sh.records.forEach(r => { if(r.f) alreadyFiled.add(r.f); }));
+  }catch(err){
+    alert('Could not check what is already in the archive: ' +
+      ((err && err.message) || 'the server did not respond') +
+      '\n\nNothing was changed. Try again in a moment.');
+    return;
+  }
+
   say('Creating the archive folders…');
   let folders = await loadOfficeDocFolders_();
   // Every folder in this shape is a plain sub-folder with no years of its own:
@@ -25035,12 +25093,12 @@ async function mergePayrollDocsIntoArchive_(){
     else notMoved += Object.keys(res.failed || {}).length;
   }
 
-  let filed = 0, idx = null;
+  let filed = 0, skippedAlready = 0, idx = null;
   const problems = [];
   for(let i = 0; i < targets.length; i++){
     const t = targets[i];
     say('Filing ' + t.bucket.path.join(' › ') + ' (' + (i + 1) + ' of ' + targets.length + ')…');
-    const docs = t.bucket.docs.map(d => {
+    const docs = t.bucket.docs.filter(d => !alreadyFiled.has(d.fileId)).map(d => {
       const m = meta[d.fileId] || {};
       return {
         // The record's own fileName is the clean, spec-format name HR reads on
@@ -25058,25 +25116,43 @@ async function mergePayrollDocsIntoArchive_(){
         uploadedBy: [d.uploadedBy || 'HR', d.docTypeLabel, d.remarks].filter(Boolean).join(' · ')
       };
     });
+    skippedAlready += t.bucket.docs.length - docs.length;
+    if(!docs.length) continue;
     try{ idx = await appendOfficeDocs_(t.folder.id, t.folder.name, OFFICE_DOCS_NO_YEAR, docs); filed += docs.length; }
     catch(err){ problems.push(t.bucket.path.join(' › ') + ': ' +
       ((err && err.message) || 'the server did not respond')); }
   }
 
-  if(filed){
-    // Only after something was actually filed, so a merge that failed outright
-    // can be run again rather than being locked out by its own flag.
+  // Set only when nothing was left unfiled. A merge that could not write every
+  // folder-month is not finished, and this flag is what decides whether it can
+  // be run again — marking it done because SOME of it worked is how documents
+  // end up stranded with no way to bring them in. That is exactly what the
+  // first real run did: 271 filed, several folder-months not, and the module
+  // then refused to try again.
+  if(filed && !problems.length){
     try{ await remoteSet(PAYROLL_MERGE_FLAG_KEY,
       JSON.stringify({ merged: true, at: Date.now(), filed: filed })); }catch(err){}
+  }
+  if(filed){
     addActivityLog('Moved ' + filed + ' payroll document(s) into Office Documents › ' +
       PAYROLL_MERGE_PARENT_).catch(() => {});
   }
   officeDocsCache_ = null;
   const notes = [filed + ' document(s) filed under Office Documents › ' + PAYROLL_MERGE_PARENT_ + '.'];
+  if(skippedAlready) notes.push(skippedAlready + ' were already filed by an earlier run and were left alone.');
   if(skipped.length) notes.push(skipped.length + ' record(s) had no usable Drive link and were left here.');
   if(notMoved) notes.push(notMoved + ' file(s) could not be moved in Drive — they are filed and open ' +
-    'correctly, but still sit in their old Drive folder. Office Documents › Tidy Drive will retry them.');
-  if(problems.length) notes.push('Not filed: ' + problems.join('; '));
+    'correctly, but still sit in their old Drive folder. Office Documents › Tidy Drive will retry them, ' +
+    'and can be pressed as often as you like.');
+  // Say plainly that pressing it again is the fix, rather than leaving a list
+  // of failures and no next step.
+  if(problems.length){
+    notes.push(problems.length + ' folder(s) could not be written and are NOT filed. Press ' +
+      '"Move to archive" again to finish them — anything already filed is skipped, so running ' +
+      'it again cannot duplicate a document.');
+    notes.push('Details: ' + problems.slice(0, 6).join('; ') +
+      (problems.length > 6 ? ' … and ' + (problems.length - 6) + ' more' : ''));
+  }
   alert(notes.join('\n\n'));
   await renderPayrollDocsModule_();
 }
