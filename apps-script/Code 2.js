@@ -768,7 +768,7 @@ function doGetDriveFileMeta_(body) {
 // stops half way is far worse than one that names what it could not carry.
 function doMoveOfficeDocs_(body) {
   var moves = body.moves || [];
-  var moved = [], failed = {};
+  var moved = [], skipped = [], failed = {};
   // Folders are resolved once per distinct path rather than per file: a merge
   // of fifty files into five folders should create and look up five folders.
   var folderCache = {};
@@ -779,6 +779,18 @@ function doMoveOfficeDocs_(body) {
       var folder = folderCache[pathKey];
       if (!folder) { folder = getOrCreateFolderPath_(m.folderPath || []); folderCache[pathKey] = folder; }
       var file = DriveApp.getFileById(m.fileId);
+      // A file already sitting exactly where it is wanted is reported and left
+      // alone. This is what makes the whole thing safe to run over the entire
+      // archive whenever Drive and the app might have drifted: the common case
+      // costs one getParents and no write at all, so "put everything where it
+      // belongs" does not mean rewriting every file's parents every time.
+      // Only a single parent counts as in place — a file in two folders is
+      // still in the wrong one as well as the right one.
+      var parents = file.getParents(), already = false;
+      if (parents.hasNext()) {
+        already = parents.next().getId() === folder.getId() && !parents.hasNext();
+      }
+      if (already) { skipped.push(m.fileId); continue; }
       // moveTo replaces every parent in one call. Adding the new parent and
       // removing the old ones by hand is the same thing done in three steps,
       // with a window in the middle where a failure leaves the file in both.
@@ -788,7 +800,7 @@ function doMoveOfficeDocs_(body) {
       failed[m.fileId] = String(err);
     }
   }
-  return { ok: true, moved: moved, failed: failed };
+  return { ok: true, moved: moved, skipped: skipped, failed: failed };
 }
 
 // Trashed rather than hard-deleted, so a document removed from the archive by

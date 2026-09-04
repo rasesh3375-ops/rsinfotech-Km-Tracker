@@ -22356,9 +22356,17 @@ function officeDocsUnsizedCount_(idx){
 // strength of one Drive lookup is not a decision to take without being asked.
 const OFFICE_DOCS_META_CHUNK = 200;   // file ids per getDriveFileMeta call
 const OFFICE_DOCS_PART_CHUNK = 20;    // shard keys per getBatch call
-async function officeDocsRefreshSizes_(){
-  const idx = await loadOfficeDocIndex_();
-  // Every shard the index says exists, and which folder-year it belongs to.
+const OFFICE_DOCS_MOVE_CHUNK = 100;   // files per moveOfficeDocs call
+// Every record in the whole archive, shard by shard, with the folder-year each
+// shard belongs to. The two maintenance actions below both need exactly this
+// and nothing else — one to write sizes into the records, one to read file ids
+// out of them — so they share the walk rather than each having their own copy
+// of "which shards exist" for the index to drift against.
+//
+// Read in chunks rather than one enormous getBatch: a full shard is 120
+// records, and asking for the whole archive in one response is how a perfectly
+// good request starts timing out once the archive is large.
+async function officeDocsAllShards_(idx){
   const shards = [];
   Object.keys(idx).forEach(slug => {
     const years = (idx[slug] || {}).years || {};
@@ -22369,21 +22377,21 @@ async function officeDocsRefreshSizes_(){
       }
     });
   });
-  if(!shards.length){ alert('There is nothing filed in the archive yet.'); return; }
-
-  // Read in chunks rather than one enormous getBatch: a full shard is 120
-  // records, and asking for the whole archive in one response is how a
-  // perfectly good request starts timing out once the archive is large.
   const raws = {};
   for(let i = 0; i < shards.length; i += OFFICE_DOCS_PART_CHUNK){
     const keys = shards.slice(i, i + OFFICE_DOCS_PART_CHUNK).map(s => s.key);
     Object.assign(raws, await officeDocsReadKeys_(keys));
   }
-  const loaded = shards.map(s => {
+  return shards.map(s => {
     let v = null;
     try{ v = raws[s.key] ? JSON.parse(raws[s.key]) : null; }catch(e){ v = null; }
     return { shard: s, records: (v && v.records) || [] };
   });
+}
+async function officeDocsRefreshSizes_(){
+  const idx = await loadOfficeDocIndex_();
+  const loaded = await officeDocsAllShards_(idx);
+  if(!loaded.length){ alert('There is nothing filed in the archive yet.'); return; }
 
   const ids = [];
   loaded.forEach(l => l.records.forEach(r => { if(r.f) ids.push(r.f); }));
@@ -22454,6 +22462,72 @@ async function officeDocsRefreshSizes_(){
                  'trashed there. Their rows are still listed and nothing was removed.' : '')
     : 'Every document already had its size and type.' +
       (missing ? '\n\n' + missing + ' file(s) could not be found in Drive.' : ''));
+}
+
+// Puts every filed document where the app says it belongs in Drive.
+//
+// The app never asks Drive where a file currently is — it does not need to.
+// View, Rename and Delete all work on the Drive file id alone, so a document
+// in the wrong Drive folder is filed correctly, opens correctly and prints
+// correctly, and nothing in the app can tell. What breaks is the archive's
+// actual promise, which is that Drive shows the same shape the app does: the
+// apprentice merge against a deployment without moveOfficeDocs left fifty-five
+// documents listed under Apprentice Documents in the app and still sitting in
+// the old Office Documents folders in Drive.
+//
+// So this sends the whole archive's wanted paths, and the backend moves only
+// what is not already there — a file in the right place costs one getParents
+// and no write. That is what makes it safe to press whenever the two might
+// have drifted, rather than a one-off repair that has to be timed correctly.
+//
+// It changes nothing the app stores. Only Drive moves; not one record, count
+// or index entry is touched, so the worst a failed run can do is leave some
+// files where they already were.
+async function officeDocsTidyDrive_(){
+  const folders = await loadOfficeDocFolders_();
+  const idx = await loadOfficeDocIndex_();
+  const loaded = await officeDocsAllShards_(idx);
+  const moves = [];
+  loaded.forEach(l => {
+    const folder = folders.find(f => f.id === l.shard.slug);
+    // A shard whose folder has been deleted from the list has no wanted path
+    // to move to. Left alone rather than guessed at.
+    if(!folder) return;
+    const path = officeDocsDrivePath_(folder, l.shard.year, folders);
+    l.records.forEach(r => { if(r.f) moves.push({ fileId: r.f, folderPath: path }); });
+  });
+  if(!moves.length){ alert('There is nothing filed in the archive yet.'); return; }
+  if(!confirm('Check all ' + moves.length + ' filed document(s) against Google Drive, and move any ' +
+    'that are not in their folder yet?\n\nFiles already in the right place are left alone. ' +
+    'Nothing is renamed, deleted or removed from the archive.')) return;
+
+  let moved = 0, already = 0;
+  const failed = [];
+  for(let i = 0; i < moves.length; i += OFFICE_DOCS_MOVE_CHUNK){
+    let res = null;
+    try{ res = await backendAction({ action: 'moveOfficeDocs', moves: moves.slice(i, i + OFFICE_DOCS_MOVE_CHUNK) }); }
+    catch(err){ res = null; }
+    // An action the backend does not know falls through to a bare {ok:true},
+    // which would otherwise read as "checked them all, moved none" — the exact
+    // answer a correct run gives, and the one thing this must not be confused
+    // with.
+    if(!res || !res.ok || !Array.isArray(res.moved)){
+      alert('The server could not move files in Drive.\n\n' +
+        'This needs the moveOfficeDocs action in the Apps Script backend — paste the latest ' +
+        'Code 2.js and save a new version of the existing deployment, then try again.\n\n' +
+        (moved ? moved + ' file(s) had already been moved before this failed.' : 'Nothing was changed.'));
+      return;
+    }
+    moved += res.moved.length;
+    already += (res.skipped || []).length;
+    Object.keys(res.failed || {}).forEach(id => failed.push(id));
+  }
+  if(moved) addActivityLog('Moved ' + moved + ' Office Old Documents file(s) into their archive ' +
+    'folder on Google Drive').catch(() => {});
+  alert((moved ? moved + ' file(s) moved into their archive folder.' : 'Every file was already in the right folder.') +
+    (already ? '\n\n' + already + ' were already in place and were left alone.' : '') +
+    (failed.length ? '\n\n' + failed.length + ' could not be moved — they may have been trashed in Drive. ' +
+      'They are still filed and still listed here.' : ''));
 }
 
 function officeDocSize_(bytes){
@@ -22758,6 +22832,11 @@ async function renderOfficeDocsModule_(){
            the index cannot see, and this is the only way to put it right. -->
       <button class="btn ghost" style="flex:0 0 auto;" title="Read every document's size and type back from Google Drive"
               onclick="withBusy(this,'Reading Drive…',officeDocsRefreshSizes_)">Refresh sizes</button>
+      <!-- Its companion, and always available for the same reason: the app
+           cannot tell where a file actually sits in Drive without asking, so
+           there is no state to show a notice from. -->
+      <button class="btn ghost" style="flex:0 0 auto;" title="Move any file that is not in its archive folder on Google Drive yet"
+              onclick="withBusy(this,'Checking Drive…',officeDocsTidyDrive_)">Tidy Drive</button>
     </div>
 
     <div class="od-layout">
