@@ -4483,7 +4483,17 @@ async function safeGetOrThrow_(key){
   if(hit && Date.now() < hit.until) return hit.value;
   // remoteGet returns an object when the backend answered — including when it
   // answered "no such key" — and null only when the call itself failed.
-  const r = await remoteGet(key);
+  //
+  // Tried more than once before giving up, which safeGet never needed to do
+  // because it had somewhere soft to land. Raising instead of answering is the
+  // right behaviour and it makes a slow moment cost the whole screen, so a
+  // second and third go at it is the least this owes the person looking at it.
+  // apiFetch retries within one call; this retries the call.
+  let r = null;
+  for(let attempt = 0; attempt < 3 && !r; attempt++){
+    if(attempt) await new Promise(res => setTimeout(res, 800 * attempt));
+    r = await remoteGet(key);
+  }
   if(!r){
     const err = new Error(lastBackendError || 'the server did not respond');
     // Marked so the listener below can tell it apart from any other rejection
@@ -4574,13 +4584,21 @@ async function recordCheckin(name){
 // call failed or the deployed backend does not know the action. Callers treat
 // null as "do it the old way", which is what lets this file ship to Vercel
 // before the Apps Script side has been pasted in — nothing breaks in between.
-async function backendAction(payload){
+// opts lets a caller doing genuinely heavier work than a single key read ask
+// for more of apiFetch's budget, the same way remoteGetAllEmployees_ already
+// does. Apps Script charges a round trip PER FILE for anything Drive-shaped —
+// getSize, getMimeType, getParents, moveTo — so an action handed forty files
+// is forty round trips inside one request, and the default nine seconds is not
+// a budget it can finish in. It came back as "Fetch is aborted" and the caller
+// could not tell that from the backend refusing.
+async function backendAction(payload, opts){
+  opts = opts || {};
   try{
     const res = await apiFetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(Object.assign({ token: sessionToken }, payload))
-    });
+    }, opts.tries, opts.budgetMs, opts.attemptMs);
     const data = JSON.parse(await res.text());
     if(data && data.error === 'unauthorized'){ onSessionExpired(); return null; }
     if(data && data.error) return null;
@@ -22413,6 +22431,14 @@ async function removeOfficeDoc_(folderId, year, fileId){
 // quietly by design there (a document filed with no size is far better than
 // one not filed at all), so something has to say so afterwards, and the index
 // already knows without reading a single record.
+// Progress for the two maintenance actions. Both now run in chunks of
+// twenty-five, so on a full archive they are several requests rather than one,
+// and a button that says "Reading Drive…" for a minute with nothing else moving
+// is indistinguishable from one that has hung.
+function officeDocsSay_(text){
+  const el = document.getElementById('odUploadMsg') || document.getElementById('odUnsized');
+  if(el && el.id === 'odUploadMsg'){ el.textContent = text; el.classList.remove('error'); }
+}
 function officeDocsUnsizedCount_(idx){
   let n = 0;
   Object.keys(idx || {}).forEach(slug => {
@@ -22441,9 +22467,23 @@ function officeDocsUnsizedCount_(idx){
 // back missing from the metadata, and that is reported as a count — a row
 // that cannot be opened is worth knowing about, but removing records on the
 // strength of one Drive lookup is not a decision to take without being asked.
-const OFFICE_DOCS_META_CHUNK = 200;   // file ids per getDriveFileMeta call
+// Apps Script pays a round trip to the Drive service for EVERY file it touches
+// — getSize, getMimeType, getParents, moveTo are each one — so a request handed
+// two hundred files is several hundred round trips, and no client budget makes
+// that arrive. Refresh sizes came back "Fetch is aborted" on fifty-five
+// documents and reported it as the backend not having the action at all, which
+// sent HR to re-paste a file that was already correct.
+//
+// Twenty-five is sized to finish inside one raised budget with room to spare,
+// and the cost of more requests is nothing next to a request that never
+// returns. Reading shards from the SHEET is not the same shape — that is one
+// findRow per key, far cheaper — so it keeps its own larger chunk.
+const OFFICE_DOCS_META_CHUNK = 25;    // file ids per getDriveFileMeta call
 const OFFICE_DOCS_PART_CHUNK = 20;    // shard keys per getBatch call
-const OFFICE_DOCS_MOVE_CHUNK = 100;   // files per moveOfficeDocs call
+const OFFICE_DOCS_MOVE_CHUNK = 25;    // files per moveOfficeDocs call
+// One chunk of Drive work, with the room it actually needs. Three attempts
+// inside forty-five seconds, any one of which may take thirty.
+const OFFICE_DOCS_DRIVE_FETCH = { budgetMs: 45000, attemptMs: 30000 };
 // Every record in the whole archive, shard by shard, with the folder-year each
 // shard belongs to. The two maintenance actions below both need exactly this
 // and nothing else — one to write sizes into the records, one to read file ids
@@ -22486,16 +22526,29 @@ async function officeDocsRefreshSizes_(){
 
   let meta = {};
   for(let i = 0; i < ids.length; i += OFFICE_DOCS_META_CHUNK){
+    officeDocsSay_('Reading Google Drive — ' + Math.min(i + OFFICE_DOCS_META_CHUNK, ids.length) +
+                   ' of ' + ids.length + '…');
     let res = null;
-    try{ res = await backendAction({ action: 'getDriveFileMeta', fileIds: ids.slice(i, i + OFFICE_DOCS_META_CHUNK) }); }
+    try{ res = await backendAction({ action: 'getDriveFileMeta',
+      fileIds: ids.slice(i, i + OFFICE_DOCS_META_CHUNK) }, OFFICE_DOCS_DRIVE_FETCH); }
     catch(err){ res = null; }
-    // An older backend answers ok with no meta at all rather than an error,
-    // which would otherwise look like "every file has gone from Drive".
-    if(!res || !res.ok || !res.meta){
-      alert('The server could not read file sizes from Drive.\n\n' +
-        'This needs the getDriveFileMeta action in the Apps Script backend — paste the ' +
-        'latest Code 2.js and save a new version of the existing deployment, then try again.\n\n' +
-        'Nothing was changed.');
+    // Three different failures, told apart rather than lumped together. Saying
+    // "paste the latest Code 2.js" to somebody whose connection simply timed
+    // out sends them to re-paste a file that was already correct — which is
+    // exactly what happened.
+    if(!res){
+      alert('Could not reach the server while reading file sizes.\n\n' +
+        'Nothing was changed. Check your connection and press Refresh from Drive again — ' +
+        'it picks up where it left off and can be run as many times as you like.');
+      return;
+    }
+    // An unrecognised action falls through doPost to a bare {ok:true}, with no
+    // meta at all. That is a backend that has not been updated, and it is the
+    // only case where re-pasting is the answer.
+    if(!res.meta){
+      alert('This needs the getDriveFileMeta action in the Apps Script backend.\n\n' +
+        'Paste the latest Code 2.js and save a new version of the existing deployment ' +
+        '(Manage deployments → edit → New version), then try again.\n\nNothing was changed.');
       return;
     }
     Object.assign(meta, res.meta);
@@ -22591,18 +22644,27 @@ async function officeDocsTidyDrive_(){
   let moved = 0, already = 0;
   const failed = [];
   for(let i = 0; i < moves.length; i += OFFICE_DOCS_MOVE_CHUNK){
+    officeDocsSay_('Checking Google Drive — ' + Math.min(i + OFFICE_DOCS_MOVE_CHUNK, moves.length) +
+                   ' of ' + moves.length + '…');
     let res = null;
-    try{ res = await backendAction({ action: 'moveOfficeDocs', moves: moves.slice(i, i + OFFICE_DOCS_MOVE_CHUNK) }); }
+    try{ res = await backendAction({ action: 'moveOfficeDocs',
+      moves: moves.slice(i, i + OFFICE_DOCS_MOVE_CHUNK) }, OFFICE_DOCS_DRIVE_FETCH); }
     catch(err){ res = null; }
+    if(!res){
+      alert('Could not reach the server while moving files.\n\n' +
+        (moved ? moved + ' file(s) were moved before this stopped. ' : 'Nothing was changed. ') +
+        'Check your connection and press Tidy Drive again — it skips whatever is already ' +
+        'in place, so running it repeatedly is safe.');
+      return;
+    }
     // An action the backend does not know falls through to a bare {ok:true},
     // which would otherwise read as "checked them all, moved none" — the exact
     // answer a correct run gives, and the one thing this must not be confused
-    // with.
-    if(!res || !res.ok || !Array.isArray(res.moved)){
-      alert('The server could not move files in Drive.\n\n' +
-        'This needs the moveOfficeDocs action in the Apps Script backend — paste the latest ' +
-        'Code 2.js and save a new version of the existing deployment, then try again.\n\n' +
-        (moved ? moved + ' file(s) had already been moved before this failed.' : 'Nothing was changed.'));
+    // with. It is also the only case where re-pasting Code 2.js is the answer.
+    if(!Array.isArray(res.moved)){
+      alert('This needs the moveOfficeDocs action in the Apps Script backend.\n\n' +
+        'Paste the latest Code 2.js and save a new version of the existing deployment ' +
+        '(Manage deployments → edit → New version), then try again.\n\nNothing was changed.');
       return;
     }
     moved += res.moved.length;
@@ -22867,8 +22929,16 @@ async function renderOfficeDocsModule_(){
     idx = await loadOfficeDocIndex_();
     officeDocsCache_ = { folders: folders, idx: idx };
   }catch(err){
-    box.innerHTML = '<div class="empty error">Could not load the archive: ' +
-      escapeHtml((err && err.message) || 'the server did not respond') + '</div>';
+    // With a Try again button, because this is now a screen HR can land on for
+    // a reason as ordinary as a slow moment on mobile data, and "reload the
+    // whole app" is a heavy answer to that. Nothing is cached to clear — the
+    // failed read was never remembered — so pressing it simply asks again.
+    box.innerHTML = '<div class="empty error" style="line-height:1.6;">Could not load the archive: ' +
+      escapeHtml((err && err.message) || 'the server did not respond') +
+      '<div style="margin-top:12px;"><button type="button" class="btn" ' +
+      'onclick="withBusy(this,\'Trying…\',renderOfficeDocsModule_)">Try again</button></div>' +
+      '<div style="margin-top:10px;font-size:12px;color:var(--muted);">' +
+      'Nothing has been lost — no folder or document is changed by a failed read.</div></div>';
     return;
   }
   if(!officeDocsState_.folderId || !folders.some(f => f.id === officeDocsState_.folderId)){
