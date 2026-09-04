@@ -22431,10 +22431,46 @@ async function officeDocsReadKeys_(keys){
 // before the index is deliberate: an index that promises a part which does not
 // exist reads as an empty folder, where a part the index has not caught up
 // with is merely invisible until the next upload fixes the count.
+// Every Drive file id already filed in one folder-year, read across ALL its
+// shards rather than the last one.
+//
+// appendOfficeDocs_ below finds the shard to append to from the index's part
+// count, and only reads that shard. That is enough to append correctly and not
+// enough to notice it is appending something already there: a call whose shard
+// write landed but whose index write did not leaves the index one behind, so
+// the next call appends to the same shard again and the same document is
+// listed twice. Payroll folders came out of a 271-document merge with exactly
+// that. Reading one part beyond what the index claims is deliberate — a shard
+// written without the index catching up is precisely the case that caused it.
+async function officeDocsExistingIds_(slug, year, idx){
+  const parts = Number((((idx[slug] || {}).years || {})[String(year)] || {}).p) || 0;
+  const keys = [];
+  for(let p = 0; p <= parts; p++) keys.push(officeDocPartKey_(slug, year, p));
+  const raws = await officeDocsReadKeys_(keys);
+  const ids = new Set();
+  keys.forEach(k => {
+    let v = null;
+    try{ v = raws[k] ? JSON.parse(raws[k]) : null; }catch(e){ v = null; }
+    ((v && v.records) || []).forEach(r => { if(r.f) ids.add(r.f); });
+  });
+  return ids;
+}
 async function appendOfficeDocs_(folderId, folderName, year, docs){
   if(!docs.length) return;
   const slug = folderId;
   const idx = await loadOfficeDocIndex_();
+  // Filing the same Drive file into the same folder-year twice is never what
+  // anybody meant — it is one document, listed twice. A repeated NAME is a
+  // different matter and stays allowed: two scans called the same thing are
+  // two documents, which is the whole reason this archive never overwrites.
+  {
+    const already = await officeDocsExistingIds_(slug, year, idx);
+    if(already.size){
+      const fresh = docs.filter(d => !already.has(d.fileId));
+      if(!fresh.length) return idx;
+      docs = fresh;
+    }
+  }
   idx[slug] = idx[slug] || { name: folderName, years: {} };
   idx[slug].name = folderName;
   idx[slug].years = idx[slug].years || {};
@@ -22702,6 +22738,116 @@ async function officeDocsRefreshSizes_(){
                  'trashed there. Their rows are still listed and nothing was removed.' : '')
     : 'Every document already had its size and type.' +
       (missing ? '\n\n' + missing + ' file(s) could not be found in Drive.' : ''));
+}
+
+// Removes documents the archive is listing more than once.
+//
+// A duplicate here means the SAME Drive file id listed twice in the same
+// folder-year — one document, two rows, both opening the same file. That can
+// only be a bookkeeping mistake, so removing the extra row is safe and removes
+// nothing real: the Drive file is untouched, and the row that stays points at
+// it exactly as before. appendOfficeDocs_ can no longer create these; this is
+// for the ones a 271-document merge already made.
+//
+// Two files with the same NAME are deliberately NOT duplicates. The archive
+// never overwrites on a name clash — it files "(2)" — because in an archive a
+// repeated name is a second document, and a second scan of the same invoice is
+// a real thing HR files on purpose. Those are counted and reported so nothing
+// is hidden, and left alone, because deciding one of two real files is surplus
+// is not a decision to take on a name match.
+async function officeDocsRemoveDuplicates_(){
+  const idx = await loadOfficeDocIndex_();
+  const loaded = await officeDocsAllShards_(idx);
+  if(!loaded.length){ alert('There is nothing filed in the archive yet.'); return; }
+
+  // Regrouped per folder-year, because a shard is only part of one.
+  const byBucket = {};
+  loaded.forEach(l => {
+    const k = l.shard.slug + '|' + l.shard.year;
+    (byBucket[k] = byBucket[k] || { slug: l.shard.slug, year: l.shard.year, records: [], parts: 0 });
+    byBucket[k].records.push(...l.records);
+    byBucket[k].parts++;
+  });
+
+  const entries = {};
+  let removed = 0, sameName = 0;
+  const examples = [];
+  Object.keys(byBucket).forEach(k => {
+    const b = byBucket[k];
+    const seen = new Set(), keep = [];
+    b.records.forEach(r => {
+      if(r.f && seen.has(r.f)){
+        removed++;
+        if(examples.length < 5){
+          examples.push(((idx[b.slug] || {}).name || b.slug) +
+            (b.year === OFFICE_DOCS_NO_YEAR ? '' : ' › ' + b.year) + ' › ' + (r.n || ''));
+        }
+        return;
+      }
+      if(r.f) seen.add(r.f);
+      keep.push(r);
+    });
+    // Reported, never removed — see the comment above for why a name match is
+    // not evidence of anything.
+    const names = {};
+    keep.forEach(r => { names[r.n] = (names[r.n] || 0) + 1; });
+    Object.keys(names).forEach(n => { if(names[n] > 1) sameName += names[n] - 1; });
+    if(keep.length === b.records.length) return;
+
+    let part = 0;
+    for(let i = 0; i < keep.length; i += OFFICE_DOCS_PER_PART){
+      entries[officeDocPartKey_(b.slug, b.year, part)] =
+        JSON.stringify({ savedAt: Date.now(), records: keep.slice(i, i + OFFICE_DOCS_PER_PART) });
+      part++;
+    }
+    if(!part){ entries[officeDocPartKey_(b.slug, b.year, 0)] = JSON.stringify({ savedAt: Date.now(), records: [] }); part = 1; }
+    // Parts compaction made surplus are emptied rather than left holding rows
+    // the index no longer counts.
+    for(let p = part; p < b.parts; p++){
+      entries[officeDocPartKey_(b.slug, b.year, p)] = JSON.stringify({ savedAt: Date.now(), records: [] });
+    }
+    b.keep = keep; b.newParts = part;
+  });
+
+  if(!removed){
+    alert('No document is listed twice.' +
+      (sameName ? '\n\n' + sameName + ' file(s) share a name with another in the same folder. That is ' +
+        'allowed — the archive files a repeated name as a second document rather than overwriting — ' +
+        'so they are left alone.' : ''));
+    return;
+  }
+  if(!confirm('Remove ' + removed + ' duplicate row(s) from the archive?\n\n' +
+      examples.map(e => '  • ' + e).join('\n') +
+      (removed > examples.length ? '\n  … and ' + (removed - examples.length) + ' more' : '') +
+      '\n\nEach of these is the same Google Drive file listed more than once in the same folder. ' +
+      'Only the extra listing goes — the file itself is untouched and stays in the archive once.')) return;
+
+  const saved = await remoteSetMany(entries, OFFICE_DOCS_WRITE_FETCH);
+  if(!saved){ alert('Could not save: ' + (lastBackendError || 'the server did not respond')); return; }
+  const notSaved = Object.keys(entries).filter(k => !saved.has(k));
+  if(notSaved.length){
+    alert(notSaved.length + ' part(s) could not be written — reload and run this again. ' +
+      'Nothing was lost.');
+    return;
+  }
+  Object.keys(byBucket).forEach(k => {
+    const b = byBucket[k];
+    if(!b.keep) return;
+    if(!idx[b.slug] || !idx[b.slug].years) return;
+    idx[b.slug].years[String(b.year)] = {
+      n: b.keep.length,
+      b: b.keep.reduce((t, r) => t + (Number(r.s) || 0), 0),
+      p: b.newParts
+    };
+  });
+  try{ await saveOfficeDocIndex_(idx); }
+  catch(err){ alert('The rows were removed but the archive index was not updated: ' +
+    ((err && err.message) || 'the server did not respond') + '\n\nReload and run this again.'); return; }
+  addActivityLog('Removed ' + removed + ' duplicate listing(s) from Office Documents').catch(() => {});
+  await officeDocsApply_({ idx: idx });
+  alert(removed + ' duplicate listing(s) removed. No file was deleted from Google Drive.' +
+    (sameName ? '\n\n' + sameName + ' file(s) share a name with another in the same folder and were ' +
+      'left alone — a repeated name is a second document here, not a duplicate.' : ''));
 }
 
 // Puts every filed document where the app says it belongs in Drive.
@@ -23111,6 +23257,8 @@ async function renderOfficeDocsModule_(){
            there is no state to show a notice from. -->
       <button class="btn ghost" style="flex:0 0 auto;" title="Move any file that is not in its archive folder on Google Drive yet"
               onclick="withBusy(this,'Checking Drive…',officeDocsTidyDrive_)">Tidy Drive</button>
+      <button class="btn ghost" style="flex:0 0 auto;" title="Find documents the archive is listing more than once. No file is deleted from Drive."
+              onclick="withBusy(this,'Checking…',officeDocsRemoveDuplicates_)">Remove duplicates</button>
     </div>
 
     <div class="od-layout">
