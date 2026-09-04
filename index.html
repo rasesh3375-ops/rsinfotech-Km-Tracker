@@ -2879,9 +2879,12 @@
                sections (Payroll, Apprentice, Holiday List upload, Company
                Profile, Important Documents, Uniform/ID, Handbook) used to
                live together under one "Office Documents" card — they're
-               peers here too now, not nested under it, so GENERATOR_SECTIONS
-               lists all fourteen and there is no "genSecOfficeDocuments"
-               entry any more. -->
+               peers here too now, not nested under it, and there is no
+               "genSecOfficeDocuments" entry any more. Which sections exist is
+               read off this list at runtime by generatorSections_ rather than
+               repeated in a JavaScript array — a header added here without a
+               matching array entry used to give a card that could not be
+               collapsed, and looked like a broken arrow. -->
           <div class="gen-accordion-list">
             <button type="button" class="gen-accordion-header" data-target="genSecRoleReports" onclick="openGeneratorCard('genSecRoleReports')" aria-expanded="false">
               <span class="gen-accordion-num">1</span>
@@ -3257,7 +3260,7 @@
         </div>
         </div>
         <!-- Office Documents used to be one more card wrapping these seven —
-             now each is its own accordion peer (see GENERATOR_SECTIONS),
+             now each is its own accordion peer (see generatorSections_),
              flattened alongside every other Generator section. Nothing
              inside any of them changed: same ids, same fields, same
              handlers, same numbering in their own headings — only the
@@ -12052,10 +12055,8 @@ function kmtActiveCard(){
     return el ? el.id : null;
   }
   if(hrRoute === 'generator'){
-    for(const id of GENERATOR_SECTIONS){
-      const el = document.getElementById(id);
-      if(el && !el.classList.contains('hidden')) return id;
-    }
+    const el = document.querySelector('#hrSubGenerator [id^="genSec"]:not(.hidden)');
+    return el ? el.id : null;
   }
   if(hrRoute === 'settings'){
     for(const id of SETTINGS_SECTIONS){
@@ -14545,8 +14546,10 @@ function employeeModalHtml(emp){
 // Increment), so — unlike those three — there is no stale state to reset
 // on open and no separate relocation step: each header and its body are
 // already adjacent in the template as written. A fixed array is safe here
-// for the same reason it is in GENERATOR_SECTIONS: this list never varies
-// per employee, only which fields inside a section are shown or hidden do.
+// where the Generator's was not: this modal's markup is one template in one
+// place, so a section cannot be added to the page without being added here
+// too, and the list never varies per employee — only which fields inside a
+// section are shown or hidden do.
 const EMP_ACCORDION_SECTIONS = ['empSecBasic','empSecContact','empSecEmergency','empSecEmployee',
   'empSecAssets','empSecAllowance','empSecBond','empSecInsurance',
   'empSecRatePay','empSecAdvanceTemp','empSecLoan','empSecHeading','empSecStatutory','empSecLeaveOpening',
@@ -20937,13 +20940,21 @@ function clearGeneratorEmployeeFields(){
 // Documents used to be one more card wrapping seven sections together
 // (Payroll, Apprentice, Holiday List upload, Company Profile, Important
 // Documents, Uniform/ID, Handbook) — they're peers here now, not nested
-// under it, so this list has seventeen entries where the old card grid had
-// eight, and there is no "genSecOfficeDocuments" any more.
-const GENERATOR_SECTIONS = ['genSecRoleReports','genSecLetters','genSecChecklists',
-  'genSecHolidayList','genSecLeaveEncashment','genSecLetterhead',
-  'genSecPayrollDocs','genSecApprenticeDocs','genSecHolidayUpload','genSecCompanyProfile',
-  'genSecImportantDocs','genSecUniformId','genSecHandbook','genSecCtcCalculator',
-  'genSecRateCalculator','genSecTakeHomeCalculator','genSecCtcToSalaryCalculator'];
+// under it, and there is no "genSecOfficeDocuments" any more.
+//
+// Found from the page rather than listed by hand, which is what the Reports
+// accordion beside it has always done. The hand-written list held seventeen
+// ids and the page held eighteen: Office Old Documents was added as card 18
+// and nobody added it here. Everything about it then behaved as designed and
+// still looked broken — its header could not collapse it (the "hide them all
+// first" pass never reached it, so a second press hid every OTHER section and
+// left this one exactly as it was), opening any other card left it on screen
+// underneath, and its chevron stayed amber because updateAccordionHeaders_
+// correctly reported a section that genuinely never closed. A list that has
+// to be kept in step with the markup will eventually not be.
+function generatorSections_(){
+  return Array.from(document.querySelectorAll('#hrSubGenerator [id^="genSec"]'));
+}
 // Syncs every header's .active class, chevron and aria-expanded to whichever
 // one section (if any) is actually open — called after every open/collapse
 // rather than toggled by hand at each call site, so it can never drift out
@@ -20960,7 +20971,7 @@ function updateAccordionHeaders_(){
   });
 }
 function showGeneratorLanding(){
-  GENERATOR_SECTIONS.forEach(id => document.getElementById(id).classList.add('hidden'));
+  generatorSections_().forEach(el => el.classList.add('hidden'));
   updateAccordionHeaders_();
 }
 function openGeneratorCard(sectionId){
@@ -20970,7 +20981,7 @@ function openGeneratorCard(sectionId){
   // click, just landing back on "nothing open" instead of switching to a
   // different one.
   const alreadyOpen = !document.getElementById(sectionId).classList.contains('hidden');
-  GENERATOR_SECTIONS.forEach(id => document.getElementById(id).classList.add('hidden'));
+  generatorSections_().forEach(el => el.classList.add('hidden'));
   if(!alreadyOpen){
     document.getElementById(sectionId).classList.remove('hidden');
     autoDefaultMonthYearSelects_(document.getElementById(sectionId));
