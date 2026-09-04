@@ -1630,7 +1630,7 @@
 .slip-words{font-size:11px;color:var(--muted);}
 .slip-foot{text-align:center;font-size:10px;color:var(--muted);margin:6px 0 0;}
 
-/* ---- Office Old Documents ---- */
+/* ---- Office Documents ---- */
 .od-folder-row{display:flex;align-items:center;gap:2px;}
 .od-folder-row .od-folder-head{flex:1;min-width:0;}
 .od-year-row{display:flex;align-items:center;gap:2px;}
@@ -3020,7 +3020,7 @@
             </button>
             <button type="button" class="gen-accordion-header" data-target="genSecOfficeDocs" onclick="openOfficeDocsCard()" aria-expanded="false">
               <span class="gen-accordion-num">18</span>
-              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Office Old Documents</strong>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Office Documents</strong>
                 <span class="gen-accordion-desc">The whole old-document archive — purchase, sales, consultant and anything else — filed by folder and year, managed entirely from here.</span></span>
               <span class="gen-accordion-chevron">▼</span>
             </button>
@@ -3029,8 +3029,8 @@
 
         <div id="genSecOfficeDocs" class="hidden gen-accordion-body">
         <section class="block">
-          <h2 style="margin:0 0 4px;">Office Old Documents</h2>
-          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Upload, search, view and manage the company's old-document archive from here. Files are stored on Google Drive under <strong>HR Management &gt; Office Old Documents &gt; folder &gt; year</strong>, and the folder is created the first time you file something into it — you never need to open Drive to upload or find a document.</p>
+          <h2 style="margin:0 0 4px;">Office Documents</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Upload, search, view and manage the company's old-document archive from here. Files are stored on Google Drive under <strong>HR Management &gt; Office Old Documents &gt; folder &gt; year</strong> — the Drive folder keeps its original name, because that is where every document already sits. The folder for each year is created the first time you file something into it, and you never need to open Drive to upload or find a document.</p>
           <div id="officeDocsBox"></div>
         </section>
         </div>
@@ -3936,7 +3936,7 @@ function hrSessionExpired_(){
   return (Date.now() - startedAt) > HR_SESSION_MAX_AGE_MS;
 }
 // Who is signed in, for the one thing that has to record it: the Uploaded By
-// column on the Office Old Documents archive. The session itself never carried
+// column on the Office Documents archive. The session itself never carried
 // a name — only a token and a role — so a filed document had nobody's name
 // against it. Optional third argument, so every existing caller is unchanged
 // and a session restored from a previous visit simply reads back what was
@@ -21071,7 +21071,7 @@ function clearGeneratorEmployeeFields(){
 //
 // Found from the page rather than listed by hand, which is what the Reports
 // accordion beside it has always done. The hand-written list held seventeen
-// ids and the page held eighteen: Office Old Documents was added as card 18
+// ids and the page held eighteen: Office Documents was added as card 18
 // and nobody added it here. Everything about it then behaved as designed and
 // still looked broken — its header could not collapse it (the "hide them all
 // first" pass never reached it, so a second press hid every OTHER section and
@@ -22163,7 +22163,7 @@ function payrollDocsFyOptions_(){
 // this cache directly — so a cached `false` (or `true`) is never stale.
 let payrollDocsMigNeededCache_ = null;
 
-// ===== Office Old Documents =====
+// ===== Office Documents =====
 //
 // The app is the document management system; Drive is only where the bytes
 // live. Nobody should have to open Drive to file or find anything, so every
@@ -22182,6 +22182,19 @@ let payrollDocsMigNeededCache_ = null;
 //  - Plain calendar years from 2022, not financial years: an old document is
 //    filed under the year printed on it.
 const OFFICE_DOCS_FIRST_YEAR = 2022;
+// The Google Drive folder every document in the archive physically sits in.
+//
+// DELIBERATELY NOT the name HR sees. The screen was renamed from "Office Old
+// Documents" to "Office Documents" because that is what HR calls it, and the
+// Drive folder was left alone because it already holds the files: changing this
+// string alone does not rename anything in Drive, it makes getOrCreateFolderPath_
+// create a second, empty folder beside the first, and the archive splits in two
+// with the older half invisible to every future upload.
+//
+// So it is named rather than written inline, to be found and left alone. To
+// change it for real: rename the folder in Drive first, then change this to
+// match, in that order.
+const OFFICE_DOCS_DRIVE_FOLDER = 'Office Old Documents';
 const OFFICE_DOC_FOLDERS_KEY = 'office_doc_folders';
 const OFFICE_DOCS_INDEX_KEY = 'office_docs_index';
 const OFFICE_DOC_FOLDERS_DEFAULT = ['Purchase Documents', 'Employee Documents',
@@ -22267,7 +22280,7 @@ function officeDocsDrivePath_(folder, year, folders){
     chain.unshift(cur.name);
     cur = cur.parentId ? (folders || []).find(f => f.id === cur.parentId) : null;
   }
-  const base = ['HR Management', 'Office Old Documents'].concat(chain);
+  const base = ['HR Management', OFFICE_DOCS_DRIVE_FOLDER].concat(chain);
   return (officeDocsUsesYears_(folder) && year && year !== OFFICE_DOCS_NO_YEAR)
     ? base.concat([String(year)]) : base;
 }
@@ -22624,7 +22637,7 @@ async function officeDocsRefreshSizes_(){
     ((err && err.message) || 'the server did not respond') + '\n\nReload and run this again.'); return; }
 
   if(changed) addActivityLog('Refreshed size and type from Drive for ' + changed +
-    ' document(s) in Office Old Documents').catch(() => {});
+    ' document(s) in Office Documents').catch(() => {});
   await officeDocsApply_({ idx: idx });
   alert(changed
     ? changed + ' document(s) updated from Google Drive.' +
@@ -22701,7 +22714,7 @@ async function officeDocsTidyDrive_(){
     already += (res.skipped || []).length;
     Object.keys(res.failed || {}).forEach(id => failed.push(id));
   }
-  if(moved) addActivityLog('Moved ' + moved + ' Office Old Documents file(s) into their archive ' +
+  if(moved) addActivityLog('Moved ' + moved + ' Office Documents file(s) into their archive ' +
     'folder on Google Drive').catch(() => {});
   alert((moved ? moved + ' file(s) moved into their archive folder.' : 'Every file was already in the right folder.') +
     (already ? '\n\n' + already + ' were already in place and were left alone.' : '') +
@@ -23048,8 +23061,9 @@ async function renderOfficeDocsModule_(){
         <div class="sec-title" style="margin:0 0 8px;">Document folders</div>
         <div class="od-tree-list">${tree || '<div class="empty">No folders yet.</div>'}</div>
         <p style="font-size:11px;color:var(--muted);margin:10px 0 0;line-height:1.5;">
-          Files are stored on Google Drive under <strong>HR Management &gt; Office Old Documents</strong>,
-          and managed entirely from here. You never need to open Drive to file or find one.</p>
+          Files are stored on Google Drive under <strong>HR Management &gt; Office Old Documents</strong>
+          — the Drive folder keeps its original name — and are managed entirely from here.
+          You never need to open Drive to file or find one.</p>
       </div>
       <div class="od-main" id="odMain">${await officeDocsMainHtml_(idx, current)}</div>
     </div>`;
@@ -23283,7 +23297,7 @@ async function officeDocsAddFolder_(parentId){
   folders.push(parent ? { id: id, name: name, parentId: parent.id } : { id: id, name: name });
   try{ await saveOfficeDocFolders_(folders); }
   catch(err){ alert('Could not add the folder: ' + ((err && err.message) || 'the server did not respond')); return; }
-  addActivityLog('Added the Office Old Documents folder "' + name + '"' +
+  addActivityLog('Added the Office Documents folder "' + name + '"' +
     (parent ? ' inside "' + parent.name + '"' : '')).catch(() => {});
   officeDocsState_.folderId = id;
   officeDocsExpanded_.add(id);
@@ -23332,7 +23346,7 @@ async function officeDocsRenameFolder_(folderId){
     const idx = await loadOfficeDocIndex_();
     if(idx[folderId]){ idx[folderId].name = name; await saveOfficeDocIndex_(idx); newIdx = idx; }
   }catch(err){}
-  addActivityLog('Renamed the Office Old Documents folder "' + was + '" to "' + name + '"').catch(() => {});
+  addActivityLog('Renamed the Office Documents folder "' + was + '" to "' + name + '"').catch(() => {});
   await officeDocsApply_({ folders: folders, idx: newIdx || undefined });
 }
 
@@ -23355,7 +23369,7 @@ async function officeDocsAddYear_(folderId){
   folder.years = years;
   try{ await saveOfficeDocFolders_(folders); }
   catch(err){ alert('Could not add the year: ' + ((err && err.message) || 'the server did not respond')); return; }
-  addActivityLog('Added ' + answer + ' to the Office Old Documents folder "' + folder.name + '"').catch(() => {});
+  addActivityLog('Added ' + answer + ' to the Office Documents folder "' + folder.name + '"').catch(() => {});
   officeDocsState_.folderId = folderId;
   officeDocsExpanded_.add(folderId);
   officeDocsSaveOpen_();
@@ -23386,7 +23400,7 @@ async function officeDocsDeleteYear_(folderId, year){
   folder.years = years;
   try{ await saveOfficeDocFolders_(folders); }
   catch(err){ alert('Could not remove the year: ' + ((err && err.message) || 'the server did not respond')); return; }
-  addActivityLog('Removed ' + year + ' from the Office Old Documents folder "' + folder.name + '"' +
+  addActivityLog('Removed ' + year + ' from the Office Documents folder "' + folder.name + '"' +
     (lastOne ? ' — it is no longer filed by year' : '')).catch(() => {});
   officeDocsState_.folderId = folderId;
   officeDocsState_.year = null;
@@ -23428,7 +23442,7 @@ async function officeDocsDeleteFolder_(folderId){
   const left = folders.filter(f => f.id !== folderId);
   try{ await saveOfficeDocFolders_(left); }
   catch(err){ alert('Could not delete the folder: ' + ((err && err.message) || 'the server did not respond')); return; }
-  addActivityLog('Deleted the empty Office Old Documents folder "' + folder.name + '"').catch(() => {});
+  addActivityLog('Deleted the empty Office Documents folder "' + folder.name + '"').catch(() => {});
   officeDocsState_.folderId = null;
   await officeDocsApply_({ folders: left });
 }
@@ -23472,7 +23486,7 @@ async function officeDocRename_(folderId, year, fileId, currentName){
     alert('A file called “' + name + '” was already in this folder, so it was saved as “' +
       finalName + '” instead — nothing was overwritten.');
   }
-  addActivityLog('Renamed "' + currentName + '" to "' + finalName + '" in Office Old Documents').catch(() => {});
+  addActivityLog('Renamed "' + currentName + '" to "' + finalName + '" in Office Documents').catch(() => {});
   await officeDocsApply_(null);
 }
 
@@ -23521,7 +23535,7 @@ async function officeDocsUpload_(){
   if(done.length){
     try{
       uploadedIdx = await appendOfficeDocs_(folder.id, folder.name, st.year, done);
-      addActivityLog('Filed ' + done.length + ' document(s) under Office Old Documents › ' +
+      addActivityLog('Filed ' + done.length + ' document(s) under Office Documents › ' +
         folder.name + ' › ' + st.year).catch(() => {});
     }catch(err){
       officeDocsState_.busy = false;
@@ -23570,7 +23584,7 @@ async function officeDocDelete_(folderId, year, fileId, name){
   try{
     await backendAction({ action: 'deleteOfficeDoc', fileId: fileId });
     removedIdx = await removeOfficeDoc_(folderId, year, fileId);
-    addActivityLog('Removed "' + name + '" from Office Old Documents › ' + folderId + ' › ' + year).catch(() => {});
+    addActivityLog('Removed "' + name + '" from Office Documents › ' + folderId + ' › ' + year).catch(() => {});
   }catch(err){
     alert('Could not remove it: ' + ((err && err.message) || 'the server did not respond'));
   }
@@ -24651,11 +24665,11 @@ async function renderApprenticeDocList(){
     box.innerHTML = `<div class="empty" style="text-align:left;line-height:1.6;">
       <strong>These have moved.</strong><br>
       Every apprentice document is now filed under
-      <strong>Office Old Documents › ${escapeHtml(APPRENTICE_MERGE_PARENT_)}</strong>,
+      <strong>Office Documents › ${escapeHtml(APPRENTICE_MERGE_PARENT_)}</strong>,
       with claims and stipend payments filed by year, and searchable alongside the rest of
       the company's paperwork.
       <div style="margin-top:12px;">
-        <button type="button" class="btn" onclick="openOfficeDocsCard()">Open Office Old Documents</button>
+        <button type="button" class="btn" onclick="openOfficeDocsCard()">Open Office Documents</button>
       </div></div>`;
     const form = document.getElementById('apprenticeDocUploadForm');
     if(form) form.classList.add('hidden');
@@ -24678,7 +24692,7 @@ async function renderApprenticeDocList(){
   // and cannot be undone from here, so HR sees the exact breakdown in the
   // confirm before anything is written.
   const mergeHtml = list.length ? `<div class="od-merge-offer">
-      <div><strong>Move these into Office Old Documents</strong>
+      <div><strong>Move these into Office Documents</strong>
       <div style="font-size:12px;color:var(--muted);margin-top:3px;line-height:1.5;">
         All ${list.length} document(s) become folders in the archive —
         claims and stipend payments filed by year, contracts and important documents without —
@@ -24714,7 +24728,7 @@ async function deleteApprenticeDoc(id){
   await renderApprenticeDocList();
 }
 
-// ---- Moving Apprentice Documents into the Office Old Documents archive ----
+// ---- Moving Apprentice Documents into the Office Documents archive ----
 //
 // This module and the archive were two answers to the same question, built a
 // year apart. This one files four fixed categories in a flat list with no
@@ -24830,7 +24844,7 @@ async function mergeApprenticeDocsIntoArchive_(){
   const msg = document.getElementById('apprenticeDocMsg');
   const say = (t, bad) => { if(msg){ msg.textContent = t; msg.classList.toggle('error', !!bad); } };
   if(await apprenticeMergeDone_()){
-    alert('These documents have already been moved into Office Old Documents.');
+    alert('These documents have already been moved into Office Documents.');
     return;
   }
   const list = await getApprenticeDocs();
@@ -24840,7 +24854,7 @@ async function mergeApprenticeDocsIntoArchive_(){
 
   const lines = buckets.map(b => '  • ' + APPRENTICE_MERGE_PARENT_ + ' › ' + b.childName +
     (b.years ? ' › ' + (b.unsorted ? 'Unsorted' : b.year) : '') + '  —  ' + b.docs.length + ' document(s)');
-  if(!confirm('Move ' + total + ' apprentice document(s) into Office Old Documents?\n\n' +
+  if(!confirm('Move ' + total + ' apprentice document(s) into Office Documents?\n\n' +
       lines.join('\n') + '\n\n' +
       (skipped.length ? skipped.length + ' record(s) have no usable Drive link and will be left here.\n\n' : '') +
       'The files themselves move in Google Drive too, so the archive and Drive stay the same shape. ' +
@@ -24957,12 +24971,12 @@ async function mergeApprenticeDocsIntoArchive_(){
     // outright can be run again rather than being locked out by its own flag.
     try{ await remoteSet(APPRENTICE_MERGE_FLAG_KEY, JSON.stringify({ merged: true, at: Date.now(), filed: filed })); }
     catch(err){}
-    addActivityLog('Moved ' + filed + ' apprentice document(s) into Office Old Documents › ' +
+    addActivityLog('Moved ' + filed + ' apprentice document(s) into Office Documents › ' +
       APPRENTICE_MERGE_PARENT_).catch(() => {});
   }
 
   officeDocsCache_ = null;   // the archive's folders and index both changed
-  const notes = [filed + ' document(s) filed under Office Old Documents › ' + APPRENTICE_MERGE_PARENT_ + '.'];
+  const notes = [filed + ' document(s) filed under Office Documents › ' + APPRENTICE_MERGE_PARENT_ + '.'];
   if(skipped.length) notes.push(skipped.length + ' record(s) had no usable Drive link and were left here.');
   if(notMoved.length) notes.push(notMoved.length + ' file(s) could not be moved in Drive — they are filed and open ' +
     'correctly, but still sit in the old Drive folder.');
