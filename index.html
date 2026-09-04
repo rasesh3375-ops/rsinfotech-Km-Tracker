@@ -888,12 +888,12 @@
   .modal-overlay > .modal-box,
   .gs-overlay > .gs-panel,
   #fullscreenSheetRoot > *{ zoom:var(--kmt-fixed-zoom, 1); }
-  /* ...except the document viewer, which is deliberately exempt — see
-     --kmt-doc-unzoom in kmtApplyZoom_. A report inside this shell is app
-     content and should scale with the app; a scanned PF receipt is not, and
-     has its own zoom for the job. More specific than the rule above so it
-     wins, rather than needing !important. */
-  #fullscreenSheetRoot #docViewerRoot{ zoom:var(--kmt-doc-unzoom, 1); }
+  /* A report inside this shell is app content and scales with the app. A
+     scanned PF receipt is not, and has a zoom of its own — but it is NOT
+     exempted here with a reciprocal zoom of its own. That was tried and it
+     stacked three zooms whose product only approximated 1; see
+     kmtSuspendAppZoom_, which switches the app's zoom off outright for as long
+     as a document is on screen. */
   /* Only once actually zoomed. At 100% the deliberate overflow-x:hidden
      above stays exactly as it was (it is the anti-rubber-band fix, see its
      own comment); zoomed in, a box wider than the screen has to be
@@ -8709,27 +8709,45 @@ if(!window.KMT_ZOOM_ARMED_){
   // the same number (the first post-DOMContentLoaded re-apply is exactly
   // that), and writing an identical style value is a no-op in the browser
   // anyway.
+  // While a document is on screen the app's zoom is switched off entirely, and
+  // the document's own zoom is the only one in play.
+  //
+  // This replaces a counter-zoom (--kmt-doc-unzoom) that tried to cancel the
+  // app's zoom out of the viewer with a reciprocal. It could not work. There
+  // were three zooms stacked — <body>, each fixed overlay's own box, then the
+  // viewer's reciprocal of that — and their product is only ever approximately
+  // 1, with each one laying out in a different coordinate space. What HR saw at
+  // 67% was the result: a receipt overflowing its box on the right with no way
+  // to pan to the rest, and spilling down over the file list behind it.
+  //
+  // No other app on the phone has this problem because no other app has an
+  // app-wide zoom to fight. Opening a document takes over the screen, and the
+  // pinch belongs to the document. So the app's own level is remembered, not
+  // applied, and comes back exactly as it was when the document is closed.
+  let kmtZoomSuspended_ = false;
+  function kmtSuspendAppZoom_(on){
+    const want = !!on;
+    if(want === kmtZoomSuspended_) return;
+    kmtZoomSuspended_ = want;
+    kmtApplyZoom_(kmtZoomLevel_, false);
+  }
   let kmtZoomSaveTimer_ = null;
   function kmtApplyZoom_(level, smooth){
     kmtZoomLevel_ = Math.min(KMT_ZOOM_MAX, Math.max(KMT_ZOOM_MIN, level));
+    // What is remembered and what is on screen are two different things while a
+    // document is open — everything below works off `shown`, so nothing else
+    // has to know about the suspension.
+    const shown = kmtZoomSuspended_ ? 1 : kmtZoomLevel_;
     const root = document.documentElement;
     const surface = kmtZoomSurface_();
     surface.style.transition = smooth ? 'zoom .12s ease-out' : 'none';
-    surface.style.zoom = kmtZoomLevel_;
+    surface.style.zoom = shown;
     // Where fixed descendants are NOT scaled by the line above, each
     // overlay's own content box carries the zoom itself — see the
     // --kmt-fixed-zoom rule in the stylesheet.
     const fixedByCss = kmtFixedInheritsZoom_() === false;
-    root.style.setProperty('--kmt-fixed-zoom', fixedByCss ? String(kmtZoomLevel_) : '1');
-    // The document viewer takes NONE of it. It is a document surface with a
-    // zoom of its own, and scaling it by the app's zoom as well is what left a
-    // receipt unreadable at 200%: the chrome doubled, the page doubled, and the
-    // two zooms fought each other instead of one of them simply working.
-    // Whichever way this browser handles fixed descendants, the value here is
-    // the one that leaves the viewer at its true size.
-    root.style.setProperty('--kmt-doc-unzoom',
-      fixedByCss ? '1' : String(1 / kmtZoomLevel_));
-    root.classList.toggle('kmt-zoomed', kmtZoomLevel_ !== 1);
+    root.style.setProperty('--kmt-fixed-zoom', fixedByCss ? String(shown) : '1');
+    root.classList.toggle('kmt-zoomed', shown !== 1);
     kmtSyncZoomChip_();
     // Debounced, deliberately not written on every call: a live pinch runs
     // this once per frame, and a synchronous localStorage write per frame
@@ -8750,7 +8768,10 @@ if(!window.KMT_ZOOM_ARMED_){
   function kmtSyncZoomChip_(){
     const chip = document.getElementById('kmtZoomReset');
     if(!chip) return;
-    chip.hidden = kmtZoomLevel_ === 1;
+    // Nothing on screen is zoomed while a document is open, so a chip saying
+    // 67% would be describing something the person cannot see — and it sat on
+    // top of the document, which is worse than useless.
+    chip.hidden = kmtZoomLevel_ === 1 || kmtZoomSuspended_;
     const pct = chip.querySelector('span');
     if(pct) pct.textContent = Math.round(kmtZoomLevel_ * 100) + '%';
   }
@@ -9133,6 +9154,11 @@ function openFullscreenView(title, sourceId){
   // into the next render — see the .fs-self-scroll rule's comment.
   fsRoot.classList.toggle('fs-self-scroll',
     sourceId === 'docViewerRoot' || sourceId === 'payrollDocsRoot');
+  // A document takes the screen over, and the pinch with it. Switching a report
+  // to a document suspends the app's zoom; switching a document back to a
+  // report restores it, which is why this is set on every open and not only
+  // when the viewer is the thing being opened.
+  kmtSuspendAppZoom_(sourceId === 'docViewerRoot');
   fsRoot.classList.remove('hidden');
   kmtLockBodyScroll('fullscreen');
   resettleFixedOverlays_();
@@ -9217,6 +9243,10 @@ function closeFullscreenView(){
   document.getElementById('fullscreenSheetRoot').classList.add('hidden');
   kmtUnlockBodyScroll('fullscreen');
   fullscreenActiveId = null;
+  // The app's own zoom comes back exactly as it was left, whatever the document
+  // was zoomed to. If a returnTo reopens something below, its own
+  // openFullscreenView sets this again for whatever that box is.
+  kmtSuspendAppZoom_(false);
   try{ if(document.fullscreenElement) document.exitFullscreen().catch(()=>{}); }catch(e){}
   if(returnTo){
     // The close just above (this same function, the first time it ran for
