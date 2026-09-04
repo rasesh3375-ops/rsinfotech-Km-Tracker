@@ -1630,6 +1630,17 @@
 .slip-words{font-size:11px;color:var(--muted);}
 .slip-foot{text-align:center;font-size:10px;color:var(--muted);margin:6px 0 0;}
 
+/* Shown only while the app itself is zoomed, which is the only time it means
+   anything. Sits in the header rather than floating over the page so it cannot
+   cover what somebody zoomed in to read. */
+#kmtZoomReset{position:fixed;left:12px;bottom:calc(12px + env(safe-area-inset-bottom));
+  z-index:var(--z-modal-top);display:inline-flex;align-items:center;gap:6px;
+  border:1px solid var(--amber-dark);background:var(--amber);color:var(--navy);
+  font:inherit;font-size:12px;font-weight:700;padding:8px 12px;border-radius:20px;
+  cursor:pointer;white-space:nowrap;box-shadow:0 2px 10px rgba(0,0,0,.25);}
+#kmtZoomReset[hidden]{display:none;}
+#kmtZoomReset span{font-variant-numeric:tabular-nums;}
+
 /* The document viewer's own zoom bar. Wraps on a phone so the Download link
    and the zoom controls each keep a tappable size instead of being squeezed
    onto one line. */
@@ -1655,9 +1666,15 @@
   -webkit-overflow-scrolling:touch;}
 .doc-view-scroll > *{display:block;margin:0 auto;}
 /* One canvas per page, stacked. Each carries its own width in CSS pixels from
-   the render, so the browser is never asked to rescale what was just drawn. */
-#docViewPages{display:flex;flex-direction:column;align-items:center;gap:10px;}
-.doc-view-page{border:1px solid var(--line);border-radius:8px;background:var(--paper);
+   the render, so the browser is never asked to rescale what was just drawn.
+   NOT a centring flex column, for the same reason .doc-view-scroll is not a
+   centring flex row: a page wider than this box would overflow equally on both
+   sides and the left half could not be scrolled to. The identical bug, one
+   level further in, and it clipped the left edge off every zoomed page. */
+#docViewPages{display:block;text-align:center;}
+#docViewPages > .doc-view-page + .doc-view-page{margin-top:10px;}
+.doc-view-page{display:block;margin-left:auto;margin-right:auto;
+  border:1px solid var(--line);border-radius:8px;background:var(--paper);
   height:auto;max-width:none;}
 
 /* ---- Office Documents ---- */
@@ -3646,6 +3663,13 @@
        #fullscreenBody and viewEmployeeDocument() fills it in; empty and
        hidden the rest of the time. -->
   <div id="docViewerRoot" class="hidden"></div>
+  <!-- Fixed to the corner rather than placed in the header, and outside every
+       scrolling container. In the header it was laid out inside a bar wider
+       than the viewport, and html{overflow-x:hidden} clipped it away — off
+       screen at exactly the zoom it exists to undo. Only shown while the app
+       is zoomed; see kmtSyncZoomChip_. -->
+  <button id="kmtZoomReset" type="button" hidden onclick="kmtResetZoom_()"
+          title="Back to normal size">Zoom <span>100%</span> ✕</button>
 
   <!-- Uses --z-modal-top (300), above #fullscreenSheetRoot's --z-fullscreen
        (200), since this can be opened from the Salary Sheet's Close button
@@ -8672,6 +8696,7 @@ if(!window.KMT_ZOOM_ARMED_){
     root.style.setProperty('--kmt-fixed-zoom',
       kmtFixedInheritsZoom_() === false ? String(kmtZoomLevel_) : '1');
     root.classList.toggle('kmt-zoomed', kmtZoomLevel_ !== 1);
+    kmtSyncZoomChip_();
     // Debounced, deliberately not written on every call: a live pinch runs
     // this once per frame, and a synchronous localStorage write per frame
     // is on its own enough to make the zoom visibly stutter on a phone —
@@ -8682,6 +8707,19 @@ if(!window.KMT_ZOOM_ARMED_){
     }, 250);
   }
   function kmtResetZoom_(){ kmtApplyZoom_(1, true); }
+  // The app's zoom persists across reloads and has no control anywhere — pinch
+  // is the whole interface for it. That is fine until somebody pinches meaning
+  // to zoom a document, and then cannot find their way back: HR ended up with a
+  // 175% interface twice, and at that size html{overflow-x:hidden} puts the
+  // right-hand edge of every screen out of reach entirely. So while the app is
+  // zoomed, and only then, there is a button that says so and undoes it.
+  function kmtSyncZoomChip_(){
+    const chip = document.getElementById('kmtZoomReset');
+    if(!chip) return;
+    chip.hidden = kmtZoomLevel_ === 1;
+    const pct = chip.querySelector('span');
+    if(pct) pct.textContent = Math.round(kmtZoomLevel_ * 100) + '%';
+  }
 
   // Restore whatever this device was last left at, once, before anything
   // else below can move it — a fresh reload landing back at a zoomed-in
