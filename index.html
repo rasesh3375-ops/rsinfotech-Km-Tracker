@@ -24800,6 +24800,46 @@ async function payrollMergeDone_(){
   try{ return !!(v && JSON.parse(v).merged); }catch(e){ return false; }
 }
 
+// Every financial year that might hold payroll documents — not just the ones
+// the registry happens to know about.
+//
+// payroll_docs_fy_index is written by notePayrollDocsFy_ when a document is
+// uploaded, so it only ever learns years uploaded through that path. A year
+// whose records arrived before the registry existed, or through the one-time
+// migration from the old flat list, or that still sits un-split under the
+// legacy payroll_docs:<fy> key, is not in it. A merge driven by the registry
+// alone leaves those years quietly behind, which is what happened: HR asked
+// where 2024-25 and 2025-26 had gone.
+//
+// So the registry is a starting point, never the answer. The sweep covers every
+// financial year the archive itself goes back to, through to next year, and a
+// year is included because it turned out to hold records — not because
+// something remembered to write it down.
+function payrollMergeCandidateYears_(indexed){
+  const set = new Set(indexed || []);
+  payrollDocsFyOptions_().forEach(fy => set.add(fy));
+  for(let y = OFFICE_DOCS_FIRST_YEAR; y <= getCurrentFYStartYear() + 1; y++){
+    set.add(financialYearLabel(y + '-04-01'));
+  }
+  // Newest first, the order they are filed and read in.
+  return [...set].sort((a, b) => String(b).localeCompare(String(a)));
+}
+// Reads those years and keeps the ones that actually hold something. Chunked
+// because each financial year is thirteen keys — twelve months and the legacy
+// one — so a decade of candidates in one request is a request that need not be
+// made that large.
+const PAYROLL_MERGE_FY_CHUNK = 3;
+async function payrollMergeReadYears_(years, say){
+  const out = {};
+  for(let i = 0; i < years.length; i += PAYROLL_MERGE_FY_CHUNK){
+    const some = years.slice(i, i + PAYROLL_MERGE_FY_CHUNK);
+    if(say) say('Looking for documents in ' + some.join(', ') + '…');
+    const got = await getPayrollDocsBatch_(some);
+    Object.keys(got).forEach(fy => { if((got[fy] || []).length) out[fy] = got[fy]; });
+  }
+  return out;
+}
+
 // Groups every payroll document by the folder it will land in, writing nothing.
 // Split out so the summary HR confirms is built by the code that then does the
 // work — a preview assembled separately is a preview of something else.
@@ -24864,23 +24904,29 @@ async function mergePayrollDocsIntoArchive_(){
     alert('Payroll documents have already been moved into Office Documents.');
     return;
   }
-  const fys = await getPayrollDocsFyIndex_();
-  if(!fys.length){ alert('There are no payroll documents to move.'); return; }
-  const byFy = await getPayrollDocsBatch_(fys);
+  const say = t => { const el = document.getElementById('payrollMergeMsg'); if(el) el.textContent = t; };
+  const indexed = await getPayrollDocsFyIndex_();
+  const byFy = await payrollMergeReadYears_(payrollMergeCandidateYears_(indexed), say);
   const unclassified = await getPayrollDocsUnclassified_();
+  say('');
+  const found = Object.keys(byFy).sort((a, b) => String(b).localeCompare(String(a)));
   const { buckets, skipped } = payrollMergeBuckets_(byFy, unclassified);
   const total = buckets.reduce((t, b) => t + b.docs.length, 0);
   if(!total){ alert('There are no payroll documents to move.'); return; }
+  // Naming the years found, and which of them the registry had never heard of,
+  // because those are the ones a registry-driven merge would have skipped and
+  // nobody would have known until they went looking for a year that was gone.
+  const unlisted = found.filter(fy => indexed.indexOf(fy) === -1);
 
   const lines = buckets.map(b => '  • ' + PAYROLL_MERGE_PARENT_ + ' › ' + b.path.join(' › ') +
     '  —  ' + b.docs.length + ' document(s)');
   if(!confirm('Move ' + total + ' payroll document(s) into Office Documents?\n\n' +
-      lines.join('\n') + '\n\n' +
+      'Financial years found: ' + (found.join(', ') || 'none') + '\n' +
+      (unlisted.length ? '(' + unlisted.join(', ') + ' were not in the index and were found by scanning.)\n' : '') +
+      '\n' + lines.join('\n') + '\n\n' +
       (skipped.length ? skipped.length + ' record(s) have no usable Drive link and will be left here.\n\n' : '') +
       'Only the current version of each document is filed — files replaced earlier stay in ' +
       'Drive and are not deleted. The files themselves move in Drive too. Done once.')) return;
-
-  const say = t => { const el = document.getElementById('payrollMergeMsg'); if(el) el.textContent = t; };
 
   say('Reading file sizes from Drive…');
   let meta = {};
