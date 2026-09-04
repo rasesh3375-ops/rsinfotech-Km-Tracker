@@ -1641,7 +1641,7 @@
 .od-noyear{font-size:11px;color:var(--muted);margin:6px 0 0;line-height:1.4;}
 .od-icon-btn{border:0;background:none;cursor:pointer;padding:6px 5px;border-radius:6px;
   font-size:13px;line-height:1;color:var(--muted);opacity:.55;}
-.od-icon-btn:hover{opacity:1;background:var(--sunk);color:var(--navy);}
+.od-icon-btn:hover{opacity:1;background:var(--cream);color:var(--navy);}
 .od-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;}
 .od-stat{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--card);}
 .od-stat-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
@@ -1655,13 +1655,19 @@
 .od-folder{margin-bottom:2px;}
 .od-folder-head,.od-year{display:flex;align-items:center;gap:8px;width:100%;text-align:left;
   background:none;border:0;cursor:pointer;padding:7px 8px;border-radius:8px;font:inherit;color:var(--ink);}
-.od-folder-head:hover,.od-year:hover{background:var(--sunk);}
+.od-folder-head:hover,.od-year:hover{background:var(--cream);}
 .od-folder-head.open{font-weight:700;color:var(--navy);}
-.od-caret{width:12px;color:var(--muted);}
+.od-caret-btn{border:0;background:none;cursor:pointer;font:inherit;font-size:11px;line-height:1;
+  color:var(--muted);width:22px;min-width:22px;padding:8px 4px;border-radius:6px;text-align:center;}
+.od-caret-btn:hover{background:var(--cream);color:var(--navy);}
+/* A folder with no years has nothing to open, so its marker is not a control
+   and must not look like one. */
+.od-leaf{cursor:default;opacity:.5;display:inline-block;}
+.od-leaf:hover{background:none;color:var(--muted);}
 .od-folder-name{flex:1;}
 .od-folder-count{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;}
 .od-years{margin:2px 0 6px 18px;border-left:1px solid var(--line);padding-left:6px;}
-.od-year.active{background:var(--sunk);font-weight:700;color:var(--navy);}
+.od-year.active{background:var(--cream);font-weight:700;color:var(--navy);}
 .od-main{border:1px solid var(--line);border-radius:10px;padding:14px;background:var(--card);min-width:0;}
 .od-main-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;}
 .od-main-title{font-size:16px;font-weight:800;color:var(--navy);}
@@ -22292,22 +22298,67 @@ let officeDocsCache_ = null;
 // Split out of renderOfficeDocsModule_ so switching folder or year repaints
 // from what is already in hand instead of rebuilding the whole screen. Pure:
 // it reads the folder list and index it is given and touches nothing else.
+// Which folders are expanded, kept apart from which folder is SELECTED.
+//
+// The two used to be the same thing — a folder showed its years only while it
+// was the one being browsed — so the arrow could not be toggled at all: it was
+// a picture of the selection, not a control. Collapsing the folder you were
+// looking at was impossible, and expanding one to glance at its years meant
+// leaving the folder you were in.
+//
+// Remembered across repaints and across reloads, so opening the archive puts
+// the tree back the way it was left. localStorage can throw outright in a
+// private window, so every touch of it is guarded and the Set is the truth.
+const OFFICE_DOCS_OPEN_KEY = 'kmt_office_docs_open';
+let officeDocsExpanded_ = (() => {
+  try{
+    const raw = localStorage.getItem(OFFICE_DOCS_OPEN_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(list) ? list : []);
+  }catch(e){ return new Set(); }
+})();
+function officeDocsSaveOpen_(){
+  try{ localStorage.setItem(OFFICE_DOCS_OPEN_KEY, JSON.stringify([...officeDocsExpanded_])); }catch(e){}
+}
+// The arrow. Toggles expansion and nothing else — it does not change which
+// folder is selected, so glancing into a folder's years never moves you out of
+// the one you are working in. Repaints the tree alone: no backend call, and the
+// document panel on the right is not touched.
+function officeDocsToggleFolder_(folderId){
+  if(officeDocsExpanded_.has(folderId)) officeDocsExpanded_.delete(folderId);
+  else officeDocsExpanded_.add(folderId);
+  officeDocsSaveOpen_();
+  officeDocsRepaintTree_();
+}
+function officeDocsRepaintTree_(){
+  const holder = document.querySelector('#officeDocsBox .od-tree-list');
+  if(!holder || !officeDocsCache_) return;
+  holder.innerHTML = officeDocsTreeHtml_(officeDocsCache_.folders, officeDocsCache_.idx);
+}
+
 function officeDocsTreeHtml_(folders, idx){
   const countFor = (folderId, year) => {
     const v = (((idx[folderId] || {}).years) || {})[String(year)];
     return Number((v || {}).n) || 0;
   };
   return folders.map(f => {
-    const open = f.id === officeDocsState_.folderId;
     const fYears = officeDocsYearsFor_(f);
     const usesYears = fYears.length > 0;
+    // A folder with no years has nothing to expand, so it gets a leaf marker
+    // rather than an arrow that would do nothing when pressed.
+    const open = usesYears && officeDocsExpanded_.has(f.id);
+    const selected = f.id === officeDocsState_.folderId;
     const total = usesYears ? fYears.reduce((t, y) => t + countFor(f.id, y), 0)
                             : countFor(f.id, OFFICE_DOCS_NO_YEAR);
     const q = v => JSON.stringify(v).replace(/"/g, '&quot;');
     return `<div class="od-folder">
       <div class="od-folder-row">
-        <button type="button" class="od-folder-head${open ? ' open' : ''}" onclick="officeDocsPick_(${q(f.id)}, null)">
-          <span class="od-caret">${usesYears ? (open ? '▾' : '▸') : '•'}</span>
+        ${usesYears
+          ? `<button type="button" class="od-caret-btn" aria-expanded="${open}"
+                     title="${open ? 'Collapse' : 'Expand'} ${escapeHtml(f.name)}"
+                     onclick="officeDocsToggleFolder_(${q(f.id)})">${open ? '▾' : '▸'}</button>`
+          : '<span class="od-caret-btn od-leaf" aria-hidden="true">•</span>'}
+        <button type="button" class="od-folder-head${selected ? ' open' : ''}" onclick="officeDocsPick_(${q(f.id)}, null)">
           <span class="od-folder-name">${escapeHtml(f.name)}</span>
           <span class="od-folder-count">${total}</span>
         </button>
@@ -22318,7 +22369,7 @@ function officeDocsTreeHtml_(folders, idx){
       </div>
       ${open ? `<div class="od-years">${fYears.map(y => `
         <div class="od-year-row">
-          <button type="button" class="od-year${String(y) === String(officeDocsState_.year) ? ' active' : ''}"
+          <button type="button" class="od-year${selected && String(y) === String(officeDocsState_.year) ? ' active' : ''}"
                   onclick="officeDocsPick_(${q(f.id)}, '${y}')">
             <span>${y}</span><span class="od-folder-count">${countFor(f.id, y)}</span>
           </button>
@@ -22326,8 +22377,9 @@ function officeDocsTreeHtml_(folders, idx){
                   onclick="officeDocsDeleteYear_(${q(f.id)}, '${y}')">🗑</button>
         </div>`).join('')}
         <button type="button" class="od-add-year" onclick="officeDocsAddYear_(${q(f.id)})">+ Add year</button>
-        ${usesYears ? '' : '<p class="od-noyear">Filed without years — documents sit directly in this folder.</p>'}
       </div>` : ''}
+      ${!usesYears && selected
+        ? '<p class="od-noyear">Filed without years — documents sit directly in this folder.</p>' : ''}
     </div>`;
   }).join('');
 }
@@ -22473,6 +22525,12 @@ function odTableHtml_(title, docs, sub, showWhere){
 // holds nothing, and loadOfficeDocs_ returns straight away without asking.
 async function officeDocsPick_(folderId, year){
   officeDocsState_.folderId = folderId;
+  // Choosing a folder opens it — otherwise picking one from collapsed would
+  // select a folder whose years you then could not see to click.
+  if(folderId && !officeDocsExpanded_.has(folderId)){
+    officeDocsExpanded_.add(folderId);
+    officeDocsSaveOpen_();
+  }
   officeDocsState_.year = year || null;   // resolved against the folder's own list
   officeDocsState_.results = null;
   if(!officeDocsCache_) return renderOfficeDocsModule_();
@@ -22558,6 +22616,8 @@ async function officeDocsAddFolder_(){
   catch(err){ alert('Could not add the folder: ' + ((err && err.message) || 'the server did not respond')); return; }
   await addActivityLog('Added the Office Old Documents folder "' + name + '"');
   officeDocsState_.folderId = id;
+  officeDocsExpanded_.add(id);
+  officeDocsSaveOpen_();
   officeDocsState_.results = null;
   officeDocsCache_ = null;
   await renderOfficeDocsModule_();
@@ -22625,6 +22685,8 @@ async function officeDocsAddYear_(folderId){
   catch(err){ alert('Could not add the year: ' + ((err && err.message) || 'the server did not respond')); return; }
   await addActivityLog('Added ' + answer + ' to the Office Old Documents folder "' + folder.name + '"');
   officeDocsState_.folderId = folderId;
+  officeDocsExpanded_.add(folderId);
+  officeDocsSaveOpen_();
   officeDocsState_.year = answer;
   officeDocsCache_ = null;
   await renderOfficeDocsModule_();
