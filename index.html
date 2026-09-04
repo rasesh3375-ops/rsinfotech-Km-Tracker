@@ -1649,7 +1649,27 @@
   border:1px solid var(--amber);background:#FEF8EC;border-radius:10px;
   padding:12px 14px;margin:0 0 14px;}
 .od-merge-offer>div{flex:1;min-width:200px;}
+/* The compact-view card's own action row. The table's .od-actions relies on a
+   cell to sit in; a card has the full width, so these wrap onto a second line
+   rather than running off the right edge the way the table's did. */
+.od-card-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px;}
+.od-card-actions .btn{flex:0 0 auto;}
+/* A document's name is the one thing that must stay readable, and file names
+   here are long, unspaced and full of capitals — "VIJAY BHAI PRICE LIST-Auto
+   price List.xlsx". Given four characters of column width the browser broke it
+   one letter to a line; given the card's full width it needs only permission to
+   break inside a word at all. */
+.od-card-name{overflow-wrap:anywhere;min-width:0;}
 .od-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;}
+/* Two across rather than four stacked. At 150px minimum each they fell to one
+   per row on a phone, so four summary figures nobody opened the screen to read
+   took most of it before the folder tree began. */
+@media (max-width: 760px){
+  .od-stats{grid-template-columns:1fr 1fr;gap:8px;}
+  .od-stat{padding:10px 11px;}
+  .od-stat-value{font-size:18px;}
+  .od-stat-label,.od-stat-sub{font-size:10px;}
+}
 .od-stat{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--paper);}
 .od-stat-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
 .od-stat-value{font-size:22px;font-weight:800;color:var(--navy);margin:4px 0 2px;font-variant-numeric:tabular-nums;}
@@ -22819,6 +22839,23 @@ function officeDocsUnsizedHtml_(idx){
             onclick="withBusy(this,'Reading Drive…',officeDocsRefreshSizes_)">Refresh from Drive</button>
   </div>`;
 }
+// Turning the phone sideways crosses the 760px line, and the panel on screen
+// was built for the width it had when it was drawn. Repainted from the cache —
+// no backend call — so a rotation costs nothing. Same shape as the apprentice
+// list's own resize watch, and guarded the same way: only while the archive is
+// actually on screen.
+let officeDocsCompactLast_ = isCompactSheetView();
+let officeDocsResizeTimer_ = null;
+window.addEventListener('resize', () => {
+  clearTimeout(officeDocsResizeTimer_);
+  officeDocsResizeTimer_ = setTimeout(() => {
+    const now = isCompactSheetView();
+    if(now === officeDocsCompactLast_) return;
+    officeDocsCompactLast_ = now;
+    const main = document.getElementById('odMain');
+    if(main && main.offsetParent !== null && officeDocsCache_) officeDocsApply_(null);
+  }, 300);
+});
 function officeDocsRepaintTree_(){
   const holder = document.querySelector('#officeDocsBox .od-tree-list');
   if(!holder || !officeDocsCache_) return;
@@ -23036,20 +23073,46 @@ async function officeDocsMainHtml_(idx, folder){
 }
 
 function odTableHtml_(title, docs, sub, showWhere){
+  // Every action a document has, built once and used by both layouts, so the
+  // phone can never end up one button short of the desktop.
+  const actionsFor = d => {
+    const q = v => JSON.stringify(v).replace(/"/g, '&quot;');
+    return `<button class="btn tiny" title="View in the app" onclick="officeDocView_('${d.fileId}', ${q(d.name)})">View</button>
+      <button class="btn tiny ghost" title="Open the original in Google Drive" onclick="window.open('${officeDocDriveUrl_(d.fileId)}','_blank','noopener')">Drive</button>
+      <button class="btn tiny ghost" title="Rename this file" onclick="officeDocRename_(${q(d.folderId)}, '${d.year}', '${d.fileId}', ${q(d.name)})">Rename</button>
+      <button class="btn tiny ghost" title="Remove from the archive" onclick="officeDocDelete_(${q(d.folderId)}, '${d.year}', '${d.fileId}', ${q(d.name)})">Delete</button>`;
+  };
+  const uploadedOn = d => d.uploadedAt
+    ? fmtDateIN(new Date(d.uploadedAt).toISOString().slice(0, 10)) : '—';
+
   const rows = docs.map(d => `<tr>
     <td class="od-name">${escapeHtml(d.name)}</td>
     <td>${escapeHtml(officeDocKind_(d.name, d.mimeType))}</td>
     <td>${escapeHtml(officeDocSize_(d.size))}</td>
-    <td>${d.uploadedAt ? escapeHtml(fmtDateIN(new Date(d.uploadedAt).toISOString().slice(0, 10))) : '—'}</td>
+    <td>${escapeHtml(uploadedOn(d))}</td>
     <td>${escapeHtml(d.uploadedBy || '—')}</td>
     ${showWhere ? `<td>${escapeHtml(d.folder)} › ${escapeHtml(d.year)}</td>` : ''}
-    <td class="od-actions">
-      <button class="btn tiny" title="View in the app" onclick="officeDocView_('${d.fileId}', ${JSON.stringify(d.name).replace(/"/g, '&quot;')})">View</button>
-      <button class="btn tiny ghost" title="Open the original in Google Drive" onclick="window.open('${officeDocDriveUrl_(d.fileId)}','_blank','noopener')">Drive</button>
-      <button class="btn tiny ghost" title="Rename this file" onclick="officeDocRename_(${JSON.stringify(d.folderId).replace(/"/g, '&quot;')}, '${d.year}', '${d.fileId}', ${JSON.stringify(d.name).replace(/"/g, '&quot;')})">Rename</button>
-      <button class="btn tiny ghost" title="Remove from the archive" onclick="officeDocDelete_(${JSON.stringify(d.folderId).replace(/"/g, '&quot;')}, '${d.year}', '${d.fileId}', ${JSON.stringify(d.name).replace(/"/g, '&quot;')})">Delete</button>
-    </td>
+    <td class="od-actions">${actionsFor(d)}</td>
   </tr>`).join('');
+
+  // A seven-column table cannot be made to fit a phone. Squeezed into 390px it
+  // gave each file name about four characters of width and broke it one letter
+  // to a line — "VIJA / Y / BHAI / PRIC / E" — while the Actions column fell
+  // off the right edge with the View button half cut off. Below 760px the same
+  // documents are cards instead, which is the treatment every other sheet and
+  // report in this app already gets at that width; see isCompactSheetView.
+  const cards = docs.map(d => hrCard(
+    `<strong class="od-card-name">${escapeHtml(d.name)}</strong>`,
+    `<div class="hr-sheet-chips">
+       <span class="hr-sheet-chip"><span class="k">Type</span> ${escapeHtml(officeDocKind_(d.name, d.mimeType))}</span>
+       <span class="hr-sheet-chip"><span class="k">Size</span> ${escapeHtml(officeDocSize_(d.size))}</span>
+       <span class="hr-sheet-chip"><span class="k">Filed</span> ${escapeHtml(uploadedOn(d))}</span>
+       ${d.uploadedBy ? `<span class="hr-sheet-chip"><span class="k">By</span> ${escapeHtml(d.uploadedBy)}</span>` : ''}
+       ${showWhere ? `<span class="hr-sheet-chip"><span class="k">In</span> ${escapeHtml(d.folder)} › ${escapeHtml(d.year)}</span>` : ''}
+     </div>
+     <div class="od-card-actions">${actionsFor(d)}</div>`
+  )).join('');
+
   return `
     <div class="od-main-head">
       <div>
@@ -23062,13 +23125,17 @@ function odTableHtml_(title, docs, sub, showWhere){
       </div>`}
     </div>
     <div id="odUploadMsg" class="msg" style="margin:8px 0 0;"></div>
-    ${docs.length ? `<div class="table-wrap"><table class="tbl od-table">
+    ${!docs.length
+      ? `<div class="empty">${showWhere ? 'Nothing matched that search.' : 'No documents filed here yet — use Upload documents to add some.'}</div>`
+      : isCompactSheetView()
+        ? `<div class="hr-sheet-cards" style="margin-top:12px;">${cards}</div>`
+        : `<div class="table-wrap"><table class="tbl od-table">
       <thead><tr>
         <th>File name</th><th>Type</th><th>Size</th><th>Uploaded on</th><th>Uploaded by</th>
         ${showWhere ? '<th>Where</th>' : ''}<th>Actions</th>
       </tr></thead>
       <tbody>${rows}</tbody>
-    </table></div>` : `<div class="empty">${showWhere ? 'Nothing matched that search.' : 'No documents filed here yet — use Upload documents to add some.'}</div>`}`;
+    </table></div>`}`;
 }
 
 // Switching folder or year repaints the tree and the panel from the cache and
