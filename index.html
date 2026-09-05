@@ -23384,6 +23384,19 @@ const OFFICE_DOCS_MOVE_CHUNK = 10;    // files per moveOfficeDocs call
 // One chunk of Drive work, with the room it actually needs. Three attempts
 // inside forty-five seconds, any one of which may take thirty.
 const OFFICE_DOCS_DRIVE_FETCH = { budgetMs: 90000, attemptMs: 75000 };
+// One folder or one file, but still Google Drive — and Drive is slow enough that
+// the default 8s per attempt is not enough for it. Renaming a folder reaches
+// Drive four times (the HR Management path, the archive root, the folder by its
+// old name, the collision check) before it renames anything, and on a cold Apps
+// Script instance behind the script-wide lock that runs past eight seconds
+// easily. It failed on HR's laptop and not on the developer's, which is exactly
+// what a timeout that close to the line looks like: "signal is aborted without
+// reason", which is what an AbortController says and means nothing to anybody.
+// tries:2 is safe for all of these — doRenameOfficeFolder_ returns ok when the
+// old name is already gone, doRenameOfficeDoc_'s collision check excludes the
+// file itself, and trashing a file already in the bin is a no-op — so a first
+// attempt that succeeded but answered too late costs a harmless second one.
+const OFFICE_DOCS_ONE_FETCH = { tries: 2, budgetMs: 45000, attemptMs: 40000 };
 // The archive's own writes to the sheet. A shard is up to 120 records and the
 // index grows with every folder-year in it, so these are tens of kilobytes
 // going up — not the single small value apiFetch's nine-second default is
@@ -24466,12 +24479,23 @@ async function officeDocsRenameFolder_(folderId){
   // Drive first: if it refuses — a folder of that name already sitting there —
   // nothing has changed yet and the app and Drive stay in step.
   let res = null;
-  try{ res = await backendAction({ action: 'renameOfficeFolder', oldName: folder.name, newName: name }); }
+  try{ res = await backendAction({ action: 'renameOfficeFolder', oldName: folder.name, newName: name }, OFFICE_DOCS_ONE_FETCH); }
   catch(err){ res = null; }
-  if(!res || !res.ok){
+  // Two different failures, and they do not mean the same thing. The server
+  // answering "no" means nothing happened and it is safe to say so. Never
+  // getting an answer means we do not know — the rename may well have gone
+  // through on Drive a moment after we gave up — and telling HR "Nothing was
+  // changed" there is a claim the app cannot support.
+  if(!res){
+    alert('Could not reach the server to rename this folder: ' +
+      (lastBackendError || 'it did not answer in time') +
+      '\n\nIt may or may not have been renamed on Google Drive. Reopen Office ' +
+      'Documents to see which, before trying again.');
+    return;
+  }
+  if(!res.ok){
     alert('Could not rename the Google Drive folder: ' +
-      ((res && res.error) || lastBackendError || 'the server did not respond') +
-      '\n\nNothing was changed.');
+      (res.error || 'the server refused it') + '\n\nNothing was changed.');
     return;
   }
   const was = folder.name;
@@ -24594,7 +24618,7 @@ async function officeDocRename_(folderId, year, fileId, currentName){
   const name = (prompt('Rename this document.', currentName) || '').trim();
   if(!name || name === currentName) return;
   let res = null;
-  try{ res = await backendAction({ action: 'renameOfficeDoc', fileId: fileId, newName: name }); }
+  try{ res = await backendAction({ action: 'renameOfficeDoc', fileId: fileId, newName: name }, OFFICE_DOCS_ONE_FETCH); }
   catch(err){ res = null; }
   if(!res || !res.ok){
     alert('Could not rename it: ' + ((res && res.error) || lastBackendError || 'the server did not respond'));
@@ -24742,7 +24766,7 @@ async function officeDocDelete_(folderId, year, fileId, name){
   if(!confirm('Remove "' + name + '" from this folder?\n\n' +
     'The file is moved to Google Drive\'s bin, where it can still be recovered for 30 days.')) return;
   try{
-    await backendAction({ action: 'deleteOfficeDoc', fileId: fileId });
+    await backendAction({ action: 'deleteOfficeDoc', fileId: fileId }, OFFICE_DOCS_ONE_FETCH);
     removedIdx = await removeOfficeDoc_(folderId, year, fileId);
     addActivityLog('Removed "' + name + '" from Office Documents › ' + folderId + ' › ' + year).catch(() => {});
   }catch(err){
@@ -26380,7 +26404,7 @@ async function mergeApprenticeDocsIntoArchive_(){
   let meta = {};
   try{
     const ids = buckets.reduce((a, b) => a.concat(b.docs.map(d => d.fileId)), []);
-    const res = await backendAction({ action: 'getDriveFileMeta', fileIds: ids });
+    const res = await backendAction({ action: 'getDriveFileMeta', fileIds: ids }, OFFICE_DOCS_DRIVE_FETCH);
     if(res && res.ok && res.meta) meta = res.meta;
   }catch(err){ /* a missing size prints as 0 B, which is better than not filing it */ }
 
@@ -26442,7 +26466,7 @@ async function mergeApprenticeDocsIntoArchive_(){
     const moves = targets.reduce((a, t) => a.concat(t.bucket.docs.map(d => ({
       fileId: d.fileId, folderPath: officeDocsDrivePath_(t.folder, t.year, folders)
     }))), []);
-    const res = await backendAction({ action: 'moveOfficeDocs', moves: moves });
+    const res = await backendAction({ action: 'moveOfficeDocs', moves: moves }, OFFICE_DOCS_DRIVE_FETCH);
     notMoved = res && res.failed ? Object.keys(res.failed) : [];
   }catch(err){
     // Filing goes ahead anyway: every record is keyed on the Drive id, so a
