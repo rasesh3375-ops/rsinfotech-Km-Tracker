@@ -9192,6 +9192,12 @@ document.addEventListener('wheel', e => {
 function openFullscreenView(title, sourceId){
   const el = document.getElementById(sourceId);
   if(!el) return;
+  // Opening a document is a new view. Without this, a restore still finishing
+  // from the previous ✕ would close it again a moment later — see kmtViewEpoch_.
+  // Deliberately NOT keyed on kmtRestoring: that stays true for the whole
+  // restore, awaits included, which is precisely the window in which the person
+  // clicks — so it would have suppressed the one call this needs to catch.
+  if(!kmtReplayOpen_) kmtSupersedeRestore_();
   // Only a genuine new level of "back" — regenerating the same report into
   // the box it's already showing full screen (a month changed, Generate
   // pressed again without leaving full screen first) must not push a second
@@ -12670,37 +12676,80 @@ function kmtBack(){
 // field value, re-generates the report fresh if it had been generated
 // before, then restores scroll — in that order, since scroll only means
 // anything once the content it's scrolling to is actually back on screen.
+// A restore replays a view the person has already left, and it is asynchronous:
+// it awaits the route's own loader, then a 60ms timer, sometimes an 80ms one on
+// top. Its last steps therefore run hundreds of milliseconds after it started —
+// longer when the Generator tab's loader is slow — by which time the person may
+// well have opened something else. Those steps then tore that down: the
+// snapshot carried no fullscreen, so a document opened in the meantime was
+// closed by the line below, and openGeneratorCard toggled shut the card they
+// had just reopened. HR saw documents they had asked for vanish back to the
+// Office Documents card, unpredictably, because whether it happened depended
+// only on how fast they clicked after pressing ✕.
+//
+// So anything that establishes a NEW view — a real navigation, or opening a
+// full-screen box — bumps this epoch, and a restore that finds it changed
+// abandons whatever is left of itself. Replays do not bump it: hrNavigate and
+// openFullscreenView called from inside a restore are the replay, not a new
+// view, and both are already guarded by kmtRestoring.
+let kmtViewEpoch_ = 0;
+function kmtSupersedeRestore_(){ kmtViewEpoch_++; }
+// Set only around the restore's OWN calls into openFullscreenView, never across
+// its awaits — an open that happens while this is false is the person's, and
+// must void the replay.
+let kmtReplayOpen_ = false;
+function kmtReplayOpening_(fn){
+  kmtReplayOpen_ = true;
+  try{ return fn(); } finally { kmtReplayOpen_ = false; }
+}
+// openReportsCard/openGeneratorCard/openSettingsCard are toggles — a second
+// call on the section already open collapses it, which is what a card's own
+// header press is meant to do. A restore wants it OPEN, so it asks only when it
+// is not.
+function kmtReopenCard_(route, card){
+  const el = document.getElementById(card);
+  if(!el || !el.classList.contains('hidden')) return;
+  if(route === 'reports') openReportsCard(card);
+  else if(route === 'generator') openGeneratorCard(card);
+  else if(route === 'settings') openSettingsCard(card);
+}
 async function kmtRestoreView(descriptor, opts){
   if(!descriptor || !descriptor.kmtView) return;
   opts = opts || {};
+  const epoch = ++kmtViewEpoch_;   // supersedes any restore already running
   kmtRestoring = true;
   kmtPendingCardRestore = descriptor.card ? descriptor : null;
   try{
     await hrNavigate(descriptor.route, { restoring:true, modals: descriptor.modals || [] });
+    if(kmtViewEpoch_ !== epoch) return;
     await new Promise(r => setTimeout(r, 60));
-    if(descriptor.card){
-      if(descriptor.route === 'reports') openReportsCard(descriptor.card);
-      else if(descriptor.route === 'generator') openGeneratorCard(descriptor.card);
-      else if(descriptor.route === 'settings') openSettingsCard(descriptor.card);
-    }
+    if(kmtViewEpoch_ !== epoch) return;
+    if(descriptor.card) kmtReopenCard_(descriptor.route, descriptor.card);
     Object.keys(descriptor.fields || {}).forEach(id => {
       const el = document.getElementById(id);
       if(el) el.value = descriptor.fields[id];
     });
     if(descriptor.generated && descriptor.card){
       const btn = document.querySelector('#' + descriptor.card + ' [data-kmt-generate]');
-      if(btn) btn.click();
+      // Part of the replay: every report auto-opens full screen when generated,
+      // and that must not read as the person opening something new.
+      if(btn) kmtReplayOpening_(() => btn.click());
       // Every report auto-opens full screen the moment it's generated — that
       // click just did exactly that, regardless of whether THIS descriptor
       // actually wants full screen. Reconciling below (after giving the
       // click's own async work time to finish) is simpler and more robust
       // than trying to suppress that behaviour from here.
       await new Promise(r => setTimeout(r, 80));
+      if(kmtViewEpoch_ !== epoch) return;
     }
+    // The line that closed the document HR had just opened. Guarded above, and
+    // again here, because everything from here down is destructive.
+    if(kmtViewEpoch_ !== epoch) return;
     if(!descriptor.fullscreen && fullscreenActiveId) closeFullscreenView();
     window.scrollTo(0, descriptor.scrollY || 0);
     if(descriptor.fullscreen && document.getElementById(descriptor.fullscreen)){
-      if(fullscreenActiveId !== descriptor.fullscreen) openFullscreenView(descriptor.cardTitle || '', descriptor.fullscreen);
+      if(fullscreenActiveId !== descriptor.fullscreen)
+        kmtReplayOpening_(() => openFullscreenView(descriptor.cardTitle || '', descriptor.fullscreen));
       setTimeout(() => {
         const fsBody = document.getElementById('fullscreenBody');
         if(fsBody) fsBody.scrollTop = descriptor.fsScrollTop || 0;
@@ -12906,6 +12955,9 @@ function toggleHrNav(force){
 }
 
 async function hrNavigate(route, opts){
+  // A navigation the person asked for supersedes any restore still replaying
+  // an older view — see kmtViewEpoch_.
+  if(!(opts && opts.restoring)) kmtSupersedeRestore_();
   opts = opts || {};
   const cfg = HR_ROUTES[route];
   if(!cfg) return;
