@@ -1756,7 +1756,15 @@
    one letter to a line; given the card's full width it needs only permission to
    break inside a word at all. */
 .od-card-name{overflow-wrap:anywhere;min-width:0;}
-.od-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;}
+.od-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;
+  overflow:hidden;max-height:220px;
+  transition:max-height .18s ease,opacity .14s ease,margin-bottom .18s ease;}
+/* The four figures are worth a glance when you arrive and in the way for the
+   rest of the time: on a bounded workspace they cost about 110px of the folder
+   list permanently, which is two folders you cannot see. So they fold away the
+   moment the list is scrolled and come back when it returns to the top. */
+#officeDocsBox.od-stats-away .od-stats{max-height:0;opacity:0;margin-bottom:0;}
+@media (prefers-reduced-motion:reduce){ .od-stats{transition:none;} }
 /* Two across rather than four stacked. At 150px minimum each they fell to one
    per row on a phone, so four summary figures nobody opened the screen to read
    took most of it before the folder tree began. */
@@ -24093,6 +24101,7 @@ async function renderOfficeDocsModule_(){
   // and filling the table in after means HR sees the archive after one round
   // trip rather than two — and can already open a different folder while the
   // first one is still arriving.
+  officeDocsWatchScroll_();
   await officeDocsFillMain_(idx, current);
 }
 
@@ -24115,6 +24124,45 @@ async function officeDocsFillMain_(idx, folder){
   main.innerHTML = '<button type="button" class="btn ghost od-back" ' +
     'onclick="officeDocsDrillOut_()">‹ All folders</button>' + body;
   officeDocsFitLayout_();
+}
+// The stats row folds away while the folder list is scrolled.
+//
+// Only meaningful where the workspace is bounded — on a phone the page scrolls
+// and the row leaves the screen on its own, and drilled into a folder it is
+// hidden already. Attached to the panes rather than the window for the same
+// reason: on a desktop the page barely moves, it is the list inside that
+// scrolls.
+let officeDocsStatsAway_ = false;
+function officeDocsStatsScrolled_(top){
+  const box = document.getElementById('officeDocsBox');
+  if(!box || officeDocsNarrow_()) return;
+  // Hysteresis, not a single threshold: hiding the row makes the workspace
+  // taller, which can leave the list no longer overflowing, which would scroll
+  // it back to the top and show the row again — and off it goes, on and off,
+  // forever. Hidden past 24px, shown again only back at the very top.
+  const want = officeDocsStatsAway_ ? top > 2 : top > 24;
+  if(want === officeDocsStatsAway_) return;
+  officeDocsStatsAway_ = want;
+  box.classList.toggle('od-stats-away', want);
+  // The workspace is measured from where the layout starts, and that just
+  // moved. Re-measured after the fold, not during it.
+  clearTimeout(officeDocsStatsTimer_);
+  officeDocsStatsTimer_ = setTimeout(officeDocsFitLayout_, 220);
+}
+let officeDocsStatsTimer_ = null;
+// Re-attached on every full render, because that replaces the panes themselves.
+function officeDocsWatchScroll_(){
+  const box = document.getElementById('officeDocsBox');
+  if(!box) return;
+  officeDocsStatsAway_ = false;
+  box.classList.remove('od-stats-away');
+  ['.od-tree-list', '.od-main'].forEach(sel => {
+    const el = box.querySelector(sel);
+    if(!el || el.dataset.odScrollWatched) return;
+    el.dataset.odScrollWatched = '1';
+    el.addEventListener('scroll', () => officeDocsStatsScrolled_(el.scrollTop),
+      { passive: true });
+  });
 }
 // Narrow screens only: which of the two panes is on screen. The class carries
 // it rather than a variable, because the panes are shown and hidden in CSS and
@@ -24142,13 +24190,22 @@ function officeDocsDrillOut_(){
 function officeDocsFitLayout_(){
   const lay = document.querySelector('#officeDocsBox .od-layout');
   if(!lay) return;
-  if(officeDocsNarrow_() || lay.offsetParent === null){ lay.style.height = ''; return; }
-  const top = lay.getBoundingClientRect().top;
-  // Clamped to the viewport: called while the page happens to be scrolled past
-  // the module, top is negative and the raw figure would be taller than the
-  // screen.
-  const room = Math.min(window.innerHeight - 24, window.innerHeight - top - 24);
-  lay.style.height = Math.max(360, room) + 'px';
+  const box = document.getElementById('officeDocsBox');
+  if(!box || officeDocsNarrow_() || lay.offsetParent === null){ lay.style.height = ''; return; }
+  // Measured against the module's OWN header — the description, the figures and
+  // the toolbar sitting above the panes — and not against where the page
+  // happens to be scrolled to.
+  //
+  // Keyed on the viewport position, this collapsed to its 360px floor whenever
+  // the module sat low on the page: with eighteen accordion cards above it the
+  // layout's top was 635px into a 1050px window, leaving 391px for both panes,
+  // about five folders. And it could not scroll up to fix itself, because a
+  // bounded workspace makes the page short — the page was already at its
+  // maximum scroll with the module still 485px down. The header is a fixed
+  // quantity; where the page is scrolled to is not.
+  const header = lay.getBoundingClientRect().top - box.getBoundingClientRect().top;
+  const room = window.innerHeight - header - 24;
+  lay.style.height = Math.max(360, Math.min(window.innerHeight - 24, room)) + 'px';
 }
 window.addEventListener('resize', () => {
   const box = document.getElementById('officeDocsBox');
