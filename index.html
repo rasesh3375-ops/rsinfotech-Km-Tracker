@@ -1826,6 +1826,13 @@
      need. Kept in the markup for the phone, where the pane is the whole screen
      and it is not in the way. */
   .od-tree-note{display:none;}
+  /* Only the list scrolls, not the whole pane: the filter box has to stay put
+     while you scroll what it is filtering, or it scrolls away the moment you
+     use it. */
+  .od-tree{display:flex;flex-direction:column;overflow:hidden;}
+  .od-tree .od-tree-list{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;}
+  .od-main{overflow:auto;-webkit-overflow-scrolling:touch;}
+  #officeDocsBox .od-back{display:none;}
 }
 /* On a wide monitor the file panel has room it is not using — a folder with one
    document in it leaves most of a thousand pixels white — so the folder column
@@ -1834,13 +1841,6 @@
    on a laptop that width would come out of a panel that needs it. */
 @media (min-width:1600px){
   .od-layout{grid-template-columns:minmax(340px,420px) 1fr;}
-  /* Only the list scrolls, not the whole pane: the filter box has to stay put
-     while you scroll what it is filtering, or it scrolls away the moment you
-     use it. */
-  .od-tree{display:flex;flex-direction:column;overflow:hidden;}
-  .od-tree .od-tree-list{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;}
-  .od-main{overflow:auto;-webkit-overflow-scrolling:touch;}
-  #officeDocsBox .od-back{display:none;}
 }
 /* On a phone the two panes cannot sit side by side, so they become one screen
    at a time — tap a folder, the files take the screen, one button back. The
