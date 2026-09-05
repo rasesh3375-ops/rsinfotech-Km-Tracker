@@ -1906,6 +1906,11 @@
   font-size:11px;color:var(--muted);padding:5px 8px;border-radius:8px;width:100%;margin-top:4px;}
 .od-add-sub:hover{border-color:var(--navy);color:var(--navy);}
 .od-year.active{background:var(--cream);font-weight:700;color:var(--navy);}
+/* A bucket holding documents that the folder's own year list does not name.
+   Marked, because it is not one of the folder's years and pressing + Add year
+   for it is usually what HR actually wants next. */
+.od-year-stray{font-style:italic;color:var(--muted);}
+.od-year-stray .od-folder-count{font-style:normal;}
 .od-main{border:1px solid var(--line);border-radius:10px;padding:14px;background:var(--paper);min-width:0;}
 .od-main-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;}
 .od-main-title{font-size:16px;font-weight:800;color:var(--navy);}
@@ -22975,6 +22980,50 @@ function officeDocsYearsFor_(folder){
 function officeDocsUsesYears_(folder){
   return officeDocsYearsFor_(folder).length > 0;
 }
+// Which buckets a folder can actually show from its own list: its years, or the
+// single no-year bucket when it has none.
+function officeDocsReachableBuckets_(folder){
+  const yrs = officeDocsYearsFor_(folder).map(String);
+  return yrs.length ? yrs : [OFFICE_DOCS_NO_YEAR];
+}
+// Buckets the index holds documents in that the folder's own list does not name
+// — and which nothing would therefore draw.
+//
+// This is not hypothetical tidying. A folder filed without years puts its
+// documents in the 'all' bucket; add a year to that folder afterwards and its
+// year list no longer names 'all', so the tree stopped counting those documents
+// and stopped drawing a row that could open them. They were still in Drive,
+// still in the index, and the only thing that admitted they existed was the
+// delete guard refusing to remove the folder — "still holds 1 document(s)"
+// against a folder showing 0. A year removed from a folder that still had
+// documents filed under it did the same thing.
+//
+// Counted and drawn instead, so the tree and the delete guard cannot disagree.
+function officeDocsStrayBuckets_(folder, idx){
+  const reachable = officeDocsReachableBuckets_(folder);
+  const buckets = (((idx || {})[folder.id] || {}).years) || {};
+  return Object.keys(buckets)
+    .filter(y => reachable.indexOf(String(y)) === -1 && Number((buckets[y] || {}).n) > 0)
+    // Newest first like the years themselves, with the no-year bucket last —
+    // it is not a year and does not belong in the middle of a run of them.
+    .sort((a, b) => a === OFFICE_DOCS_NO_YEAR ? 1 : b === OFFICE_DOCS_NO_YEAR ? -1
+                                                  : Number(b) - Number(a));
+}
+function officeDocsBucketLabel_(y){
+  return String(y) === OFFICE_DOCS_NO_YEAR ? 'Not filed by year' : String(y);
+}
+// The bucket on screen has to be one this folder can actually show. A stray
+// counts: without that, selecting the documents filed without a year snapped
+// straight back to the newest year, so the row drawn for them could be pressed
+// and would never open.
+function officeDocsClampYear_(folder, idx, want){
+  if(!folder) return OFFICE_DOCS_NO_YEAR;
+  const yrs = officeDocsYearsFor_(folder).map(String);
+  if(yrs.indexOf(String(want)) !== -1) return String(want);
+  const buckets = (((idx || {})[folder.id] || {}).years) || {};
+  if(Number((buckets[String(want)] || {}).n) > 0) return String(want);
+  return yrs.length ? yrs[0] : OFFICE_DOCS_NO_YEAR;
+}
 // The Drive path for a folder-year, with the year level left out entirely when
 // the folder does not use years — rather than a folder literally called "all"
 // sitting in Drive for somebody to wonder about.
@@ -23729,9 +23778,7 @@ async function officeDocsApply_(patch){
   // changed under the year being viewed.
   let folder = folders.find(f => f.id === officeDocsState_.folderId) || null;
   if(!folder){ folder = folders[0] || null; officeDocsState_.folderId = folder ? folder.id : null; }
-  const yrs = folder ? officeDocsYearsFor_(folder) : [];
-  if(!yrs.length) officeDocsState_.year = OFFICE_DOCS_NO_YEAR;
-  else if(yrs.indexOf(String(officeDocsState_.year)) === -1) officeDocsState_.year = yrs[0];
+  officeDocsState_.year = officeDocsClampYear_(folder, idx, officeDocsState_.year);
 
   officeDocsRepaintStats_(folders, idx);
   officeDocsRepaintTree_();
@@ -23847,10 +23894,15 @@ function officeDocsTreeHtml_(folders, idx, parentId, depth){
   // What a folder holds, plus everything filed anywhere beneath it. A parent
   // like Apprentice Documents holds nothing of its own, and a bare 0 beside it
   // while collapsed would read as an empty folder rather than a full one.
+  //
+  // Every bucket the index holds, not just the ones the folder's year list
+  // names — the same sum officeDocsDeleteFolder_ makes. It used to count only
+  // the folder's own years, so a document in a bucket that list had stopped
+  // naming was uncounted here and counted there: the tree showed 0 and the bin
+  // answered "still holds 1 document(s)", with nothing on screen to explain it.
   const ownTotal = f => {
-    const yrs = officeDocsYearsFor_(f);
-    return yrs.length ? yrs.reduce((t, y) => t + countFor(f.id, y), 0)
-                      : countFor(f.id, OFFICE_DOCS_NO_YEAR);
+    const buckets = ((idx[f.id] || {}).years) || {};
+    return Object.keys(buckets).reduce((t, y) => t + (Number((buckets[y] || {}).n) || 0), 0);
   };
   const subtreeTotal = (f, d) => {
     let n = ownTotal(f);
@@ -23868,10 +23920,13 @@ function officeDocsTreeHtml_(folders, idx, parentId, depth){
   return shown.map(f => {
     const fYears = officeDocsYearsFor_(f);
     const usesYears = fYears.length > 0;
+    const strays = officeDocsStrayBuckets_(f, idx);
     const kids = officeDocsChildrenOf_(folders, f.id);
     // A folder with neither years nor sub-folders has nothing to expand, so it
     // gets a leaf marker rather than an arrow that would do nothing when pressed.
-    const expandable = usesYears || kids.length > 0;
+    // A stray bucket counts as something to expand: it is the only way to reach
+    // the documents in it.
+    const expandable = usesYears || kids.length > 0 || strays.length > 0;
     // While filtering, a folder kept only because something beneath it matched
     // is opened so that match is actually on screen — a hit you have to go
     // hunting for behind a closed arrow is not a hit.
@@ -23909,6 +23964,19 @@ function officeDocsTreeHtml_(folders, idx, parentId, depth){
           </button>
           <button type="button" class="od-icon-btn" title="Remove ${y} from this folder"
                   onclick="officeDocsDeleteYear_(${q(f.id)}, '${y}')">🗑</button>
+        </div>`).join('')}
+        ${/* Buckets holding documents that this folder's year list does not
+              name. No bin beside them: officeDocsDeleteYear_ takes a year OUT
+              of the list, and these are not in it — pressing it would report
+              success and change nothing while the documents stayed put. */
+          strays.map(y => `
+        <div class="od-year-row">
+          <button type="button" class="od-year od-year-stray${selected && String(y) === String(officeDocsState_.year) ? ' active' : ''}"
+                  title="Filed here, but outside this folder's year list"
+                  onclick="officeDocsPick_(${q(f.id)}, '${y}')">
+            <span>${escapeHtml(officeDocsBucketLabel_(y))}</span>
+            <span class="od-folder-count">${countFor(f.id, y)}</span>
+          </button>
         </div>`).join('')}
         <button type="button" class="od-add-year" onclick="officeDocsAddYear_(${q(f.id)})">+ Add year</button>
         ${depth < OFFICE_DOCS_MAX_DEPTH
@@ -24002,12 +24070,10 @@ async function renderOfficeDocsModule_(){
   if(!officeDocsState_.folderId || !folders.some(f => f.id === officeDocsState_.folderId)){
     officeDocsState_.folderId = (folders[0] || {}).id || null;
   }
-  const current = folders.find(f => f.id === officeDocsState_.folderId) || null;
   // The year has to belong to the folder being looked at, or a folder that
   // does not use 2024 would try to open a bucket it has no year for.
-  const curYears = current ? officeDocsYearsFor_(current) : [];
-  if(!curYears.length) officeDocsState_.year = OFFICE_DOCS_NO_YEAR;
-  else if(curYears.indexOf(String(officeDocsState_.year)) === -1) officeDocsState_.year = curYears[0];
+  const current = folders.find(f => f.id === officeDocsState_.folderId) || null;
+  officeDocsState_.year = officeDocsClampYear_(current, idx, officeDocsState_.year);
 
   // The four figures across the top come from the index alone — no folder is
   // read to draw them, so this stays instant however many documents there are.
@@ -24219,8 +24285,12 @@ async function officeDocsMainHtml_(idx, folder){
     escapeHtml((err && err.message) || 'the server did not respond') + '</div>'; }
   docs.sort((a, b) => b.uploadedAt - a.uploadedAt);
   const bytes = docs.reduce((t, d) => t + d.size, 0);
+  // The bucket's label, not its key — a folder that uses years can still be
+  // showing the no-year bucket, and "Extra Documents › all" names nothing HR
+  // would recognise.
   const title = officeDocsUsesYears_(folder)
-    ? escapeHtml(folder.name) + ' <span style="color:var(--muted);font-weight:400;">›</span> ' + st.year
+    ? escapeHtml(folder.name) + ' <span style="color:var(--muted);font-weight:400;">›</span> ' +
+      escapeHtml(officeDocsBucketLabel_(st.year))
     : escapeHtml(folder.name);
   return odTableHtml_(title, docs, docs.length + ' document(s) · ' + officeDocSize_(bytes), false);
 }
@@ -24338,9 +24408,7 @@ async function officeDocsPick_(folderId, year){
   const folder = folders.find(f => f.id === folderId) || null;
   // Same resolution the full render does, so a folder whose years differ from
   // the one just left opens on a year it actually has.
-  const yrs = folder ? officeDocsYearsFor_(folder) : [];
-  if(!yrs.length) officeDocsState_.year = OFFICE_DOCS_NO_YEAR;
-  else if(yrs.indexOf(String(officeDocsState_.year)) === -1) officeDocsState_.year = yrs[0];
+  officeDocsState_.year = officeDocsClampYear_(folder, idx, officeDocsState_.year);
 
   const treeBox = document.querySelector('#officeDocsBox .od-tree');
   if(treeBox){
