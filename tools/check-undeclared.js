@@ -49,7 +49,7 @@ const BUILTINS = new Set((
   'crypto btoa atob structuredClone Intl arguments this globalThis L html2canvas jspdf ' +
   'HTMLElement Node NodeList Element CanvasRenderingContext2D AbortController TextEncoder Uint8Array ' +
   'ArrayBuffer DataView Reflect Proxy BigInt eval print history screen top parent self frames ' +
-  'ResizeObserver' ).split(/\s+/));
+  'ResizeObserver XLSX mammoth' ).split(/\s+/));
 
 const problems = [];
 

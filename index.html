@@ -1697,6 +1697,20 @@
    half cannot be scrolled to at all — so zooming in cut off the left of every
    document. text-align + margin:auto centres a document that fits and lets one
    that does not overflow to the right, where scrolling can reach it. */
+/* Word and Excel render as ordinary HTML, so they get read like a document
+   rather than centred like a page: left-aligned, and the table scrolls sideways
+   inside its own box rather than pushing the viewer wide. */
+.doc-sheet,.doc-word{display:block;text-align:left;background:var(--paper);
+  border:1px solid var(--line);border-radius:8px;padding:14px;overflow-x:auto;}
+.doc-sheet table{border-collapse:collapse;font-size:13px;}
+.doc-sheet td,.doc-sheet th{border:1px solid var(--line);padding:5px 9px;
+  white-space:nowrap;text-align:left;}
+.doc-sheet tr:first-child td{font-weight:700;background:var(--cream);}
+.doc-word{line-height:1.65;font-size:14px;max-width:80ch;}
+.doc-word img{max-width:100%;height:auto;}
+.doc-word table{border-collapse:collapse;}
+.doc-word td,.doc-word th{border:1px solid var(--line);padding:5px 9px;}
+.doc-sheet-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px;text-align:left;}
 .doc-view-scroll{flex:1;overflow:auto;display:block;text-align:center;
   -webkit-overflow-scrolling:touch;}
 .doc-view-scroll > *{display:block;margin:0 auto;}
@@ -15886,9 +15900,12 @@ function renderDocInViewer_(box, data, label, retryOnclick){
     return;
   }
   const objectUrl = URL.createObjectURL(base64ToBlob_(data.base64Data, data.mimeType));
-  const isPdf = /pdf/.test(data.mimeType);
+  const name = data.fileName || label || '';
+  const kind = docViewerKind_(data.mimeType, name);
+  const isPdf = kind === 'pdf';
   docViewerZoom_ = 1;
   docViewerPdf_ = null;
+  docViewerBook_ = null;
   docViewerPdfBytes_ = isPdf ? data.base64Data : null;
   box.innerHTML = `<div style="padding:16px;display:flex;flex-direction:column;gap:12px;height:100%;box-sizing:border-box;">
     <div class="doc-view-bar">
@@ -15903,11 +15920,31 @@ function renderDocInViewer_(box, data, label, retryOnclick){
     <div class="doc-view-scroll">
       ${isPdf
         ? `<div id="docViewPages"><div class="empty">Opening…</div></div>`
-        : `<img id="docViewContent" src="${objectUrl}" alt="${escapeHtml(label)}" style="width:100%;height:auto;border-radius:8px;border:1px solid var(--line);">`}
+        : kind === 'image'
+        ? `<img id="docViewContent" src="${objectUrl}" alt="${escapeHtml(label)}" style="width:100%;height:auto;border-radius:8px;border:1px solid var(--line);">`
+        : `<div id="docViewBody"><div class="empty">Opening ${escapeHtml(name)}…</div></div>`}
     </div>
   </div>`;
   docViewerWatchResize_();
   if(isPdf) docViewerOpenPdf_(objectUrl, label);
+  else if(kind === 'sheet') docViewerOpenSheet_(data.base64Data, name, objectUrl);
+  else if(kind === 'word') docViewerOpenWord_(data.base64Data, name, objectUrl);
+  else if(kind !== 'image') docViewerNoPreview_(name, objectUrl,
+    'This kind of file has no preview built in.');
+}
+
+// Which reader a document needs. Judged on the mime type AND the file name,
+// because Drive reports some uploads as application/octet-stream and the name
+// is then the only thing that says what it is.
+function docViewerKind_(mime, name){
+  const m = String(mime || '').toLowerCase(), n = String(name || '').toLowerCase();
+  if(/pdf/.test(m) || /\.pdf$/.test(n)) return 'pdf';
+  if(/^image\//.test(m) || /\.(png|jpe?g|gif|webp|bmp|svg)$/.test(n)) return 'image';
+  if(/spreadsheet|ms-excel|csv/.test(m) || /\.(xlsx|xlsm|xlsb|xls|csv|tsv)$/.test(n)) return 'sheet';
+  // .docx only. The old binary .doc is a different format entirely and mammoth
+  // cannot read it — saying so beats a spinner that never resolves.
+  if(/wordprocessingml/.test(m) || /\.docx$/.test(n)) return 'word';
+  return 'other';
 }
 
 // PDFs are drawn to a canvas rather than handed to <embed>.
@@ -16052,6 +16089,101 @@ function docViewerWatchResize_(){
   });
   docViewerResizeObs_.observe(scroll);
 }
+// Word and Excel, read in the browser the same way PDFs are.
+//
+// Every non-PDF used to be handed to an <img>, which for a .xlsx or a .docx is
+// a broken image — the blank box HR reported. There is nothing to fall back to
+// either: no browser renders Office formats natively, and the Drive preview
+// needs the viewer to be signed into the account that owns the file, which HR
+// is not. So they are converted here, from the same base64 the backend already
+// returns, with no extra permission and no second round trip.
+const SHEETJS_SRC_ = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+const MAMMOTH_SRC_ = 'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js';
+const docViewerScripts_ = {};
+function docViewerLoadScript_(src){
+  if(docViewerScripts_[src]) return docViewerScripts_[src];
+  docViewerScripts_[src] = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve;
+    // Cleared so a later attempt can retry — a reader that failed once because
+    // the phone was on a dead signal must not stay broken for the session.
+    s.onerror = () => { docViewerScripts_[src] = null; reject(new Error('could not be loaded')); };
+    document.head.appendChild(s);
+  });
+  return docViewerScripts_[src];
+}
+// What every reader falls back to. Never a bare error: the file is right there
+// and Download always works, whatever the browser can or cannot draw.
+function docViewerNoPreview_(name, objectUrl, why){
+  const holder = document.getElementById('docViewBody');
+  if(!holder) return;
+  holder.innerHTML = `<div class="empty" style="line-height:1.7;">
+    ${escapeHtml(why)}<br>
+    <strong>${escapeHtml(name)}</strong>
+    <div style="margin-top:12px;">
+      <a class="btn" href="${objectUrl}" download="${escapeHtml(name)}">⬇ Download it</a>
+    </div>
+    <div style="margin-top:10px;font-size:12px;color:var(--muted);">
+      The Drive button on the document's row opens the original in Google Drive.</div>
+  </div>`;
+}
+let docViewerBook_ = null;
+async function docViewerOpenSheet_(b64, name, objectUrl){
+  const holder = document.getElementById('docViewBody');
+  if(!holder) return;
+  try{
+    await docViewerLoadScript_(SHEETJS_SRC_);
+    docViewerBook_ = XLSX.read(base64ToBytes_(b64), { type: 'array' });
+  }catch(err){
+    docViewerNoPreview_(name, objectUrl,
+      'This spreadsheet could not be opened here — the reader ' +
+      ((err && err.message) || 'could not be loaded') + '.');
+    return;
+  }
+  const names = docViewerBook_.SheetNames || [];
+  if(!names.length){
+    docViewerNoPreview_(name, objectUrl, 'This spreadsheet has no sheets in it.');
+    return;
+  }
+  // Tabs only when there is more than one, so a single-sheet file is not given
+  // a row of chrome that decides nothing.
+  holder.innerHTML =
+    (names.length > 1
+      ? '<div class="doc-sheet-tabs">' + names.map((s, i) =>
+          `<button type="button" class="btn tiny${i ? ' ghost' : ''}" data-sheet="${i}"
+                   onclick="docViewerShowSheet_(${i})">${escapeHtml(s)}</button>`).join('') + '</div>'
+      : '') +
+    '<div id="docViewContent" class="doc-sheet" data-zoom-mode="scale"></div>';
+  docViewerShowSheet_(0);
+}
+function docViewerShowSheet_(i){
+  if(!docViewerBook_) return;
+  const el = document.getElementById('docViewContent');
+  const sheetName = (docViewerBook_.SheetNames || [])[i];
+  if(!el || !sheetName) return;
+  el.innerHTML = XLSX.utils.sheet_to_html(docViewerBook_.Sheets[sheetName], { editable: false });
+  document.querySelectorAll('.doc-sheet-tabs [data-sheet]').forEach(b => {
+    b.classList.toggle('ghost', Number(b.dataset.sheet) !== i);
+  });
+  docViewerApplyZoom_(docViewerZoom_);
+}
+async function docViewerOpenWord_(b64, name, objectUrl){
+  const holder = document.getElementById('docViewBody');
+  if(!holder) return;
+  try{
+    await docViewerLoadScript_(MAMMOTH_SRC_);
+    const bytes = base64ToBytes_(b64);
+    const out = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer });
+    holder.innerHTML = '<div id="docViewContent" class="doc-word" data-zoom-mode="scale">' +
+      (out && out.value ? out.value : '<p>This document has no text in it.</p>') + '</div>';
+    docViewerApplyZoom_(docViewerZoom_);
+  }catch(err){
+    docViewerNoPreview_(name, objectUrl,
+      'This document could not be opened here — the reader ' +
+      ((err && err.message) || 'could not be loaded') + '.');
+  }
+}
 function base64ToBytes_(b64){
   const bin = atob(String(b64 || ''));
   const out = new Uint8Array(bin.length);
@@ -16097,6 +16229,14 @@ function docViewerApplyZoom_(z){
   }
   const el = document.getElementById('docViewContent');
   if(el){
+    // Rendered HTML — a spreadsheet or a Word document — is scaled, not
+    // widened. Setting a width on a table makes its columns roomier and leaves
+    // the text exactly as small as it was, which is the opposite of what
+    // somebody pressing + is asking for.
+    if(el.dataset.zoomMode === 'scale'){
+      el.style.zoom = docViewerZoom_;
+      return;
+    }
     el.style.width = (docViewerZoom_ * 100) + '%';
     el.style.maxWidth = 'none';
     // Only reached by the <embed> fallback, where growing the box is all that
