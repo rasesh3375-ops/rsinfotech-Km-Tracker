@@ -1762,8 +1762,36 @@
 .od-stat-sub{font-size:11px;color:var(--muted);}
 /* The tree sits beside the table on a desktop and stacks above it on a phone,
    which is the only layout that keeps a document table usable on both. */
+/* The archive is a workspace, not a page.
+   HR has 196 folders, which renders a tree about ten thousand pixels tall with
+   the file panel pinned to the top of it. Clicking a folder four fifths of the
+   way down left its documents 7,909px above the screen — measured — so every
+   View meant scrolling up eight thousand pixels and back down again for the
+   next one. No file manager works that way: Drive, Dropbox, SharePoint,
+   Outlook and Finder all bound the workspace to the window and let each pane
+   scroll inside it, and that is what this does. The tree can be any length it
+   likes; the file panel never leaves the screen. */
 .od-layout{display:grid;grid-template-columns:minmax(200px,260px) 1fr;gap:14px;margin-top:14px;align-items:start;}
-@media (max-width:820px){ .od-layout{grid-template-columns:1fr;} }
+@media (min-width:821px){
+  /* Height is set by officeDocsFitLayout_ — the header above this wraps
+     differently at every width, so it is measured rather than guessed at. */
+  .od-layout{align-items:stretch;}
+  .od-tree,.od-main{overflow:auto;-webkit-overflow-scrolling:touch;}
+  #officeDocsBox .od-back{display:none;}
+}
+/* On a phone the two panes cannot sit side by side, so they become one screen
+   at a time — tap a folder, the files take the screen, one button back. The
+   same drill-down Drive and Files use, and the reason is the same: 196 folders
+   above a file list means scrolling past all of them to reach it. */
+@media (max-width:820px){
+  .od-layout{grid-template-columns:1fr;}
+  #officeDocsBox:not(.od-drilled) .od-main{display:none;}
+  #officeDocsBox.od-drilled .od-tree,
+  #officeDocsBox.od-drilled .od-stats,
+  #officeDocsBox.od-drilled .od-toolbar{display:none;}
+  #officeDocsBox .od-back{display:block;width:100%;margin:0 0 12px;text-align:left;
+    font-weight:700;}
+}
 /* min-width:0 for the same reason .od-main has it. A grid item refuses by
    default to shrink below its content's min-content width, and a folder tree of
    nested sub-folders with nowrap action buttons has a wide one — so the tree
@@ -18761,7 +18789,17 @@ async function openLetterheadCard(){
 // returns to this card rather than the top of the Generator.
 function openOfficeDocsCard(){
   openGeneratorCard('genSecOfficeDocs');
-  renderOfficeDocsModule_();
+  renderOfficeDocsModule_().then(() => {
+    // Bring the archive to the top of the window before sizing the workspace.
+    // Its height is whatever the window has left below it, so opened with the
+    // module halfway down the page there is nothing left to give it — the panes
+    // came out at their 360px floor with the useful space above the fold.
+    const box = document.getElementById('officeDocsBox');
+    if(box && box.offsetParent !== null && !officeDocsNarrow_()){
+      box.scrollIntoView({ block: 'start' });
+      officeDocsFitLayout_();
+    }
+  });
 }
 
 function openCtcCalculatorCard(){
@@ -23496,8 +23534,7 @@ async function officeDocsApply_(patch){
 
   officeDocsRepaintStats_(folders, idx);
   officeDocsRepaintTree_();
-  const main = document.getElementById('odMain');
-  if(main) main.innerHTML = await officeDocsMainHtml_(idx, folder);
+  await officeDocsFillMain_(idx, folder);
 }
 // The four figures across the top move when a folder or a document does, and
 // they come from the index alone — so they are repainted from it rather than
@@ -23713,7 +23750,7 @@ async function renderOfficeDocsModule_(){
     </div>
     <div id="odUnsized">${officeDocsUnsizedHtml_(idx)}</div>
 
-    <div class="row-inline" style="margin:14px 0 0;flex-wrap:wrap;gap:8px;">
+    <div class="row-inline od-toolbar" style="margin:14px 0 0;flex-wrap:wrap;gap:8px;">
       <input id="odSearch" class="field-input" style="flex:2;min-width:200px;"
              placeholder="Search by file name, folder, year or type…"
              value="${escapeHtml(officeDocsState_.query)}"
@@ -23752,8 +23789,7 @@ async function renderOfficeDocsModule_(){
   // and filling the table in after means HR sees the archive after one round
   // trip rather than two — and can already open a different folder while the
   // first one is still arriving.
-  const main = document.getElementById('odMain');
-  if(main) main.innerHTML = await officeDocsMainHtml_(idx, current);
+  await officeDocsFillMain_(idx, current);
 }
 
 function odStat_(label, value, sub){
@@ -23764,6 +23800,59 @@ function odStat_(label, value, sub){
   </div>`;
 }
 
+// Every path that paints the file panel goes through here, so the back button
+// and the workspace sizing cannot be present on one of them and missing on
+// another — which is exactly what happened while this was a prototype: picking
+// a folder re-rendered the panel and took the button with it.
+async function officeDocsFillMain_(idx, folder){
+  const main = document.getElementById('odMain');
+  if(!main) return;
+  const body = await officeDocsMainHtml_(idx, folder);
+  main.innerHTML = '<button type="button" class="btn ghost od-back" ' +
+    'onclick="officeDocsDrillOut_()">‹ All folders</button>' + body;
+  officeDocsFitLayout_();
+}
+// Narrow screens only: which of the two panes is on screen. The class carries
+// it rather than a variable, because the panes are shown and hidden in CSS and
+// a re-render must not be able to lose it.
+function officeDocsNarrow_(){
+  return window.matchMedia('(max-width:820px)').matches;
+}
+function officeDocsDrillIn_(){
+  const box = document.getElementById('officeDocsBox');
+  if(box && officeDocsNarrow_()) box.classList.add('od-drilled');
+}
+function officeDocsDrillOut_(){
+  const box = document.getElementById('officeDocsBox');
+  if(!box) return;
+  box.classList.remove('od-drilled');
+  // Back to the folder you came from, still open in the tree, rather than the
+  // top of a list of 196.
+  const open = box.querySelector('.od-folder-head.open');
+  if(open) open.scrollIntoView({ block: 'center' });
+}
+// The workspace is as tall as whatever is left of the window below it. Measured
+// rather than a fixed allowance: the card's description and the toolbar above
+// it wrap to different heights at every width, and a guess that is 60px out
+// either scrolls the page again or crops the panes.
+function officeDocsFitLayout_(){
+  const lay = document.querySelector('#officeDocsBox .od-layout');
+  if(!lay) return;
+  if(officeDocsNarrow_() || lay.offsetParent === null){ lay.style.height = ''; return; }
+  const top = lay.getBoundingClientRect().top;
+  // Clamped to the viewport: called while the page happens to be scrolled past
+  // the module, top is negative and the raw figure would be taller than the
+  // screen.
+  const room = Math.min(window.innerHeight - 24, window.innerHeight - top - 24);
+  lay.style.height = Math.max(360, room) + 'px';
+}
+window.addEventListener('resize', () => {
+  const box = document.getElementById('officeDocsBox');
+  if(box && box.offsetParent !== null){
+    if(!officeDocsNarrow_()) box.classList.remove('od-drilled');
+    officeDocsFitLayout_();
+  }
+});
 async function officeDocsMainHtml_(idx, folder){
   const st = officeDocsState_;
   if(st.results){
@@ -23908,9 +23997,12 @@ async function officeDocsPick_(folderId, year){
     const holder = treeBox.querySelector('.od-tree-list');
     if(holder) holder.innerHTML = rebuilt;
   }
-  const main = document.getElementById('odMain');
-  if(!main) return renderOfficeDocsModule_();
-  main.innerHTML = await officeDocsMainHtml_(idx, folder);
+  if(!document.getElementById('odMain')) return renderOfficeDocsModule_();
+  await officeDocsFillMain_(idx, folder);
+  // Only here, not in the two paths above: this is the one that means somebody
+  // chose a folder. A background repaint after an upload or a delete must not
+  // throw the phone into a folder nobody asked to open.
+  officeDocsDrillIn_();
 }
 function officeDocsClearSearch_(){
   officeDocsState_.results = null;
