@@ -23932,6 +23932,34 @@ function officeDocsTreeHtml_(folders, idx, parentId, depth){
   }).join('');
 }
 
+// The same default showing through on folders that already exist. A folder with
+// no years list of its own falls back to the standard run, so every folder made
+// before "+ Add year" existed displays 2022 to this year whether or not anything
+// was ever filed under them — five empty rows to delete by hand on a folder that
+// was never meant to be filed by year.
+//
+// Where every bucket the index holds for that folder is empty, those years are
+// not a record of anything, and they are cleared. A folder holding even ONE
+// document under any year keeps its years untouched: clearing them would move
+// where its next upload lands and leave what is already filed behind a year
+// level the tree had stopped drawing. Every year the index knows about is
+// checked, not just the standard run, so a folder holding something under a year
+// outside that run — invisible in the tree today, but real — is left alone too.
+//
+// No flag key and no migration button: a folder it clears is no longer a
+// candidate, and one made after this carries its own empty list, so the second
+// run over the same archive finds nothing and writes nothing.
+function officeDocsDropUnusedYears_(folders, idx){
+  const cleared = [];
+  folders.forEach(f => {
+    if(Array.isArray(f.years)) return;   // its own list — HR chose it, leave it
+    const buckets = ((idx[f.id] || {}).years) || {};
+    if(Object.keys(buckets).some(y => Number((buckets[y] || {}).n) > 0)) return;
+    f.years = [];
+    cleared.push(f.name);
+  });
+  return cleared;
+}
 async function renderOfficeDocsModule_(){
   const box = document.getElementById('officeDocsBox');
   if(!box) return;
@@ -23941,6 +23969,23 @@ async function renderOfficeDocsModule_(){
     const cfg = await loadOfficeDocsConfig_();
     folders = cfg.folders; idx = cfg.idx;
     officeDocsCache_ = { folders: folders, idx: idx };
+    // In memory first and drawn from immediately, so the tree below is right on
+    // this open rather than the one after it. The save goes out without being
+    // waited for and without an alert if it fails: nothing is lost when it does
+    // — the next open simply finds the same folders and clears them again — and
+    // a cosmetic tidy has no business holding up the archive or interrupting HR.
+    const cleared = officeDocsDropUnusedYears_(folders, idx);
+    if(cleared.length){
+      // Named, but not all of them — this can be most of a hundred-and-twenty
+      // folder archive on the first open, and an activity log line that long is
+      // unreadable in the place it is actually read.
+      const named = cleared.slice(0, 8).join(', ') +
+        (cleared.length > 8 ? ' and ' + (cleared.length - 8) + ' more' : '');
+      saveOfficeDocFolders_(folders).then(() =>
+        addActivityLog('Cleared the unused year folders from ' + cleared.length +
+          ' Office Documents folder(s): ' + named)
+      ).catch(() => {});
+    }
   }catch(err){
     // With a Try again button, because this is now a screen HR can land on for
     // a reason as ordinary as a slow moment on mobile data, and "reload the
@@ -24381,7 +24426,15 @@ async function officeDocsAddFolder_(parentId){
     return;
   }
   const id = officeDocNewId_(name, folders);
-  folders.push(parent ? { id: id, name: name, parentId: parent.id } : { id: id, name: name });
+  // years: [] deliberately, not left unset. A folder with no years list of its
+  // own falls back to the standard run in officeDocsYearsFor_, so every new
+  // folder arrived carrying 2022 to the current year, all of them empty, before
+  // anyone had said the folder was filed by year at all — and most are not. HR
+  // then had to delete five years by hand to get the plain folder they wanted.
+  // It starts with none, and "+ Add year" — which is shown under a folder that
+  // has neither years nor sub-folders, exactly for this — puts one back.
+  folders.push(parent ? { id: id, name: name, parentId: parent.id, years: [] }
+                      : { id: id, name: name, years: [] });
   try{ await saveOfficeDocFolders_(folders); }
   catch(err){ alert('Could not add the folder: ' + ((err && err.message) || 'the server did not respond')); return; }
   addActivityLog('Added the Office Documents folder "' + name + '"' +
