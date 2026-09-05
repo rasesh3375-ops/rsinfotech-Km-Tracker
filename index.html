@@ -22449,7 +22449,7 @@ async function uploadEmployeeHandbook(){
   msg.classList.remove('error');
   const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
   const fileName = `Employee Handbook${year ? ' - ' + year : ''}${ext}`;
-  const url = await uploadDocumentToDrive(hrYearPath('', 'Office Documents', 'Employee Handbook'), fileName, file);
+  const url = await uploadDocumentToDrive(officeArchivePath_('Employee Handbook'), fileName, file);
   if(!url){
     msg.textContent = 'Upload failed — check your connection and try again.';
     msg.classList.add('error');
@@ -23029,6 +23029,19 @@ function officeDocsYears_(){
 // The no-year case still needs a storage key and a Drive folder, so it uses
 // the literal 'all' in place of a year. Years are four digits, so that can
 // never collide with a real one.
+// Where a document belongs on Drive: HR Management / Office Documents / …
+//
+// NOT hrYearPath, which is what every one of these upload screens used and what
+// split the archive in two. hrYearPath inserts the financial year — HR
+// Management / 2026-27 / Office Documents / Important Documents — while the
+// archive itself has no year level in its path at all. HR Management ended up
+// with a 2024-25, a 2025-26 and a 2026-27, each holding an Office Documents the
+// archive could not see, and twenty-odd company documents sitting in one of
+// them. The archive's own year level is a folder inside it, not a folder above
+// it; officeArchiveRoot_ on the backend resolves exactly this path.
+function officeArchivePath_(...rest){
+  return ['HR Management', OFFICE_DOCS_ROOT_SEGMENT, ...rest];
+}
 const OFFICE_DOCS_NO_YEAR = 'all';
 function officeDocsYearsFor_(folder){
   return Array.isArray((folder || {}).years) ? folder.years.slice() : officeDocsYears_();
@@ -24079,6 +24092,12 @@ async function renderOfficeDocsModule_(){
                   onclick="withBusy(this,'Checking Drive…',officeDocsTidyDrive_)">Tidy Drive</button>
           <button class="btn ghost" title="Find documents the archive is listing more than once. No file is deleted from Drive."
                   onclick="withBusy(this,'Checking…',officeDocsRemoveDuplicates_)">Remove duplicates</button>
+          <!-- One-off, and it says so: the Generator's own document screens file
+               into a financial-year folder the archive does not read, so what
+               they hold has to be brought across once before those screens can
+               go. Safe to run twice — it skips what is already filed. -->
+          <button class="btn ghost" title="Bring documents uploaded from the Generator's own screens into this archive"
+                  onclick="withBusy(this,'Bringing them in…',mergeCompanyDocsIntoArchive_)">Bring in older documents</button>
         </div>
       </details>
     </div>
@@ -25823,7 +25842,7 @@ async function uploadApprenticeDoc(){
   // file is named for it too — see uniqueDocFileName_.
   const docId = randomHex(6);
   const fileName = uniqueDocFileName_([emp && emp.name, category], docId, ext);
-  const url = await uploadDocumentToDrive(hrYearPath('', 'Office Documents', 'Apprentice Documents', category), fileName, file);
+  const url = await uploadDocumentToDrive(officeArchivePath_('Apprentice Documents', category), fileName, file);
   if(!url){
     msg.textContent = 'Upload failed — check your connection and try again.';
     msg.classList.add('error');
@@ -26285,6 +26304,191 @@ const APPRENTICE_MERGE_PLAN_ = [
 // would file every document twice — the archive has no idea it has seen a
 // Drive id before, and nor should it: two scans of the same invoice are two
 // documents everywhere else in it.
+// ===== Bringing the year-folder documents into the archive =====
+//
+// The Generator's document cards and the Office Documents archive have never
+// written to the same place, and the whole difference is one path segment.
+// uploadCompanyDoc and its siblings file through hrYearPath, which puts the
+// financial year in the middle:
+//
+//     HR Management / 2026-27 / Office Documents / Important Documents
+//     HR Management /           Office Documents / Important Documents   ← archive
+//
+// So HR Management holds a 2024-25, a 2025-26 and a 2026-27, each with an
+// Office Documents of its own, and none of what is in them appears in the
+// archive. This moves every one of those documents into the archive and files
+// it there, then the cards that fed them can go.
+//
+// Enumerated from the app's own records rather than by listing Drive: each
+// record already carries the Drive link the card opens, so the file id is in
+// hand and there is no folder to walk. Apprentice documents are not here —
+// they have a merge of their own that has already run.
+const COMPANY_MERGE_FLAG_KEY = 'office_company_docs_merged';
+const COMPANY_MERGE_SOURCES_ = [
+  { label: 'Important Documents', read: () => getCompanyDocs('important') },
+  { label: 'Company Profile',     read: () => getCompanyDocs('profile') },
+  { label: 'Holiday List',        read: () => getCompanyDocs('holidaylist') },
+  { label: 'Uniform and ID',      read: () => getUniformIdList() },
+  { label: 'Employee Handbook',   read: async () => {
+      const h = await getEmployeeHandbook();
+      return h && h.fileUrl ? [h] : [];
+    } }
+];
+async function companyMergeDone_(){
+  const v = await safeGet(COMPANY_MERGE_FLAG_KEY, true);
+  try{ return !!(v && JSON.parse(v).merged); }catch(e){ return false; }
+}
+// One record from any of those stores, reduced to what the archive needs. They
+// do not share a shape — a company document has name/fileName/url, the handbook
+// has fileUrl/fileName/year, a uniform row carries the employee — so each is
+// read for whichever of those it has rather than assuming one layout.
+function companyMergeRecord_(r, label){
+  const url = r.url || r.fileUrl || '';
+  const m = /\/d\/([^/]+)/.exec(url);
+  if(!m) return null;
+  return {
+    fileId: m[1],
+    name: r.fileName || r.name || r.docName || label,
+    uploadedAt: Date.parse(r.uploadedAt || r.filedAt || '') || 0,
+    by: [r.uploadedBy || 'HR', r.employeeName || r.name, r.year].filter(Boolean).join(' · ')
+  };
+}
+async function companyMergeRead_(say){
+  const buckets = [];
+  let skipped = 0;
+  for(const src of COMPANY_MERGE_SOURCES_){
+    if(say) say('Reading ' + src.label + '…');
+    let list = [];
+    try{ list = await src.read() || []; }
+    catch(err){ throw new Error('Could not read ' + src.label + ': ' +
+      ((err && err.message) || 'the server did not respond')); }
+    const docs = [];
+    (Array.isArray(list) ? list : [list]).forEach(r => {
+      const rec = companyMergeRecord_(r, src.label);
+      if(rec) docs.push(rec); else skipped++;
+    });
+    if(docs.length) buckets.push({ label: src.label, docs: docs });
+  }
+  return { buckets, skipped };
+}
+async function mergeCompanyDocsIntoArchive_(){
+  const say = t => officeDocsSay_(t);
+  let read;
+  try{ read = await companyMergeRead_(say); }
+  catch(err){ say(''); alert(err.message + '\n\nNothing was changed.'); return; }
+  const { buckets, skipped } = read;
+  say('');
+  const total = buckets.reduce((t, b) => t + b.docs.length, 0);
+  if(!total){
+    alert('There are no company documents left to bring in — everything those ' +
+          'screens hold is already in the archive.');
+    return;
+  }
+  const lines = buckets.map(b => '  • ' + b.label + '  —  ' + b.docs.length + ' document(s)');
+  if(!confirm('Bring ' + total + ' document(s) into Office Documents?\n\n' +
+      lines.join('\n') + '\n\n' +
+      (skipped ? skipped + ' record(s) have no usable Drive link and will be left alone.\n\n' : '') +
+      'These are the documents uploaded from the Generator\'s own screens, which file ' +
+      'into a financial-year folder the archive does not read. The files move in Drive ' +
+      'too — the same file, one copy, nothing duplicated.')) return;
+
+  say('Reading file sizes from Drive…');
+  let meta = {};
+  const allIds = buckets.reduce((a, b) => a.concat(b.docs.map(d => d.fileId)), []);
+  for(let i = 0; i < allIds.length; i += OFFICE_DOCS_META_CHUNK){
+    try{
+      const res = await backendAction({ action: 'getDriveFileMeta',
+        fileIds: allIds.slice(i, i + OFFICE_DOCS_META_CHUNK) }, OFFICE_DOCS_DRIVE_FETCH);
+      if(res && res.meta) Object.assign(meta, res.meta);
+    }catch(err){ /* a missing size prints as 0 B, which beats not filing it */ }
+  }
+
+  // Keyed on the Drive id, so running this again finishes what a half-finished
+  // run left rather than filing anything twice — the lesson from the payroll
+  // merge, which sealed itself after leaving folders unfiled.
+  say('Checking what is already filed…');
+  const alreadyFiled = new Set();
+  try{
+    const shards = await officeDocsAllShards_(await loadOfficeDocIndex_());
+    shards.forEach(sh => sh.records.forEach(r => { if(r.f) alreadyFiled.add(r.f); }));
+  }catch(err){
+    say('');
+    alert('Could not check what is already in the archive: ' +
+      ((err && err.message) || 'the server did not respond') +
+      '\n\nNothing was changed. Try again in a moment.');
+    return;
+  }
+
+  say('Creating the archive folders…');
+  let folders = await loadOfficeDocFolders_();
+  const ensure = name => {
+    let f = officeDocsChildrenOf_(folders, null)
+              .find(x => x.name.toLowerCase() === String(name).toLowerCase());
+    if(f){ if(!Array.isArray(f.years)) f.years = []; return f; }
+    f = { id: officeDocNewId_(name, folders), name: String(name), years: [] };
+    folders.push(f);
+    return f;
+  };
+  const targets = buckets.map(b => ({ bucket: b, folder: ensure(b.label) }));
+  try{ await saveOfficeDocFolders_(folders); }
+  catch(err){ say(''); alert('Could not create the archive folders: ' +
+    ((err && err.message) || 'the server did not respond')); return; }
+
+  say('Moving ' + total + ' file(s) in Google Drive…');
+  const moves = targets.reduce((a, t) => a.concat(t.bucket.docs.map(d => ({
+    fileId: d.fileId, folderPath: officeDocsDrivePath_(t.folder, OFFICE_DOCS_NO_YEAR, folders)
+  }))), []);
+  let notMoved = 0;
+  for(let i = 0; i < moves.length; i += OFFICE_DOCS_MOVE_CHUNK){
+    say('Moving files in Google Drive — ' + Math.min(i + OFFICE_DOCS_MOVE_CHUNK, moves.length) +
+        ' of ' + moves.length + '…');
+    let res = null;
+    try{ res = await backendAction({ action: 'moveOfficeDocs',
+      moves: moves.slice(i, i + OFFICE_DOCS_MOVE_CHUNK) }, OFFICE_DOCS_DRIVE_FETCH); }
+    catch(err){ res = null; }
+    // Filing goes ahead either way: a record is keyed on the Drive id, so a
+    // document the app can find and open is filed correctly whether or not its
+    // file actually changed folders. Counted and reported at the end.
+    if(!res || !Array.isArray(res.moved)) notMoved += moves.slice(i, i + OFFICE_DOCS_MOVE_CHUNK).length;
+    else notMoved += Object.keys(res.failed || {}).length;
+  }
+
+  let filed = 0, skippedAlready = 0, idx = null;
+  const problems = [];
+  for(let i = 0; i < targets.length; i++){
+    const t = targets[i];
+    say('Filing ' + t.bucket.label + ' (' + (i + 1) + ' of ' + targets.length + ')…');
+    const docs = t.bucket.docs.filter(d => !alreadyFiled.has(d.fileId)).map(d => {
+      const m = meta[d.fileId] || {};
+      return { name: d.name || m.name || 'Document', fileId: d.fileId,
+               mimeType: m.mimeType || '', size: Number(m.size) || 0,
+               uploadedAt: d.uploadedAt, uploadedBy: d.by };
+    });
+    skippedAlready += t.bucket.docs.length - docs.length;
+    if(!docs.length) continue;
+    try{ idx = await appendOfficeDocs_(t.folder.id, t.folder.name, OFFICE_DOCS_NO_YEAR, docs); filed += docs.length; }
+    catch(err){ problems.push(t.bucket.label + ': ' +
+      ((err && err.message) || 'the server did not respond')); }
+  }
+
+  // The flag only where nothing was left behind — a half-finished run must stay
+  // runnable, which is the whole reason the payroll one had to be reopened.
+  if(!problems.length){
+    try{ await remoteSet(COMPANY_MERGE_FLAG_KEY, JSON.stringify({ merged: true, at: Date.now() })); }
+    catch(err){ /* the work is done; the flag is only a signpost */ }
+  }
+  say('');
+  addActivityLog('Brought ' + filed + ' company document(s) into Office Documents').catch(() => {});
+  await officeDocsApply_({ folders: folders, idx: idx || undefined });
+  alert(filed + ' document(s) are now in Office Documents.' +
+    (skippedAlready ? '\n' + skippedAlready + ' were already filed and were left alone.' : '') +
+    (notMoved ? '\n' + notMoved + ' file(s) could not be moved in Drive — they are filed and ' +
+                'open normally, and Tidy Drive will move them.' : '') +
+    (skipped ? '\n' + skipped + ' record(s) had no usable Drive link.' : '') +
+    (problems.length ? '\n\nNot filed:\n  ' + problems.join('\n  ') +
+                       '\n\nRun this again to finish those.' : ''));
+}
+
 const APPRENTICE_MERGE_FLAG_KEY = 'office_apprentice_docs_merged';
 async function apprenticeMergeDone_(){
   const v = await safeGet(APPRENTICE_MERGE_FLAG_KEY, true);
@@ -26535,7 +26739,7 @@ async function uploadCompanyDoc(category, folderLabel){
   const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
   const docId = randomHex(6);
   const fileName = uniqueDocFileName_([docName], docId, ext);
-  const url = await uploadDocumentToDrive(hrYearPath('', 'Office Documents', folderLabel), fileName, file);
+  const url = await uploadDocumentToDrive(officeArchivePath_(folderLabel), fileName, file);
   if(!url){
     msg.textContent = 'Upload failed — check your connection and try again.';
     msg.classList.add('error');
@@ -26653,7 +26857,7 @@ async function uploadUniformDoc(employeeId, employeeName, event){
   if(!file) return;
   const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
   const fileName = `${employeeName} - Uniform-ID Document${ext}`;
-  const url = await uploadDocumentToDrive(hrYearPath('', 'Office Documents', 'Uniform and ID', employeeName), fileName, file);
+  const url = await uploadDocumentToDrive(officeArchivePath_('Uniform and ID', employeeName), fileName, file);
   if(!url){ alert('Upload failed — check your connection and try again.'); return; }
   const list = await getUniformIdList();
   let entry = list.find(u => u.employeeId === employeeId);
