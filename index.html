@@ -12646,7 +12646,7 @@ function kmtPersistLastView_(){
 // placeholder, and never fires mid-restore, where history.state is already
 // the destination we're replaying, not something to overwrite.
 function kmtCaptureDeparture(){
-  if(kmtRestoring) return;
+  if(kmtReplaying_()) return;
   if(history.state && history.state.kmtView) history.replaceState(kmtSnapshotView(), '');
   kmtPersistLastView_();
 }
@@ -12654,7 +12654,7 @@ function kmtCaptureDeparture(){
 // for the same reason as above — a restore is replaying an existing entry,
 // not creating a new one.
 function kmtCommitArrival(){
-  if(kmtRestoring) return;
+  if(kmtReplaying_()) return;
   history.pushState(kmtSnapshotView(), '');
   kmtPersistLastView_();
 }
@@ -12698,6 +12698,16 @@ function kmtSupersedeRestore_(){ kmtViewEpoch_++; }
 // its awaits — an open that happens while this is false is the person's, and
 // must void the replay.
 let kmtReplayOpen_ = false;
+// Which restore, if any, is still the current view. kmtRestoring alone was the
+// wrong question for history capture: it stays true for the whole async restore,
+// and if the route's own render is slow — renderGeneratorTab awaits
+// getEmployees() — that window is seconds long. Everything the person did in it
+// recorded no history entry at all, so the next ✕ replayed a snapshot older than
+// the screen they were on, and the Office Documents card came back collapsed
+// because that stale snapshot named no open card. A replay is only a replay
+// while nothing newer has happened.
+let kmtRestoreEpoch_ = -1;
+function kmtReplaying_(){ return kmtRestoring && kmtViewEpoch_ === kmtRestoreEpoch_; }
 function kmtReplayOpening_(fn){
   kmtReplayOpen_ = true;
   try{ return fn(); } finally { kmtReplayOpen_ = false; }
@@ -12717,6 +12727,7 @@ async function kmtRestoreView(descriptor, opts){
   if(!descriptor || !descriptor.kmtView) return;
   opts = opts || {};
   const epoch = ++kmtViewEpoch_;   // supersedes any restore already running
+  kmtRestoreEpoch_ = epoch;
   kmtRestoring = true;
   kmtPendingCardRestore = descriptor.card ? descriptor : null;
   try{
