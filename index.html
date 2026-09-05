@@ -1776,7 +1776,27 @@
 @media (min-width:821px){
   /* Height is set by officeDocsFitLayout_ — the header above this wraps
      differently at every width, so it is measured rather than guessed at. */
-  .od-layout{align-items:stretch;}
+  /* Wider than the 260px it was, because the names here are long and HR could
+     not read them. Measured against the real folder list: at 260px nine of the
+     twenty-six names fit on one line, at 340px twenty-three do, and past that
+     the curve flattens — 420px buys one more name and costs the file panel
+     another 80px. "EMPOLYEE PF DETAILS (R S INFOTECH)" wraps at any width worth
+     giving it. */
+  .od-layout{align-items:stretch;grid-template-columns:minmax(280px,340px) 1fr;}
+  /* The rename and delete icons sit on every row and take about 60px of it from
+     the name. They belong to the row you are working with, not to all 196 at
+     once — the treatment Drive and Finder give row actions — so they appear on
+     the row under the pointer, the row with keyboard focus, and the folder
+     that is currently open, which is what keeps them reachable without a mouse. */
+  .od-folder-row .od-icon-btn{display:none;}
+  .od-folder-row:hover .od-icon-btn,
+  .od-folder-row:focus-within .od-icon-btn,
+  .od-folder-row .od-folder-head.open ~ .od-icon-btn{display:inline-flex;}
+  /* Said already, and better, in the card's own description at the top — where
+     it is not sitting under the folder list taking up the room the folders
+     need. Kept in the markup for the phone, where the pane is the whole screen
+     and it is not in the way. */
+  .od-tree-note{display:none;}
   /* Only the list scrolls, not the whole pane: the filter box has to stay put
      while you scroll what it is filtering, or it scrolls away the moment you
      use it. */
@@ -23824,7 +23844,7 @@ async function renderOfficeDocsModule_(){
                value="${escapeHtml(officeDocsFolderQuery_)}"
                oninput="officeDocsFilterFolders_(this.value)">
         <div class="od-tree-list">${tree || '<div class="empty">No folders yet.</div>'}</div>
-        <p style="font-size:11px;color:var(--muted);margin:10px 0 0;line-height:1.5;">
+        <p class="od-tree-note" style="font-size:11px;color:var(--muted);margin:10px 0 0;line-height:1.5;">
           Files are stored on Google Drive under <strong>HR Management &gt; Office Documents</strong>,
           and managed entirely from here. You never need to open Drive to file or find one.</p>
       </div>
