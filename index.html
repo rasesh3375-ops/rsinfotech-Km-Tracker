@@ -1772,11 +1772,17 @@
    scroll inside it, and that is what this does. The tree can be any length it
    likes; the file panel never leaves the screen. */
 .od-layout{display:grid;grid-template-columns:minmax(200px,260px) 1fr;gap:14px;margin-top:14px;align-items:start;}
+.od-folder-filter{width:100%;margin:0 0 8px;font-size:13px;}
 @media (min-width:821px){
   /* Height is set by officeDocsFitLayout_ — the header above this wraps
      differently at every width, so it is measured rather than guessed at. */
   .od-layout{align-items:stretch;}
-  .od-tree,.od-main{overflow:auto;-webkit-overflow-scrolling:touch;}
+  /* Only the list scrolls, not the whole pane: the filter box has to stay put
+     while you scroll what it is filtering, or it scrolls away the moment you
+     use it. */
+  .od-tree{display:flex;flex-direction:column;overflow:hidden;}
+  .od-tree .od-tree-list{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;}
+  .od-main{overflow:auto;-webkit-overflow-scrolling:touch;}
   #officeDocsBox .od-back{display:none;}
 }
 /* On a phone the two panes cannot sit side by side, so they become one screen
@@ -23610,9 +23616,35 @@ function officeDocsRepaintTree_(){
 // and a folder that ended up naming its own descendant would hang the archive
 // screen outright rather than merely draw a wrong tree.
 const OFFICE_DOCS_MAX_DEPTH = 8;
+// Narrowing 196 folders to the one you want.
+//
+// "Collapse them by default" was the obvious answer and it is already what
+// happens — officeDocsExpanded_ starts empty, and measured with nothing
+// expanded at all the list is 10,010px against 10,066px with a folder open.
+// The length is 196 folders at 51px each; expansion is 56px of it. Collapsing
+// harder cannot help. What shortens a list this long is being able to filter
+// it, which is what Outlook, Drive and every mail client do with a long folder
+// list, so that is what this is.
+let officeDocsFolderQuery_ = '';
+// A folder survives the filter if it matches, or if anything beneath it does —
+// otherwise filtering for a sub-folder would hide the parent it lives in and
+// the match with it.
+function officeDocsFolderHit_(folders, f, q, depth){
+  if((f.name || '').toLowerCase().indexOf(q) !== -1) return true;
+  if((depth || 0) > OFFICE_DOCS_MAX_DEPTH) return false;
+  return officeDocsChildrenOf_(folders, f.id)
+    .some(c => officeDocsFolderHit_(folders, c, q, (depth || 0) + 1));
+}
+function officeDocsFilterFolders_(value){
+  officeDocsFolderQuery_ = String(value || '').trim().toLowerCase();
+  officeDocsRepaintTree_();
+}
 function officeDocsTreeHtml_(folders, idx, parentId, depth){
   depth = depth || 0;
   if(depth > OFFICE_DOCS_MAX_DEPTH) return '';
+  // Not `q`: the map below declares its own q for attribute quoting, which
+  // shadows this one and puts every use inside the map in its dead zone.
+  const folderQ = officeDocsFolderQuery_;
   const countFor = (folderId, year) => {
     const v = (((idx[folderId] || {}).years) || {})[String(year)];
     return Number((v || {}).n) || 0;
@@ -23631,14 +23663,25 @@ function officeDocsTreeHtml_(folders, idx, parentId, depth){
     officeDocsChildrenOf_(folders, f.id).forEach(c => { n += subtreeTotal(c, d + 1); });
     return n;
   };
-  return officeDocsChildrenOf_(folders, parentId || null).map(f => {
+  const shown = officeDocsChildrenOf_(folders, parentId || null)
+    .filter(f => !folderQ || officeDocsFolderHit_(folders, f, folderQ, depth));
+  if(!shown.length){
+    return depth === 0 && folderQ
+      ? '<div class="empty">No folder matches “' + escapeHtml(officeDocsFolderQuery_) + '”.</div>'
+      : '';
+  }
+  return shown.map(f => {
     const fYears = officeDocsYearsFor_(f);
     const usesYears = fYears.length > 0;
     const kids = officeDocsChildrenOf_(folders, f.id);
     // A folder with neither years nor sub-folders has nothing to expand, so it
     // gets a leaf marker rather than an arrow that would do nothing when pressed.
     const expandable = usesYears || kids.length > 0;
-    const open = expandable && officeDocsExpanded_.has(f.id);
+    // While filtering, a folder kept only because something beneath it matched
+    // is opened so that match is actually on screen — a hit you have to go
+    // hunting for behind a closed arrow is not a hit.
+    const open = expandable && (officeDocsExpanded_.has(f.id) ||
+      (!!folderQ && kids.some(c => officeDocsFolderHit_(folders, c, folderQ, depth + 1))));
     const selected = f.id === officeDocsState_.folderId;
     const total = subtreeTotal(f, depth);
     const rolled = kids.length > 0 && total !== ownTotal(f);
@@ -23776,6 +23819,10 @@ async function renderOfficeDocsModule_(){
     <div class="od-layout">
       <div class="od-tree">
         <div class="sec-title" style="margin:0 0 8px;">Document folders</div>
+        <input id="odFolderFilter" class="field-input od-folder-filter" type="search"
+               placeholder="Filter folders…" aria-label="Filter the folder list"
+               value="${escapeHtml(officeDocsFolderQuery_)}"
+               oninput="officeDocsFilterFolders_(this.value)">
         <div class="od-tree-list">${tree || '<div class="empty">No folders yet.</div>'}</div>
         <p style="font-size:11px;color:var(--muted);margin:10px 0 0;line-height:1.5;">
           Files are stored on Google Drive under <strong>HR Management &gt; Office Documents</strong>,
