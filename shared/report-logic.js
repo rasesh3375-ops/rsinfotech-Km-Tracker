@@ -3519,8 +3519,12 @@ function prePayrollChecks(employees, attByEmp, ym, holidayMap, sal, prevSal, opt
   // raised in March it is too late to grant the leave instead of paying it.
   {
     const m = Number(ym.split('-')[1]);
+    // Number() for the same reason the briefing needs it: elBalance is the
+    // string 'NA' for a Resident Engineer. 'NA' >= 6 happens to be false, so
+    // this behaved — by accident rather than by intent, which is not a
+    // property to leave a payroll screen resting on.
     const who = (m === 12 || m <= 3)
-      ? active.filter(e => (sal[e.id] || {}).elBalance >= PREPAY_EL_AT_RISK).map(nameOf) : [];
+      ? active.filter(e => Number((sal[e.id] || {}).elBalance) >= PREPAY_EL_AT_RISK).map(nameOf) : [];
     add('warn', 'el-at-risk', 'Earned leave heading for encashment',
         PREPAY_EL_AT_RISK + ' days or more still unused. Neither EL nor SL carries forward, ' +
         'so what is not granted before 31 March is encashed at 70% of Basic + HRA.', who);
@@ -3594,8 +3598,17 @@ function briefingFigures(employees, ym, sal, prevSal, opts){
   let elDays = 0, elMoney = 0;
   const elHeavy = [];
   active.forEach(e => {
-    const bal = ((sal || {})[e.id] || {}).elBalance || 0;
-    if(bal <= 0) return;
+    // Number(), not `|| 0`. elBalance is deliberately the STRING 'NA' for a
+    // Resident Engineer — they are outside the leave scheme entirely, and the
+    // Salary Sheet prints that rather than a number they have not earned. 'NA'
+    // is truthy, so `|| 0` let it straight through, `'NA' <= 0` is false so it
+    // was not skipped either, and one resident on the roster turned the running
+    // total into "0NA" and then NaN. The screen read "NaN day(s)" beside a
+    // perfectly correct rupee figure — plEncashmentFor coerces its own input,
+    // so the money survived what the day count did not — and because NaN > 0 is
+    // false the whole earned-leave paragraph silently disappeared with it.
+    const bal = Number(((sal || {})[e.id] || {}).elBalance);
+    if(!(bal > 0)) return;   // also catches NaN, undefined and a plain zero
     elDays += bal;
     elMoney += plEncashmentFor(e, bal).amount;
     if(bal >= BRIEF_EL_AT_RISK) elHeavy.push({ id: e.id, name: e.name || e.id, days: bal });
