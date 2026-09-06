@@ -145,6 +145,37 @@ console.log('\nearned leave, and what it is worth\n');
   }
 }
 
+// ------------------------------------------------- a resident on the roster
+console.log('\na Resident Engineer, who is outside the leave scheme\n');
+{
+  // elBalance is deliberately the STRING 'NA' for a resident — they are not in
+  // the EL/SL scheme and the Salary Sheet prints that rather than a number.
+  // Every fixture here had office staff only, so nothing caught what one
+  // resident did to a running total: "NaN day(s)" on the live August briefing,
+  // beside a rupee figure that was perfectly correct because plEncashmentFor
+  // coerces its own input. And NaN > 0 being false took the whole earned-leave
+  // paragraph out with it.
+  const office = emp({ id: 'O', name: 'Office One', elOpening: 9, leaveOpeningFrom: '2026-04-01' });
+  const resident = emp({ id: 'RE', name: 'Resident One', employeeType: 'resident',
+                         elOpening: 9, leaveOpeningFrom: '2026-04-01' });
+  const att = { O: attendance(), RE: attendance() };
+  const { brief, sal } = build([office, resident], att);
+  check('the resident really does report NA, not a number', sal.RE.elBalance, 'NA');
+  check('the day count is a number, not NaN',
+        Number.isFinite(brief.figures.elDays), true);
+  check('and it counts only the people actually in the scheme',
+        brief.figures.elDays, Number(sal.O.elBalance));
+  check('the resident is not named among those carrying leave',
+        brief.figures.elHeavy.some(x => x.id === 'RE'), false);
+  const t = text(brief);
+  check('the earned-leave paragraph is printed, not silently dropped',
+        /Earned leave stands at/.test(t), true);
+  check('with no NaN anywhere in the prose', /NaN/.test(t), false);
+  check('nor in any figure the screen shows',
+        Object.keys(brief.figures).some(k => typeof brief.figures[k] === 'number' &&
+                                             !Number.isFinite(brief.figures[k])), false);
+}
+
 // -------------------------------------------------------- paragraphs that vanish
 console.log('\na month with nothing to say about something says nothing\n');
 {
