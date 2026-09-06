@@ -187,5 +187,63 @@ console.log('\nthe route kept for the trip\n');
   check('and still fits in one cell', bytes < 20000, true);
 }
 
+// ---------------------------------------------- when the app was not running
+console.log('\na gap while the app was suspended\n');
+{
+  const L2 = vm.runInContext('({trackingResume, trackingGapSummary})', sb);
+  // Drive, then the engineer switches to WhatsApp for six minutes and comes
+  // back 3 km away. Nobody measured that 3 km — not the route, not whether he
+  // drove straight there.
+  const a = leg(L.newTrackingState(), 45, 10);
+  const drove = a.s.vehicleKm;
+  const back = { lat: a.lat + 3 / 111.32, lon: START_LON };
+  const r = L2.trackingResume(a.s, 6 * 60 * 1000, back);
+  check('the gap is recorded', [r.gap.ms, Math.round(r.gap.straightKm)], [360000, 3]);
+  // THE assertion. A guess must not reach the figure that becomes money.
+  check('and not one metre of it joins the paid distance', r.state.vehicleKm, drove);
+  check('nor the walked one', r.state.walkKm, a.s.walkKm);
+  // Without this the next fix extends the journey across the hole: 3 km is
+  // over maxStepKm so it would vanish silently, and a 1.5 km gap would have
+  // been added as though it had been driven under observation.
+  check('the next fix starts fresh rather than bridging the hole', r.state.last, null);
+  const after = leg(r.state, 45, 5, { t0: a.t + 6 * 60000, lat: back.lat });
+  near('driving after the gap is counted normally again',
+       after.s.vehicleKm - drove, 3.75, 0.3);
+}
+{
+  const L2 = vm.runInContext('({trackingResume, trackingGapSummary})', sb);
+  // A glance at a notification is not a tracking failure.
+  const a = leg(L.newTrackingState(), 45, 5);
+  const r = L2.trackingResume(a.s, 4000, { lat: a.lat, lon: START_LON });
+  check('a four-second glance is not recorded as a gap', r.gap, null);
+  check('and does not throw the journey away', r.state.last !== null, true);
+}
+{
+  const L2 = vm.runInContext('({trackingResume, trackingGapSummary})', sb);
+  // No fix on the way back — GPS had not caught up yet.
+  const a = leg(L.newTrackingState(), 45, 5);
+  const r = L2.trackingResume(a.s, 5 * 60000, null);
+  check('a gap with no fix to compare is still recorded', r.gap.ms, 300000);
+  // "We do not know how far it moved" and "it did not move" are different
+  // answers, and only one of them may be shown to HR as a distance.
+  check('but its distance is unknown, not zero', r.gap.straightKm, null);
+}
+{
+  const L2 = vm.runInContext('({trackingResume, trackingGapSummary})', sb);
+  let st = L.newTrackingState();
+  st.last = { lat: START_LAT, lon: START_LON, ts: 0 };
+  st = L2.trackingResume(st, 60000, { lat: START_LAT + 1 / 111.32, lon: START_LON }).state;
+  st.last = { lat: START_LAT, lon: START_LON, ts: 0 };
+  st = L2.trackingResume(st, 120000, null).state;
+  const sum = L2.trackingGapSummary(st);
+  check('the trip reports how many holes it has', sum.count, 2);
+  check('and how long they add up to', sum.ms, 180000);
+  check('with the measured distance totalled', Math.round(sum.straightKm), 1);
+  // The count that stops the total reading as complete when it is not.
+  check('and the unmeasured ones counted separately', sum.unmeasured, 1);
+  check('a trip with no gaps reports none',
+        L2.trackingGapSummary(L.newTrackingState()), { count: 0, ms: 0, straightKm: 0, unmeasured: 0 });
+}
+
 console.log('\n' + (fails.length ? fails.length + ' FAILURE(S):\n  ' + fails.join('\n  ') : 'PASS'));
 process.exit(fails.length ? 1 : 0);
