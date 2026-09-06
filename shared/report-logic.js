@@ -3539,3 +3539,170 @@ function prePayrollChecks(employees, attByEmp, ym, holidayMap, sal, prevSal, opt
     checked: active.length
   };
 }
+
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+function monthLabel(monthVal){
+  const m = /^(\d{4})-(\d{2})/.exec(String(monthVal || ''));
+  return m ? MONTH_NAMES[Number(m[2]) - 1] + ' ' + m[1] : String(monthVal || '');
+}
+
+// ---- monthly briefing ----
+//
+// What a month cost, what moved it, and what is building up — in six
+// paragraphs of English rather than six reports to open and compare.
+//
+// Pure, like prePayrollChecks, and for the same reasons: the caller fetches and
+// computes, this decides what is worth saying. Every figure handed in is one
+// computeSalaryFromAttendance already produced, so a sentence here cannot
+// disagree with the sheet it describes.
+//
+// The wording is generated from the figures, not written out and kept in step
+// by hand — the same rule the salary-heading explanations already follow. A
+// paragraph that names two increments says "two" because two were found, and a
+// month with none does not print the sentence at all. Nothing here has to be
+// remembered when a policy changes.
+const BRIEF_EL_AT_RISK = 6;
+
+// The whole month, added up once, so no paragraph below re-derives a total.
+function briefingFigures(employees, ym, sal, prevSal, opts){
+  opts = opts || {};
+  const dateList = monthDateList_(ym);
+  const monthEnd = dateList[dateList.length - 1];
+  const prevFirst = prevMonthOf_(ym) + '-01';
+  const active = employees.filter(e => e.employmentStatus !== 'left' &&
+                                       employedDuringPeriod_(e, dateList[0], monthEnd));
+  const sum = (map, key, list) => (list || active).reduce((t, e) => t + (((map || {})[e.id] || {})[key] || 0), 0);
+
+  // Increments that took effect this month, read off the salary history rather
+  // than inferred from a figure moving — history is what makes an increment an
+  // increment, and it carries the amount.
+  const increments = [];
+  active.forEach(e => {
+    salaryHistoryOf(e).forEach(h => {
+      if(!h.from || h.from < dateList[0] || h.from > monthEnd) return;
+      const was = ratePayAsOf(e, prevFirst).ratePay;
+      const now = Number(h.ratePay) || 0;
+      if(now === was) return;
+      increments.push({ id: e.id, name: e.name || e.id, from: h.from, was: was, now: now, by: now - was });
+    });
+  });
+  increments.sort((a, b) => Math.abs(b.by) - Math.abs(a.by));
+
+  // Earned leave that turns into money if it is not taken. plEncashmentFor is
+  // the one place that rate lives — 70% of Basic + HRA, a day being a
+  // twenty-fifth of it — so this is what the Encashment Report would pay.
+  let elDays = 0, elMoney = 0;
+  const elHeavy = [];
+  active.forEach(e => {
+    const bal = ((sal || {})[e.id] || {}).elBalance || 0;
+    if(bal <= 0) return;
+    elDays += bal;
+    elMoney += plEncashmentFor(e, bal).amount;
+    if(bal >= BRIEF_EL_AT_RISK) elHeavy.push({ id: e.id, name: e.name || e.id, days: bal });
+  });
+  elHeavy.sort((a, b) => b.days - a.days);
+
+  const ctc = sum(sal, 'ctc'), ctcWas = sum(prevSal, 'ctc');
+  return {
+    month: ym, headcount: active.length,
+    ctc: ctc, ctcWas: ctcWas,
+    ctcMove: ctcWas > 0 ? (ctc - ctcWas) / ctcWas : 0,
+    net: sum(sal, 'netSalary'), gross: sum(sal, 'gross'),
+    pf: sum(sal, 'pf') + sum(sal, 'employerPf') + sum(sal, 'pen'),
+    esi: sum(sal, 'esi') + sum(sal, 'esiEmployer'),
+    pt: sum(sal, 'pt'),
+    increments: increments,
+    incrementCost: increments.reduce((t, i) => t + i.by, 0),
+    loanBalance: active.reduce((t, e) => t + loanBalanceAfterMonth(e, Number(ym.slice(0, 4)), Number(ym.slice(5, 7))), 0),
+    loanPeople: active.filter(e => loanBalanceAfterMonth(e, Number(ym.slice(0, 4)), Number(ym.slice(5, 7))) > 0).length,
+    recovered: sum(sal, 'loanEmi') + sum(sal, 'advance') + sum(sal, 'advanceTemp') + sum(sal, 'retention'),
+    elDays: Math.round(elDays * 10) / 10, elMoney: elMoney, elHeavy: elHeavy,
+    leaveDays: sum(sal, 'leaveDays'),
+    sandwichDays: sum(sal, 'sandwichDays'),
+    policyHalfDays: sum(sal, 'policyHalfDays')
+  };
+}
+// The paragraphs. Each returns a sentence or nothing, and a month with nothing
+// to say about loans simply has no loan paragraph — a briefing padded with
+// "there were no loans this month" every month is one nobody finishes reading.
+function briefingParagraphs(f, checks){
+  const money = n => '₹' + fmtMoney(n);
+  const pct = n => (n >= 0 ? 'up ' : 'down ') + Math.abs(Math.round(n * 1000) / 10) + '%';
+  const list = (arr, fn) => arr.map(fn).join(arr.length === 2 ? ' and ' : ', ');
+  const out = [];
+
+  // 1. What the month cost, and whether that moved.
+  if(f.ctcWas > 0){
+    let p = 'Total cost to company for ' + monthLabel(f.month) + ' is ' + money(f.ctc) +
+            ' across ' + f.headcount + ' people — ' + pct(f.ctcMove) + ' on ' +
+            monthLabel(prevMonthOf_(f.month)) + '.';
+    if(f.increments.length){
+      p += ' ' + (f.increments.length === 1 ? 'One increment took effect' :
+                  f.increments.length + ' increments took effect') + ' this month' +
+           (f.incrementCost ? ', adding ' + money(f.incrementCost) + ' a month between them' : '') +
+           ': ' + list(f.increments.slice(0, 3), i => i.name + ' (' + money(i.was) + ' to ' + money(i.now) + ')') + '.';
+    }
+    out.push(p);
+  } else {
+    out.push('Total cost to company for ' + monthLabel(f.month) + ' is ' + money(f.ctc) +
+             ' across ' + f.headcount + ' people. There is no previous month on file to compare it against.');
+  }
+
+  // 2. What is going out, and to whom.
+  out.push('Net payable is ' + money(f.net) + ' against a gross of ' + money(f.gross) + '. ' +
+           'Statutory comes to ' + money(f.pf) + ' of PF, ' + money(f.esi) + ' of ESI and ' +
+           money(f.pt) + ' of Professional Tax, employer share included.');
+
+  // 3. Anything the pre-payroll check found — the same run, not a second
+  //    opinion, so the briefing and the check cannot contradict each other.
+  if(checks && checks.flags.length){
+    const stop = checks.flags.filter(x => x.level === 'stop');
+    out.push(stop.length
+      ? 'The pre-payroll check found ' + stop.length + ' thing' + (stop.length === 1 ? '' : 's') +
+        ' that had to be fixed before this ran: ' + list(stop, x => x.title.toLowerCase()) + '.'
+      : 'Nothing blocked payroll. The pre-payroll check raised ' + checks.flags.length +
+        ' point' + (checks.flags.length === 1 ? '' : 's') + ' worth a look: ' +
+        list(checks.flags, x => x.title.toLowerCase()) + '.');
+  } else if(checks){
+    out.push('The pre-payroll check found nothing at all — all ' + checks.checked +
+             ' records complete, and no figure moved without a reason on file.');
+  }
+
+  // 4. Leave that becomes money.
+  if(f.elDays > 0){
+    let p = 'Earned leave stands at ' + f.elDays + ' day' + (f.elDays === 1 ? '' : 's') +
+            ' across the roster, worth ' + money(f.elMoney) + ' if it is encashed rather than taken.';
+    if(f.elHeavy.length) p += ' ' + f.elHeavy.length + ' ' +
+      (f.elHeavy.length === 1 ? 'person is' : 'people are') + ' carrying ' + BRIEF_EL_AT_RISK +
+      ' days or more: ' + list(f.elHeavy.slice(0, 4), x => x.name + ' (' + x.days + ')') +
+      '. Neither EL nor SL carries forward past 31 March.';
+    out.push(p);
+  }
+
+  // 5. Money owed to the company.
+  if(f.loanBalance > 0){
+    out.push('Loans and advances outstanding come to ' + money(f.loanBalance) + ' across ' +
+             f.loanPeople + ' ' + (f.loanPeople === 1 ? 'person' : 'people') +
+             ', recovering at ' + money(f.recovered) + ' this month.');
+  }
+
+  // 6. Attendance, only where it cost somebody something.
+  if(f.sandwichDays > 0 || f.policyHalfDays > 0){
+    const bits = [];
+    if(f.sandwichDays) bits.push(f.sandwichDays + ' sandwich day' + (f.sandwichDays === 1 ? '' : 's') +
+      ' charged where a Sunday or holiday sat between two unpaid absences');
+    if(f.policyHalfDays) bits.push(f.policyHalfDays + ' half day' + (f.policyHalfDays === 1 ? '' : 's') +
+      ' deducted under the late-coming and short-leave policy');
+    out.push('On attendance: ' + bits.join(', and ') + '.');
+  }
+  return out;
+}
+function monthlyBriefing(employees, ym, sal, prevSal, checks, opts){
+  const figures = briefingFigures(employees, ym, sal, prevSal, opts);
+  return { month: ym, figures: figures, paragraphs: briefingParagraphs(figures, checks),
+           // Named so a reader can go and check any sentence against the report
+           // it came from. A summary nobody can trace back is a summary nobody
+           // should act on.
+           sources: ['Salary Sheet', 'PF Return', 'ESI Return', 'Loan & Advance Report',
+                     'EL Calculation Sheet', 'Pre-Payroll Check'] };
+}

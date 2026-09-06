@@ -1907,6 +1907,21 @@
 .od-add-sub:hover{border-color:var(--navy);color:var(--navy);}
 .od-year.active{background:var(--cream);font-weight:700;color:var(--navy);}
 
+/* ---- Monthly Briefing ----
+   Prose, so it is set as prose: a measure that stops around 68 characters and
+   line height to match. The four figures above it use the archive's own stat
+   tiles rather than a fifth variant of the same thing. */
+.brief-figs{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:0 0 18px;}
+.brief-body{max-width:68ch;}
+.brief-body p{font-size:14px;line-height:1.7;color:#2C2C28;margin:0 0 14px;}
+.brief-body p:last-child{margin-bottom:0;}
+.brief-src{font-size:11px !important;color:var(--muted) !important;line-height:1.6 !important;
+  border-top:1px dashed var(--line);padding-top:12px;margin-top:18px !important;}
+/* The two-line taste of it on the Dashboard. */
+.brief-peek{border:1px solid var(--line);border-radius:12px;padding:14px 15px;background:var(--paper);}
+.brief-peek p{font-size:12.5px;line-height:1.6;color:#2C2C28;margin:0 0 10px;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
+
 /* ---- Pre-Payroll Check ----
    A flag is a coloured left edge, an icon, what is wrong, why it matters and
    who it is about. The edge carries the severity rather than a coloured
@@ -2718,6 +2733,12 @@
               <span class="gen-accordion-chevron">▼</span>
             </button>
             <div id="reportCardsLandingBox2" style="display:contents"></div>
+            <button type="button" class="gen-accordion-header" data-target="rptSecBriefing" onclick="openReportsCard('rptSecBriefing')" aria-expanded="false">
+              <span class="gen-accordion-num"></span>
+              <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Monthly Briefing</strong>
+                <span class="gen-accordion-desc">The month in six paragraphs — what it cost, what moved it, and what is building up. Written from the reports below it.</span></span>
+              <span class="gen-accordion-chevron">▼</span>
+            </button>
             <button type="button" class="gen-accordion-header" data-target="rptSecSalaryCompare" onclick="openReportsCard('rptSecSalaryCompare')" aria-expanded="false">
               <span class="gen-accordion-num"></span>
               <span class="gen-accordion-headtext"><strong class="gen-accordion-title">Month-wise Salary Comparison</strong>
@@ -3036,6 +3057,20 @@
           <button class="btn full" data-kmt-generate onclick="withBusy(this,'Building report…',renderConsultantSummaryReport)">Generate summary report</button>
           <div style="height:14px"></div>
           <div id="consultantSummaryReportBox"></div>
+        </section>
+        </div>
+
+        <div id="rptSecBriefing" class="hidden gen-accordion-body">
+        <section class="block">
+          <h2 style="margin:0 0 4px;">Monthly Briefing</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Everything the month's reports say, in the order it matters, as sentences rather than six tables to open and compare. Every figure is computed by the same functions those reports use.</p>
+          <div class="row-inline">
+            <div><label class="field">Month</label><select class="field-input" id="briefMonthSel"></select></div>
+            <div><label class="field">Year</label><select class="field-input" id="briefYearSel"></select></div>
+          </div>
+          <button class="btn full" data-kmt-generate onclick="withBusy(this,'Writing the briefing…',renderMonthlyBriefing)">Write the briefing</button>
+          <div style="height:14px"></div>
+          <div id="briefBox"></div>
         </section>
         </div>
 
@@ -3858,7 +3893,9 @@ function getCurrentFYStartYear(){
 // (notably iOS Safari), silently failing to let people pick a different
 // month. These two helpers replace it with a plain Month + Year select
 // pair, which works reliably everywhere.
-const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+// MONTH_NAMES and monthLabel now live in shared/report-logic.js — the monthly
+// briefing writes its own sentences and needs to name a month, and a second
+// copy of a month list is exactly the drift that file exists to prevent.
 // "2026-07" -> "July 2026", for report headings. A heading that read
 // "Attendance Sheet — 2026-07" sat directly above the header's date line, and
 // with that line unlabelled the two together read as an August report for July
@@ -3866,10 +3903,6 @@ const MONTH_NAMES = ['January','February','March','April','May','June','July','A
 // they sort correctly, and the Drive organiser reads the year out of them.
 // Parsed from the string, not through new Date(), which would shift the month
 // in a timezone behind UTC.
-function monthLabel(monthVal){
-  const m = /^(\d{4})-(\d{2})/.exec(String(monthVal || ''));
-  return m ? MONTH_NAMES[Number(m[2]) - 1] + ' ' + m[1] : String(monthVal || '');
-}
 // Every report using this pair is scoped to a financial year, so the picker
 // is too: the year select holds financial years ("2026-27"), and the month
 // select lists April through March in that order — not the calendar's
@@ -13336,6 +13369,72 @@ function prepayPaintStrip_(){
     renderHrSideNav();
   }).catch(() => {});
 }
+
+// ---- Monthly Briefing ----
+//
+// The month as sentences. Same thin-async-half pattern as the Pre-Payroll
+// Check, and it deliberately reuses that check's own result rather than
+// running its own: the briefing that says "nothing blocked payroll" and the
+// screen that says what blocked it must be the same run, or the two will
+// eventually disagree in front of the consultant.
+async function renderMonthlyBriefing(){
+  const box = document.getElementById('briefBox');
+  if(!box) return;
+  const ym = getMonthYearValue('briefMonthSel', 'briefYearSel');
+  if(!ym){ box.innerHTML = '<div class="empty">Pick a month first.</div>'; return; }
+  box.innerHTML = '<div class="empty">Reading the month…</div>';
+
+  const dateList = monthDateList_(ym);
+  const monthDays = dateList.length;
+  const prevList = monthDateList_(prevMonthOf_(ym));
+  let brief;
+  try{
+    const employees = await getEmployees();
+    const holidayMap = await getHolidayMap_local();
+    const active = employees.filter(e => e.employmentStatus !== 'left');
+    // One batched read for the whole roster, and both months come out of it —
+    // an employee's record holds every year, so last month costs nothing extra.
+    const attByEmp = await getAttendanceMany(active.map(e => e.id));
+    const sal = {}, prevSal = {};
+    active.forEach(e => {
+      const att = attByEmp[e.id] || {};
+      if(employedDuringPeriod_(e, dateList[0], dateList[monthDays - 1]))
+        sal[e.id] = computeSalaryFromAttendance(e, att, dateList, monthDays, holidayMap);
+      if(employedDuringPeriod_(e, prevList[0], prevList[prevList.length - 1]))
+        prevSal[e.id] = computeSalaryFromAttendance(e, att, prevList, prevList.length, holidayMap);
+    });
+    const checks = prePayrollChecks(employees, attByEmp, ym, holidayMap, sal, prevSal);
+    brief = monthlyBriefing(employees, ym, sal, prevSal, checks);
+  }catch(err){
+    box.innerHTML = '<div class="empty error" style="line-height:1.6;">Could not write the briefing: ' +
+      escapeHtml((err && err.message) || 'the server did not respond') +
+      '<div style="margin-top:10px;font-size:12px;color:var(--muted);">Nothing has been changed — this only reads.</div></div>';
+    return;
+  }
+  lastMonthlyBriefing_ = brief;
+  const f = brief.figures;
+  const label = monthLabel(ym);
+  const shareText = brief.paragraphs.join('\n\n');
+  stashReportShare('Monthly Briefing — ' + label,
+    'Monthly Briefing - ' + ym + '.txt', shareText, 'text/plain', 'briefBox');
+
+  box.innerHTML = reportActionBar('Monthly Briefing — ' + label, 'briefBox') +
+    `<div class="print-isolate" id="briefPrintArea">${reportLogoHeader('Monthly Briefing — ' + label)}
+    <div class="brief-figs">
+      ${odStat_('Cost to company', '₹' + fmtMoney(f.ctc), f.ctcWas ? (f.ctcMove >= 0 ? 'up ' : 'down ') + Math.abs(Math.round(f.ctcMove * 1000) / 10) + '% on ' + monthLabel(prevMonthOf_(ym)) : 'no previous month')}
+      ${odStat_('Net payable', '₹' + fmtMoney(f.net), 'After every deduction')}
+      ${odStat_('On roll', f.headcount, 'Employed this month')}
+      ${odStat_('Earned leave', f.elDays + ' day(s)', 'Worth ₹' + fmtMoney(f.elMoney) + ' if encashed')}
+    </div>
+    <div class="brief-body">
+      ${brief.paragraphs.map(p => '<p>' + escapeHtml(p) + '</p>').join('')}
+      <p class="brief-src">Every figure above is computed by the same functions these reports use, and can be checked against them: ${escapeHtml(brief.sources.join(', '))}. The wording is generated from those figures — no number here was written by hand or estimated.</p>
+    </div></div>`;
+  openFullscreenView('Monthly Briefing — ' + label, 'briefBox');
+}
+// Kept for the Dashboard preview, so opening the app does not rebuild a whole
+// month to show two sentences.
+let lastMonthlyBriefing_ = null;
 
 // ---- Pre-Payroll Check ----
 //
