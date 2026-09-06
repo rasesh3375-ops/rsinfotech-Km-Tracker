@@ -9301,7 +9301,31 @@ function closeFullscreenHeaderButton(){
   // tab" entry closeFullscreenView() used to reach directly, just by way of
   // history instead of skipping it, so a later real Back press still unwinds
   // correctly rather than landing one level short.
+  //
+  // ...as long as the browser actually goes back. kmtBack() asks and assumes
+  // something comes of it, and that assumption has now been wrong three times:
+  // the engineer handbook (no kmtView entry to fall back to, handled above),
+  // the cold-relaunch restore (one entry painted over another, handled by the
+  // extra pushes in kmtRestoreView), and a document opened from Office
+  // Documents. In that last case history.back() reaches the bottom of the
+  // stack — or an entry whose "Are you sure you want to exit?" a standalone
+  // iOS web app silently swallows — so no popstate replay ever runs,
+  // closeFullscreenView() is never called, and the document just sits there
+  // with a ✕ that does nothing at all. Not a flicker, not a wrong screen:
+  // nothing, which is exactly how HR reported it.
+  //
+  // So for the document viewer the outcome is checked rather than assumed. A
+  // restore that really did run bumps kmtViewEpoch_ as its first act, so an
+  // unchanged epoch with the viewer still on screen means the back went
+  // nowhere and this ✕ has to do the closing itself. Deliberately scoped to
+  // the viewer: every other box's ✕ works, and a fallback is only ever right
+  // where the primary path can be shown to have done nothing.
+  const wasDocViewer = fullscreenActiveId === 'docViewerRoot';
+  const epochBefore = kmtViewEpoch_;
   kmtBack();
+  if(wasDocViewer) setTimeout(() => {
+    if(kmtViewEpoch_ === epochBefore && fullscreenActiveId === 'docViewerRoot') closeFullscreenView();
+  }, 300);
 }
 
 // ---- close the Salary Sheet, asking whether to save a PDF first ----
