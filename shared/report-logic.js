@@ -3728,3 +3728,87 @@ function monthlyBriefing(employees, ym, sal, prevSal, checks, opts){
            sources: ['Salary Sheet', 'PF Return', 'ESI Return', 'Loan & Advance Report',
                      'EL Calculation Sheet', 'Pre-Payroll Check'] };
 }
+
+// ---- PF challan against what the app filed ----
+//
+// A challan is money that has already left the bank. The question worth asking
+// of one is not "what does it say" but "does what it says match what this
+// month's payroll actually came to" — and that second half is arithmetic this
+// app already does, in consultantSummaryTotals, against the same Salary Sheet
+// the PF Return is filed from.
+//
+// So the split is absolute. Reading the document is the only part a model does,
+// and all it may return is what is printed on the page. The comparison below is
+// ordinary subtraction over figures the app computed, and it is what decides
+// whether anything is wrong. No model is asked to judge, agree, or explain a
+// number — it could be confidently wrong about all three, and this is a figure
+// that has already been paid to the EPFO.
+//
+// The five accounts an EPFO challan carries, in the order it prints them.
+const CHALLAN_ACCOUNTS = [
+  { key: 'ac1',  label: 'A/c 1 — EPF',            of: t => t.acct1 },
+  { key: 'ac2',  label: 'A/c 2 — Admin charges',  of: t => t.pf.admin },
+  { key: 'ac10', label: 'A/c 10 — Pension/EPS',   of: t => t.pf.eps },
+  { key: 'ac21', label: 'A/c 21 — EDLI',          of: t => t.pf.edli },
+  { key: 'ac22', label: 'A/c 22 — EDLI admin',    of: t => t.acct22 }
+];
+// One row per figure: what the challan says, what the app makes it, and the
+// difference. Deliberately no tolerance band — every difference is reported
+// exactly as it is, and HR decides whether a rupee of per-member rounding
+// matters. A threshold here would be a policy figure, and inventing one is how
+// a check quietly starts hiding the very thing it was built to find.
+function challanComparison(extracted, totals, opts){
+  opts = opts || {};
+  const rows = [];
+  const num = v => {
+    if(v === null || v === undefined || v === '') return null;
+    // Strip the rupee sign, the thousands separators and any stray spaces a
+    // scanned challan prints — but only AFTER checking a digit survives.
+    // Number('') is 0, so a reader handing back "illegible" or "not clear"
+    // stripped to nothing and became a confident ₹0: a mismatch reported
+    // against a challan that may be perfectly correct, or an agreement with a
+    // zero the app happens to hold. An unread figure has to stay unread.
+    const cleaned = String(v).replace(/[^0-9.-]/g, '');
+    if(!/[0-9]/.test(cleaned)) return null;
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : null;
+  };
+  // Every row but one is money. A member count rendered with a rupee sign
+  // reads as an amount — "Members ₹1" — so the unit travels with the row
+  // rather than being guessed at from the label by whatever draws it.
+  const add = (label, said, ours, unit) => {
+    const s = num(said), o = Math.round(Number(ours) || 0);
+    rows.push({
+      label: label,
+      unit: unit || 'money',
+      challan: s,
+      app: o,
+      // A figure the reader could not find on the page is not a mismatch — it
+      // is a figure nobody has yet compared, and saying otherwise would put a
+      // red mark against a challan that may be perfectly correct.
+      status: s === null ? 'missing' : (Math.round(s) === o ? 'agrees' : 'differs'),
+      difference: s === null ? null : Math.round(s) - o
+    });
+  };
+  CHALLAN_ACCOUNTS.forEach(a => add(a.label, (extracted || {})[a.key], a.of(totals)));
+  add('Total', (extracted || {}).total, totals.pfTotal);
+  if((extracted || {}).memberCount !== undefined && (extracted || {}).memberCount !== null){
+    add('Members', extracted.memberCount, totals.pf.count, 'count');
+  }
+  const differs = rows.filter(r => r.status === 'differs');
+  const missing = rows.filter(r => r.status === 'missing');
+  return {
+    month: (extracted || {}).month || null,
+    trrn: (extracted || {}).trrn || null,
+    establishment: (extracted || {}).establishment || null,
+    rows: rows,
+    // The month printed on the challan against the month the figures were
+    // computed for. A challan compared against the wrong month agrees with
+    // nothing and looks like a disaster, so this is stated separately rather
+    // than folded into the row count.
+    monthMatches: opts.ym && (extracted || {}).month ? String(extracted.month) === String(opts.ym) : null,
+    agrees: differs.length === 0 && missing.length < rows.length,
+    differCount: differs.length,
+    missingCount: missing.length
+  };
+}
