@@ -13403,16 +13403,32 @@ function prepayPaintStrip_(){
 
 // ---- checking a PF challan against what payroll came to ----
 //
-// Two halves, and the line between them is the whole point. Reading the
-// document is the only thing a model does, and all it hands back is what is
-// printed on the page — it is never asked whether a figure is right. The
-// comparison is consultantSummaryTotals, the same function the Consultant
-// Summary and the PF Return are built from, and ordinary subtraction.
+// Two halves, and the line between them is the whole point. One half reads the
+// figures off the document; the other decides whether they are right, and that
+// half is consultantSummaryTotals — the same function the Consultant Summary
+// and the PF Return are built from — plus ordinary subtraction.
 //
-// A challan is money that has already left the bank. A model that decided one
-// looked fine would be a model quietly approving a payment, which is not a job
-// it can be given.
-const CHALLAN_AI_FETCH = { tries: 1, budgetMs: 100000, attemptMs: 95000 };
+// Only the reading half was ever worth paying for, and it no longer is. Drive
+// converts the challan to text for nothing, parseChallanText finds the figures
+// in it, and HR confirms every one of them in a form before anything is
+// compared. That last step is not a formality: it is what makes a mis-read
+// digit a box to correct rather than a wrong answer, which is why the figures
+// are never compared straight off the conversion.
+//
+// A challan is money that has already left the bank. Nothing here may decide
+// one looks fine on its own — that would be a machine quietly approving a
+// payment, which is not a job it can be given.
+const CHALLAN_OCR_FETCH = { tries: 1, budgetMs: 100000, attemptMs: 95000 };
+// The boxes HR confirms, in the order the challan prints them.
+const CHALLAN_FIELDS = [
+  { k: 'ac1',  label: 'A/c 1 — EPF' },
+  { k: 'ac2',  label: 'A/c 2 — Admin charges' },
+  { k: 'ac10', label: 'A/c 10 — Pension/EPS' },
+  { k: 'ac21', label: 'A/c 21 — EDLI' },
+  { k: 'ac22', label: 'A/c 22 — EDLI admin' },
+  { k: 'total', label: 'Total amount' },
+  { k: 'memberCount', label: 'Total members' }
+];
 
 // The app's own PF figures for a month, from the roster and attendance.
 async function challanAppTotals_(ym){
@@ -13424,50 +13440,109 @@ async function challanAppTotals_(ym){
   const attByEmp = await getAttendanceMany(employees.map(e => e.id));
   return consultantSummaryTotals(employees, attByEmp, dateList, monthDays, holidayMap);
 }
+// The form goes up first and the conversion runs behind it, so HR can start
+// typing off the challan straight away instead of watching a spinner. Every
+// box stays editable whatever the conversion comes back with.
 async function challanCheck_(fileId, name){
+  challanForm_(name);
   let res;
   try{
-    res = await backendAction({ action: 'aiReadChallan', fileId: fileId }, CHALLAN_AI_FETCH);
+    res = await backendAction({ action: 'ocrChallan', fileId: fileId }, CHALLAN_OCR_FETCH);
   }catch(err){ res = null; }
-  if(!res){
-    alert('Could not reach the server to read this challan: ' +
-      (lastBackendError || 'it did not answer in time') +
-      '\n\nNothing has been changed — this only reads.');
+  const note = document.getElementById('chOcrNote');
+  // The form is still open and still usable, so a failure here is a note on it
+  // rather than an alert that takes the screen away and loses what was typed.
+  if(!note) return;
+  if(!res || !res.ok){
+    note.className = 'pol-warn';
+    note.textContent = (res && res.message) ||
+      ('Could not reach the server to convert this challan: ' +
+       (lastBackendError || 'it did not answer in time')) +
+      ' Type the figures in from the challan.';
     return;
   }
-  if(!res.ok){
-    // The backend says exactly which of the several different failures this is,
-    // because they need different things done about them.
-    const what = res.error === 'no-key'
-      ? '\n\nUntil that is set, this button cannot read anything. Every other part of the app is unaffected.'
-      : res.error === 'unreadable'
-        ? '\n\nThe figures can still be compared by opening the challan and reading them yourself.'
-        : '';
-    alert((res.message || 'Could not read that challan.') + what);
+  const ex = parseChallanText(res.text || '');
+  if(!ex.found){
+    note.className = 'pol-warn';
+    note.textContent = 'The challan converted, but no figures could be recognised in it. ' +
+      'Type them in from the document.';
     return;
   }
-  const ex = res.extracted || {};
-  // The month printed on the challan decides which month is compared, and when
-  // it could not be read HR is asked rather than guessed at — comparing a
-  // challan against the wrong month makes every line disagree and looks like a
-  // catastrophe rather than a missing field.
-  let ym = /^\d{4}-\d{2}$/.test(String(ex.month || '')) ? String(ex.month) : '';
-  if(!ym){
-    ym = (prompt('The wage month could not be read off this challan.\n\n' +
-      'Which month is it for? Type it as YYYY-MM, e.g. 2026-08.', prepayDefaultMonth_()) || '').trim();
-    if(!/^\d{4}-\d{2}$/.test(ym)) return;
+  CHALLAN_FIELDS.forEach(f => {
+    const el = document.getElementById('chFld_' + f.k);
+    if(el && ex[f.k] !== null && ex[f.k] !== undefined) el.value = String(ex[f.k]);
+  });
+  const put = (id, v) => { const el = document.getElementById(id); if(el && v) el.value = String(v); };
+  put('chFld_month', ex.month);
+  put('chFld_trrn', ex.trrn);
+  // Reliable means the five accounts add up to the total printed on the same
+  // page. When they do not, nothing about the reading is trusted and the note
+  // says so in those words — a quiet pre-fill of figures that failed their own
+  // arithmetic is exactly how a wrong number would get confirmed by habit.
+  if(ex.reliable){
+    note.className = '';
+    note.textContent = 'Filled in from the challan — the five accounts add up to the total ' +
+      'printed on it. Check them against the document, then compare.';
+  }else{
+    note.className = 'pol-warn';
+    note.textContent = 'Filled in from the challan, but the accounts do not add up to the total ' +
+      'on it, so the reading is not trusted. Check every box against the document before comparing.';
+  }
+}
+// The form. Deliberately in docViewerRoot, the same place the result lands, so
+// comparing replaces the form rather than stacking a second screen behind it.
+function challanForm_(name){
+  const box = document.getElementById('docViewerRoot');
+  if(!box) return;
+  const money = CHALLAN_FIELDS.filter(f => f.k !== 'memberCount');
+  box.classList.remove('hidden');
+  box.innerHTML = reportActionBar('Challan check — ' + name, 'docViewerRoot') +
+    `<div class="print-isolate">${reportLogoHeader('Challan check — ' + escapeHtml(name))}
+    <p id="chOcrNote" style="font-size:12px;color:var(--muted);line-height:1.6;margin:0 0 12px;">Reading the challan…</p>
+    <div class="row-inline">
+      <div><label class="field">Wage month</label>
+        <input class="field-input" type="month" id="chFld_month"></div>
+      <div><label class="field">TRRN</label>
+        <input class="field-input" id="chFld_trrn" placeholder="as printed"></div>
+    </div>
+    ${money.map(f => `<label class="field">${escapeHtml(f.label)}</label>
+      <input class="field-input" inputmode="decimal" id="chFld_${f.k}" placeholder="as printed on the challan">`).join('')}
+    <label class="field">Total members</label>
+    <input class="field-input" inputmode="numeric" id="chFld_memberCount" placeholder="leave blank if the challan does not print it">
+    <div class="row-inline" style="margin:14px 0 0;">
+      <button class="btn full" onclick="withBusy(this,'Comparing…',()=>challanCompare_(${JSON.stringify(name)}))">Compare with payroll</button>
+    </div>
+    <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:14px 0 0;">
+      A box left empty is reported as not compared, never as zero — the Nov 2025 challan prints no
+      member count at all, and a blank read as 0 would say every member was unaccounted for.
+      Rupee signs and commas are fine. Nothing is saved, and the challan never leaves your Google
+      account: Drive converts it to text in the same account that stores it.
+    </p></div>`;
+  openFullscreenView('Challan check — ' + name, 'docViewerRoot');
+}
+async function challanCompare_(name){
+  const val = id => (document.getElementById(id) || {}).value || '';
+  const ex = { trrn: val('chFld_trrn').trim() || null, month: val('chFld_month').trim() || null };
+  CHALLAN_FIELDS.forEach(f => { const v = val('chFld_' + f.k).trim(); ex[f.k] = v === '' ? null : v; });
+  // The month decides which month is compared, so it is asked for rather than
+  // guessed at — a challan compared against the wrong month disagrees on every
+  // line and looks like a catastrophe rather than a blank field.
+  const ym = String(ex.month || '');
+  if(!/^\d{4}-\d{2}$/.test(ym)){
+    alert('Which month is this challan for? Fill in the wage month before comparing.');
+    return;
   }
   let totals;
   try{ totals = await challanAppTotals_(ym); }
   catch(err){
-    alert('Read the challan, but could not work out what ' + monthLabel(ym) +
-      ' came to: ' + ((err && err.message) || 'the server did not respond'));
+    alert('Could not work out what ' + monthLabel(ym) + ' came to: ' +
+      ((err && err.message) || 'the server did not respond') +
+      '\n\nThe figures you typed are still on the form.');
     return;
   }
-  const cmp = challanComparison(ex, totals, { ym: ym });
-  challanShow_(cmp, name, ym, res);
+  challanShow_(challanComparison(ex, totals, { ym: ym }), name, ym);
 }
-function challanShow_(cmp, name, ym, res){
+function challanShow_(cmp, name, ym){
   const box = document.getElementById('docViewerRoot');
   if(!box) return;
   // Rows carry their own unit — a head count must not come out as "₹1".
@@ -13505,7 +13580,7 @@ function challanShow_(cmp, name, ym, res){
       <thead><tr><th>Figure</th><th class="num">On the challan</th><th class="num">This app</th><th class="num">Difference</th><th></th></tr></thead>
       <tbody>${rows}</tbody></table></div>
     <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:14px 0 0;">
-      The figures in the middle column were read off the document by Claude, which was asked to copy what is printed and nothing else — it was not asked whether any of them is correct. The right-hand column is this app's own arithmetic for ${escapeHtml(monthLabel(ym))}, from consultantSummaryTotals, the same function the Consultant Summary and the PF Return are built from. The comparison is subtraction. Nothing has been saved, and no employee name, salary or bank detail left your Google account — only the challan itself was sent.
+      The figures in the middle column are the ones confirmed on the form — read off the document by Drive's own conversion where it could, and by you where it could not. Nothing was asked whether any of them is correct. The right-hand column is this app's own arithmetic for ${escapeHtml(monthLabel(ym))}, from consultantSummaryTotals, the same function the Consultant Summary and the PF Return are built from. The comparison is subtraction, with no tolerance band: a rupee of difference is shown as a rupee of difference, and whether that matters is HR's call and the PF consultant's, not this screen's. Nothing has been saved and nothing left your Google account.
     </p></div>`;
   openFullscreenView('Challan check — ' + name, 'docViewerRoot');
   addActivityLog('Checked the PF challan "' + name + '" against ' + monthLabel(ym) +
