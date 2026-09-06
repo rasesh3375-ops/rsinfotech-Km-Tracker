@@ -3309,7 +3309,15 @@ function prePayrollChecks(employees, attByEmp, ym, holidayMap, sal, prevSal, opt
   const monthEnd = dateList[dateList.length - 1];
   const active = employees.filter(e => e.employmentStatus !== 'left' &&
                                        employedDuringPeriod_(e, dateList[0], monthEnd));
+  // A month that has not finished yet. Several checks mean something different
+  // in one, and saying "must fix" about a month still being worked is how this
+  // screen first managed to flag 32 of 40 people over nothing.
+  const inProgress = ym === String(today).slice(0, 7);
   const nameOf = e => ({ id: e.id, name: e.name || e.id });
+  // The same, carrying the one detail that makes the flag actionable without
+  // opening the record — "12 days", "advance recovered". A list of names tells
+  // HR who; a list of names with reasons tells them what to do next.
+  const noted = (e, note) => ({ id: e.id, name: e.name || e.id, note: note });
   const flags = [];
   const flagged = new Set();
   const add = (level, key, title, detail, who) => {
@@ -3334,13 +3342,19 @@ function prePayrollChecks(employees, attByEmp, ym, holidayMap, sal, prevSal, opt
         if(new Date(d + 'T00:00:00').getDay() === 0) return;
         n++;
       });
-      if(n){ who.push(nameOf(e)); perEmp[e.id] = n; }
+      if(n){ who.push(noted(e, n + (n === 1 ? ' day' : ' days'))); perEmp[e.id] = n; }
     });
     const total = Object.keys(perEmp).reduce((t, k) => t + perEmp[k], 0);
-    add('stop', 'attendance-incomplete', 'Attendance not complete',
+    // A month still running is a different statement. Nothing is wrong with
+    // the 1st to the 5th being unmarked on the 6th — that is simply how a month
+    // is worked. Saying "must fix" there put the screen into a state where 32
+    // of 40 people were flagged and none of it needed doing.
+    add(inProgress ? 'warn' : 'stop', 'attendance-incomplete',
+        inProgress ? 'Attendance not marked yet' : 'Attendance not complete',
         total + ' day(s) unmarked across ' + who.length + ' ' +
         (who.length === 1 ? 'person' : 'people') +
-        '. Payroll would pay these as absent.', who);
+        (inProgress ? '. This month is still running, so this is only where it stands today.'
+                    : '. Payroll would pay these as absent.'), who);
   }
 
   // --- 2. No Rate of Pay ---------------------------------------------------
@@ -3367,26 +3381,56 @@ function prePayrollChecks(employees, attByEmp, ym, holidayMap, sal, prevSal, opt
   });
 
   // --- 4. Net pay moved with nothing on record to explain it ---------------
+  // Not "unexplained pay", because on an unchanged Rate of Pay there is no such
+  // thing. Net is gross less deductions, gross is the rate less the leave taken
+  // off it, and the deductions are PF, ESI, PT and the recoveries — so with the
+  // rate fixed, every rupee of a month-on-month move is one of those, exactly.
+  // The arithmetic is closed, and a check hunting for a residue would find none.
+  //
+  // The first version did not know that. It flagged any move over 15% as a
+  // must-fix while its own wording admitted the cause was "usually attendance, a
+  // loan or an advance" — five of forty people in a live August, every one of
+  // them a month worked normally. A must-fix that fires every month on ordinary
+  // business teaches HR to skip the whole screen.
+  //
+  // So it states the cause instead of implying a fault: whichever of leave,
+  // recoveries or the statutory deductions accounts for most of the move, named
+  // against each person. Worth a look, not must fix — a real error still shows
+  // up here, but as the odd one out among reasons that make sense.
   {
-    const who = [], detail = {};
+    const who = [];
+    const rupeesOf = n => Math.abs(Math.round(n));
     active.forEach(e => {
       const now = sal[e.id], was = prevSal && prevSal[e.id];
       if(!now || !was || !(was.netSalary > 0)) return;
       const move = Math.abs(now.netSalary - was.netSalary) / was.netSalary;
       if(move < PREPAY_PAY_MOVE_PCT) return;
-      // A recorded increment, or a heading change, explains it — those are
-      // salary history, which ratePayAsOf reads. Silent only when the rate is
-      // the same in both months and the pay moved anyway.
+      // A recorded increment already explains itself on the salary history, and
+      // is the one thing HR does not need telling about.
       const rNow = ratePayAsOf(e, dateList[0]).ratePay;
       const rWas = ratePayAsOf(e, prevMonthOf_(ym) + '-01').ratePay;
       if(rNow !== rWas) return;
-      who.push(nameOf(e));
-      detail[e.id] = Math.round(move * 100);
+      const rec = s => (s.loanEmi || 0) + (s.advance || 0) + (s.advanceTemp || 0) + (s.retention || 0);
+      const parts = [
+        { d: (now.leaveAmount || 0) - (was.leaveAmount || 0),
+          say: (now.leaveDays || 0) > (was.leaveDays || 0)
+            ? Math.round((now.leaveDays - was.leaveDays) * 10) / 10 + ' more leave day(s)'
+            : Math.round((was.leaveDays - now.leaveDays) * 10) / 10 + ' fewer leave day(s)' },
+        { d: rec(now) - rec(was),
+          say: rec(now) > rec(was) ? rupeesOf(rec(now) - rec(was)) + ' more recovered'
+                                   : rupeesOf(rec(now) - rec(was)) + ' less recovered' },
+        { d: ((now.pf || 0) + (now.esi || 0) + (now.pt || 0)) -
+             ((was.pf || 0) + (was.esi || 0) + (was.pt || 0)),
+          say: 'a change in PF, ESI or PT' }
+      ];
+      parts.sort((a, b) => Math.abs(b.d) - Math.abs(a.d));
+      const dir = now.netSalary > was.netSalary ? 'up' : 'down';
+      who.push(noted(e, dir + ' ' + Math.round(move * 100) + '%, ' +
+        (Math.abs(parts[0].d) >= 1 ? parts[0].say : 'no single cause stands out')));
     });
-    const worst = who.length ? Math.max.apply(null, who.map(w => detail[w.id])) : 0;
-    add('stop', 'pay-moved', 'Net pay moved with no increment recorded',
-        'Up to ' + worst + '% against last month on an unchanged Rate of Pay — ' +
-        'usually attendance, a loan or an advance, and worth confirming it is meant.', who);
+    add('warn', 'pay-moved', 'Pay changed materially against last month',
+        'The Rate of Pay is unchanged for these, so the move is leave, a recovery or ' +
+        'statutory — the main cause is named against each. Worth confirming it is meant.', who);
   }
 
   // --- 5. Crossed the ESI ceiling mid-period -------------------------------

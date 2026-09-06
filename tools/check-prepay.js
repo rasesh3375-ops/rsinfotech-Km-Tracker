@@ -207,26 +207,71 @@ console.log('\nan increment that has come and gone\n');
         keys(res).includes('increment-due'), false);
 }
 
-// -------------------------------------------------------------- pay moved silently
-console.log('\npay that moved with nothing on record to explain it\n');
+// -------------------------------------------------------------- pay that moved
+console.log('\npay that moved, and what moved it\n');
 {
-  // Same Rate of Pay both months; August is half absent, so the net drops far
-  // enough to be worth a word before it is paid.
+  // Same Rate of Pay both months; August is half absent. The move is real and
+  // worth seeing — but it is leave, not a fault, and the flag must say so.
   const att = fullAttendance();
   LIST.slice(0, 14).forEach(d => { if (att[d]) att[d] = { code: 'A' }; });
   const res = run([emp()], { E1: att });
-  check('a large drop on an unchanged rate is flagged', whoOf(res, 'pay-moved'), ['E1']);
+  const f = res.flags.find(f => f.key === 'pay-moved');
+  check('the move is reported', !!f, true);
+  check('as something to look at, not something to fix — its cause is ordinary',
+        f.level, 'warn');
+  check('and the reason is named against the person, not left to be guessed',
+        /leave day/.test((f.who[0] || {}).note || ''), true);
+  check('with the direction and size', /^down \d+%/.test((f.who[0] || {}).note || ''), true);
 }
 {
-  // A recorded increment explains the move, so it must not fire. This is the
-  // one that would otherwise flag every promotion in the company.
+  // A recorded increment explains itself on the salary history and is the one
+  // thing HR does not need telling about.
   const e = emp({
     ratePay: 45000,
     salaryHistory: [{ from: '2020-01-01', ratePay: 30000, salaryHeading: 'managerial' },
                     { from: '2026-08-01', ratePay: 45000, salaryHeading: 'managerial' }]
   });
   const res = run([e], { E1: fullAttendance() });
-  check('a recorded increment is not "unexplained"', keys(res).includes('pay-moved'), false);
+  check('a recorded increment is not reported at all', keys(res).includes('pay-moved'), false);
+}
+{
+  // Recoveries, not leave: an advance recovered this month and not last. The
+  // cause named must be the recovery, or the flag sends HR to the attendance
+  // sheet for something that is not there.
+  const e = emp({ advanceHistory: [{ month: '2026-08', advance: 9000 }] });
+  const res = run([e], { E1: fullAttendance() });
+  const f = res.flags.find(f => f.key === 'pay-moved');
+  check('a recovery is picked out as the cause, not leave',
+        /recovered/.test(((f || {}).who || [{}])[0].note || ''), true);
+}
+
+// ------------------------------------------------------------ month in progress
+console.log('\na month that has not finished yet\n');
+{
+  // The 6th of the month, nothing marked yet. Every one of those unmarked days
+  // is correct and none of them needs doing — the screen opened on exactly this
+  // and flagged 32 of 40 people over nothing.
+  const att = fullAttendance();
+  LIST.forEach(d => delete att[d]);
+  const res = L.prePayrollChecks([emp()], { E1: att }, YM, HOLIDAYS,
+    { E1: L.computeSalaryFromAttendance(emp(), att, LIST, LIST.length, HOLIDAYS) },
+    { E1: L.computeSalaryFromAttendance(emp(), att, PLIST, PLIST.length, HOLIDAYS) },
+    { today: '2026-08-06' });
+  const f = res.flags.find(f => f.key === 'attendance-incomplete');
+  check('unmarked days in a running month are still reported', !!f, true);
+  check('but not as a must-fix', f.level, 'warn');
+  check('and the wording says the month is still running',
+        /still running/.test(f.detail), true);
+  check('nothing is a must-fix in a month nobody has finished working',
+        res.counts.stop, 0);
+}
+{
+  // The same month, finished. Now it is a blocker.
+  const att = fullAttendance();
+  delete att['2026-08-11'];
+  const res = run([emp()], { E1: att });
+  check('the same gap in a finished month IS a must-fix',
+        res.flags.find(f => f.key === 'attendance-incomplete').level, 'stop');
 }
 
 // ------------------------------------------------------------------- the counts
