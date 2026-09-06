@@ -3642,6 +3642,15 @@ function briefingParagraphs(f, checks){
   const money = n => '₹' + fmtMoney(n);
   const pct = n => (n >= 0 ? 'up ' : 'down ') + Math.abs(Math.round(n * 1000) / 10) + '%';
   const list = (arr, fn) => arr.map(fn).join(arr.length === 2 ? ' and ' : ', ');
+  // Names them all while the list is short enough to read, and says how many it
+  // left out when it is not. A sentence that counts four increments and then
+  // names three reads as an omission rather than a summary — the reader is left
+  // counting, and wondering which one is missing and why. The count and the
+  // names have to agree, or the paragraph undermines the figure above it.
+  const NAMED_IN_FULL = 5;
+  const named = (arr, fn) => arr.length <= NAMED_IN_FULL
+    ? list(arr, fn)
+    : list(arr.slice(0, NAMED_IN_FULL), fn) + ', and ' + (arr.length - NAMED_IN_FULL) + ' more';
   const out = [];
 
   // 1. What the month cost, and whether that moved.
@@ -3653,7 +3662,7 @@ function briefingParagraphs(f, checks){
       p += ' ' + (f.increments.length === 1 ? 'One increment took effect' :
                   f.increments.length + ' increments took effect') + ' this month' +
            (f.incrementCost ? ', adding ' + money(f.incrementCost) + ' a month between them' : '') +
-           ': ' + list(f.increments.slice(0, 3), i => i.name + ' (' + money(i.was) + ' to ' + money(i.now) + ')') + '.';
+           ': ' + named(f.increments, i => i.name + ' (' + money(i.was) + ' to ' + money(i.now) + ')') + '.';
     }
     out.push(p);
   } else {
@@ -3687,7 +3696,7 @@ function briefingParagraphs(f, checks){
             ' across the roster, worth ' + money(f.elMoney) + ' if it is encashed rather than taken.';
     if(f.elHeavy.length) p += ' ' + f.elHeavy.length + ' ' +
       (f.elHeavy.length === 1 ? 'person is' : 'people are') + ' carrying ' + BRIEF_EL_AT_RISK +
-      ' days or more: ' + list(f.elHeavy.slice(0, 4), x => x.name + ' (' + x.days + ')') +
+      ' days or more: ' + named(f.elHeavy, x => x.name + ' (' + x.days + ')') +
       '. Neither EL nor SL carries forward past 31 March.';
     out.push(p);
   }
