@@ -3252,3 +3252,246 @@ function consultantSummaryCsv(t){
     ]
   };
 }
+
+// ---- pre-payroll check ----
+//
+// Everything that will be wrong with a month's payroll, found before it is
+// paid rather than after. Pure: the caller fetches the roster, the attendance
+// and the holidays and hands them in, exactly as computeSalaryFromAttendance
+// is handed its attendance — so the same checks can run from a screen, from a
+// scheduled email, or from tools/check-reports.js with no browser at all.
+//
+// Not one new figure is worked out here. Every amount comes from
+// computeSalaryFromAttendance, every code from resolvedAttendanceCode_, every
+// rate from ratePayAsOf — this file decides only what is worth telling HR
+// about, never what a number is. That is the whole reason it can be trusted
+// against a payroll it is checking.
+const PREPAY_PAY_MOVE_PCT = 0.15;      // a month-on-month net move worth explaining
+const PREPAY_RECOVERY_PCT = 0.50;      // recoveries against net that warrant a word
+const PREPAY_EL_AT_RISK = 6;           // EL days that will be lost or paid out if unused
+const PREPAY_PT_YEAR_CAP = 2500;       // PT is capped at this for the financial year
+
+// One month back from a 'YYYY-MM' — integer month arithmetic, never a Date,
+// because a date-only string parses as UTC midnight and in a timezone behind
+// UTC the 1st lands in the previous month (see CLAUDE.md).
+function prevMonthOf_(ym){
+  let [y, m] = String(ym).split('-').map(Number);
+  m -= 1; if(m === 0){ m = 12; y -= 1; }
+  return y + '-' + String(m).padStart(2, '0');
+}
+function monthDateList_(ym){
+  const [y, m] = String(ym).split('-').map(Number);
+  const days = new Date(y, m, 0).getDate();
+  const out = [];
+  for(let d = 1; d <= days; d++) out.push(y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0'));
+  return out;
+}
+// The ESI half-yearly contribution period a date falls in — April-September or
+// October-March, the same year boundary everything else in this app uses. Two
+// dates in the same period matter because of "once covered, always covered":
+// crossing the ceiling mid-period does NOT stop the deduction.
+function esiPeriodKey_(dateStr){
+  const [y, m] = String(dateStr).split('-').map(Number);
+  return m >= 4 && m <= 9 ? y + '-AS' : (m >= 10 ? y : y - 1) + '-OM';
+}
+// A flag, in the shape the screen and any future email both render.
+function prepayFlag_(level, key, title, detail, who){
+  return { level: level, key: key, title: title, detail: detail, who: who || [] };
+}
+// Every check, over one month. `sal` is a map of employee id to the salary
+// object computeSalaryFromAttendance already returned for this month, and
+// `prevSal` the same for the month before — passed in rather than computed
+// here so the arithmetic has exactly one home.
+function prePayrollChecks(employees, attByEmp, ym, holidayMap, sal, prevSal, opts){
+  opts = opts || {};
+  const today = opts.today || todayStr();
+  const dateList = monthDateList_(ym);
+  const monthEnd = dateList[dateList.length - 1];
+  const active = employees.filter(e => e.employmentStatus !== 'left' &&
+                                       employedDuringPeriod_(e, dateList[0], monthEnd));
+  const nameOf = e => ({ id: e.id, name: e.name || e.id });
+  const flags = [];
+  const flagged = new Set();
+  const add = (level, key, title, detail, who) => {
+    if(!who.length) return;
+    who.forEach(w => flagged.add(w.id));
+    flags.push(prepayFlag_(level, key, title, detail, who));
+  };
+
+  // --- 1. Attendance not complete -----------------------------------------
+  // A day with no code that is not a Sunday and not a declared holiday, up to
+  // today. computeAttendanceSummary scores exactly these as absent, so payroll
+  // would pay them as absent — which is what makes this the first check.
+  {
+    const who = [], perEmp = {};
+    active.forEach(e => {
+      const att = attByEmp[e.id] || {};
+      let n = 0;
+      dateList.forEach(d => {
+        if(d > today || d > monthEnd) return;
+        if(att[d]) return;
+        if(holidayMap && holidayMap[d]) return;
+        if(new Date(d + 'T00:00:00').getDay() === 0) return;
+        n++;
+      });
+      if(n){ who.push(nameOf(e)); perEmp[e.id] = n; }
+    });
+    const total = Object.keys(perEmp).reduce((t, k) => t + perEmp[k], 0);
+    add('stop', 'attendance-incomplete', 'Attendance not complete',
+        total + ' day(s) unmarked across ' + who.length + ' ' +
+        (who.length === 1 ? 'person' : 'people') +
+        '. Payroll would pay these as absent.', who);
+  }
+
+  // --- 2. No Rate of Pay ---------------------------------------------------
+  {
+    const who = active.filter(e => !(ratePayAsOf(e, dateList[0]).ratePay > 0)).map(nameOf);
+    add('stop', 'no-rate', 'No Rate of Pay on record',
+        'Nothing to pay them from — the Salary Sheet would show zero.', who);
+  }
+
+  // --- 3. The same identifier on two people --------------------------------
+  // A duplicated bank account is the cheapest fraud and typo check there is;
+  // a duplicated UAN or PAN is a filing that will be rejected.
+  [['accountNumber', 'bank account'], ['uan', 'UAN'], ['pan', 'PAN']].forEach(([field, label]) => {
+    const seen = {};
+    active.forEach(e => {
+      const v = String(e[field] || '').replace(/\s+/g, '').toUpperCase();
+      if(!v) return;
+      (seen[v] = seen[v] || []).push(e);
+    });
+    const who = [];
+    Object.keys(seen).forEach(v => { if(seen[v].length > 1) seen[v].forEach(e => who.push(nameOf(e))); });
+    add('stop', 'duplicate-' + field, 'Two employees share one ' + label,
+        'The same ' + label + ' is on more than one record. One of them is wrong.', who);
+  });
+
+  // --- 4. Net pay moved with nothing on record to explain it ---------------
+  {
+    const who = [], detail = {};
+    active.forEach(e => {
+      const now = sal[e.id], was = prevSal && prevSal[e.id];
+      if(!now || !was || !(was.netSalary > 0)) return;
+      const move = Math.abs(now.netSalary - was.netSalary) / was.netSalary;
+      if(move < PREPAY_PAY_MOVE_PCT) return;
+      // A recorded increment, or a heading change, explains it — those are
+      // salary history, which ratePayAsOf reads. Silent only when the rate is
+      // the same in both months and the pay moved anyway.
+      const rNow = ratePayAsOf(e, dateList[0]).ratePay;
+      const rWas = ratePayAsOf(e, prevMonthOf_(ym) + '-01').ratePay;
+      if(rNow !== rWas) return;
+      who.push(nameOf(e));
+      detail[e.id] = Math.round(move * 100);
+    });
+    const worst = who.length ? Math.max.apply(null, who.map(w => detail[w.id])) : 0;
+    add('stop', 'pay-moved', 'Net pay moved with no increment recorded',
+        'Up to ' + worst + '% against last month on an unchanged Rate of Pay — ' +
+        'usually attendance, a loan or an advance, and worth confirming it is meant.', who);
+  }
+
+  // --- 5. Crossed the ESI ceiling mid-period -------------------------------
+  // Once covered, always covered until the contribution period ends. This is
+  // the one HR gets wrong, because the deduction looks like it should stop.
+  {
+    const who = [];
+    const period = esiPeriodKey_(dateList[0]);
+    const prevFirst = prevMonthOf_(ym) + '-01';
+    active.forEach(e => {
+      const asOf = ratePayAsOf(e, dateList[0]);
+      const heading = SALARY_HEADINGS[asOf.salaryHeading];
+      if(!heading || !heading.esi) return;
+      const ceiling = e.esiDisabled === 'yes' ? ESI_RULES.disabledCeiling : ESI_RULES.wageCeiling;
+      // Judged on the Rate of Pay, not on the gross the salary object carries.
+      // That gross is already reduced for absence, so an ordinary month with a
+      // week of leave in it dips under the ceiling and the month after reads as
+      // a crossing — and a new joiner, who has no previous month at all, reads
+      // as one every time. Neither is a wage that went up, which is the only
+      // thing this flag exists to say.
+      const rateNow = asOf.ratePay, rateWas = ratePayAsOf(e, prevFirst).ratePay;
+      if(!(rateWas > 0) || !(rateNow > 0)) return;   // nothing to compare against yet
+      if(rateNow > ceiling && rateWas <= ceiling &&
+         period === esiPeriodKey_(prevFirst)) who.push(nameOf(e));
+    });
+    const end = period.slice(-2) === 'AS' ? '30 September' : '31 March';
+    add('warn', 'esi-crossed', 'Crossed the ESI ceiling this month',
+        'Gross is now above ' + fmtMoney(ESI_RULES.wageCeiling) + ', but once covered, always ' +
+        'covered — keep deducting to ' + end + ', the end of this contribution period.', who);
+  }
+
+  // --- 6. Recoveries taking more than half the pay -------------------------
+  {
+    const who = [];
+    active.forEach(e => {
+      const s = sal[e.id];
+      if(!s || !(s.netSalary > 0)) return;
+      const rec = (s.loanEmi || 0) + (s.advance || 0) + (s.advanceTemp || 0) + (s.retention || 0);
+      if(rec > 0 && rec / (rec + s.netSalary) > PREPAY_RECOVERY_PCT) who.push(nameOf(e));
+    });
+    add('warn', 'recoveries-high', 'Recoveries above half of pay',
+        'Loan, advance and retention together take more than half of what they would ' +
+        'otherwise be paid.', who);
+  }
+
+  // --- 7. Professional Tax annual cap --------------------------------------
+  {
+    const who = active.filter(e => {
+      const paid = Number(e.ptPaidThisYear) || 0;
+      const s = sal[e.id];
+      return s && s.pt > 0 && paid + s.pt >= PREPAY_PT_YEAR_CAP;
+    }).map(nameOf);
+    add('warn', 'pt-cap', 'Professional Tax reaches its yearly cap',
+        'PT is capped at ' + fmtMoney(PREPAY_PT_YEAR_CAP) + ' a financial year — this month ' +
+        'takes them to it, so nothing more should come out until April.', who);
+  }
+
+  // --- 8. Marked present on a day nobody worked ----------------------------
+  {
+    const who = [];
+    active.forEach(e => {
+      const att = attByEmp[e.id] || {};
+      const hit = dateList.some(d => {
+        const entry = att[d];
+        if(!entry || !/^(P|SHORT)$/.test(entry.code || '')) return false;
+        return !!(holidayMap && holidayMap[d]) || new Date(d + 'T00:00:00').getDay() === 0;
+      });
+      if(hit) who.push(nameOf(e));
+    });
+    add('warn', 'present-on-holiday', 'Marked present on a Sunday or declared holiday',
+        'Usually a marking error. Where it is genuine, it belongs in the Overtime Report ' +
+        'rather than as a present day.', who);
+  }
+
+  // --- 9. Increment already due --------------------------------------------
+  {
+    const who = active.filter(e => e.nextIncrement && e.nextIncrement <= monthEnd &&
+      !salaryHistoryOf(e).some(h => h.from && h.from >= e.nextIncrement)).map(nameOf);
+    add('warn', 'increment-due', 'Increment due and not recorded',
+        'Their next increment date has passed with no salary history entry against it, ' +
+        'so this month pays at the old rate.', who);
+  }
+
+  // --- 10. Earned leave that will have to be paid out ----------------------
+  // Only worth saying in the closing months: raised in April it is noise, and
+  // raised in March it is too late to grant the leave instead of paying it.
+  {
+    const m = Number(ym.split('-')[1]);
+    const who = (m === 12 || m <= 3)
+      ? active.filter(e => (sal[e.id] || {}).elBalance >= PREPAY_EL_AT_RISK).map(nameOf) : [];
+    add('warn', 'el-at-risk', 'Earned leave heading for encashment',
+        PREPAY_EL_AT_RISK + ' days or more still unused. Neither EL nor SL carries forward, ' +
+        'so what is not granted before 31 March is encashed at 70% of Basic + HRA.', who);
+  }
+
+  const order = { stop: 0, warn: 1 };
+  flags.sort((a, b) => order[a.level] - order[b.level]);
+  return {
+    month: ym,
+    flags: flags,
+    counts: {
+      stop: flags.filter(f => f.level === 'stop').length,
+      warn: flags.filter(f => f.level === 'warn').length,
+      clear: active.length - flagged.size
+    },
+    checked: active.length
+  };
+}
