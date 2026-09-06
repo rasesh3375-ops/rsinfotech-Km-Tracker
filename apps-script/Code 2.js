@@ -1066,7 +1066,39 @@ function organiseReportsByYear() {
 
 // Shared reference data. Policy and configuration, nothing about anybody's pay.
 var ENGINEER_SHARED_READ = ['holidays', 'geofences', 'rate_per_km',
-  'company_profile', 'employee_handbook', 'resident_policy_text'];
+  'company_profile'];
+// The two handbooks are NOT shared reading, which is why they are not in the
+// list above. A Resident Engineer works to the Resident Engineer Policy and a
+// Field or WFH engineer works to the full Employee Handbook; each is entitled
+// to their own and neither to the other's. The engineer app has drawn that
+// line since the handbook was added, but only on screen — both keys sat in
+// the shared list, so the rule was a rendering choice rather than a
+// restriction. engineerMayRead_ enforces it below, by employee type.
+var HANDBOOK_FOR_TYPE = { resident: 'resident_policy_text' };
+var HANDBOOK_DEFAULT = 'employee_handbook';
+function handbookKeyForTrackingUser_(username) {
+  var t = employeeTypeForTrackingUser_(username);
+  return HANDBOOK_FOR_TYPE[t] || HANDBOOK_DEFAULT;
+}
+// Cached the same way and for the same reason as employeeIdForTrackingUser_ —
+// this is consulted on every read an engineer makes, and a whole-sheet scan
+// each time would put a Drive round trip in front of every request.
+function employeeTypeForTrackingUser_(username) {
+  if (!username) return '';
+  var cache = CacheService.getScriptCache();
+  var hit = cache.get('emptype_' + username);
+  if (hit !== null && hit !== undefined) return hit === '-' ? '' : hit;
+  var rows = getSheet_().getDataRange().getValues();
+  var list = allEmployeesFromRows_(rows);
+  var type = '';
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && list[i].trackingUsername === username) {
+      type = String(list[i].employeeType || ''); break;
+    }
+  }
+  cache.put('emptype_' + username, type || '-', 300);
+  return type;
+}
 
 // Keys belonging to one engineer, addressed by their own username.
 function engineerScopedKeys_(username) {
@@ -1173,6 +1205,15 @@ function engineerMayRead_(key, username) {
   // sees colleagues' too. Accepted: it is not pay data, and splitting the list
   // per person is a larger change than this one. Revisit if it matters.
   if (key === 'leave_requests') return true;
+  // One handbook each, decided by employee type — never both, and never the
+  // other one. A type that is not on file at all reads as neither rather than
+  // as the default: an engineer whose record cannot be found is somebody this
+  // cannot answer for, and handing out the field handbook on a failed lookup
+  // is the wrong way to be wrong.
+  if (key === 'employee_handbook' || key === 'resident_policy_text') {
+    var t = employeeTypeForTrackingUser_(username);
+    return !!t && handbookKeyForTrackingUser_(username) === key;
+  }
   var empId = employeeIdForTrackingUser_(username);
   if (empId && (key === 'attendance:' + empId || key.indexOf('attendance:' + empId + ':') === 0)) return true;
   // One route per trip, in its own key, because every trip an engineer has
@@ -1866,8 +1907,14 @@ function doPost(e) {
   }
 
   if (body.action === 'getEmployeeHandbookFile') {
-    // Allowed for both roles — see doGetEmployeeHandbookFile_'s own
-    // comment for why this one is safe to leave open to engineers.
+    // HR unrestricted; an engineer only if the full handbook is the one that
+    // belongs to them. This action hands back the handbook's Drive contents
+    // and so bypasses engineerMayRead_ entirely — leaving it open to every
+    // engineer would have made the rule above decorative, since a Resident
+    // Engineer could fetch the field handbook through this door instead.
+    if (isEngineer && handbookKeyForTrackingUser_(auth.username) !== 'employee_handbook') {
+      return forbidden_();
+    }
     return jsonOut_(doGetEmployeeHandbookFile_());
   }
 

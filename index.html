@@ -2044,7 +2044,11 @@
       <p style="font-size:13.5px;color:var(--muted);margin:0 0 4px;">Logged in as <strong id="engNameLabel" style="color:var(--navy)"></strong> · <button class="linkbtn" style="padding:0" onclick="logoutEngineer()">log out</button></p>
 
       <div id="engHandbookCard" class="hidden" style="border:1px solid var(--line);border-radius:10px;padding:14px;margin:12px 0;background:var(--paper);">
-        <div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:6px;">📘 Employee Handbook</div>
+        <!-- Titled from the employee's own type, not hardcoded. A Resident
+             Engineer works to the Resident Engineer Policy, and heading it
+             "Employee Handbook" told him he was reading the document he is
+             specifically not governed by. -->
+        <div id="engHandbookTitle" style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:6px;">📘 Handbook</div>
         <div id="engHandbookBody"></div>
       </div>
 
@@ -6488,9 +6492,27 @@ async function renderEmployeeHandbookForEngineer(){
   const card = document.getElementById('engHandbookCard');
   const body = document.getElementById('engHandbookBody');
   if(!card || !body || !engineerName) return;
-  const emp = await findEmployeeByTrackingUsername(engineerName);
-  const isResident = emp && emp.employeeType === 'resident';
+  const title = document.getElementById('engHandbookTitle');
+  let emp = null;
+  try{ emp = await findEmployeeByTrackingUsername(engineerName); }catch(e){ emp = null; }
+  const type = emp && emp.employeeType ? String(emp.employeeType) : '';
   card.classList.remove('hidden');
+  // Which document somebody is entitled to is decided by their employee type,
+  // so a type nobody could read is a question this cannot answer — and it used
+  // to answer it anyway, with the full Employee Handbook, because `emp &&
+  // emp.employeeType === 'resident'` is false when the lookup fails. A
+  // Resident Engineer on a weak signal was shown the field handbook. Failing
+  // closed here matches engineerMayRead_, which now refuses both keys when no
+  // type is on file, so the screen cannot promise what the backend will refuse.
+  if(!type){
+    if(title) title.textContent = '📘 Handbook';
+    body.innerHTML = `<div style="font-size:12.5px;color:var(--muted);">Your employee type is not
+      on record, so the app cannot tell which handbook applies to you. Ask HR to set it — until
+      then neither handbook is shown, rather than the wrong one.</div>`;
+    return;
+  }
+  const isResident = type === 'resident';
+  if(title) title.textContent = isResident ? '📘 Resident Engineer Policy' : '📘 Employee Handbook';
   if(isResident){
     const text = await getResidentPolicyText();
     body.innerHTML = `<details><summary style="font-size:13px;color:var(--amber-dark);cursor:pointer;">View Resident Engineer Policy</summary><div style="white-space:pre-wrap;font-size:12.5px;margin-top:10px;line-height:1.6;">${escapeHtml(text)}</div></details>`;
