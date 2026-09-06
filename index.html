@@ -1906,6 +1906,54 @@
   font-size:11px;color:var(--muted);padding:5px 8px;border-radius:8px;width:100%;margin-top:4px;}
 .od-add-sub:hover{border-color:var(--navy);color:var(--navy);}
 .od-year.active{background:var(--cream);font-weight:700;color:var(--navy);}
+
+/* ---- Pre-Payroll Check ----
+   A flag is a coloured left edge, an icon, what is wrong, why it matters and
+   who it is about. The edge carries the severity rather than a coloured
+   background: a screen of eight flags should read as a list to work through,
+   not as an emergency. */
+.pp-flag{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);
+  border-left:4px solid var(--line);border-radius:10px;padding:11px 13px;
+  background:var(--paper);margin-bottom:8px;}
+.pp-flag.stop{border-left-color:var(--red);}
+.pp-flag.warn{border-left-color:var(--amber-dark);}
+.pp-flag.clear{border-left-color:var(--green);}
+.pp-flag .ic{font-size:14px;line-height:1.4;flex:0 0 auto;width:18px;text-align:center;}
+.pp-flag .bd{flex:1;min-width:0;}
+.pp-flag .ti{font-size:13px;font-weight:700;color:var(--navy);display:block;margin-bottom:2px;}
+.pp-flag .su{font-size:12px;color:var(--muted);line-height:1.5;display:block;}
+.pp-flag .who{font-size:11.5px;margin-top:5px;display:block;line-height:1.7;}
+.pp-flag .who button{border:none;background:transparent;color:var(--navy);font:inherit;
+  font-weight:600;text-decoration:underline;cursor:pointer;padding:0;}
+.pp-counts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:0 0 16px;}
+.pp-counts>div{border:1px solid var(--line);border-radius:10px;padding:11px 8px;
+  text-align:center;background:var(--paper);}
+.pp-counts b{display:block;font-size:26px;line-height:1.1;color:var(--navy);
+  font-variant-numeric:tabular-nums;}
+.pp-counts span{display:block;font-size:10.5px;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.4px;margin-top:3px;}
+.pp-counts .stop b{color:var(--red);}
+.pp-counts .warn b{color:var(--amber-dark);}
+.pp-counts .ok b{color:var(--green);}
+/* The count beside the sidebar item. Drawn only when there is something to fix
+   — a badge that sits there showing 0 teaches people to stop seeing it. */
+.side-link .pp-badge{margin-left:auto;background:var(--red);color:#fff;font-size:10px;
+  font-weight:700;border-radius:999px;padding:1px 7px;min-width:18px;text-align:center;}
+.side-link.active .pp-badge{background:#fff;color:var(--navy);}
+/* The strip on the Dashboard. Its whole job is to be the reason somebody opens
+   the check at all, so it sits above the KPIs rather than under them. */
+.pp-strip{display:flex;gap:11px;align-items:center;border:1px solid var(--line);
+  border-left:4px solid var(--red);border-radius:12px;padding:13px 15px;
+  background:var(--paper);margin:0 0 16px;}
+.pp-strip.warn{border-left-color:var(--amber-dark);}
+.pp-strip.ok{border-left-color:var(--green);}
+.pp-strip .bd{flex:1;min-width:0;}
+.pp-strip .ti{font-size:13.5px;font-weight:700;color:var(--navy);display:block;margin-bottom:3px;}
+.pp-strip .su{font-size:12px;color:var(--muted);line-height:1.55;display:block;}
+@media (max-width:520px){
+  .pp-strip{flex-wrap:wrap;align-items:flex-start;}
+  .pp-strip .btn{width:100%;}
+}
 /* A bucket holding documents that the folder's own year list does not name.
    Marked, because it is not one of the folder's years and pressing + Add year
    for it is usually what HR actually wants next. */
@@ -2201,6 +2249,10 @@
         </div>
         <main id="hrContent">
         <div id="hrPageDashboard" class="hidden"></div>
+        <!-- Its own page rather than a card inside Reports: this is a monthly
+             ritual run before payroll, and a screen you have to remember to go
+             looking for is a screen nobody runs. -->
+        <div id="hrPagePrepay" class="hidden"></div>
 
     <div class="hr-tabs hr-shell-hide">
       <button class="active" id="hrTabBtnTracking" onclick="switchHrTab('tracking')">📍 Tracking</button>
@@ -12294,6 +12346,9 @@ const HR_PANELS = ['hrPageDashboard','hrTabTracking','hrTabMgmt','hrSubDash','hr
 // (Tracking-side) after Reports and Generator (HR Management-side).
 const HR_ROUTES = {
   dashboard:  { label:'Dashboard',           icon:'🏠', show:['hrPageDashboard'], run:() => renderHrDashboardHome() },
+  // Second in the list on purpose — it is the screen to open before payroll,
+  // and the sidebar carries a count so it does not have to be remembered.
+  prepay:     { label:'Pre-Payroll Check',   icon:'✅', show:['hrPagePrepay'], run:() => renderPrePayrollCheck() },
   tracking:   { label:'Tracking',            icon:'📍', show:['hrTabTracking','secManageTeam','secLiveTracking','secByCompany'],
                 run:() => { loadHR(); loadCompanyReport(); setTimeout(invalidateLiveMaps, 60); } },
   team:       { label:'Team Overview',       icon:'👤', show:['hrTabTracking','secTeamOverview'], run:() => loadHR() },
@@ -12860,9 +12915,14 @@ async function kmtReconcileModals_(targetModals){
 function renderHrSideNav(){
   const nav = document.getElementById('hrSideNav');
   if(!nav) return;
+  // Only Pre-Payroll Check carries a count, and only when it has found
+  // something that must be fixed — a badge sitting there showing 0 is a badge
+  // people stop seeing, which is the one thing this one must not become.
+  const badge = k => (k === 'prepay' && prepayResult_ && prepayResult_.counts.stop)
+    ? `<span class="pp-badge">${prepayResult_.counts.stop}</span>` : '';
   nav.innerHTML = Object.keys(HR_ROUTES).map(k =>
     `<button class="side-link${k === hrRoute ? ' active' : ''}" onclick="hrNavigate('${k}')">
-       <span class="ic">${HR_ROUTES[k].icon}</span><span>${HR_ROUTES[k].label}</span>
+       <span class="ic">${HR_ROUTES[k].icon}</span><span>${HR_ROUTES[k].label}</span>${badge(k)}
      </button>`).join('');
 }
 
@@ -13257,6 +13317,188 @@ function reviveDashboard(){
   try{ updateLiveMap(dashLastMapInfos || [], { mapId:'dashLiveMap', emptyId:'dashLiveMapEmpty' }); }catch(e){}
   setTimeout(invalidateLiveMaps, 60);
   try{ renderIncrementWidget(); }catch(e){}
+  try{ prepayPaintStrip_(); }catch(e){}
+}
+// Draws the strip from the last run, and starts one if there has not been a
+// run yet — asked for here rather than awaited by the Dashboard's own build,
+// so a slow check never holds up the figures HR came to look at. When it
+// lands, the strip and the sidebar badge are repainted in place. A failure is
+// swallowed on purpose: the Dashboard is not the place to report it, and the
+// Pre-Payroll Check screen says so plainly when opened.
+function prepayPaintStrip_(){
+  const el = document.getElementById('dashPrepayStrip');
+  if(!el) return;
+  el.innerHTML = prepayStripHtml_();
+  if(prepayResult_ || prepayRunning_) return;
+  prepayEnsure_().then(() => {
+    const now = document.getElementById('dashPrepayStrip');
+    if(now) now.innerHTML = prepayStripHtml_();
+    renderHrSideNav();
+  }).catch(() => {});
+}
+
+// ---- Pre-Payroll Check ----
+//
+// Everything that will be wrong with a month's payroll, before it is paid.
+//
+// The thin async half of the pattern computeSalaryForEmployee already uses: it
+// fetches the roster, the attendance and the holidays, computes each month's
+// salary with the SAME computeSalaryFromAttendance the Salary Sheet calls, and
+// hands the lot to prePayrollChecks in shared/report-logic.js, which decides
+// what is worth saying. No figure is worked out here or there — a check that
+// did its own arithmetic could disagree with the sheet it is checking, which
+// would make it worse than nothing.
+let prepayResult_ = null;          // the last run, for the sidebar badge and the strip
+let prepayRunning_ = null;         // the run in flight, so two callers share one
+
+// Which month to check: this one, until payroll for it is behind us. HR runs
+// payroll on the 2nd for the month just gone, so up to and including the 5th
+// the month worth checking is the previous one, not the one a few days old.
+function prepayDefaultMonth_(){
+  const t = todayStr();
+  const day = Number(t.slice(8, 10));
+  return day <= 5 ? prevMonthOf_(t.slice(0, 7)) : t.slice(0, 7);
+}
+async function runPrePayrollCheck_(ym){
+  ym = ym || prepayDefaultMonth_();
+  const dateList = monthDateList_(ym);
+  const monthDays = dateList.length;
+  const prevYm = prevMonthOf_(ym);
+  const prevList = monthDateList_(prevYm);
+
+  const employees = await getEmployees();
+  const holidayMap = await getHolidayMap_local();
+  const active = employees.filter(e => e.employmentStatus !== 'left');
+  // One batched read for every employee, the same priming the Salary Sheet and
+  // the statutory reports do — without it this is one round trip per person.
+  const attByEmp = await getAttendanceMany(active.map(e => e.id));
+
+  const sal = {}, prevSal = {};
+  active.forEach(e => {
+    const att = attByEmp[e.id] || {};
+    // Both months come out of the one attendance record already in hand, so
+    // checking against last month costs no extra read.
+    if(employedDuringPeriod_(e, dateList[0], dateList[monthDays - 1]))
+      sal[e.id] = computeSalaryFromAttendance(e, att, dateList, monthDays, holidayMap);
+    if(employedDuringPeriod_(e, prevList[0], prevList[prevList.length - 1]))
+      prevSal[e.id] = computeSalaryFromAttendance(e, att, prevList, prevList.length, holidayMap);
+  });
+
+  prepayResult_ = prePayrollChecks(employees, attByEmp, ym, holidayMap, sal, prevSal);
+  return prepayResult_;
+}
+// Shared between the screen, the Dashboard strip and the sidebar badge, so
+// opening the app does not run the same check three times.
+function prepayEnsure_(ym){
+  if(prepayRunning_) return prepayRunning_;
+  prepayRunning_ = runPrePayrollCheck_(ym).finally(() => { prepayRunning_ = null; });
+  return prepayRunning_;
+}
+
+function prepayWhoHtml_(who){
+  // Named, and each name opens that person's record — a flag you cannot act on
+  // from where you are reading it is a flag that gets read and left. Capped at
+  // eight, because a list of forty names buries the flag it belongs to.
+  const shown = who.slice(0, 8).map(w =>
+    `<button type="button" onclick="openAddEmployeeModal('${escapeJsAttr_(w.id)}')">${escapeHtml(w.name)}</button>`);
+  const rest = who.length - shown.length;
+  return '<span class="who">' + shown.join(' · ') +
+         (rest > 0 ? ' <span style="color:var(--muted);font-weight:400;">and ' + rest + ' more</span>' : '') +
+         '</span>';
+}
+function prepayFlagHtml_(f){
+  const icon = f.level === 'stop' ? '■' : f.level === 'warn' ? '▲' : '✓';
+  return `<div class="pp-flag ${f.level}">
+    <span class="ic">${icon}</span>
+    <span class="bd">
+      <span class="ti">${escapeHtml(f.title)}</span>
+      <span class="su">${escapeHtml(f.detail)}</span>
+      ${prepayWhoHtml_(f.who)}
+    </span>
+  </div>`;
+}
+async function renderPrePayrollCheck(ym){
+  const box = document.getElementById('hrPagePrepay');
+  if(!box) return;
+  box.innerHTML = '<section class="block"><div class="empty">Checking the month…</div></section>';
+  let res;
+  try{ res = await (ym ? runPrePayrollCheck_(ym) : prepayEnsure_()); }
+  catch(err){
+    // A failed read is not a clean month — saying nothing here would read as
+    // "nothing to fix", which is the one thing this screen must never imply.
+    box.innerHTML = `<section class="block"><h2 style="margin:0 0 4px;">Pre-Payroll Check</h2>
+      <div class="empty error" style="line-height:1.6;">Could not run the check: ` +
+      escapeHtml((err && err.message) || 'the server did not respond') +
+      `<div style="margin-top:12px;"><button type="button" class="btn" onclick="withBusy(this,'Trying…',()=>renderPrePayrollCheck())">Try again</button></div>
+      <div style="margin-top:10px;font-size:12px;color:var(--muted);">This is a read-only check — nothing has been changed either way.</div></div></section>`;
+    return;
+  }
+  renderHrSideNav();   // the badge count just changed
+
+  const stop = res.flags.filter(f => f.level === 'stop');
+  const warn = res.flags.filter(f => f.level === 'warn');
+  const label = monthLabel(res.month);
+  const section = (title, list) => list.length
+    ? `<div class="sec-title"${title === 'Must fix before payroll' ? ' style="border-top:0;padding-top:0;margin-top:0;"' : ''}>${title}</div>` +
+      list.map(prepayFlagHtml_).join('')
+    : '';
+
+  box.innerHTML = `<section class="block">
+    <h2 style="margin:0 0 4px;">Pre-Payroll Check — ${escapeHtml(label)}</h2>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Run this before you process. Every figure below is computed by the same functions the Salary Sheet uses — nothing here is a guess, and nothing here changes anything.</p>
+
+    <div class="row-inline" style="margin:0 0 14px;gap:8px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:150px;"><label class="field">Month</label>
+        <select class="field-input" id="prepayMonthSel" onchange="renderPrePayrollCheck(this.value)">
+          ${[0,1,2,3,4,5].map(i => {
+            let ymv = res.month; for(let k=0;k<i;k++) ymv = prevMonthOf_(ymv);
+            return `<option value="${ymv}"${ymv===res.month?' selected':''}>${escapeHtml(monthLabel(ymv))}</option>`;
+          }).join('')}
+        </select></div>
+      <div style="flex:0 0 auto;align-self:flex-end;">
+        <button type="button" class="btn ghost" onclick="withBusy(this,'Checking…',()=>renderPrePayrollCheck(document.getElementById('prepayMonthSel').value))">Run again</button>
+      </div>
+    </div>
+
+    <div class="pp-counts">
+      <div class="stop"><b>${res.counts.stop}</b><span>Must fix</span></div>
+      <div class="warn"><b>${res.counts.warn}</b><span>Check</span></div>
+      <div class="ok"><b>${res.counts.clear}</b><span>Clear</span></div>
+    </div>
+
+    ${section('Must fix before payroll', stop)}
+    ${section(stop.length ? 'Worth a look' : 'Worth a look', warn)}
+    ${!res.flags.length ? '<div class="pp-flag clear"><span class="ic">✓</span><span class="bd"><span class="ti">Nothing to fix</span><span class="su">All ' + res.checked + ' employees checked and clear. Safe to run payroll.</span></span></div>' : ''}
+    ${res.flags.length ? `<div class="sec-title">Checked and clear</div>
+      <div class="pp-flag clear"><span class="ic">✓</span><span class="bd">
+        <span class="ti">${res.counts.clear} of ${res.checked} employees with nothing to flag</span>
+        <span class="su">Rate of Pay present, attendance complete, PF and ESI eligibility unchanged, no shared bank account, UAN or PAN, and recoveries within limits.</span>
+      </span></div>` : ''}
+  </section>`;
+}
+// The strip at the top of the Dashboard. Rendered from whatever the last run
+// found, and it asks for a run if there has not been one — that is what makes
+// the check something HR meets rather than something they must remember.
+function prepayStripHtml_(){
+  const r = prepayResult_;
+  if(!r) return '';
+  const label = monthLabel(r.month);
+  if(r.counts.stop){
+    return `<div class="pp-strip"><span class="bd">
+      <span class="ti">${r.counts.stop} thing${r.counts.stop===1?'':'s'} to fix before you run ${escapeHtml(label)} payroll</span>
+      <span class="su">${escapeHtml(r.flags.filter(f=>f.level==='stop').map(f=>f.title.toLowerCase()).join(', '))}.</span>
+    </span><button type="button" class="btn" onclick="hrNavigate('prepay')">Open the check</button></div>`;
+  }
+  if(r.counts.warn){
+    return `<div class="pp-strip warn"><span class="bd">
+      <span class="ti">Nothing blocking ${escapeHtml(label)} payroll, ${r.counts.warn} thing${r.counts.warn===1?'':'s'} worth a look</span>
+      <span class="su">${escapeHtml(r.flags.map(f=>f.title.toLowerCase()).join(', '))}.</span>
+    </span><button type="button" class="btn ghost" onclick="hrNavigate('prepay')">Open the check</button></div>`;
+  }
+  return `<div class="pp-strip ok"><span class="bd">
+    <span class="ti">${escapeHtml(label)} payroll is clear to run</span>
+    <span class="su">All ${r.checked} employees checked — attendance complete, no unexplained pay movement, nothing shared between records.</span>
+  </span><button type="button" class="btn ghost" onclick="hrNavigate('prepay')">Open the check</button></div>`;
 }
 
 async function renderHrDashboardHome(force){
@@ -13456,7 +13698,11 @@ async function buildHrDashboardHome(box){
       ${lastBackendError ? `<p style="font-size:11px;color:var(--muted);margin:8px 0 0;word-break:break-word;">Last backend error: ${String(lastBackendError).slice(0, 180)}</p>` : ''}
     </div>` : '';
 
-  box.innerHTML = degradedBanner + `
+  // Above the KPIs, not below them: the whole point of the strip is to be the
+  // reason somebody opens the Pre-Payroll Check, and it cannot do that from
+  // under four tiles. Empty until the first run has answered — see
+  // prepayEnsure_ below, which starts one and repaints when it lands.
+  box.innerHTML = degradedBanner + `<div id="dashPrepayStrip">${prepayStripHtml_()}</div>` + `
     <div class="kpi-row">
       ${kpi('👥','Employee Master', onRoll.length, 'Open employee records', 'indigo', null, 'employees')}
       ${kpi('🗓️','Attendance Sheet', '', 'Mark and review attendance', 'green', null, 'attendance')}
