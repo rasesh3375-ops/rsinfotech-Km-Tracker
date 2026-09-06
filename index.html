@@ -7002,6 +7002,60 @@ async function renderEngHistory(){
   box.innerHTML = `<table><tr><th>Date</th><th>Company</th><th>Trip time</th><th class="num">By vehicle</th></tr>${rows}</table>`;
 }
 
+// One engineer's recent trips, for HR. The engineer's own history has shown
+// him his walked kilometres since they stopped being paid; this is the same
+// information on the other side of the conversation, so HR can answer "why is
+// my distance lower this month" with the figures rather than with the policy.
+async function hrShowEngineerTrips_(username, label){
+  const root = document.getElementById('tripRouteModalRoot');
+  if(!root) return;
+  root.innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeTripRoute_()">
+    <div class="modal-box" style="max-width:820px;">
+      <div class="modal-head"><h3 style="margin:0;">Trips — ${escapeHtml(label)}</h3>
+        <button class="modal-x" onclick="closeTripRoute_()">✕</button></div>
+      <div id="hrTripsBody"><div class="empty">Loading…</div></div>
+    </div></div>`;
+  let trips = [];
+  try{ trips = await getTrips(username) || []; }catch(e){ trips = []; }
+  const body = document.getElementById('hrTripsBody');
+  if(!body) return;
+  if(!trips.length){ body.innerHTML = '<div class="empty">No trips recorded for this engineer.</div>'; return; }
+  const sorted = trips.slice()
+    .sort((a, b) => String(b.startTime || b.date).localeCompare(String(a.startTime || a.date)))
+    .slice(0, 40);
+  let walkTotal = 0, kmTotal = 0;
+  const rows = sorted.map(t => {
+    kmTotal += Number(t.km) || 0;
+    walkTotal += Number(t.walkKm) || 0;
+    const time = t.manual ? 'Added manually'
+      : (new Date(t.startTime).toLocaleTimeString() + ' – ' + new Date(t.endTime).toLocaleTimeString());
+    // Trips recorded before this change carry no walkKm at all, and that is
+    // not the same as having walked nothing — every metre of those was paid,
+    // whether it was driven or not. Saying "—" keeps the two apart.
+    const walk = t.walkKm === undefined || t.walkKm === null
+      ? '<span class="muted">—</span>'
+      : (Number(t.walkKm) > 0.05 ? fmtKm(t.walkKm) + ' km' : '0');
+    const route = t.hasRoute
+      ? `<button class="btn tiny ghost" onclick='showTripRoute_(${JSON.stringify(String(t.id || ''))}, ${JSON.stringify(String(t.date || ''))}, ${JSON.stringify(String(username))})'>Route</button>`
+      : '<span class="muted">—</span>';
+    return `<tr><td>${escapeHtml(fmtDateIN(t.date))}</td><td>${escapeHtml(t.company || '—')}</td>
+      <td>${escapeHtml(time)}</td><td class="num">${fmtKm(t.km)} km</td>
+      <td class="num">${walk}</td><td>${route}</td></tr>`;
+  }).join('');
+  body.innerHTML = `<div class="payroll-docs-table-wrap"><table class="sal-table">
+      <thead><tr><th>Date</th><th>Company</th><th>Trip time</th><th class="num">By vehicle</th>
+      <th class="num">On foot</th><th>Route</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:12px 0 0;">
+      The last ${sorted.length} trip(s): <strong>${fmtKm(kmTotal)} km</strong> by vehicle,
+      <strong>${fmtKm(walkTotal)} km</strong> on foot. Only the vehicle figure is paid — travel is
+      counted once speed passes ${TRACKING_RULES.vehicleEnterKmph} km/h and keeps counting through
+      slow traffic until speed stays under ${TRACKING_RULES.footExitKmph} km/h for
+      ${Math.round(TRACKING_RULES.exitGraceMs / 60000)} minutes, so a jam is not mistaken for
+      walking. A dash under On foot is a trip recorded before walking was separated out, where
+      every metre was paid.
+    </p>`;
+}
 // The route of one finished trip, fetched from its own key. Takes the owner as
 // an argument rather than assuming engineerName, so HR opening an engineer's
 // trip reaches the same function instead of growing a second copy of it.
@@ -7026,6 +7080,15 @@ async function showTripRoute_(tripId, date, owner){
   if(!el) return;
   if(pts.length < 2){
     if(note) note.textContent = 'No route was recorded for this trip.';
+    return;
+  }
+  // Leaflet comes off a CDN, and an engineer opening this on a weak signal in
+  // the field is exactly who will not have it. Without this the function
+  // throws on `L`, and the modal sits on "Loading the route…" forever with no
+  // hint that anything went wrong.
+  if(typeof L === 'undefined'){
+    if(note) note.textContent = 'The map could not be loaded — check the connection and try ' +
+      'again. The trip and its distance are unaffected.';
     return;
   }
   tripRouteMap_ = L.map(el, { zoomControl: true });
@@ -11682,8 +11745,13 @@ async function loadHR(){
       pillLabel = status.label;
     }
     const pill = `<span class="pill ${pillClass}">${pillLabel}</span>`;
+    // The km in these columns is vehicle km only. What was excluded, and the
+    // path each trip actually took, live one click away rather than nowhere —
+    // an engineer who queries his kilometres is asking HR, so HR is the one
+    // who needs to be able to answer.
     rowsHtml += `<tr>
-      <td>${label} ${pill}</td>
+      <td>${label} ${pill}
+        <br><button class="btn tiny ghost" onclick='hrShowEngineerTrips_(${JSON.stringify(String(name))}, ${JSON.stringify(String(label))})'>Trips</button></td>
       <td class="num">${fmtKm(kmToday)}</td>
       <td class="num">${fmtKm(km7)}</td>
       <td class="num">${fmtKm(km15)}</td>
