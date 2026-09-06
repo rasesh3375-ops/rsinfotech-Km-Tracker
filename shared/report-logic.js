@@ -4030,8 +4030,22 @@ const TRACKING_RULES = {
   // its own key, so this is about keeping one cell comfortable rather than the
   // whole trip list — see routeAppend_.
   routeMinGapKm: 0.075,
-  routeMaxPoints: 600
+  routeMaxPoints: 600,
+  // Below this, a gap is somebody glancing at a message, not tracking being
+  // lost. Recording every blink would bury the gaps that actually cost km.
+  gapMinMs: 30 * 1000
 };
+// Number(null) is 0, Number('') is 0, Number(undefined) is NaN. Only the last
+// of those is any use, and the first two have now caused three separate bugs
+// here: "illegible" on a challan becoming a confident zero, a phone that
+// reports no speed reading as stationary and booking a day's driving as
+// walking, and a resume with no GPS fix yet measuring the distance to the
+// Gulf of Guinea. A number that is absent must stay absent.
+function numOrNull_(v){
+  if(v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
 function haversineKm(lat1, lon1, lat2, lon2){
   const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -4041,7 +4055,58 @@ function haversineKm(lat1, lon1, lat2, lon2){
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 function newTrackingState(){
-  return { mode: 'foot', slowSince: null, vehicleKm: 0, walkKm: 0, last: null, route: [] };
+  return { mode: 'foot', slowSince: null, vehicleKm: 0, walkKm: 0, last: null,
+           route: [], gaps: [] };
+}
+// The app came back after being suspended — the engineer switched to WhatsApp,
+// or the phone locked. A web page cannot track in the background on either
+// platform, so the journey in between was not measured by anybody.
+//
+// Two things follow, and the second is the one that matters. What CAN be said
+// is recorded: how long the gap was and how far apart its two ends are in a
+// straight line. What must NOT happen is that straight line joining the paid
+// figure — nobody knows what route the phone took, or whether it drove out and
+// came back to nearly the same place, so paying it would be paying a guess.
+// Clearing `last` is what prevents that: the next fix re-establishes where the
+// phone is rather than extending a journey across the hole. Without it a gap
+// under maxStepKm was quietly added as though it had been driven under
+// observation, and a longer one was silently dropped with nothing said.
+function trackingResume(state, hiddenMs, fix, rules){
+  const R = rules || TRACKING_RULES;
+  const s = {
+    mode: state.mode, slowSince: null, vehicleKm: state.vehicleKm,
+    walkKm: state.walkKm, last: state.last, route: state.route,
+    gaps: (state.gaps || []).slice()
+  };
+  const ms = Math.max(0, Number(hiddenMs) || 0);
+  if(ms < R.gapMinMs) return { state: s, gap: null };
+  const lat = numOrNull_(fix && fix.lat), lon = numOrNull_(fix && fix.lon);
+  const gap = {
+    ms: ms,
+    // Null, not zero, when there is no fix to compare against: "we do not know
+    // how far it moved" and "it did not move" are different answers, and only
+    // one of them should ever be shown to HR as a distance. Reached through
+    // numOrNull_ because `Number(fix && fix.lat)` with no fix is 0, which is a
+    // perfectly finite latitude off the coast of Africa.
+    straightKm: (s.last && lat !== null && lon !== null)
+      ? haversineKm(s.last.lat, s.last.lon, lat, lon) : null
+  };
+  s.gaps.push(gap);
+  s.last = null;
+  return { state: s, gap: gap };
+}
+// What the trip reports about its own holes. Kept separate from the km so a
+// short trip is visibly explained rather than quietly short.
+function trackingGapSummary(state){
+  const gaps = (state && state.gaps) || [];
+  return {
+    count: gaps.length,
+    ms: gaps.reduce((a, g) => a + (Number(g.ms) || 0), 0),
+    // Only the gaps whose distance is actually known. Summing nulls as zero
+    // would report a confident total that leaves out the unmeasured ones.
+    straightKm: gaps.reduce((a, g) => a + (Number(g.straightKm) || 0), 0),
+    unmeasured: gaps.filter(g => g.straightKm === null).length
+  };
 }
 // One GPS fix in, the new state out. Pure and total: it never throws on a
 // missing field, because the one place it runs is a watchPosition callback on
@@ -4078,8 +4143,8 @@ function trackingStep(state, fix, rules){
   // is booked as walking. Plenty of Android fixes report no speed at all, so
   // that is not a corner case: it is one handset paying nothing for a day's
   // driving. The absence has to be checked before the conversion, not after.
-  const devSpeed = (fix.speed === null || fix.speed === undefined) ? NaN : Number(fix.speed);
-  const kmph = Number.isFinite(devSpeed) && devSpeed >= 0
+  const devSpeed = numOrNull_(fix.speed);
+  const kmph = devSpeed !== null && devSpeed >= 0
     ? devSpeed * 3.6
     : (dtMs > 0 ? d / (dtMs / 3600000) : null);
   if(kmph !== null && Number.isFinite(kmph)){

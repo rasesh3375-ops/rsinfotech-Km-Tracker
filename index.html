@@ -6591,6 +6591,7 @@ async function enterEngineerMain(){
     trackState.walkKm = walkedKm;
     trackState.mode = active.trackMode === 'vehicle' ? 'vehicle' : 'foot';
     trackState.route = Array.isArray(active.route) ? active.route : [];
+    trackState.gaps = Array.isArray(active.gaps) ? active.gaps : [];
     startTime = active.startTime;
     pendingSelfie = active.selfie || null;
     lastCoord = active.lastCoord || null;
@@ -6683,7 +6684,7 @@ async function pushActiveState(extra){
   const battery = await getBatteryInfo();
   await setActive(engineerName, Object.assign({
     startTime, accumulatedKm, walkedKm, trackMode: trackState.mode,
-    route: trackState.route, selfie: pendingSelfie,
+    route: trackState.route, gaps: trackState.gaps, selfie: pendingSelfie,
     lastCoord, lastFixTime: lastCoord ? Date.now() : null,
     lastHeartbeat: Date.now(),
     gpsError: lastGpsError,
@@ -6816,11 +6817,54 @@ async function acquireWakeLock(){
 async function releaseWakeLock(){
   try{ if(wakeLock){ await wakeLock.release(); wakeLock = null; } }catch(e){}
 }
+// A web page cannot track in the background on either platform — iOS suspends
+// a home-screen app the moment the screen locks, and a service worker has no
+// access to geolocation on Android. So the honest thing is not to pretend it
+// kept tracking: notice that it stopped, say so, and record the hole.
+let hiddenSince = null;
 document.addEventListener('visibilitychange', async () => {
-  if(tracking && document.visibilityState === 'visible' && !wakeLock){
-    await acquireWakeLock();
-  }
+  if(!tracking) return;
+  if(document.visibilityState === 'hidden'){ hiddenSince = Date.now(); return; }
+  if(!wakeLock) await acquireWakeLock();
+  const away = hiddenSince ? Date.now() - hiddenSince : 0;
+  hiddenSince = null;
+  if(away < TRACKING_RULES.gapMinMs) return;
+  // One fresh fix to see where the phone is now. It is deliberately NOT fed to
+  // trackingStep: the distance across a gap was never observed, and
+  // trackingResume clears `last` so the next fix re-establishes position
+  // instead of extending the journey across the hole.
+  let here = null;
+  try{
+    here = await new Promise(res => {
+      if(!navigator.geolocation) return res(null);
+      navigator.geolocation.getCurrentPosition(
+        p => res({ lat: p.coords.latitude, lon: p.coords.longitude }),
+        () => res(null), { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 });
+    });
+  }catch(e){ here = null; }
+  const r = trackingResume(trackState, away, here);
+  trackState = r.state;
+  if(r.gap) showTrackingGap_(r.gap);
+  await pushActiveState();
 });
+// Told to the engineer, plainly, the moment he comes back. He is the one whose
+// distance is short, and the only person who can stop it happening again.
+function showTrackingGap_(gap){
+  const mins = Math.max(1, Math.round(gap.ms / 60000));
+  const far = gap.straightKm !== null && gap.straightKm > 0.1
+    ? ' You are about ' + fmtKm(gap.straightKm) + ' km from where it stopped, in a straight line — ' +
+      'that distance is NOT counted, because nobody measured the route you took.'
+    : '';
+  try{ if(navigator.vibrate) navigator.vibrate([300, 120, 300]); }catch(e){}
+  const box = document.getElementById('gpsMsg');
+  if(box){
+    box.textContent = 'Tracking stopped for ' + mins + ' min while the app was closed or the ' +
+      'screen was off.' + far + ' Keep this screen open during a trip.';
+    box.classList.add('error');
+  }
+  const w = document.getElementById('liveWalkKm');
+  if(w){ w.hidden = false; w.textContent = 'Tracking paused ' + mins + ' min — that stretch is not counted'; }
+}
 
 function startWatch(resumed){
   const msg = document.getElementById('gpsMsg');
@@ -6915,6 +6959,7 @@ function beginCheckout(){
     endTime: new Date().toISOString(),
     km: Math.round(accumulatedKm * 100) / 100,
     walkKm: Math.round(walkedKm * 100) / 100,
+    gaps: trackingGapSummary(trackState),
     route: trackState.route,
     selfie: pendingSelfie
   };
@@ -6950,6 +6995,10 @@ async function saveTripWithCompany(){
     // engineer who asks why his kilometres look low can be shown exactly what
     // was counted and what was not, rather than being told the app decided.
     walkKm: pendingTrip.walkKm || 0,
+    // Why a trip may be shorter than the engineer expects. Recorded, never
+    // added: the distance across a hole was never observed, and paying a
+    // straight line would be paying a guess about somebody's money.
+    gaps: pendingTrip.gaps && pendingTrip.gaps.count ? pendingTrip.gaps : null,
     hasRoute: !!(pendingTrip.route && pendingTrip.route.length > 1),
     checkinSelfie: pendingTrip.selfie,
     checkoutSelfie: pendingCheckoutSelfie,
@@ -7026,11 +7075,13 @@ async function renderEngHistory(){
     // have to ask what it was.
     const walk = t.walkKm > 0.05
       ? `<br><small class="muted">+ ${fmtKm(t.walkKm)} km on foot</small>` : '';
+    const gap = t.gaps && t.gaps.count
+      ? `<br><small class="pol-warn">${Math.max(1, Math.round(t.gaps.ms / 60000))} min not tracked</small>` : '';
     // Single-quoted attribute so JSON's own double quotes sit inside it. `q`
     // is an HR-side helper and does not exist in this script block.
     const route = t.hasRoute
       ? `<button class="btn tiny ghost" onclick='showTripRoute_(${JSON.stringify(String(t.id || ''))}, ${JSON.stringify(String(t.date || ''))})'>Route</button>` : '';
-    return `<tr><td>${inPhoto}${outPhoto} ${fmtDateIN(t.date)}</td><td>${t.company || '—'}</td><td>${timeCol}${route ? '<br>' + route : ''}</td><td class="num">${fmtKm(t.km)} km${walk}</td></tr>`;
+    return `<tr><td>${inPhoto}${outPhoto} ${fmtDateIN(t.date)}</td><td>${t.company || '—'}</td><td>${timeCol}${route ? '<br>' + route : ''}</td><td class="num">${fmtKm(t.km)} km${walk}${gap}</td></tr>`;
   }).join('');
   box.innerHTML = `<table><tr><th>Date</th><th>Company</th><th>Trip time</th><th class="num">By vehicle</th></tr>${rows}</table>`;
 }
@@ -7068,16 +7119,25 @@ async function hrShowEngineerTrips_(username, label){
     const walk = t.walkKm === undefined || t.walkKm === null
       ? '<span class="muted">—</span>'
       : (Number(t.walkKm) > 0.05 ? fmtKm(t.walkKm) + ' km' : '0');
+    // Why a trip may read short. A web app stops tracking the moment the phone
+    // is locked or another app comes forward, so a trip with a hole in it is
+    // not the same as a trip that was genuinely that length — and HR should
+    // not have to guess which they are looking at.
+    const g = t.gaps;
+    const gapCell = g && g.count
+      ? `<span class="pill warn">${Math.max(1, Math.round(g.ms / 60000))} min</span>` +
+        (g.straightKm > 0.1 ? `<br><small class="muted">${fmtKm(g.straightKm)} km apart, not counted</small>` : '')
+      : '<span class="muted">—</span>';
     const route = t.hasRoute
       ? `<button class="btn tiny ghost" onclick='showTripRoute_(${JSON.stringify(String(t.id || ''))}, ${JSON.stringify(String(t.date || ''))}, ${JSON.stringify(String(username))})'>Route</button>`
       : '<span class="muted">—</span>';
     return `<tr><td>${escapeHtml(fmtDateIN(t.date))}</td><td>${escapeHtml(t.company || '—')}</td>
       <td>${escapeHtml(time)}</td><td class="num">${fmtKm(t.km)} km</td>
-      <td class="num">${walk}</td><td>${route}</td></tr>`;
+      <td class="num">${walk}</td><td class="num">${gapCell}</td><td>${route}</td></tr>`;
   }).join('');
   body.innerHTML = `<div class="payroll-docs-table-wrap"><table class="sal-table">
       <thead><tr><th>Date</th><th>Company</th><th>Trip time</th><th class="num">By vehicle</th>
-      <th class="num">On foot</th><th>Route</th></tr></thead>
+      <th class="num">On foot</th><th class="num">Not tracked</th><th>Route</th></tr></thead>
       <tbody>${rows}</tbody></table></div>
     <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:12px 0 0;">
       The last ${sorted.length} trip(s): <strong>${fmtKm(kmTotal)} km</strong> by vehicle,
@@ -7087,6 +7147,11 @@ async function hrShowEngineerTrips_(username, label){
       ${Math.round(TRACKING_RULES.exitGraceMs / 60000)} minutes, so a jam is not mistaken for
       walking. A dash under On foot is a trip recorded before walking was separated out, where
       every metre was paid.
+      <br><strong style="color:var(--navy);">Not tracked</strong> is time the app was closed or the
+      phone locked during the trip. A web app cannot follow a phone in the background on either
+      iPhone or Android, so those stretches were never measured — the straight-line distance is
+      shown for context and is deliberately not added to the paid figure, since nobody knows what
+      route was taken. A trip with time here may genuinely be longer than it reads.
     </p>`;
 }
 // The route of one finished trip, fetched from its own key. Takes the owner as
