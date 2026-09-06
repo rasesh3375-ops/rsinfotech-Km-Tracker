@@ -129,6 +129,43 @@ console.log('\nthe month-on-month direction and size\n');
   check('and prints no percentage at all', /up \d|down \d/.test(t), false);
 }
 
+// ------------------------------------------------- the count and the names agree
+console.log('\nthe count in the sentence and the names after it\n');
+{
+  // Four increments listed as three read as an omission on the live August
+  // briefing: "4 increments took effect" followed by three names, leaving the
+  // reader counting and wondering which one was left out.
+  const mk = (id, name, was, now) => emp({ id: id, name: name, ratePay: now,
+    salaryHistory: [{ from: '2020-01-01', ratePay: was, salaryHeading: 'managerial' },
+                    { from: '2026-08-01', ratePay: now, salaryHeading: 'managerial' }] });
+  const four = [mk('A','Ay',30000,34000), mk('B','Bee',28000,31000),
+                mk('C','Cee',25000,27000), mk('D','Dee',20000,21000)];
+  const att = {}; four.forEach(e => { att[e.id] = attendance(); });
+  const { brief } = build(four, att);
+  const t = text(brief);
+  check('four increments are counted', brief.figures.increments.length, 4);
+  check('and all four are named', four.every(e => t.includes(e.name)), true);
+  check('with nothing left implied', /and \d+ more/.test(t), false);
+}
+{
+  // Past the point where naming them all is readable, it says how many it left
+  // out rather than trailing off — the count and the list still agree.
+  const many = [];
+  for(let i = 0; i < 8; i++){
+    const now = 30000 + i * 1000;
+    many.push(emp({ id: 'X' + i, name: 'Person ' + i, ratePay: now,
+      salaryHistory: [{ from: '2020-01-01', ratePay: 20000, salaryHeading: 'managerial' },
+                      { from: '2026-08-01', ratePay: now, salaryHeading: 'managerial' }] }));
+  }
+  const att = {}; many.forEach(e => { att[e.id] = attendance(); });
+  const { brief } = build(many, att);
+  const t = text(brief);
+  check('eight increments are counted', brief.figures.increments.length, 8);
+  check('five are named and the rest are accounted for', /, and 3 more/.test(t), true);
+  check('the biggest movers are the ones named',
+        t.includes('Person 7') && t.includes('Person 6'), true);
+}
+
 // ------------------------------------------------------------------ leave money
 console.log('\nearned leave, and what it is worth\n');
 {
