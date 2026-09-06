@@ -32,6 +32,7 @@ const CHECKS = [
   ['check-leave-detail-metrics.js', 'every Leave Detail column is a figure something actually produces'],
   ['check-sequence-writes.js',   'a sequence change either happens or says plainly that it did not'],
   ['check-session-purge.js',     'the session purge never evicts the login that just happened'],
+  ['check-briefing.js',          'the monthly briefing says what the figures say, and nothing it cannot'],
   ['check-prepay.js',            'the pre-payroll check fires on a real fault and stays quiet otherwise'],
 ];
 
