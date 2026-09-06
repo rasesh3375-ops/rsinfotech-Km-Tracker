@@ -24,7 +24,8 @@ const sandbox = { JSON, Math, Date, String, Number, Boolean, Array, Object, RegE
 vm.createContext(sandbox);
 
 const EXPORTS = ['prePayrollChecks','challanComparison','CHALLAN_ACCOUNTS','parseChallanText',
-  'trackingStep','newTrackingState','TRACKING_RULES','haversineKm','monthlyBriefing','briefingFigures','briefingParagraphs',
+  'trackingStep','newTrackingState','TRACKING_RULES','haversineKm',
+  'trackerStatus','notCheckedInToday','TRACKER_HEALTH','monthlyBriefing','briefingFigures','briefingParagraphs',
   'monthLabel','MONTH_NAMES','monthDateList_','prevMonthOf_','esiPeriodKey_',
   'computeSalaryFromAttendance','computeAttendanceSummary','LEAVE_DETAIL_METRICS',
   'resolvedAttendanceCode_','loansOf','loanBalanceAfter','loanEmiRateAsOf','computeLoanEmiForMonth',
