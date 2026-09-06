@@ -3919,6 +3919,12 @@ function parseChallanText(text){
   // is a document this could not read, and it has to say so.
   out.found = ['total', 'memberCount', 'month', 'trrn', 'establishment']
     .concat(CHALLAN_MONEY_KEYS).filter(k => out[k] !== null).length;
+  // How many of the five EPFO accounts are actually on the page, which is what
+  // separates a PF challan from an ESI or Professional Tax one. Those two also
+  // carry a TRRN-ish number, a month and a total, so "it read something" is not
+  // evidence this is a PF challan — and comparing an ESI challan against PF
+  // totals marks every line wrong on a document that is perfectly correct.
+  out.accountsFound = CHALLAN_MONEY_KEYS.filter(k => out[k] !== null).length;
   return out;
 }
 

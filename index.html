@@ -13468,6 +13468,19 @@ async function challanCheck_(fileId, name){
       'Type them in from the document.';
     return;
   }
+  // An ESI or Professional Tax challan carries a TRRN-ish number, a month and
+  // a total too, so "something was read" is not evidence this is a PF challan.
+  // What settles it is whether the EPFO accounts are on the page. Comparing an
+  // ESI challan against PF totals would mark every line wrong on a document
+  // that is perfectly correct, which is the one thing this screen must never do.
+  if(!ex.accountsFound){
+    note.className = 'pol-warn';
+    note.textContent = 'None of the EPFO accounts (A/c 1, 2, 10, 21 and 22) appear on this ' +
+      'document, so it does not look like a PF challan. ESI and Professional Tax challans ' +
+      'cannot be checked here — this screen only compares PF. If it is a PF challan, type the ' +
+      'figures in from it.';
+    return;
+  }
   CHALLAN_FIELDS.forEach(f => {
     const el = document.getElementById('chFld_' + f.k);
     if(el && ex[f.k] !== null && ex[f.k] !== undefined) el.value = String(ex[f.k]);
@@ -24864,8 +24877,16 @@ function odTableHtml_(title, docs, sub, showWhere){
     // this archive whose figures the app can check against its own, so the
     // button appears on those and nowhere else — a Check button on a purchase
     // invoice would be a button that can only ever disappoint.
-    const isChallan = /challan/i.test(String(d.name || '')) ||
-                      /challan/i.test(String(d.folder || ''));
+    // Only a PF challan. This screen compares the five EPFO accounts against
+    // consultantSummaryTotals, so pointing it at the ESI and Professional Tax
+    // challans sitting in the same archive marks every line wrong on documents
+    // that are perfectly correct. Framed as "not the other two" rather than
+    // "must say PF", so a PF challan filed under an unusual name keeps its
+    // button — anything ambiguous that slips through is caught on reading,
+    // where accountsFound settles it from the document's own contents.
+    const challanWhere = String(d.name || '') + ' ' + String(d.folder || '');
+    const isChallan = /challan/i.test(challanWhere) &&
+      !/(^|[^a-z0-9])(esi|esic|pt|professional[\s_-]*tax)([^a-z0-9]|$)/i.test(challanWhere);
     return `<button class="btn tiny" title="View in the app" onclick="officeDocView_('${d.fileId}', ${q(d.name)})">View</button>
       ${isChallan ? `<button class="btn tiny ghost" title="Read the figures off this challan and compare them with what payroll came to" onclick="withBusy(this,'Reading…',()=>challanCheck_('${d.fileId}', ${q(d.name)}))">Check</button>` : ''}
       <button class="btn tiny ghost" title="Open the original in Google Drive" onclick="window.open('${officeDocDriveUrl_(d.fileId)}','_blank','noopener')">Drive</button>
