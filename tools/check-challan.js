@@ -265,6 +265,37 @@ console.log('\na reading that cannot be trusted says so\n');
   check('empty text finds nothing', p.found, 0);
 }
 
+console.log('\nonly a PF challan gets compared against PF\n');
+{
+  // An ESI challan carries a TRRN, a month, an establishment and a total, so
+  // everything except the EPFO accounts reads off it. Compared against PF
+  // totals it would mark every line wrong on a document that is correct.
+  const ESI =
+    'ESIC Challan\n\nChallan Number : 2599900033344\n\nEmployer Code : 12345678900001234\n\n' +
+    'Wage Month : AUG-2025\n\nTotal Amount (Rs) : 18,400\n\nTotal Members : 12\n\n' +
+    'Payment Date : 11-SEP-2025';
+  const e = L.parseChallanText(ESI);
+  check('an ESI challan has none of the EPFO accounts on it', e.accountsFound, 0);
+  check('even though it reads as a document with figures on it', e.found > 0, true);
+  const a = L.parseChallanText(LAYOUT_A);
+  check('a PF challan has all five', a.accountsFound, 5);
+  // The rule the Check button uses. These four names are real: two PF challans
+  // and the ESI and Professional Tax challans filed in the same archive, all
+  // of which match a plain /challan/i and so all of which used to offer a
+  // PF comparison.
+  const offersCheck = s => /challan/i.test(s) &&
+    !/(^|[^a-z0-9])(esi|esic|pt|professional[\s_-]*tax)([^a-z0-9]|$)/i.test(s);
+  check('the PF challan keeps its button', offersCheck('PF Challan - 2025-08.pdf '), true);
+  check('a PF challan named only by its folder keeps it too',
+        offersCheck('Challan Aug.pdf PF Challan'), true);
+  check('the ESI challan no longer offers a PF comparison',
+        offersCheck('2024-25_December_ESI-Challan_RS-Infotech_a178bb9a.pdf '), false);
+  check('nor does the Professional Tax one',
+        offersCheck('2024-25_December_Professional-Tax-Challan_RS-Infotech_b78a3a14.pdf '), false);
+  check('and a document that is not a challan never did',
+        offersCheck('Employee Handbook.pdf '), false);
+}
+
 console.log('\nfrom the document straight through to the comparison\n');
 {
   // The round trip the feature is: text in, figures out, compared against what
