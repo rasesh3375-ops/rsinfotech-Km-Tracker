@@ -2049,8 +2049,13 @@
       </div>
 
       <div class="odometer-box">
-        <div class="label">Today's distance</div>
+        <div class="label">Today's distance by vehicle</div>
         <div class="odometer"><span id="liveKm">0.00</span><small>km</small></div>
+        <!-- Shown to the engineer, not just to HR. This is his reimbursement,
+             and walking is now excluded from it — so he can see what was
+             excluded while the trip is running, rather than finding a shorter
+             number than he expected at the end of the month. -->
+        <div class="status-line" id="liveWalkKm" hidden></div>
         <div class="status-line" id="trackStatus">Not tracking</div>
       </div>
 
@@ -3760,6 +3765,7 @@
   </div>
 
   <div id="checklistModalRoot"></div>
+  <div id="tripRouteModalRoot"></div>
   <div id="employeeModalRoot"></div>
   <!-- After employeeModalRoot on purpose: Record Increment opens from a
        button inside the employee edit form, and a later sibling paints over
@@ -3893,7 +3899,9 @@ let engineerName = null;
 let engineerDisplayName = null;
 let tracking = false;
 let watchId = null;
-let accumulatedKm = 0;
+let accumulatedKm = 0;   // vehicle km only — what the engineer is paid for
+let walkedKm = 0;        // measured and kept, never paid; see trackingStep
+let trackState = newTrackingState();
 let todayCompletedKm = 0;
 let lastCoord = null;
 let startTime = null;
@@ -5787,14 +5795,6 @@ async function renderUserList(){
     </div>`).join('');
 }
 
-function haversineKm(lat1, lon1, lat2, lon2){
-  const R = 6371;
-  const dLat = (lat2-lat1) * Math.PI/180;
-  const dLon = (lon2-lon1) * Math.PI/180;
-  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-}
-
 async function compressImageFile(file){
   const size = 240;
   if(window.createImageBitmap){
@@ -6528,6 +6528,8 @@ async function forceLogoutEngineer(reason){
   await clearActive(engineerName);
   await safeSet('my_username', '', false);
   accumulatedKm = 0;
+  walkedKm = 0;
+  trackState = newTrackingState();
   lastCoord = null;
   tripTrail = [];
   pendingSelfie = null;
@@ -6553,6 +6555,14 @@ async function enterEngineerMain(){
   const active = await getActive(engineerName);
   if(active){
     accumulatedKm = active.accumulatedKm || 0;
+    walkedKm = active.walkedKm || 0;
+    // Restored, not restarted. Without the mode a resumed trip begins on foot,
+    // so the first stretch after a reload or a dropped tab is not paid for.
+    trackState = newTrackingState();
+    trackState.vehicleKm = accumulatedKm;
+    trackState.walkKm = walkedKm;
+    trackState.mode = active.trackMode === 'vehicle' ? 'vehicle' : 'foot';
+    trackState.route = Array.isArray(active.route) ? active.route : [];
     startTime = active.startTime;
     pendingSelfie = active.selfie || null;
     lastCoord = active.lastCoord || null;
@@ -6609,6 +6619,16 @@ async function handleCheckoutSelfie(event){
 
 function updateLiveDisplay(){
   document.getElementById('liveKm').textContent = fmtKm(todayCompletedKm + accumulatedKm);
+  const w = document.getElementById('liveWalkKm');
+  if(!w) return;
+  // Only once there is something to say. A permanent "0.00 km on foot" is
+  // noise on a screen an engineer looks at all day.
+  if(walkedKm >= 0.05){
+    w.hidden = false;
+    w.textContent = fmtKm(walkedKm) + ' km on foot this trip — not counted as travel';
+  }else{
+    w.hidden = true;
+  }
 }
 
 async function refreshTodayTotal(){
@@ -6633,7 +6653,8 @@ async function getBatteryInfo(){
 async function pushActiveState(extra){
   const battery = await getBatteryInfo();
   await setActive(engineerName, Object.assign({
-    startTime, accumulatedKm, selfie: pendingSelfie,
+    startTime, accumulatedKm, walkedKm, trackMode: trackState.mode,
+    route: trackState.route, selfie: pendingSelfie,
     lastCoord, lastFixTime: lastCoord ? Date.now() : null,
     lastHeartbeat: Date.now(),
     gpsError: lastGpsError,
@@ -6680,6 +6701,8 @@ async function handleSelfieCapture(event){
   }
   msg.textContent = '';
   accumulatedKm = 0;
+  walkedKm = 0;
+  trackState = newTrackingState();
   lastCoord = null;
   tripTrail = [];
   lastGpsError = null;
@@ -6784,19 +6807,23 @@ function startWatch(resumed){
   document.getElementById('trackStatus').innerHTML = '<span class="status-dot"></span>Tracking since ' + new Date(startTime).toLocaleTimeString();
 
   watchId = navigator.geolocation.watchPosition(async (pos) => {
-    const { latitude, longitude, accuracy } = pos.coords;
+    const { latitude, longitude, accuracy, speed } = pos.coords;
     lastGpsError = null;
-    if(accuracy && accuracy > 60){
-      return;
-    }
-    if(lastCoord){
-      const d = haversineKm(lastCoord.lat, lastCoord.lon, latitude, longitude);
-      if(d > 0.005 && d < 2){
-        accumulatedKm += d;
-        updateLiveDisplay();
-      }
-    }
-    lastCoord = { lat: latitude, lon: longitude };
+    // Every decision about what counts is trackingStep's, in
+    // shared/report-logic.js, so the rule that decides an engineer's
+    // reimbursement is one tested function rather than arithmetic sitting in a
+    // GPS callback where nothing can reach it. All this does is hand it the
+    // fix and keep what comes back.
+    const before = trackState.vehicleKm;
+    trackState = trackingStep(trackState, {
+      lat: latitude, lon: longitude, ts: pos.timestamp || Date.now(),
+      accuracy: accuracy, speed: speed
+    });
+    accumulatedKm = trackState.vehicleKm;
+    walkedKm = trackState.walkKm;
+    if(trackState.vehicleKm !== before) updateLiveDisplay();
+    if(!trackState.last) return;
+    lastCoord = { lat: trackState.last.lat, lon: trackState.last.lon };
     tripTrail.push(lastCoord);
     if(tripTrail.length > 40) tripTrail.shift();
     updateGeofenceStatus(lastCoord);
@@ -6854,6 +6881,8 @@ function beginCheckout(){
     startTime,
     endTime: new Date().toISOString(),
     km: Math.round(accumulatedKm * 100) / 100,
+    walkKm: Math.round(walkedKm * 100) / 100,
+    route: trackState.route,
     selfie: pendingSelfie
   };
   showCompanyForm();
@@ -6872,15 +6901,35 @@ async function saveTripWithCompany(){
     msg.classList.add('error');
     return;
   }
+  // Every trip an engineer has ever made shares ONE cell, and a cell holds
+  // 50,000 characters. A few hundred route points would fill it inside a
+  // month, so the route goes in its own key and the trip keeps only the id
+  // that finds it — the same answer this app already gives for anything large,
+  // where the record keeps a link and the bulk lives elsewhere.
+  const tripId = 'T-' + Date.now();
   const trip = {
+    id: tripId,
     date: pendingTrip.date,
     startTime: pendingTrip.startTime,
     endTime: pendingTrip.endTime,
     km: pendingTrip.km,
+    // Measured, kept, and never paid. HR sees it beside the vehicle km, so an
+    // engineer who asks why his kilometres look low can be shown exactly what
+    // was counted and what was not, rather than being told the app decided.
+    walkKm: pendingTrip.walkKm || 0,
+    hasRoute: !!(pendingTrip.route && pendingTrip.route.length > 1),
     checkinSelfie: pendingTrip.selfie,
     checkoutSelfie: pendingCheckoutSelfie,
     company
   };
+  // The route first: a trip that lists a route nothing can fetch is worse than
+  // one that admits it has none, so hasRoute is corrected if this fails rather
+  // than the save being abandoned over a map line.
+  if(trip.hasRoute){
+    const wrote = await remoteSet('route:' + engineerName + ':' + tripId,
+      JSON.stringify({ id: tripId, date: trip.date, points: pendingTrip.route }));
+    if(!wrote) trip.hasRoute = false;
+  }
   const trips = await getTrips(engineerName);
   trips.push(trip);
   const ok = await saveTrips(engineerName, trips);
@@ -6910,6 +6959,8 @@ async function saveTripWithCompany(){
   }catch(e){}
 
   accumulatedKm = 0;
+  walkedKm = 0;
+  trackState = newTrackingState();
   lastCoord = null;
   tripTrail = [];
   pendingSelfie = null;
@@ -6937,9 +6988,67 @@ async function renderEngHistory(){
     const timeCol = t.manual ? 'Added manually' : (new Date(t.startTime).toLocaleTimeString() + ' – ' + new Date(t.endTime).toLocaleTimeString());
     const inPhoto = t.checkinSelfie ? `<img src="${t.checkinSelfie}" class="selfie-thumb sm" title="Check-in" />` : '';
     const outPhoto = t.checkoutSelfie ? `<img src="${t.checkoutSelfie}" class="selfie-thumb sm" title="Check-out" />` : '';
-    return `<tr><td>${inPhoto}${outPhoto} ${fmtDateIN(t.date)}</td><td>${t.company || '—'}</td><td>${timeCol}</td><td class="num">${fmtKm(t.km)} km</td></tr>`;
+    // The walked figure sits under the paid one on the engineer's own screen.
+    // He is the person the exclusion costs, so he is the person who should not
+    // have to ask what it was.
+    const walk = t.walkKm > 0.05
+      ? `<br><small class="muted">+ ${fmtKm(t.walkKm)} km on foot</small>` : '';
+    // Single-quoted attribute so JSON's own double quotes sit inside it. `q`
+    // is an HR-side helper and does not exist in this script block.
+    const route = t.hasRoute
+      ? `<button class="btn tiny ghost" onclick='showTripRoute_(${JSON.stringify(String(t.id || ''))}, ${JSON.stringify(String(t.date || ''))})'>Route</button>` : '';
+    return `<tr><td>${inPhoto}${outPhoto} ${fmtDateIN(t.date)}</td><td>${t.company || '—'}</td><td>${timeCol}${route ? '<br>' + route : ''}</td><td class="num">${fmtKm(t.km)} km${walk}</td></tr>`;
   }).join('');
-  box.innerHTML = `<table><tr><th>Date</th><th>Company</th><th>Trip time</th><th class="num">Distance</th></tr>${rows}</table>`;
+  box.innerHTML = `<table><tr><th>Date</th><th>Company</th><th>Trip time</th><th class="num">By vehicle</th></tr>${rows}</table>`;
+}
+
+// The route of one finished trip, fetched from its own key. Takes the owner as
+// an argument rather than assuming engineerName, so HR opening an engineer's
+// trip reaches the same function instead of growing a second copy of it.
+let tripRouteMap_ = null;
+async function showTripRoute_(tripId, date, owner){
+  const who = owner || engineerName;
+  const root = document.getElementById('tripRouteModalRoot');
+  if(!root) return;
+  root.innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeTripRoute_()">
+    <div class="modal-box" style="max-width:760px;">
+      <div class="modal-head"><h3 style="margin:0;">Route — ${escapeHtml(fmtDateIN(date))}</h3>
+        <button class="modal-x" onclick="closeTripRoute_()">✕</button></div>
+      <div id="tripRouteMap" style="height:420px;border-radius:8px;overflow:hidden;background:var(--card);"></div>
+      <p id="tripRouteNote" style="font-size:11px;color:var(--muted);margin:10px 0 0;line-height:1.6;">Loading the route…</p>
+    </div></div>`;
+  let data = null;
+  try{ data = await remoteGet('route:' + who + ':' + tripId); }catch(e){ data = null; }
+  let pts = [];
+  try{ pts = (typeof data === 'string' ? JSON.parse(data) : (data || {})).points || []; }catch(e){ pts = []; }
+  const note = document.getElementById('tripRouteNote');
+  const el = document.getElementById('tripRouteMap');
+  if(!el) return;
+  if(pts.length < 2){
+    if(note) note.textContent = 'No route was recorded for this trip.';
+    return;
+  }
+  tripRouteMap_ = L.map(el, { zoomControl: true });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(tripRouteMap_);
+  const line = L.polyline(pts, { color: '#2E7D4F', weight: 4, opacity: 0.85 }).addTo(tripRouteMap_);
+  L.marker(pts[0]).addTo(tripRouteMap_).bindPopup('Start');
+  L.marker(pts[pts.length - 1]).addTo(tripRouteMap_).bindPopup('End');
+  tripRouteMap_.fitBounds(line.getBounds(), { padding: [24, 24] });
+  // Leaflet measures the container on creation, and this one was still being
+  // laid out inside a modal that had just opened — the same invalidateSize
+  // the live map needs for the same reason.
+  setTimeout(() => { if(tripRouteMap_) tripRouteMap_.invalidateSize(); }, 120);
+  if(note){
+    note.textContent = 'The path recorded while travelling, thinned to roughly one point every ' +
+      Math.round(TRACKING_RULES.routeMinGapKm * 1000) + ' metres — ' + pts.length +
+      ' points. It shows where the trip went, not every metre of it.';
+  }
+}
+function closeTripRoute_(){
+  if(tripRouteMap_){ try{ tripRouteMap_.remove(); }catch(e){} tripRouteMap_ = null; }
+  const root = document.getElementById('tripRouteModalRoot');
+  if(root) root.innerHTML = '';
 }
 
 async function renderDaily30(){
@@ -28641,7 +28750,8 @@ window.addEventListener('popstate', (e) => {
 
 window.addEventListener('beforeunload', (e) => {
   if(tracking && engineerName){
-    setActive(engineerName, { startTime, accumulatedKm, selfie: pendingSelfie, lastCoord, lastFixTime: lastCoord ? Date.now() : null, lastHeartbeat: Date.now(), gpsError: 'Tab closed or app exited while tracking', trail: tripTrail });
+    setActive(engineerName, { startTime, accumulatedKm, walkedKm, trackMode: trackState.mode,
+      route: trackState.route, selfie: pendingSelfie, lastCoord, lastFixTime: lastCoord ? Date.now() : null, lastHeartbeat: Date.now(), gpsError: 'Tab closed or app exited while tracking', trail: tripTrail });
   }
   // Browsers show their own generic wording here, not this text — but setting
   // returnValue is what triggers the "leave site?" confirmation at all. It only

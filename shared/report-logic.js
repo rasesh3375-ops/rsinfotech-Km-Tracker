@@ -3988,3 +3988,139 @@ function challanComparison(extracted, totals, opts){
     missingCount: missing.length
   };
 }
+
+// ---- how far an engineer travelled, and by what ----
+//
+// This figure is money: the engineer app's km becomes kmToday * rate_per_km on
+// HR's dashboard, so a rupee here is a rupee in somebody's reimbursement. It
+// used to count every movement over five metres, which meant walking round a
+// plant was paid at the same rate as driving to it.
+//
+// The obvious fix — "below walking pace, stop counting" — is wrong, and wrong
+// in the direction that takes money off people. A vehicle in city traffic
+// moves at walking pace for minutes at a time, so a single threshold stops
+// counting genuine driven kilometres in a traffic jam, and the engineer has no
+// way to show what was dropped.
+//
+// So a journey is judged in stretches, not fix by fix, with two thresholds and
+// a grace period between them. Speed has to pass vehicleEnterKmph — faster
+// than anybody walks — before a stretch counts as driving, and once it is
+// driving it stays driving until speed holds below footExitKmph for a full
+// exitGraceMs. Traffic keeps counting; parking and walking to the door does
+// not.
+//
+// Nothing is thrown away. Distance covered on foot is accumulated separately
+// as walkKm, so HR sees both figures and an engineer who queries his
+// kilometres can be shown exactly what counted and what did not. Only
+// vehicleKm reaches the expense.
+const TRACKING_RULES = {
+  // Faster than anybody walks, so crossing it is unambiguous.
+  vehicleEnterKmph: 15,
+  // Below this for exitGraceMs in a row and the stretch is over. The grace is
+  // what protects a traffic jam: two minutes of crawling is still driving.
+  footExitKmph: 5,
+  exitGraceMs: 2 * 60 * 1000,
+  // A fix this vague cannot say whether anybody moved at all.
+  maxAccuracyM: 60,
+  // Below this is GPS jitter while standing still; above it is a fix that
+  // teleported, which is a bad reading rather than a real journey.
+  minStepKm: 0.005,
+  maxStepKm: 2,
+  // How far apart the points kept for the route are. A trip's route lives in
+  // its own key, so this is about keeping one cell comfortable rather than the
+  // whole trip list — see routeAppend_.
+  routeMinGapKm: 0.075,
+  routeMaxPoints: 600
+};
+function haversineKm(lat1, lon1, lat2, lon2){
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+function newTrackingState(){
+  return { mode: 'foot', slowSince: null, vehicleKm: 0, walkKm: 0, last: null, route: [] };
+}
+// One GPS fix in, the new state out. Pure and total: it never throws on a
+// missing field, because the one place it runs is a watchPosition callback on
+// a phone in a van, where a thrown error stops the trip being measured at all
+// and nobody finds out until the engineer's reimbursement is short.
+function trackingStep(state, fix, rules){
+  const R = rules || TRACKING_RULES;
+  const s = {
+    mode: state.mode, slowSince: state.slowSince,
+    vehicleKm: state.vehicleKm, walkKm: state.walkKm,
+    last: state.last, route: state.route
+  };
+  const lat = Number(fix && fix.lat), lon = Number(fix && fix.lon);
+  const ts = Number(fix && fix.ts);
+  if(!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(ts)) return s;
+  const acc = Number(fix.accuracy);
+  // Dropped entirely, and `last` deliberately not moved: comparing the next
+  // good fix against a vague one manufactures a jump that never happened.
+  if(Number.isFinite(acc) && acc > R.maxAccuracyM) return s;
+  const here = { lat: lat, lon: lon, ts: ts };
+  if(!s.last){
+    s.last = here;
+    s.route = routeAppend_(s.route, here, R);
+    return s;
+  }
+  const d = haversineKm(s.last.lat, s.last.lon, lat, lon);
+  const dtMs = ts - s.last.ts;
+  // The phone's own speed where it reports one — it comes off GPS Doppler and
+  // is steadier than dividing two positions — and distance over time where it
+  // does not. A negative or absent speed means the device declined to say.
+  // Number(null) is 0, and 0 is a perfectly valid speed — so reading the
+  // device's speed with a plain Number() turns "this phone does not report
+  // speed" into "this phone is stationary", and every kilometre of the drive
+  // is booked as walking. Plenty of Android fixes report no speed at all, so
+  // that is not a corner case: it is one handset paying nothing for a day's
+  // driving. The absence has to be checked before the conversion, not after.
+  const devSpeed = (fix.speed === null || fix.speed === undefined) ? NaN : Number(fix.speed);
+  const kmph = Number.isFinite(devSpeed) && devSpeed >= 0
+    ? devSpeed * 3.6
+    : (dtMs > 0 ? d / (dtMs / 3600000) : null);
+  if(kmph !== null && Number.isFinite(kmph)){
+    if(kmph >= R.vehicleEnterKmph){
+      s.mode = 'vehicle';
+      s.slowSince = null;
+    }else if(s.mode === 'vehicle'){
+      if(kmph < R.footExitKmph){
+        // The grace runs from the first slow fix, not from each one, so a
+        // jam that dips and recovers does not restart the clock every time.
+        if(s.slowSince === null) s.slowSince = ts;
+        else if(ts - s.slowSince >= R.exitGraceMs){ s.mode = 'foot'; s.slowSince = null; }
+      }else{
+        s.slowSince = null;
+      }
+    }
+  }
+  if(d > R.minStepKm && d < R.maxStepKm){
+    if(s.mode === 'vehicle') s.vehicleKm += d; else s.walkKm += d;
+    s.route = routeAppend_(s.route, here, R);
+  }
+  s.last = here;
+  return s;
+}
+// The route, thinned as it is collected rather than at the end — the phone
+// holds this for the length of a trip, and an unthinned one is tens of
+// thousands of points. Once the cap is reached every second point goes and the
+// spacing doubles, so an eight-hour trip costs no more room than a one-hour
+// one; it is simply drawn coarser.
+function routeAppend_(route, point, rules){
+  const R = rules || TRACKING_RULES;
+  const out = route || [];
+  const p = [Math.round(point.lat * 1e5) / 1e5, Math.round(point.lon * 1e5) / 1e5];
+  if(!out.length) return [p];
+  const prev = out[out.length - 1];
+  const gap = (R.routeMinGapKm || 0.075) * Math.pow(2, Math.floor(out.length / R.routeMaxPoints));
+  if(haversineKm(prev[0], prev[1], p[0], p[1]) < gap) return out;
+  const next = out.concat([p]);
+  if(next.length <= R.routeMaxPoints) return next;
+  // Keep the first and last, drop every second one in between.
+  const thinned = next.filter((_, i) => i % 2 === 0);
+  if(thinned[thinned.length - 1] !== next[next.length - 1]) thinned.push(next[next.length - 1]);
+  return thinned;
+}

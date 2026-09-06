@@ -1175,6 +1175,12 @@ function engineerMayRead_(key, username) {
   if (key === 'leave_requests') return true;
   var empId = employeeIdForTrackingUser_(username);
   if (empId && (key === 'attendance:' + empId || key.indexOf('attendance:' + empId + ':') === 0)) return true;
+  // One route per trip, in its own key, because every trip an engineer has
+  // made shares one 50,000-character cell and a route of a few hundred points
+  // would fill it inside a month. Named deliberately rather than by widening
+  // the default, and pinned to this engineer's own username, so nobody reaches
+  // anybody else's route and no other key shape is reached by adding it.
+  if (username && key.indexOf('route:' + username + ':') === 0) return true;
   return false;
 }
 
@@ -1187,6 +1193,12 @@ function engineerMayWrite_(key, username) {
   // back forbidden and was silently dropped by safeSet's error-swallowing.
   var empId = employeeIdForTrackingUser_(username);
   if (empId && (key === 'attendance:' + empId || key.indexOf('attendance:' + empId + ':') === 0)) return true;
+  // One route per trip, in its own key, because every trip an engineer has
+  // made shares one 50,000-character cell and a route of a few hundred points
+  // would fill it inside a month. Named deliberately rather than by widening
+  // the default, and pinned to this engineer's own username, so nobody reaches
+  // anybody else's route and no other key shape is reached by adding it.
+  if (username && key.indexOf('route:' + username + ':') === 0) return true;
   return false;
 }
 
