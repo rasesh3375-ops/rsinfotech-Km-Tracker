@@ -888,6 +888,30 @@
   .modal-overlay > .modal-box,
   .gs-overlay > .gs-panel,
   #fullscreenSheetRoot > *{ zoom:var(--kmt-fixed-zoom, 1); }
+  /* ...and the other half of the same browser difference, which the rule above
+     does not cover.
+     Where fixed descendants ARE scaled by the app's zoom, the overlay ITSELF
+     is scaled too — so inset:0 and height:100dvh resolve against the viewport
+     and are then multiplied by the zoom. At 80% a full-screen report measured
+     531px tall in a 664px viewport: the overlay stopped four fifths of the way
+     down and the page it was covering showed underneath it, which is what HR
+     photographed. At 150% it ran off the bottom instead.
+     Divided by the zoom here so that, once scaled, it lands on the viewport
+     exactly. Only under .kmt-fixed-zooms, which kmtApplyZoom_ sets from the
+     same probe as --kmt-fixed-zoom — where fixed does NOT inherit the zoom
+     (iOS/WebKit) the overlay was never scaled and needs no correction, and
+     applying one there would break the case that already worked. */
+  html.kmt-fixed-zooms.kmt-zoomed .modal-overlay,
+  html.kmt-fixed-zooms.kmt-zoomed .gs-overlay,
+  html.kmt-fixed-zooms.kmt-zoomed #hrNavScrim,
+  html.kmt-fixed-zooms.kmt-zoomed #fullscreenSheetRoot{
+    width:calc(100vw / var(--kmt-app-zoom, 1));
+    height:calc(100dvh / var(--kmt-app-zoom, 1));
+  }
+  /* The sidebar is a fixed-WIDTH drawer, so only its height is corrected —
+     scaling its width along with its contents is what zooming a drawer should
+     do, and forcing it back would spill them out of it. */
+  html.kmt-fixed-zooms.kmt-zoomed #hrSidebar{ height:calc(100dvh / var(--kmt-app-zoom, 1)); }
   /* A report inside this shell is app content and scales with the app. A
      scanned PF receipt is not, and has a zoom of its own — but it is NOT
      exempted here with a reciprocal zoom of its own. That was tried and it
@@ -8814,6 +8838,13 @@ if(!window.KMT_ZOOM_ARMED_){
     // --kmt-fixed-zoom rule in the stylesheet.
     const fixedByCss = kmtFixedInheritsZoom_() === false;
     root.style.setProperty('--kmt-fixed-zoom', fixedByCss ? String(shown) : '1');
+    // The zoom actually on screen, whatever the browser does with fixed
+    // elements — the overlay-size correction above divides by this, and it must
+    // be the real figure rather than the 1 that --kmt-fixed-zoom carries here.
+    root.style.setProperty('--kmt-app-zoom', String(shown));
+    // Which of the two browser behaviours we are in. Measured once by the same
+    // probe, not sniffed from a user-agent string.
+    root.classList.toggle('kmt-fixed-zooms', !fixedByCss);
     root.classList.toggle('kmt-zoomed', shown !== 1);
     kmtSyncZoomChip_();
     // Debounced, deliberately not written on every call: a live pinch runs
