@@ -13351,16 +13351,26 @@ function prepayPaintStrip_(){
 let prepayResult_ = null;          // the last run, for the sidebar badge and the strip
 let prepayRunning_ = null;         // the run in flight, so two callers share one
 
-// Which month to check: this one, until payroll for it is behind us. HR runs
-// payroll on the 2nd for the month just gone, so up to and including the 5th
-// the month worth checking is the previous one, not the one a few days old.
+// The last COMPLETE month, always. A pre-payroll check on a month still
+// running is not a check: on the 6th of September nobody has marked the 1st to
+// the 5th yet, and the screen opened on 98 unmarked days across 32 people —
+// every one of them correct, and every one of them useless. That first version
+// defaulted to the current month from the 6th onward, which put the screen into
+// that state for twenty-five days out of thirty.
+//
+// The month you are about to pay, or have just paid, is the one worth checking,
+// and it is always the previous one. September becomes checkable on 1 October.
 function prepayDefaultMonth_(){
-  const t = todayStr();
-  const day = Number(t.slice(8, 10));
-  return day <= 5 ? prevMonthOf_(t.slice(0, 7)) : t.slice(0, 7);
+  return prevMonthOf_(todayStr().slice(0, 7));
 }
+// The month on screen, which is not always the default: a re-render — coming
+// back from an employee record, a Back-navigation replay — used to call
+// renderPrePayrollCheck() with no argument and quietly revert to the default,
+// throwing away the month that had been chosen. Remembered here instead.
+let prepayMonth_ = null;
 async function runPrePayrollCheck_(ym){
-  ym = ym || prepayDefaultMonth_();
+  ym = ym || prepayMonth_ || prepayDefaultMonth_();
+  prepayMonth_ = ym;
   const dateList = monthDateList_(ym);
   const monthDays = dateList.length;
   const prevYm = prevMonthOf_(ym);
@@ -13399,11 +13409,17 @@ function prepayWhoHtml_(who){
   // Named, and each name opens that person's record — a flag you cannot act on
   // from where you are reading it is a flag that gets read and left. Capped at
   // eight, because a list of forty names buries the flag it belongs to.
-  const shown = who.slice(0, 8).map(w =>
-    `<button type="button" onclick="openAddEmployeeModal('${escapeJsAttr_(w.id)}')">${escapeHtml(w.name)}</button>`);
+  // Each name carries its own reason where the check worked one out — "12 days",
+  // "down 88%, 9 more leave day(s)". One name per line then, rather than a run
+  // of them: a reason appended to a comma-separated list reads as belonging to
+  // the whole list instead of to the name in front of it.
+  const noted = who.some(w => w.note);
+  const one = w => `<button type="button" onclick="openAddEmployeeModal('${escapeJsAttr_(w.id)}')">${escapeHtml(w.name)}</button>` +
+    (w.note ? ` <span style="color:var(--muted);font-weight:400;">— ${escapeHtml(w.note)}</span>` : '');
+  const shown = who.slice(0, 8).map(one);
   const rest = who.length - shown.length;
-  return '<span class="who">' + shown.join(' · ') +
-         (rest > 0 ? ' <span style="color:var(--muted);font-weight:400;">and ' + rest + ' more</span>' : '') +
+  return '<span class="who">' + shown.join(noted ? '<br>' : ' · ') +
+         (rest > 0 ? (noted ? '<br>' : ' ') + '<span style="color:var(--muted);font-weight:400;">and ' + rest + ' more</span>' : '') +
          '</span>';
 }
 function prepayFlagHtml_(f){
@@ -13450,15 +13466,22 @@ async function renderPrePayrollCheck(ym){
     <div class="row-inline" style="margin:0 0 14px;gap:8px;flex-wrap:wrap;">
       <div style="flex:1;min-width:150px;"><label class="field">Month</label>
         <select class="field-input" id="prepayMonthSel" onchange="renderPrePayrollCheck(this.value)">
-          ${[0,1,2,3,4,5].map(i => {
-            let ymv = res.month; for(let k=0;k<i;k++) ymv = prevMonthOf_(ymv);
-            return `<option value="${ymv}"${ymv===res.month?' selected':''}>${escapeHtml(monthLabel(ymv))}</option>`;
+          ${/* From the month in progress back through the year. It is offered
+                but not the default, and labelled for what it is — the figures
+                in a month still being worked are a preview, not a check. */
+            [0,1,2,3,4,5,6,7,8,9,10,11].map(i => {
+            let ymv = todayStr().slice(0, 7); for(let k=0;k<i;k++) ymv = prevMonthOf_(ymv);
+            const running = ymv === todayStr().slice(0, 7);
+            return `<option value="${ymv}"${ymv===res.month?' selected':''}>${escapeHtml(monthLabel(ymv))}${running?' — still running':''}</option>`;
           }).join('')}
         </select></div>
       <div style="flex:0 0 auto;align-self:flex-end;">
         <button type="button" class="btn ghost" onclick="withBusy(this,'Checking…',()=>renderPrePayrollCheck(document.getElementById('prepayMonthSel').value))">Run again</button>
       </div>
     </div>
+
+    ${res.month === todayStr().slice(0, 7) ? `<p class="pol-warn" style="margin:0 0 12px;line-height:1.5;">
+      ${escapeHtml(monthLabel(res.month))} is still being worked, so this is where it stands today rather than a check of a finished month. ${escapeHtml(monthLabel(prevMonthOf_(res.month)))} is the one to run before payroll.</p>` : ''}
 
     <div class="pp-counts">
       <div class="stop"><b>${res.counts.stop}</b><span>Must fix</span></div>
