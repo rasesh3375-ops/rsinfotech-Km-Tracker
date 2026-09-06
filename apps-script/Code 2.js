@@ -845,7 +845,7 @@ function doMoveOfficeDocs_(body) {
   for (var i = 0; i < moves.length; i++) {
     var m = moves[i] || {};
     try {
-      var pathKey = (m.folderPath || []).join(' ');
+      var pathKey = (m.folderPath || []).join('\u0000');
       var folder = folderCache[pathKey];
       if (!folder) { folder = officeDocFolderFromPath_(m.folderPath); folderCache[pathKey] = folder; }
       var file = DriveApp.getFileById(m.fileId);
@@ -1841,6 +1841,16 @@ function doPost(e) {
     // engineer app has no legitimate reason to read any of them.
     if (isEngineer) return forbidden_();
     return jsonOut_(doGetDriveFile_(body));
+  }
+
+  // Reads a PF challan with Claude and hands back what is printed on it.
+  // Deliberately here, ABOVE the write lock: it does not touch the sheet, and
+  // an API call takes several seconds — holding the script-wide lock for that
+  // long would make HR's next Save come back "busy", which is the exact
+  // failure setSequence caused before it was rewritten.
+  if (body.action === 'aiReadChallan') {
+    if (isEngineer) return forbidden_();
+    return jsonOut_(doAiReadChallan_(body));
   }
 
   if (body.action === 'getEmployeeHandbookFile') {
@@ -4706,4 +4716,121 @@ function removeLegacyEmployeesKey() {
   Logger.log('Removed the legacy `employees` row (' + Math.round(legacyValue.length / 1024) +
     ' KB, ' + legacyCount + ' record(s)); ' + perRecord + ' employee:<id> keys remain. ' +
     'A copy was saved to Drive under HR Management.');
+}
+
+// ---- reading a PF challan with Claude ----
+//
+// The ONLY thing a model is asked to do anywhere in this app: read what is
+// printed on a document and hand back the figures verbatim. It is not asked
+// whether they are right — that comparison happens in the browser, against
+// consultantSummaryTotals, over the same Salary Sheet the PF Return is filed
+// from. A model could be confidently wrong about a challan that has already
+// been paid, so it is never allowed to judge one.
+//
+// The key lives in Script Properties (File > Project Settings > Script
+// Properties, key ANTHROPIC_API_KEY), never in index.html — that file is served
+// publicly by Vercel and anyone can read it.
+const AI_MODEL_DEFAULT = 'claude-sonnet-5';
+const AI_TIMEOUT_MS = 90000;
+
+function aiApiKey_() {
+  return PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY') || '';
+}
+// The document goes up; the roster does not. A challan carries the
+// establishment code and the totals, and that is all this needs — no employee
+// name, salary, Aadhaar or bank detail is sent anywhere.
+function doAiReadChallan_(body) {
+  const key = aiApiKey_();
+  if (!key) {
+    return { ok: false, error: 'no-key',
+      message: 'No API key is set on the backend yet. In the Apps Script editor: ' +
+        'Project Settings > Script Properties > Add script property, name ANTHROPIC_API_KEY.' };
+  }
+  let file, blob;
+  try {
+    file = DriveApp.getFileById(body.fileId);
+    if (file.getSize() > DRIVE_FILE_VIEW_LIMIT_BYTES) {
+      return { ok: false, error: 'too-large',
+        message: 'That file is ' + (file.getSize() / (1024 * 1024)).toFixed(1) + ' MB — too large to send.' };
+    }
+    blob = file.getBlob();
+  } catch (err) {
+    return { ok: false, error: 'no-file', message: 'Could not read that file from Drive.' };
+  }
+  const mime = blob.getContentType() || '';
+  const b64 = Utilities.base64Encode(blob.getBytes());
+  // A PDF goes as a document block, a scan as an image. Anything else is not
+  // something to guess at.
+  let source;
+  if (/pdf/.test(mime)) {
+    source = { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } };
+  } else if (/^image\/(png|jpe?g|gif|webp)/.test(mime)) {
+    source = { type: 'image', source: { type: 'base64', media_type: mime.split(';')[0], data: b64 } };
+  } else {
+    return { ok: false, error: 'unsupported',
+      message: 'Only a PDF or an image of a challan can be read. This file is ' + mime + '.' };
+  }
+
+  // Told to copy, not to interpret, and to leave a field null rather than
+  // reach for a plausible number — a guessed TRRN is worse than a blank one,
+  // because a blank is visibly unanswered and a guess is not.
+  const instruction =
+    'This is an Indian EPFO Provident Fund challan (ECR). Read the figures printed on it and ' +
+    'return ONLY a JSON object, no prose and no code fence, with exactly these keys:\n' +
+    '  trrn           the TRRN / Confirmation number, as printed, or null\n' +
+    '  month          the WAGE month the challan is for, as "YYYY-MM", or null\n' +
+    '  establishment  the establishment code / ID, as printed, or null\n' +
+    '  ac1            A/c No. 1 amount, digits only, or null\n' +
+    '  ac2            A/c No. 2 amount, digits only, or null\n' +
+    '  ac10           A/c No. 10 amount, digits only, or null\n' +
+    '  ac21           A/c No. 21 amount, digits only, or null\n' +
+    '  ac22           A/c No. 22 amount, digits only, or null\n' +
+    '  total          the grand total amount, digits only, or null\n' +
+    '  memberCount    the number of members/employees, or null\n' +
+    'Copy what is printed. Do not calculate, correct, or infer any figure. If a field is not ' +
+    'legible or not present, use null — never a guess.';
+
+  let res;
+  try {
+    res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+      method: 'post',
+      contentType: 'application/json',
+      muteHttpExceptions: true,
+      payload: JSON.stringify({
+        model: PropertiesService.getScriptProperties().getProperty('ANTHROPIC_MODEL') || AI_MODEL_DEFAULT,
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: [source, { type: 'text', text: instruction }] }]
+      }),
+      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' }
+    });
+  } catch (err) {
+    return { ok: false, error: 'unreachable',
+      message: 'Could not reach the reading service: ' + (err && err.message ? err.message : 'no answer') };
+  }
+  const code = res.getResponseCode();
+  const textOut = res.getContentText();
+  if (code !== 200) {
+    // The API's own message, not a paraphrase — a wrong key and a spent quota
+    // need different actions, and only it knows which this is.
+    let detail = '';
+    try { const j = JSON.parse(textOut); detail = (j.error && j.error.message) || ''; } catch (e) {}
+    return { ok: false, error: 'api-' + code,
+      message: 'The reading service answered ' + code + (detail ? ': ' + detail : '') };
+  }
+  let extracted = null, rawText = '';
+  try {
+    const j = JSON.parse(textOut);
+    rawText = ((j.content || []).filter(function (c) { return c.type === 'text'; })[0] || {}).text || '';
+    // Tolerates a ```json fence even though the instruction forbids one.
+    const m = /\{[\s\S]*\}/.exec(rawText);
+    extracted = m ? JSON.parse(m[0]) : null;
+  } catch (err) {
+    extracted = null;
+  }
+  if (!extracted) {
+    return { ok: false, error: 'unreadable',
+      message: 'The challan could not be read into figures. Open it and enter them by hand.',
+      raw: rawText.slice(0, 500) };
+  }
+  return { ok: true, fileName: file.getName(), extracted: extracted, raw: rawText.slice(0, 2000) };
 }

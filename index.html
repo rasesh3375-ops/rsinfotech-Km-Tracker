@@ -13401,6 +13401,117 @@ function prepayPaintStrip_(){
   }).catch(() => {});
 }
 
+// ---- checking a PF challan against what payroll came to ----
+//
+// Two halves, and the line between them is the whole point. Reading the
+// document is the only thing a model does, and all it hands back is what is
+// printed on the page — it is never asked whether a figure is right. The
+// comparison is consultantSummaryTotals, the same function the Consultant
+// Summary and the PF Return are built from, and ordinary subtraction.
+//
+// A challan is money that has already left the bank. A model that decided one
+// looked fine would be a model quietly approving a payment, which is not a job
+// it can be given.
+const CHALLAN_AI_FETCH = { tries: 1, budgetMs: 100000, attemptMs: 95000 };
+
+// The app's own PF figures for a month, from the roster and attendance.
+async function challanAppTotals_(ym){
+  const dateList = monthDateList_(ym);
+  const monthDays = dateList.length;
+  const employees = (await getEmployees()).filter(e =>
+    employedDuringPeriod_(e, dateList[0], dateList[monthDays - 1]));
+  const holidayMap = await getHolidayMap_local();
+  const attByEmp = await getAttendanceMany(employees.map(e => e.id));
+  return consultantSummaryTotals(employees, attByEmp, dateList, monthDays, holidayMap);
+}
+async function challanCheck_(fileId, name){
+  let res;
+  try{
+    res = await backendAction({ action: 'aiReadChallan', fileId: fileId }, CHALLAN_AI_FETCH);
+  }catch(err){ res = null; }
+  if(!res){
+    alert('Could not reach the server to read this challan: ' +
+      (lastBackendError || 'it did not answer in time') +
+      '\n\nNothing has been changed — this only reads.');
+    return;
+  }
+  if(!res.ok){
+    // The backend says exactly which of the several different failures this is,
+    // because they need different things done about them.
+    const what = res.error === 'no-key'
+      ? '\n\nUntil that is set, this button cannot read anything. Every other part of the app is unaffected.'
+      : res.error === 'unreadable'
+        ? '\n\nThe figures can still be compared by opening the challan and reading them yourself.'
+        : '';
+    alert((res.message || 'Could not read that challan.') + what);
+    return;
+  }
+  const ex = res.extracted || {};
+  // The month printed on the challan decides which month is compared, and when
+  // it could not be read HR is asked rather than guessed at — comparing a
+  // challan against the wrong month makes every line disagree and looks like a
+  // catastrophe rather than a missing field.
+  let ym = /^\d{4}-\d{2}$/.test(String(ex.month || '')) ? String(ex.month) : '';
+  if(!ym){
+    ym = (prompt('The wage month could not be read off this challan.\n\n' +
+      'Which month is it for? Type it as YYYY-MM, e.g. 2026-08.', prepayDefaultMonth_()) || '').trim();
+    if(!/^\d{4}-\d{2}$/.test(ym)) return;
+  }
+  let totals;
+  try{ totals = await challanAppTotals_(ym); }
+  catch(err){
+    alert('Read the challan, but could not work out what ' + monthLabel(ym) +
+      ' came to: ' + ((err && err.message) || 'the server did not respond'));
+    return;
+  }
+  const cmp = challanComparison(ex, totals, { ym: ym });
+  challanShow_(cmp, name, ym, res);
+}
+function challanShow_(cmp, name, ym, res){
+  const box = document.getElementById('docViewerRoot');
+  if(!box) return;
+  // Rows carry their own unit — a head count must not come out as "₹1".
+  const val = (v, r) => v === null ? '—' : (r.unit === 'count' ? String(v) : '₹' + fmtMoney(v));
+  const mark = { agrees: '✓', differs: '✕', missing: '—' };
+  const rows = cmp.rows.map(r => `<tr class="${r.status === 'differs' ? 'inc-overdue' : ''}">
+      <td>${escapeHtml(r.label)}</td>
+      <td class="num">${escapeHtml(val(r.challan, r))}</td>
+      <td class="num">${escapeHtml(val(r.app, r))}</td>
+      <td class="num">${r.difference === null ? '—' : (r.difference === 0 ? '0' : escapeHtml((r.difference > 0 ? '+' : '') + fmtMoney(r.difference)))}</td>
+      <td>${mark[r.status]}</td>
+    </tr>`).join('');
+  const headline = cmp.differCount
+    ? `<div class="pp-flag stop"><span class="ic">■</span><span class="bd">
+        <span class="ti">${cmp.differCount} figure${cmp.differCount === 1 ? '' : 's'} on this challan ${cmp.differCount === 1 ? 'does' : 'do'} not match ${escapeHtml(monthLabel(ym))}</span>
+        <span class="su">The challan has been paid, so the difference is either in what was filed or in what this app computed. Both are worth reading before anything is changed.</span></span></div>`
+    : `<div class="pp-flag clear"><span class="ic">✓</span><span class="bd">
+        <span class="ti">Every figure matches ${escapeHtml(monthLabel(ym))}</span>
+        <span class="su">Each account on the challan is the figure this app computed for the month, to the rupee.</span></span></div>`;
+  const monthNote = cmp.monthMatches === false
+    ? `<p class="pol-warn" style="margin:10px 0 0;">The challan says it is for ${escapeHtml(String(cmp.month))}, and this was compared against ${escapeHtml(monthLabel(ym))}. Check which is right before reading anything into the differences.</p>`
+    : '';
+
+  box.classList.remove('hidden');
+  box.innerHTML = reportActionBar('Challan check — ' + name, 'docViewerRoot') +
+    `<div class="print-isolate">${reportLogoHeader('Challan check — ' + escapeHtml(name))}
+    ${headline}${monthNote}
+    <div class="hr-sheet-card" style="margin:12px 0;">
+      <div class="head"><strong>What the challan says it is</strong></div>
+      ${hrRow('TRRN', cmp.trrn ? escapeHtml(String(cmp.trrn)) : '<span class="pol-warn">not read</span>')}
+      ${hrRow('Wage month', cmp.month ? escapeHtml(String(cmp.month)) : '<span class="pol-warn">not read</span>')}
+      ${hrRow('Establishment', cmp.establishment ? escapeHtml(String(cmp.establishment)) : '—')}
+    </div>
+    <div class="payroll-docs-table-wrap"><table class="sal-table">
+      <thead><tr><th>Figure</th><th class="num">On the challan</th><th class="num">This app</th><th class="num">Difference</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:14px 0 0;">
+      The figures in the middle column were read off the document by Claude, which was asked to copy what is printed and nothing else — it was not asked whether any of them is correct. The right-hand column is this app's own arithmetic for ${escapeHtml(monthLabel(ym))}, from consultantSummaryTotals, the same function the Consultant Summary and the PF Return are built from. The comparison is subtraction. Nothing has been saved, and no employee name, salary or bank detail left your Google account — only the challan itself was sent.
+    </p></div>`;
+  openFullscreenView('Challan check — ' + name, 'docViewerRoot');
+  addActivityLog('Checked the PF challan "' + name + '" against ' + monthLabel(ym) +
+    ' — ' + (cmp.differCount ? cmp.differCount + ' figure(s) differ' : 'every figure matches')).catch(() => {});
+}
+
 // ---- Monthly Briefing ----
 //
 // The month as sentences. Same thin-async-half pattern as the Pre-Payroll
@@ -24674,7 +24785,14 @@ function odTableHtml_(title, docs, sub, showWhere){
   // phone can never end up one button short of the desktop.
   const actionsFor = d => {
     const q = v => JSON.stringify(v).replace(/"/g, '&quot;');
+    // Offered only where it means something. A challan is the one document in
+    // this archive whose figures the app can check against its own, so the
+    // button appears on those and nowhere else — a Check button on a purchase
+    // invoice would be a button that can only ever disappoint.
+    const isChallan = /challan/i.test(String(d.name || '')) ||
+                      /challan/i.test(String(d.folder || ''));
     return `<button class="btn tiny" title="View in the app" onclick="officeDocView_('${d.fileId}', ${q(d.name)})">View</button>
+      ${isChallan ? `<button class="btn tiny ghost" title="Read the figures off this challan and compare them with what payroll came to" onclick="withBusy(this,'Reading…',()=>challanCheck_('${d.fileId}', ${q(d.name)}))">Check</button>` : ''}
       <button class="btn tiny ghost" title="Open the original in Google Drive" onclick="window.open('${officeDocDriveUrl_(d.fileId)}','_blank','noopener')">Drive</button>
       <button class="btn tiny ghost" title="Rename this file" onclick="officeDocRename_(${q(d.folderId)}, '${d.year}', '${d.fileId}', ${q(d.name)})">Rename</button>
       <button class="btn tiny ghost" title="Remove from the archive" onclick="officeDocDelete_(${q(d.folderId)}, '${d.year}', '${d.fileId}', ${q(d.name)})">Delete</button>`;
