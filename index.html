@@ -2406,6 +2406,12 @@
       </div>
       <div style="height:14px"></div>
       <div id="liveStatusList"></div>
+      <!-- The question HR actually asks in the morning, and the one the live
+           list cannot answer: it only ever shows people who ARE checked in, so
+           somebody who never started is invisible on it. Needs no location to
+           answer — only whether a trip was started. -->
+      <div style="height:18px"></div>
+      <div id="notCheckedInPanel"></div>
     </section>
 
     <section class="block hidden gen-accordion-body" id="secGeofence">
@@ -6661,6 +6667,7 @@ async function refreshTodayTotal(){
 
 let heartbeatTimer = null;
 let lastGpsError = null;
+let lastGpsErrorCode = null;
 
 async function getBatteryInfo(){
   try{
@@ -6680,6 +6687,8 @@ async function pushActiveState(extra){
     lastCoord, lastFixTime: lastCoord ? Date.now() : null,
     lastHeartbeat: Date.now(),
     gpsError: lastGpsError,
+    gpsErrorCode: lastGpsErrorCode,
+    online: typeof navigator.onLine === 'boolean' ? navigator.onLine : null,
     trail: tripTrail,
     geofenceStatus: currentGeofenceStatus,
     battery
@@ -6831,6 +6840,7 @@ function startWatch(resumed){
   watchId = navigator.geolocation.watchPosition(async (pos) => {
     const { latitude, longitude, accuracy, speed } = pos.coords;
     lastGpsError = null;
+    lastGpsErrorCode = null;
     // Every decision about what counts is trackingStep's, in
     // shared/report-logic.js, so the rule that decides an engineer's
     // reimbursement is one tested function rather than arithmetic sitting in a
@@ -6856,6 +6866,7 @@ function startWatch(resumed){
     }
   }, (err) => {
     // err.code: 1 = permission denied (GPS/location turned off), 2 = unavailable, 3 = timeout
+    lastGpsErrorCode = err.code;
     if(err.code === 1){
       lastGpsError = 'Location permission denied or GPS turned off';
     } else if(err.code === 2){
@@ -7229,26 +7240,12 @@ function sumKmInRange(trips, sinceDateStr){
   return trips.filter(t => t.date >= sinceDateStr).reduce((s,t) => s + t.km, 0);
 }
 
+// Thin wrapper over trackerStatus, which is in shared/report-logic.js so
+// every combination of battery, signal and silence can be tested without a
+// browser. Kept as a named function because the dashboard, the alerts and the
+// live cards all call it.
 function computeStatus(active){
-  if(!active) return { level: 'idle', label: 'idle', detail: 'Not checked in right now.' };
-  const now = Date.now();
-  const hbAge = active.lastHeartbeat ? now - active.lastHeartbeat : Infinity;
-  const fixAge = active.lastFixTime ? now - active.lastFixTime : Infinity;
-  if(hbAge > 65000){
-    const secs = isFinite(hbAge) ? Math.round(hbAge/1000) : '?';
-    return { level:'warn', label:'not responding', detail: 'No signal from the app for ' + secs + ' sec — tab may be closed or phone switched off.' };
-  }
-  if(active.gpsError){
-    return { level:'warn', label:'GPS issue', detail: active.gpsError };
-  }
-  if(fixAge > 180000){
-    const mins = Math.round(fixAge/60000);
-    return { level:'warn', label:'no GPS fix', detail: 'No location fix for ' + mins + ' min — GPS may be turned off or signal is weak.' };
-  }
-  if(active.geofenceStatus === 'outside'){
-    return { level:'warn', label:'outside zone', detail: 'Currently outside all defined geofence zones.' };
-  }
-  return { level:'ok', label:'live', detail: 'Tracking normally · updated ' + new Date(active.lastHeartbeat).toLocaleTimeString() };
+  return trackerStatus(active, Date.now());
 }
 
 let previousWarnState = {};
@@ -7411,6 +7408,35 @@ function updateLiveMap(activeOnes, opts){
     if(!st || st.map !== liveMap) return;
     try{ liveMap.invalidateSize(); }catch(e){}
   }, 50);
+}
+
+// Who has a working login and has not started a trip today. The live list
+// above shows only people who ARE checked in, so somebody who never started is
+// invisible on it — which is exactly the person HR wants to know about.
+function renderNotCheckedIn(users, byUser){
+  const box = document.getElementById('notCheckedInPanel');
+  if(!box) return;
+  const rows = notCheckedInToday(users, byUser, todayStr());
+  if(!rows.length){
+    box.innerHTML = '<div class="empty">Everyone with a login has checked in today.</div>';
+    return;
+  }
+  const when = r => r.daysSince === null
+    // Never once, which is a different conversation from an absence — a new
+    // joiner who has not been shown the app, or a login nobody uses.
+    ? '<span class="pill warn">never checked in</span>'
+    : (r.daysSince === 1 ? 'last trip yesterday'
+       : 'last trip ' + fmtDateIN(r.lastTripDate) + ' · ' + r.daysSince + ' days ago');
+  box.innerHTML = `<div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:8px;">
+      Not checked in today — ${rows.length}</div>
+    <div class="payroll-docs-table-wrap"><table class="sal-table">
+      <thead><tr><th>Engineer</th><th>Last seen working</th></tr></thead>
+      <tbody>${rows.map(r => `<tr><td>${escapeHtml(r.name)}</td><td>${when(r)}</td></tr>`).join('')}</tbody>
+    </table></div>
+    <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:8px 0 0;">
+      Logins that are switched off are not listed, and neither is anybody who checked in and
+      finished a trip earlier today. This is drawn from whether a trip was started — no location
+      is involved.</p>`;
 }
 
 function renderLiveStatus(infos){
@@ -11728,6 +11754,7 @@ async function loadHR(){
   lastHRRows = [];
   const infos = [];
 
+  const byUser = {};
   for(const u of users){
     const name = u.username;
     const label = u.displayName || u.username;
@@ -11735,6 +11762,9 @@ async function loadHR(){
     const active = await getActive(name);
     const status = computeStatus(active);
     infos.push({ name: label, active, status });
+    // Kept so the not-checked-in panel can be answered from the same fetch
+    // rather than reading every engineer's trips a second time.
+    byUser[name] = { active: active, trips: trips };
 
     if(alertsEnabled && status.level === 'warn' && !previousWarnState[name]){
       try{
@@ -11786,6 +11816,7 @@ async function loadHR(){
   }
 
   renderLiveStatus(infos);
+  renderNotCheckedIn(users, byUser);
 
   document.getElementById('hrSummaryGrid').innerHTML = `
     <div class="summary-grid">

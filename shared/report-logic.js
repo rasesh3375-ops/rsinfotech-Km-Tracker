@@ -4124,3 +4124,116 @@ function routeAppend_(route, point, rules){
   if(thinned[thinned.length - 1] !== next[next.length - 1]) thinned.push(next[next.length - 1]);
   return thinned;
 }
+
+// ---- is the engineer's phone actually able to report? ----
+//
+// Everything below was already being collected on every heartbeat — battery
+// level and charging state, the geolocation error code, the time of the last
+// fix and the last contact. Almost none of it reached HR. Battery in
+// particular was a line of grey text inside a card, which is not a thing
+// anybody notices before a phone dies halfway through a trip.
+//
+// The other half is that "not responding" was doing too much work. A phone
+// switched off, an app closed and a van in a patch with no signal produced
+// exactly the same words, and they need different actions — one is a call to
+// the engineer, one is nothing at all because he is in a basement. Where the
+// server genuinely cannot tell the difference, this says so rather than
+// picking the guess that sounds most definite.
+const TRACKER_HEALTH = {
+  heartbeatStaleMs: 65 * 1000,
+  fixStaleMs: 3 * 60 * 1000,
+  batteryLowPct: 15,
+  batteryCriticalPct: 5
+};
+// Ordered worst first: the first one that matches is what HR is told. A phone
+// about to die matters more than being outside a zone, and nothing at all
+// matters if the app has stopped talking, because every other figure is then
+// as old as the silence.
+function trackerStatus(active, now, rules){
+  const R = rules || TRACKER_HEALTH;
+  const t = Number(now) || Date.now();
+  if(!active){
+    return { level: 'idle', key: 'idle', label: 'idle', detail: 'Not checked in right now.' };
+  }
+  const hbAge = active.lastHeartbeat ? t - active.lastHeartbeat : Infinity;
+  const fixAge = active.lastFixTime ? t - active.lastFixTime : Infinity;
+  const mins = ms => Number.isFinite(ms) ? Math.max(1, Math.round(ms / 60000)) : null;
+  if(hbAge > R.heartbeatStaleMs){
+    const m = mins(hbAge);
+    // Three different problems, one silence. The app cannot report that it has
+    // no signal, because reporting needs signal — so naming one cause as
+    // though it were known would be a guess dressed as a diagnosis. What CAN
+    // be said is which of them the app itself last saw coming.
+    const sawOffline = active.online === false;
+    return { level: 'warn', key: 'no-contact',
+      label: sawOffline ? 'lost signal' : 'not responding',
+      detail: 'Nothing from the app for ' + (m === null ? 'a while' : m + ' min') + '. ' +
+        (sawOffline
+          ? 'It reported having no data connection just before it went quiet, so this is most likely no network — it should catch up by itself when the signal returns.'
+          : 'The phone is switched off, out of network range, or the app has been closed. From here those look the same; a call settles it.') };
+  }
+  const bat = active.battery;
+  const pct = bat && Number.isFinite(Number(bat.level)) ? Number(bat.level) : null;
+  const charging = !!(bat && bat.charging);
+  if(pct !== null && pct <= R.batteryCriticalPct && !charging){
+    return { level: 'warn', key: 'battery-critical', label: 'battery ' + pct + '%',
+      detail: 'Battery at ' + pct + '% and not charging — the phone is about to go off and the ' +
+        'rest of this trip will not be recorded. Worth a call now rather than afterwards.' };
+  }
+  // Deliberately above the fix checks: the engineer turning location off is a
+  // thing he can put right in ten seconds, and telling him that is more use
+  // than telling him the signal is weak.
+  if(active.gpsErrorCode === 1){
+    return { level: 'warn', key: 'location-off', label: 'location off',
+      detail: 'Location permission is denied or location services are switched off on the ' +
+        'phone. Distance is not being recorded until it is turned back on.' };
+  }
+  if(active.gpsError){
+    return { level: 'warn', key: 'gps-error', label: 'no GPS signal', detail: active.gpsError };
+  }
+  if(fixAge > R.fixStaleMs){
+    const m = mins(fixAge);
+    return { level: 'warn', key: 'no-fix', label: 'no GPS fix',
+      detail: 'No position for ' + (m === null ? 'a while' : m + ' min') + ' — the app is still ' +
+        'reporting, so this is a weak GPS signal rather than a phone that has stopped.' };
+  }
+  if(pct !== null && pct <= R.batteryLowPct && !charging){
+    return { level: 'warn', key: 'battery-low', label: 'battery ' + pct + '%',
+      detail: 'Battery at ' + pct + '% and not charging. Still tracking, but it will not last a ' +
+        'full day at this level.' };
+  }
+  if(active.geofenceStatus === 'outside'){
+    return { level: 'warn', key: 'outside-zone', label: 'outside zone',
+      detail: 'Currently outside all defined geofence zones.' };
+  }
+  return { level: 'ok', key: 'live', label: 'live',
+    detail: 'Tracking normally · updated ' + new Date(active.lastHeartbeat).toLocaleTimeString() +
+      (pct !== null ? ' · battery ' + pct + '%' + (charging ? ' (charging)' : '') : '') };
+}
+// Who has a working login and has not started a trip today. The question this
+// answers is the one HR actually asks in the morning, and it needs no location
+// at all to answer it — only whether a trip was started.
+function notCheckedInToday(users, byUser, today){
+  const out = [];
+  (users || []).forEach(u => {
+    if(!u || u.enabled === false) return;
+    const info = (byUser || {})[u.username] || {};
+    if(info.active) return;
+    const trips = (info.trips || []).filter(t => t && t.date);
+    let last = '';
+    trips.forEach(t => { if(String(t.date) > last) last = String(t.date); });
+    if(last === today) return;   // came in, finished, checked out again
+    out.push({
+      username: u.username,
+      name: u.displayName || u.username,
+      lastTripDate: last || null,
+      // Null rather than a large number when there is no trip at all: somebody
+      // who has never checked in is a different conversation from somebody who
+      // was here last week, and "9999 days" would read as a bug.
+      daysSince: last ? Math.round((Date.parse(today) - Date.parse(last)) / 86400000) : null
+    });
+  });
+  return out.sort((a, b) =>
+    (a.daysSince === null ? -1 : b.daysSince === null ? 1 : b.daysSince - a.daysSince) ||
+    String(a.name).localeCompare(String(b.name)));
+}
