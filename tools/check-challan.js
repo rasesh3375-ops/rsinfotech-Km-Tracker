@@ -19,7 +19,7 @@ const sb = { JSON, Math, Date, String, Number, Boolean, Array, Object, RegExp,
 vm.createContext(sb);
 vm.runInContext(fs.readFileSync(R + '/shared/report-logic.js', 'utf8'), sb);
 const L = vm.runInContext('({challanComparison, CHALLAN_ACCOUNTS, consultantSummaryTotals,' +
-  ' monthDateList_, computeSalaryFromAttendance, employedDuringPeriod_})', sb);
+  ' parseChallanText, monthDateList_, computeSalaryFromAttendance, employedDuringPeriod_})', sb);
 
 const fails = [];
 const check = (label, got, want) => {
@@ -167,6 +167,121 @@ console.log('\nagainst what consultantSummaryTotals really returns\n');
   const cmp = L.challanComparison(asChallan, real, { ym: '2026-08' });
   check('a challan carrying exactly what the app computed agrees on every line',
         [cmp.differCount, cmp.missingCount, cmp.agrees], [0, 0, true]);
+}
+
+// ------------------------------------------------- reading the challan's text
+//
+// Both of these are the exact shapes two real challans from this company's
+// Drive convert to — only the identifiers and amounts are made up. The shapes
+// are the whole point: the same portal prints the value BEFORE its label on
+// one receipt and AFTER it on another, so a parser that assumes either one
+// reads half the challans wrong. Layout B additionally carries the 7Q/14B
+// damages column as a trailing zero, runs that zero into the next label
+// ("0Account-2"), writes "TRRN :" rather than "TRRN No :", and prints no
+// member count at all.
+console.log('\nthe two layouts a real challan converts to\n');
+// Value BEFORE label. 30,000 + 900 + 8,000 + 700 + 0 = 39,600.
+const LAYOUT_A =
+  'Payment Confirmation Receipt\n\nTRRN No : 1899900011122\n\n' +
+  'Payment Confirmed Challan Status :\n\n10-SEP-2025 16:04:38 Challan Generated On :\n\n' +
+  'ABCDE1234567000 Establishment ID :\n\nR S INFOTECH Establishment Name :\n\n' +
+  'Monthly Contribution Challan Challan Type :\n\n12 Total Members :\n\n' +
+  'AUG-2025 Wage Month :\n\n39,600 Total Amount (Rs) :\n\n' +
+  '30,000 Account-1 Amount (Rs) :\n\n900 Account-2 Amount (Rs) :\n\n' +
+  '8,000 Account-10 Amount (Rs) :\n\n700 Account-21 Amount (Rs) :\n\n' +
+  '0 Account-22 Amount (Rs) :\n\nPayment Confirmation Bank : Axis Bank\n\n' +
+  '211110925001457 CRN :\n\nPayment Date : 11-SEP-2025\n\n0 Total PMRPY Benefit :\n\nPage 1 of 1';
+// Value AFTER label, one long line, damages column, no Total Members.
+const LAYOUT_B =
+  '24/12/2025 Generated On 10:40:36 Payment Confirmation Receipt\n\nTRRN : 2599900022233\n\n' +
+  'Challan Status : Payment Confirmed Challan Generated On : 06-DEC-2025 15:21:55 ' +
+  'Establishment ID : ABCDE1234567000 Establishment Name : R S INFOTECH ' +
+  'Challan Type : Monthly Contribution Wage Month : NOV-2025 ' +
+  'Total Amount (Rs) : 39,600 Accounts Amount (Rs) 7Q 14B\n\n' +
+  'Account-1 Amount (Rs) : 30,000 0Account-2 Amount (Rs) : 900 0' +
+  'Account-10 Amount (Rs) : 8,000 0Account-21 Amount (Rs) : 700 0' +
+  'Account-22 Amount (Rs) : 0 0\n\nPayment : Payment type : Full Confirmation Bank\n\n' +
+  'Axis Bank\n\nCRN : 211081225002038 Page 1 of 1';
+{
+  const a = L.parseChallanText(LAYOUT_A);
+  // THE assertion. Read the obvious way — "the number after the colon" — A/c 1
+  // comes out as 900, because the figure following that colon is the NEXT
+  // row's. It is a plausible-looking wrong number that would be compared,
+  // would disagree, and would send somebody to the PF consultant about a
+  // challan that was correct.
+  check('A/c 1 is its own figure, not the row below it', a.ac1, 30000);
+  check('the whole of layout A reads',
+        [a.ac2, a.ac10, a.ac21, a.ac22, a.total], [900, 8000, 700, 0, 39600]);
+  check('the orientation was worked out, not assumed', a.orientation, 'before');
+  check('and it knows the reading holds up', a.reliable, true);
+  check('the wage month becomes a month this app can use', a.month, '2025-08');
+  check('the member count is read', a.memberCount, 12);
+  // "R S INFOTECH" sits directly after the establishment ID on the page and
+  // was read as the ID on the first run.
+  check('the establishment ID, not the name printed next to it',
+        a.establishment, 'ABCDE1234567000');
+  // The TRRN is in the header, above the table, so it is label-then-value even
+  // on a challan whose table below it is the other way round. Both "before"
+  // challans in Drive came back with no TRRN at all until that was handled.
+  check('the TRRN is found even though the table runs the other way',
+        a.trrn, '1899900011122');
+}
+{
+  const b = L.parseChallanText(LAYOUT_B);
+  check('the same figures read off the opposite layout',
+        [b.ac1, b.ac2, b.ac10, b.ac21, b.ac22, b.total], [30000, 900, 8000, 700, 0, 39600]);
+  check('with the orientation the other way round', b.orientation, 'after');
+  check('the damages column is not mistaken for an account', b.reliable, true);
+  check('"TRRN :" is read as well as "TRRN No :"', b.trrn, '2599900022233');
+  check('a glued-on digit does not break the label after it', b.month, '2025-11');
+  // The one that would quietly report every member as unaccounted for.
+  check('a member count the challan does not print stays unread, not zero',
+        b.memberCount, null);
+  const a = L.parseChallanText(LAYOUT_A);
+  check('both layouts arrive at the same figures',
+        [a.ac1, a.ac2, a.ac10, a.ac21, a.ac22, a.total],
+        [b.ac1, b.ac2, b.ac10, b.ac21, b.ac22, b.total]);
+}
+
+console.log('\na reading that cannot be trusted says so\n');
+{
+  // Accounts that do not add up to the total printed beside them. Neither
+  // orientation passes its own arithmetic, so nothing here may be presented as
+  // read — HR has to check every box.
+  const broken = LAYOUT_A.replace('30,000 Account-1', '31,234 Account-1');
+  const p = L.parseChallanText(broken);
+  check('a challan whose accounts do not sum is not called reliable', p.reliable, false);
+  // Still filled in — an unreliable reading is a draft to correct, and a blank
+  // form gives HR nothing to correct.
+  check('but the figures are still offered to be corrected', p.ac1, 31234);
+}
+{
+  const p = L.parseChallanText('This is not a challan. Nothing here is a figure.');
+  check('a document with no challan in it finds nothing', p.found, 0);
+  check('and does not invent a total', p.total, null);
+}
+{
+  const p = L.parseChallanText('');
+  check('empty text finds nothing', p.found, 0);
+}
+
+console.log('\nfrom the document straight through to the comparison\n');
+{
+  // The round trip the feature is: text in, figures out, compared against what
+  // the app computed. Totals here are made to match layout A exactly.
+  const t = { acct1: 30000, acct22: 0, pfTotal: 39600,
+              pf: { admin: 900, eps: 8000, edli: 700, count: 12 } };
+  const cmp = L.challanComparison(L.parseChallanText(LAYOUT_A), t, { ym: '2025-08' });
+  check('a challan that matches payroll agrees on every line',
+        [cmp.differCount, cmp.missingCount, cmp.agrees], [0, 0, true]);
+  check('and the month read off it lines up', cmp.monthMatches, true);
+  // Layout B prints no member count, so that row must be absent rather than
+  // compared against a zero.
+  const cmpB = L.challanComparison(L.parseChallanText(LAYOUT_B), t, { ym: '2025-11' });
+  check('the missing member count is left out rather than failed',
+        [cmpB.differCount, cmpB.missingCount], [0, 0]);
+  check('the wrong month is still caught after a real read',
+        L.challanComparison(L.parseChallanText(LAYOUT_A), t, { ym: '2025-09' }).monthMatches, false);
 }
 
 console.log('\n' + (fails.length ? fails.length + ' FAILURE(S):\n  ' + fails.join('\n  ') : 'PASS'));

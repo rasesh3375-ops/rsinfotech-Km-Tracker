@@ -3752,6 +3752,176 @@ const CHALLAN_ACCOUNTS = [
   { key: 'ac21', label: 'A/c 21 — EDLI',          of: t => t.pf.edli },
   { key: 'ac22', label: 'A/c 22 — EDLI admin',    of: t => t.acct22 }
 ];
+// ---- reading the figures off the text of a challan ----
+//
+// The receipt is a two-column table, and the text a converter pulls out of it
+// arrives in one of two orders depending on which portal version printed it.
+// Both of these are real files from this company's own Drive:
+//
+//   Aug 2025:  "38,133 Account-1 Amount (Rs) :"      the value BEFORE its label
+//   Nov 2025:  "Account-1 Amount (Rs) : 38,136 0"    after it, and then the
+//                                                    7Q/14B damages column
+//
+// So "the number after the colon" — the obvious rule, and the one worth
+// writing down because it is what anyone would reach for — reads Account-1 as
+// 1,053 on the August challan, because the figure following that colon is the
+// NEXT row's. A wrong number that looks entirely plausible is the worst thing
+// this could produce: it would be compared, it would disagree, and it would
+// send somebody to the PF consultant about a challan that was correct.
+//
+// The orientation is therefore never assumed. Both readings are built, and the
+// one whose five accounts add up to its own printed total wins. That is the
+// challan checking itself with arithmetic it carries on its own face, which is
+// what makes this safe to run over a layout nobody has seen yet. When neither
+// reading adds up, nothing is guessed at — `reliable` comes back false and the
+// figures are put in front of HR as a draft to correct, never compared behind
+// their back.
+//
+// The Nov 2025 file is also why nothing here treats a missing field as zero:
+// it carries no Total Members line at all, and a head count silently read as 0
+// would report every member as unaccounted for.
+const CHALLAN_MONTH_NUM = { jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+                            jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12' };
+// The labels worth reading, and — just as important — the ones worth knowing
+// the position of so a value cannot bleed across into the field next to it.
+// A boundary carries no key: it exists only to end the segment before it.
+const CHALLAN_LABELS = [
+  { key: 'trrn',          re: /TRRN(?:\s*No\.?)?\s*:/i },
+  { key: 'establishment', re: /Establishment\s*(?:ID|Code)\s*:/i },
+  { key: 'month',         re: /Wage\s*Month\s*:/i },
+  { key: 'memberCount',   re: /Total\s*(?:Members|Employees)\s*:/i },
+  { key: 'total',         re: /Total\s*Amount\s*\(?\s*Rs\.?\s*\)?\s*:/i },
+  { key: 'ac1',           re: /A\/?c(?:count)?\s*(?:No\.?)?\s*-?\s*1(?!\d)\s*(?:Amount)?\s*\(?\s*Rs\.?\s*\)?\s*:/i },
+  { key: 'ac2',           re: /A\/?c(?:count)?\s*(?:No\.?)?\s*-?\s*2(?!\d)\s*(?:Amount)?\s*\(?\s*Rs\.?\s*\)?\s*:/i },
+  { key: 'ac10',          re: /A\/?c(?:count)?\s*(?:No\.?)?\s*-?\s*10(?!\d)\s*(?:Amount)?\s*\(?\s*Rs\.?\s*\)?\s*:/i },
+  { key: 'ac21',          re: /A\/?c(?:count)?\s*(?:No\.?)?\s*-?\s*21(?!\d)\s*(?:Amount)?\s*\(?\s*Rs\.?\s*\)?\s*:/i },
+  { key: 'ac22',          re: /A\/?c(?:count)?\s*(?:No\.?)?\s*-?\s*22(?!\d)\s*(?:Amount)?\s*\(?\s*Rs\.?\s*\)?\s*:/i },
+  // Boundaries. Every one of these sat next to a figure on a real challan and
+  // would have been read as that figure's value without them — the
+  // establishment NAME directly after the establishment ID being the one that
+  // actually did it on the first run.
+  { key: null, re: /Challan\s*Status\s*:/i },
+  { key: null, re: /Challan\s*Generated\s*On\s*:/i },
+  { key: null, re: /Establishment\s*Name\s*:/i },
+  { key: null, re: /Challan\s*Type\s*:/i },
+  { key: null, re: /Accounts\s*Amount/i },
+  { key: null, re: /Payment\s*Confirmation\s*Bank/i },
+  { key: null, re: /Payment\s*Confirmation\s*Date/i },
+  { key: null, re: /Confirmation\s*Bank/i },
+  { key: null, re: /Payment\s*type\s*:/i },
+  { key: null, re: /Payment\s*Date\s*:/i },
+  { key: null, re: /CRN\s*:/i },
+  { key: null, re: /Total\s*PMRPY\s*Benefit\s*:/i },
+  { key: null, re: /Page\s*\d+\s*of/i },
+  { key: null, re: /Generated\s*On/i }
+];
+const CHALLAN_MONEY_KEYS = ['ac1', 'ac2', 'ac10', 'ac21', 'ac22'];
+// Every number in a stretch of text, in order. Thousands separators are how a
+// challan prints, so they are part of the number rather than a delimiter.
+function challanNumbersIn_(seg){
+  const out = [];
+  const re = /-?\d[\d,]*(?:\.\d+)?/g;
+  let m;
+  while((m = re.exec(String(seg || '')))){
+    const n = Number(m[0].replace(/,/g, ''));
+    if(Number.isFinite(n)) out.push(n);
+  }
+  return out;
+}
+function challanMonthIn_(seg){
+  const s = String(seg || '');
+  let m = /(\d{4})\s*-\s*(0[1-9]|1[0-2])(?!\d)/.exec(s);
+  if(m) return m[1] + '-' + m[2];
+  m = /(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s*[-\/ ]\s*(\d{4})/i.exec(s);
+  return m ? m[2] + '-' + CHALLAN_MONTH_NUM[m[1].toLowerCase()] : null;
+}
+// An establishment ID is letters then digits — VDBRD3096973000. Spelled out
+// rather than "the last word" because the last word next to it on the page is
+// the establishment's NAME, and "R S INFOTECH" would have won.
+function challanIdsIn_(seg){
+  return String(seg || '').match(/\b[A-Z]{2,}[A-Z0-9]*\d[A-Z0-9]*\b/g) || [];
+}
+function challanTrrnsIn_(seg){
+  return String(seg || '').match(/\b\d{8,}\b/g) || [];
+}
+// Where every label sits, in document order, with overlaps dropped — without
+// that, "Generated On" matches inside "Challan Generated On" and cuts a
+// segment in half.
+function challanLabelSpans_(text){
+  const found = [];
+  CHALLAN_LABELS.forEach(l => {
+    const m = l.re.exec(text);
+    if(m) found.push({ key: l.key, start: m.index, end: m.index + m[0].length });
+  });
+  found.sort((a, b) => a.start - b.start || b.end - a.end);
+  const spans = [];
+  found.forEach(f => { if(!spans.length || f.start >= spans[spans.length - 1].end) spans.push(f); });
+  return spans;
+}
+function parseChallanText(text){
+  const src = String(text || '');
+  const spans = challanLabelSpans_(src);
+  const seg = {};
+  spans.forEach((s, i) => {
+    if(!s.key) return;
+    seg[s.key] = {
+      // Bounded by the neighbouring labels on both sides, so a figure can only
+      // ever be claimed by the field it actually sits against.
+      after: src.slice(s.end, i + 1 < spans.length ? spans[i + 1].start : src.length),
+      before: src.slice(i ? spans[i - 1].end : 0, s.start)
+    };
+  });
+  const readAll = dir => {
+    const pick = (list) => list.length ? (dir === 'after' ? list[0] : list[list.length - 1]) : null;
+    const out = {};
+    ['total', 'memberCount'].concat(CHALLAN_MONEY_KEYS).forEach(k => {
+      out[k] = seg[k] ? pick(challanNumbersIn_(seg[k][dir])) : null;
+    });
+    out.month = seg.month ? challanMonthIn_(seg.month[dir]) : null;
+    out.trrn = seg.trrn ? pick(challanTrrnsIn_(seg.trrn[dir])) : null;
+    out.establishment = seg.establishment ? pick(challanIdsIn_(seg.establishment[dir])) : null;
+    if(out.trrn !== null) out.trrn = String(out.trrn);
+    return out;
+  };
+  // The whole safety of this: does what was read add up to what it says the
+  // total is? The wrong orientation reads each field's neighbour, so it
+  // reaches this test with five figures that have no reason to sum.
+  const addsUp = c => {
+    if(c.total === null || CHALLAN_MONEY_KEYS.some(k => c[k] === null)) return false;
+    return Math.round(CHALLAN_MONEY_KEYS.reduce((a, k) => a + c[k], 0)) === Math.round(c.total);
+  };
+  const cand = { after: readAll('after'), before: readAll('before') };
+  const ok = { after: addsUp(cand.after), before: addsUp(cand.before) };
+  let orientation;
+  if(ok.after !== ok.before) orientation = ok.after ? 'after' : 'before';
+  else if(ok.after) orientation = 'after';
+  else {
+    // Neither adds up, so nothing here is trusted. Whichever found more of the
+    // figures gives HR the most to correct, and `reliable` says plainly that
+    // correcting them is the job rather than a formality.
+    const found = c => Object.keys(c).filter(k => c[k] !== null).length;
+    orientation = found(cand.after) >= found(cand.before) ? 'after' : 'before';
+  }
+  const out = cand[orientation];
+  out.orientation = orientation;
+  out.reliable = ok[orientation];
+  // The TRRN is printed in the receipt's header, above the two-column table,
+  // so it reads label-then-value whichever way round the table below it is —
+  // and on both "before" challans in Drive it came back empty until this.
+  // Only these three get to look on the other side, and only when the chosen
+  // orientation found nothing: each has a shape of its own (eight or more
+  // digits, letters followed by digits, a month against a year), so a
+  // second look cannot quietly hand back a plausible amount of money the way
+  // it could for an account. The five accounts and the total never do this.
+  const other = cand[orientation === 'after' ? 'before' : 'after'];
+  ['trrn', 'establishment', 'month'].forEach(k => { if(out[k] === null) out[k] = other[k]; });
+  // Nothing recognisable at all is not a challan that reads as all-zero — it
+  // is a document this could not read, and it has to say so.
+  out.found = ['total', 'memberCount', 'month', 'trrn', 'establishment']
+    .concat(CHALLAN_MONEY_KEYS).filter(k => out[k] !== null).length;
+  return out;
+}
+
 // One row per figure: what the challan says, what the app makes it, and the
 // difference. Deliberately no tolerance band — every difference is reported
 // exactly as it is, and HR decides whether a rupee of per-member rounding
