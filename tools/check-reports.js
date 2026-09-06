@@ -35,6 +35,7 @@ const CHECKS = [
   ['check-challan.js',           'a PF challan is compared with the month, and never agrees with a figure it could not read'],
   ['check-briefing.js',          'the monthly briefing says what the figures say, and nothing it cannot'],
   ['check-prepay.js',            'the pre-payroll check fires on a real fault and stays quiet otherwise'],
+  ['check-tracking.js',          'an engineer is paid for driving, not walking, and never short-changed by traffic'],
 ];
 
 let failed = 0;
