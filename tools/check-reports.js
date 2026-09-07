@@ -38,6 +38,7 @@ const CHECKS = [
   ['check-tracking.js',          'an engineer is paid for driving, not walking, and never short-changed by traffic'],
   ['check-tracker-health.js',    'HR is told what is actually wrong with a phone, and who never checked in'],
   ['check-email-triggers.js',    'a monthly email goes out monthly, not on every firing of its daily trigger'],
+  ['check-appraisal.js',         'an increment already recorded is reported, never applied a second time'],
 ];
 
 let failed = 0;

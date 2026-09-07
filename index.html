@@ -3477,14 +3477,23 @@
               is then calculated from it, not assumed: PT is a flat ₹200 that does not scale, and
               crossing the ESI ceiling removes a deduction outright, so a 10% rise in pay usually
               lands as slightly more than 10% in hand.</p>
+            <label class="field">Appraisal month</label>
+            <input type="month" id="genApprMonth" onchange="renderAppraisalRoster_()" />
+            <div style="height:12px"></div>
             <label class="field">Increase %</label>
-            <input type="number" id="genApprPercent" step="0.5" min="0" placeholder="e.g. 10" />
+            <input type="number" id="genApprPercent" step="0.5" min="0" placeholder="e.g. 10"
+                   onchange="renderAppraisalRoster_()" />
             <div style="height:12px"></div>
             <label class="field">…or type the revised Rate of Pay instead (overrides the %)</label>
             <input type="number" id="genApprNewRate" min="0" placeholder="leave blank to use the % above" />
             <div style="height:12px"></div>
-            <label class="field">Effective from</label>
+            <label class="field">Effective from (leave blank to use the recorded date)</label>
             <input type="date" id="genApprEffective" />
+            <div style="height:14px"></div>
+            <!-- Every employee for the chosen month, so HR can see at a glance
+                 who already has the rise on record and who is being proposed
+                 one, without opening forty letters to find out. -->
+            <div id="genApprRoster"></div>
             <div style="height:14px"></div>
           </div>
           <div id="genLeaveFieldsWrap" class="hidden">
@@ -23249,6 +23258,52 @@ async function renderGeneratorTab(){
   document.getElementById('letterActionsBox').classList.add('hidden');
   toggleGeneratorFieldsForType();
 }
+// Every employee's appraisal for the chosen month, side by side. It answers
+// the question HR could otherwise only answer by opening forty letters: who
+// already has the rise on their record, and who is only being proposed one.
+async function renderAppraisalRoster_(){
+  const box = document.getElementById('genApprRoster');
+  if(!box) return;
+  const monthEl = document.getElementById('genApprMonth');
+  const ym = (monthEl && monthEl.value) || todayStr().slice(0, 7);
+  const pctEl = document.getElementById('genApprPercent');
+  const percent = pctEl && pctEl.value !== '' ? Number(pctEl.value) : undefined;
+  let employees = [];
+  try{ employees = await getEmployees(); }
+  catch(e){
+    box.innerHTML = '<div class="empty">Could not load the employee list — reopen this card to try again.</div>';
+    return;
+  }
+  const rows = appraisalRoster(employees, { ym: ym, percent: percent });
+  if(!rows.length){ box.innerHTML = '<div class="empty">No employees on roll.</div>'; return; }
+  const R = n => '₹' + fmtMoney(Math.round(n));
+  const recorded = rows.filter(r => r.figures.alreadyRecorded).length;
+  box.innerHTML = `<div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px;">
+      All employees — ${escapeHtml(monthLabel(ym))}</div>
+    <div class="payroll-docs-table-wrap"><table class="sal-table">
+      <thead><tr><th>Employee</th><th class="num">Last salary</th><th class="num">New salary</th>
+        <th class="num">Increment</th><th>Source</th></tr></thead>
+      <tbody>${rows.map(r => {
+        const a = r.figures;
+        return `<tr><td class="sal-name">${escapeHtml(r.name)}</td>
+          <td class="num">${a.hasPrevious ? R(a.takeHomeBefore) : '<span class="muted">—</span>'}</td>
+          <td class="num">${R(a.takeHomeAfter)}</td>
+          <td class="num">${a.ratePct === null ? '<span class="muted">—</span>'
+            : (Math.round(a.ratePct * 100) / 100) + '%'}</td>
+          <td>${a.alreadyRecorded
+            ? '<span class="pill live">on record</span>'
+            : '<span class="muted">proposed</span>'}</td></tr>`;
+      }).join('')}</tbody></table></div>
+    <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:8px 0 0;">
+      Salaries shown are <strong>take home</strong> — before any loan or advance instalment.
+      <strong>On record</strong> means an increment is already saved against that employee for
+      ${escapeHtml(monthLabel(ym))}, so the letter states what was actually granted and the
+      Increase % above is ignored for them — that is what stops a salary already raised being
+      raised a second time on paper. <strong>Proposed</strong> means nothing is recorded yet, so
+      the Increase % is applied to the rate in force that month.
+      ${recorded} of ${rows.length} already recorded.</p>`;
+}
+
 // Both pickers for the letter type, from the same list and the same handler,
 // so choosing one way stays in sync with the other.
 function renderLetterChoices_(){
@@ -28024,7 +28079,17 @@ async function toggleGeneratorFieldsForType(){
   const isLeave = type === 'Leave Application Form';
   document.getElementById('genOfferFieldsWrap').classList.toggle('hidden', !isOffer);
   const apprWrap = document.getElementById('genApprFieldsWrap');
-  if(apprWrap) apprWrap.classList.toggle('hidden', type !== 'Salary Appraisal Letter');
+  if(apprWrap){
+    const isAppr = type === 'Salary Appraisal Letter';
+    apprWrap.classList.toggle('hidden', !isAppr);
+    if(isAppr){
+      const monthEl = document.getElementById('genApprMonth');
+      // Defaults to this month, which is what HR means by "the appraisal I am
+      // doing now"; picking July then shows July's recorded rises instead.
+      if(monthEl && !monthEl.value) monthEl.value = todayStr().slice(0, 7);
+      renderAppraisalRoster_();
+    }
+  }
   document.getElementById('genEmpSelectWrap').classList.toggle('hidden', isOffer);
   const leaveWrap = document.getElementById('genLeaveFieldsWrap');
   if(leaveWrap){
@@ -28656,34 +28721,32 @@ function letterTemplate(type, f){
       return `Dear ${name},\n\nFurther to your application and the discussions we have had with you, we are pleased to offer you employment with ${company} in the position of ${designation}${inDept}, on the following terms:\n\nDesignation: ${designation}\n${department ? 'Department: ' + department + '\n' : ''}Proposed date of joining: ${doj || '[to be confirmed]'}\n${f.offeredSalary ? 'Compensation: ' + f.offeredSalary + '\n' : ''}\nThis offer is extended on the basis of the information provided by you during the selection process and is subject to satisfactory verification of your documents, credentials and references. It does not by itself constitute a confirmed appointment — your appointment will be formally confirmed, and the detailed terms of your employment communicated, once you join us and receive your Appointment Letter.\n\n${f.replyBy ? 'Kindly confirm your acceptance of this offer on or before ' + niceDate_(f.replyBy) + ', failing which we will treat this offer as declined.\n\n' : ''}We look forward to welcoming you to the ${company} team.\n\nYours sincerely,`;
     case 'Salary Appraisal Letter': {
       const a = f.appraisal;
-      if(!a) return `Dear ${name},\n\nSelect an employee and enter the increase to generate this letter.`;
+      if(!a) return `Dear ${name},\n\nSelect an employee and the appraisal month to generate this letter.`;
       const R = n => 'Rs. ' + fmtMoney(Math.round(n));
-      const eff = niceDate_(f.appraisalEffective) || '[effective date]';
-      // The bifurcation of the REVISED figure, which is what the employee will
-      // want to check. Only the components the heading actually splits into —
-      // Junior Staff is a flat Basic, so printing "HRA: Rs. 0" beside it
-      // invites a question with no answer.
-      const bits = [['Basic', a.after.basic], ['HRA', a.after.hra], ['LTA', a.after.lta],
-                    ['Other allowances', a.after.other], ['Conveyance', a.after.conveyance]]
-        .filter(([, v]) => Math.round(v) > 0)
-        .map(([k, v]) => k + ': ' + R(v)).join('\n');
-      // Listed only where they apply. An Apprentice attracts none of the
-      // three, and a line reading "PF: Rs. 0" reads as an error.
-      const ded = [a.applies.pf ? 'Provident Fund (employee share): ' + R(a.after.pf) : '',
-                   a.applies.esi ? 'ESI (employee share): ' + R(a.after.esi) : '',
-                   a.applies.pt ? 'Professional Tax: ' + R(a.after.pt) : '']
-        .filter(Boolean).join('\n');
+      const eff = niceDate_(f.appraisalEffective || a.effectiveFrom) || '[effective date]';
+      // Take home first, then the deductions that were taken off it, then the
+      // total they add back up to — so the block can be checked by eye against
+      // the Salary Sheet. Only the deductions the heading actually attracts
+      // are listed; an Apprentice has none, and "PT: Rs. 0" reads as an error.
+      const block = (p, take) => [
+        'Take Home: ' + R(take),
+        a.applies.pt ? 'Professional Tax: ' + R(p.pt) : '',
+        a.applies.pf ? 'Provident Fund (employee share): ' + R(p.pf) : '',
+        a.applies.esi ? 'ESI (employee share): ' + R(p.esi) : '',
+        'Grand Total: ' + R(p.salaryGross + p.other + p.conveyance)
+      ].filter(Boolean).join('\n');
+      const pct = a.ratePct === null ? '—' : (Math.round(a.ratePct * 100) / 100) + '%';
+      const prev = a.hasPrevious
+        ? `Previous Salary (per month):\n${block(a.before, a.takeHomeBefore)}\n\n`
+        : 'This is the first salary recorded for you, so there is no previous figure to state.\n\n';
       return `Dear ${name},\n\n` +
 `We are pleased to inform you that based on your performance, dedication, and contribution to the organization, the management of ${company} has decided to revise your salary as part of the appraisal process.\n\n` +
 `Your consistent efforts, sense of responsibility, and professional approach during the appraisal period are highly appreciated. Your contribution has added value to the growth and success of the company.\n\n` +
 `As per the appraisal decision, your revised salary details are as follows:\n\n` +
-`Previous Salary: ${R(a.takeHomeBefore)} per month\n` +
-`Revised Salary: ${R(a.takeHomeAfter)} per month\n` +
+prev +
+`Revised Salary (per month):\nIncrement: ${pct}\n${block(a.after, a.takeHomeAfter)}\n\n` +
 `Effective From: ${eff}\n\n` +
-`Both figures above are your take-home salary — what is paid into your account each month — and are stated before any loan or advance instalment you may be repaying, which is unchanged by this revision.\n\n` +
-`Revised salary structure (per month):\n${bits}\nGross Salary: ${R(a.after.salaryGross + a.after.other + a.after.conveyance)}\n\n` +
-(ded ? `Statutory deductions (per month):\n${ded}\nTotal deductions: ${R(a.after.statutory)}\n\nNet Take Home: ${R(a.takeHomeAfter)} per month\n\n`
-     : `No statutory deductions apply to your salary heading, so your gross and take-home salary are the same.\n\n`) +
+`Take Home is what is paid into your account each month. It is stated before any loan or advance instalment you may be repaying, which is unchanged by this revision. Grand Total is your gross salary — Take Home plus the statutory deductions listed above it.\n\n` +
 `All other terms and conditions of your employment with ${company} will remain unchanged.\n\n` +
 `We look forward to your continued dedication and wish you success and growth in your career with ${company}.\n\n` +
 `Congratulations and best wishes.\n\nYours sincerely,`;
@@ -28851,8 +28914,9 @@ async function generateLetter(){
     // employee's own PF eligibility, ESI period status and PT paid so far —
     // not the heading percentages alone, which would quote deductions the
     // Salary Sheet does not take.
+    const monthEl = document.getElementById('genApprMonth');
     f.appraisal = appraisalFigures(matched, {
-      ym: (f.issueDate || todayStr()).slice(0, 7),
+      ym: (monthEl && monthEl.value) || (f.issueDate || todayStr()).slice(0, 7),
       percent: pctEl && pctEl.value !== '' ? Number(pctEl.value) : undefined,
       newRate: rateEl && rateEl.value !== '' ? Number(rateEl.value) : undefined
     });

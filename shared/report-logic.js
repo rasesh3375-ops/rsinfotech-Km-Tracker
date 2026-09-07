@@ -4327,62 +4327,101 @@ function notCheckedInToday(users, byUser, today){
 function appraisalTakeHome_(p){
   return p.salaryGross + p.other + p.conveyance - p.statutory;
 }
-// The percentage is applied to the RATE OF PAY, not to take home. Rate of Pay
-// is the figure the employee's record holds, the figure every increment in
-// salaryHistory is expressed in, and the figure the Salary Sheet works from —
-// so a 10% appraisal means a 10% rise in that, and the take home that results
-// is then computed rather than assumed. Raising take home by 10% instead would
-// need the rate solved backwards and would move by a different percentage the
-// moment somebody crosses the ESI ceiling, which is not what "a 10% rise"
-// means to anybody.
+// An appraisal is either being RECORDED or being REPORTED, and telling those
+// apart is the whole of this function.
+//
+// If an increment is already on the employee's salary history effective inside
+// the month being asked about, the appraisal has happened. The letter's job is
+// then to state it: the rate before it, the rate after it, and the percentage
+// that actually separates them. Applying the typed percentage on top of a rate
+// that already includes the rise is how somebody on 10,000 who went to 11,000
+// in July gets a letter promising 12,100 — a raise nobody granted, in writing,
+// to the employee.
+//
+// If there is no increment recorded in that month, nothing has happened yet and
+// the typed percentage is applied to the rate in force, as a proposal.
+//
+// Either way the percentage on the letter is derived from the two rates rather
+// than echoed back from the input, so it cannot disagree with them.
 function appraisalFigures(emp, opts){
   opts = opts || {};
-  const ym = /^\d{4}-\d{2}$/.test(String(opts.ym || '')) ? String(opts.ym)
-    : financialYearLabel && todayStr ? todayStr().slice(0, 7) : '';
+  const ym = /^\d{4}-\d{2}$/.test(String(opts.ym || '')) ? String(opts.ym) : todayStr().slice(0, 7);
   const y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
-  const asOf = ratePayAsOf(emp, ym + '-01');
-  const oldRate = Number(asOf.ratePay) || 0;
-  const pct = Number(opts.percent);
-  let newRate = Number(opts.newRate);
-  if(!Number.isFinite(newRate) || newRate <= 0){
-    newRate = Number.isFinite(pct) ? Math.round(oldRate * (1 + pct / 100)) : oldRate;
+  const hist = salaryHistoryOf(emp);
+  // Every increment effective inside this month, earliest first. Dates are
+  // YYYY-MM-DD, so a plain string compare bounds the month exactly — and
+  // '-31' as the upper bound is safe in February for the same reason.
+  const inMonth = hist
+    .filter(h => h && h.from && h.from >= ym + '-01' && h.from <= ym + '-31')
+    .slice().sort((a, b) => String(a.from).localeCompare(String(b.from)));
+  const recorded = inMonth.length ? inMonth[inMonth.length - 1] : null;
+
+  let oldRate, newRate, oldHeading, newHeading, effectiveFrom, hasPrevious = true;
+  if(recorded){
+    // The rate in force immediately before the FIRST rise in the month, so two
+    // increments in one month report the month's whole movement rather than
+    // only the last step. Found by filtering the history rather than by
+    // subtracting a day from a date — a date-only string parses as UTC
+    // midnight, and the 1st of a month can land in the previous one.
+    const firstFrom = String(inMonth[0].from);
+    const before = hist.filter(h => h && String(h.from || '') < firstFrom)
+      .slice().sort((a, b) => String(a.from || '').localeCompare(String(b.from || ''))).pop();
+    hasPrevious = !!before;
+    oldRate = before ? (Number(before.ratePay) || 0) : (Number(recorded.ratePay) || 0);
+    oldHeading = (before && before.salaryHeading) || recorded.salaryHeading || 'managerial';
+    newRate = Number(recorded.ratePay) || 0;
+    newHeading = recorded.salaryHeading || oldHeading;
+    effectiveFrom = firstFrom;
+  }else{
+    const asOf = ratePayAsOf(emp, ym + '-01');
+    oldRate = Number(asOf.ratePay) || 0;
+    oldHeading = asOf.salaryHeading;
+    newHeading = asOf.salaryHeading;
+    const pct = Number(opts.percent);
+    const typed = Number(opts.newRate);
+    newRate = (Number.isFinite(typed) && typed > 0) ? typed
+      : (Number.isFinite(pct) ? Math.round(oldRate * (1 + pct / 100)) : oldRate);
+    effectiveFrom = ym + '-01';
   }
-  const before = monthlyPayFor(emp, y, m);
-  // salaryHistory emptied so ratePayAsOf falls back to the rate being asked
-  // about; the heading is carried over explicitly because it comes from the
-  // same history and would otherwise fall back to the record's current one.
-  const revised = Object.assign({}, emp, {
-    ratePay: newRate, salaryHeading: asOf.salaryHeading, salaryHistory: []
-  });
-  const after = monthlyPayFor(revised, y, m);
+
+  // Both sides costed on the same month, so PT's annual cap and the ESI
+  // half-year period are read against one point in time rather than two.
+  const at = (rate, heading) => monthlyPayFor(
+    Object.assign({}, emp, { ratePay: rate, salaryHeading: heading, salaryHistory: [] }), y, m);
+  const before = at(oldRate, oldHeading);
+  const after = at(newRate, newHeading);
   const takeBefore = appraisalTakeHome_(before);
   const takeAfter = appraisalTakeHome_(after);
   return {
     ym: ym,
-    heading: asOf.salaryHeading,
+    heading: newHeading,
+    // True when the rise is already on the record — the letter reports it, and
+    // the form stops offering to apply a percentage on top of it.
+    alreadyRecorded: !!recorded,
+    // False when the increment IS the first thing on the employee's history,
+    // so there is no earlier rate to call a previous salary.
+    hasPrevious: hasPrevious,
+    effectiveFrom: effectiveFrom,
     oldRate: oldRate,
     newRate: newRate,
-    // The rise actually granted, off the rate. Null rather than 0 when there
-    // was no previous rate to compare against — a new record with nothing on
-    // file is not a 0% appraisal.
     ratePct: oldRate > 0 ? ((newRate - oldRate) / oldRate) * 100 : null,
     before: before,
     after: after,
     takeHomeBefore: takeBefore,
     takeHomeAfter: takeAfter,
     takeHomeRise: takeAfter - takeBefore,
-    // Take home does NOT move by the same percentage as the rate, and the
-    // letter says so rather than letting HR discover it: PT is a flat 200 that
-    // does not scale, and crossing the ESI ceiling removes a 0.75% deduction
-    // outright, so a 10% rise in rate can land as more than 10% in hand.
     takeHomePct: takeBefore > 0 ? ((takeAfter - takeBefore) / takeBefore) * 100 : null,
-    // Whether each statutory deduction applies at all, so the letter can list
-    // only the ones that do — an Apprentice attracts none of the three, and a
-    // line reading "PF: 0" invites the question of why it is there.
     applies: {
       pf: after.pf > 0 || before.pf > 0,
       esi: after.esi > 0 || before.esi > 0,
       pt: after.pt > 0 || before.pt > 0
     }
   };
+}
+// Every employee's appraisal for one month, in roster order — which
+// getEmployees() already guarantees, so this must not re-sort.
+function appraisalRoster(employees, opts){
+  return (employees || [])
+    .filter(e => e && e.employmentStatus !== 'left')
+    .map(e => ({ id: e.id, name: e.name, figures: appraisalFigures(e, opts) }));
 }
