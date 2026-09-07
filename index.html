@@ -10351,6 +10351,128 @@ function salaryMobileTotalsCard(label, t, cssClass){
   </div>`;
 }
 
+// ---- finalised months, browser side ----
+//
+// shared/report-logic.js may not fetch anything, so the stored months are read
+// here and handed to it with setPayrollLocks. Two keys: PAYROLL_LOCK_INDEX_KEY
+// lists which months are finalised — one small read tells a screen, instead of
+// probing twelve — and payrollLockKey(ym) holds that month's figures.
+let payrollLockIndex_ = null;
+const payrollLockRows_ = {};
+
+async function payrollLockIndex(force){
+  if(payrollLockIndex_ && !force) return payrollLockIndex_;
+  const raw = await safeGet(PAYROLL_LOCK_INDEX_KEY, true);
+  let idx = {};
+  try{ idx = raw ? (JSON.parse(raw) || {}) : {}; }catch(e){ idx = {}; }
+  payrollLockIndex_ = idx;
+  return idx;
+}
+
+// Puts whichever of these months are finalised in force for the render that
+// follows, loading any it has not read yet. Everything already loaded stays in
+// force: a finalised month is finalised on every screen, not only on the one
+// that happened to ask for it.
+async function usePayrollLocks_(yms, force){
+  const idx = await payrollLockIndex(force);
+  const want = (Array.isArray(yms) ? yms : [yms]).filter(Boolean);
+  for(const ym of want){
+    if(!idx[ym] || payrollLockRows_[ym] !== undefined) continue;
+    const raw = await safeGet(payrollLockKey(ym), true);
+    let stored = null;
+    try{ stored = raw ? JSON.parse(raw) : null; }catch(e){ stored = null; }
+    payrollLockRows_[ym] = payrollLockUnpack(stored);
+  }
+  const inForce = {};
+  Object.keys(payrollLockRows_).forEach(ym => {
+    const rows = payrollLockRows_[ym];
+    if(idx[ym] && rows && Object.keys(rows).length) inForce[ym] = rows;
+  });
+  setPayrollLocks(inForce);
+  return idx;
+}
+
+// Finalising is the moment the month's figures stop being a calculation and
+// become a record. Everything it needs is read fresh — buildPayrollLock
+// ignores any existing lock for the month deliberately, so re-finalising a
+// month that was reopened to correct something picks up the correction rather
+// than handing back the freeze it was reopened to replace.
+async function finalisePayrollMonth(ym){
+  if(!/^\d{4}-\d{2}$/.test(String(ym || ''))) return;
+  if(!confirm('Finalise ' + monthLabel(ym) + '?\n\nIts figures are stored exactly as they stand now. ' +
+              'After this, editing an employee — conveyance, a loan, PF eligibility, attendance, anything — ' +
+              'changes the months still open and leaves ' + monthLabel(ym) + ' alone.\n\n' +
+              'You can reopen it later if you find a genuine mistake.')) return;
+  const [y, m] = ym.split('-').map(Number);
+  const monthDays = new Date(y, m, 0).getDate();
+  const dateList = [];
+  for(let d = 1; d <= monthDays; d++) dateList.push(ym + '-' + String(d).padStart(2, '0'));
+
+  let employees;
+  try{ employees = await getEmployeesOrThrow_(); }
+  catch(e){ alert('Could not read the employee list, so nothing was finalised — ' + (e && e.message || 'the backend did not answer')); return; }
+  const inMonth = employees.filter(e => employedDuringPeriod_(e, dateList[0], dateList[dateList.length - 1]));
+  if(!inMonth.length){ alert('No employees were on the roll in ' + monthLabel(ym) + ', so there is nothing to finalise.'); return; }
+
+  const holidayMap = {};
+  (await getHolidays()).forEach(h => { holidayMap[h.date] = h.name; });
+  const attById = await getAttendanceMany(inMonth.map(e => e.id));
+
+  const built = buildPayrollLock(inMonth, attById, dateList, monthDays, holidayMap);
+  if(built.tooBig){
+    // Refusing beats truncating: a half-written cell reads back as a month
+    // where some people simply have no figures at all.
+    alert('This month is too large to finalise in one record (' + built.size.toLocaleString() +
+          ' of ' + PAYROLL_LOCK_MAX_CHARS.toLocaleString() + ' characters). Nothing was saved — tell whoever maintains the app.');
+    return;
+  }
+  if(!await remoteSet(payrollLockKey(ym), JSON.stringify(built.packed))){
+    alert('Could not save the finalised figures — nothing was finalised. ' + (lastBackendError || ''));
+    return;
+  }
+  // The index is written second on purpose. If this fails the figures are
+  // stored but the month is not listed as finalised, which reads as "not
+  // finalised yet" everywhere — the safe way round. The other order would
+  // announce a finalised month whose figures were never written.
+  const idx = Object.assign({}, await payrollLockIndex(true));
+  idx[ym] = { lockedAt: todayStr(), employees: built.employees };
+  if(!await remoteSet(PAYROLL_LOCK_INDEX_KEY, JSON.stringify(idx))){
+    alert('The figures were saved but the month could not be marked finalised, so it is still open. ' +
+          'Try Finalise again. ' + (lastBackendError || ''));
+    return;
+  }
+  payrollLockIndex_ = idx;
+  payrollLockRows_[ym] = payrollLockUnpack(built.packed);
+  await addActivityLog('Finalised the payroll for ' + monthLabel(ym) + ' — ' + built.employees +
+                       ' employees. Their figures for that month are now fixed.');
+  await usePayrollLocks_(ym, true);
+  alert(monthLabel(ym) + ' is finalised. Its figures will not change again unless it is reopened.');
+  renderSalarySheet();
+}
+
+// Reopening is rare and deliberate, so it says plainly what it undoes.
+async function reopenPayrollMonth(ym){
+  if(!/^\d{4}-\d{2}$/.test(String(ym || ''))) return;
+  if(!confirm('Reopen ' + monthLabel(ym) + '?\n\nIts figures go back to being worked out from the ' +
+              'employee records as they stand TODAY, which may not be what was actually paid. ' +
+              'Only do this to correct a genuine mistake, and finalise the month again afterwards.')) return;
+  const idx = Object.assign({}, await payrollLockIndex(true));
+  delete idx[ym];
+  if(!await remoteSet(PAYROLL_LOCK_INDEX_KEY, JSON.stringify(idx))){
+    alert('Could not reopen the month — it is still finalised. ' + (lastBackendError || ''));
+    return;
+  }
+  payrollLockIndex_ = idx;
+  // The stored figures are left in place rather than deleted. They cost one
+  // cell, they are the only record of what the month was finalised at, and
+  // finalising again overwrites them anyway.
+  delete payrollLockRows_[ym];
+  await addActivityLog('Reopened the payroll for ' + monthLabel(ym) +
+                       '. Its figures are being worked out from the records again.');
+  await usePayrollLocks_(ym, true);
+  renderSalarySheet();
+}
+
 async function renderSalarySheet(){
   const box = document.getElementById('salarySheetBox');
   populateMonthYearSelects('salSheetMonthSel', 'salSheetYearSel');
@@ -10359,6 +10481,12 @@ async function renderSalarySheet(){
   const monthDays = new Date(year, month, 0).getDate();
   const dateList = [];
   for(let d=1; d<=monthDays; d++) dateList.push(year + '-' + String(month).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
+
+  // Before a single figure is worked out: if this month has been finalised,
+  // put its stored figures in force so everything below reads them instead of
+  // recomputing. Nothing changes for a month nobody has finalised.
+  const lockIdx = await usePayrollLocks_(monthVal);
+  const lockedThis = lockIdx[monthVal] || null;
 
   const employees = (await getEmployees()).filter(e => employedDuringPeriod_(e, dateList[0], dateList[dateList.length-1]));
   if(!employees.length){
@@ -10514,7 +10642,22 @@ async function renderSalarySheet(){
   // fell through to a quick, unprompted exit instead (see that function's
   // comment). This restores that.
   const closeBtnHtml = `<div class="row-inline rpt-actions-top" style="margin-bottom:6px;"><button class="rpt-close-btn" data-no-fs-delegate onclick="confirmCloseSalarySheet()" title="Close" aria-label="Close">✕</button></div>`;
-  box.innerHTML = `${closeBtnHtml}
+  // Finalised or not, said on the sheet itself rather than tucked in a menu —
+  // whether these figures can still move is the first thing HR needs to know
+  // about a month, and the last thing they should have to go looking for.
+  const lockBanner = lockedThis
+    ? `<div class="row-inline" style="margin:0 0 10px;align-items:center;background:#EDF7ED;border:1px solid #bcd9bc;border-radius:8px;padding:8px 10px;">
+         <span style="font-size:12px;flex:1;line-height:1.5;"><strong>Finalised${lockedThis.lockedAt ? ' on ' + escapeHtml(fmtDateIN(lockedThis.lockedAt)) : ''}.</strong>
+           These figures are fixed. Editing an employee now changes the months still open and leaves ${escapeHtml(monthLabel(monthVal))} alone.</span>
+         <button class="btn ghost" style="flex:0 0 auto;" onclick="reopenPayrollMonth('${monthVal}')">Reopen</button>
+       </div>`
+    : `<div class="row-inline" style="margin:0 0 10px;align-items:center;background:var(--amber-bg,#FFF8E7);border:1px solid var(--amber-dark);border-radius:8px;padding:8px 10px;">
+         <span style="font-size:12px;flex:1;line-height:1.5;"><strong>Still open.</strong>
+           These figures are worked out from the employee records as they stand today, so editing a record later will change them.
+           Finalise the month once it has been paid.</span>
+         <button class="btn" style="flex:0 0 auto;" onclick="finalisePayrollMonth('${monthVal}')">Finalise month</button>
+       </div>`;
+  box.innerHTML = `${closeBtnHtml}${lockBanner}
     <div class="sal-sheet-wrap print-isolate" id="salaryPrintArea">
       ${reportLogoHeader('Salary Sheet — ' + monthLabel(monthVal))}
       <p style="font-size:11px;margin:0 0 8px;"><span class="pill new" style="margin-right:6px;">new</span>joined this month &nbsp; <span style="display:inline-block;width:11px;height:11px;background:#FDECC8;box-shadow:inset 0 0 0 1px var(--amber-dark);vertical-align:middle;margin-right:5px;"></span>Rate of Pay changed since last month</p>

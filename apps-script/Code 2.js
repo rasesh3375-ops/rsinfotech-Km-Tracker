@@ -2778,7 +2778,12 @@ function loadSharedReportLogic_(map) {
     'excelIdNumber', 'employeesInSequence', 'seqNoOf',
     'consultantSummaryEmployees', 'consultantSummaryTotals', 'consultantSummaryCsv',
     'WAGE_REGISTER_COLS', 'wageRegisterRows', 'wageRegisterCsvRows',
-    'withSalaryCache'];
+    'withSalaryCache',
+    // Finalised months. Without these the emailed pack would recompute a month
+    // the screen has frozen, and the CSV in HR's inbox would disagree with the
+    // sheet it was generated from — the exact drift shared/report-logic.js
+    // exists to prevent.
+    'setPayrollLocks', 'payrollLockUnpack', 'payrollLockKey', 'PAYROLL_LOCK_INDEX_KEY'];
   var collect = new Function(body + '\nreturn (function(){ var o = {};' +
     names.map(function (n) { return 'try{ o[' + JSON.stringify(n) + '] = ' + n + '; }catch(e){}'; }).join('') +
     'return o; })();');
@@ -2811,8 +2816,35 @@ function reportDataSnapshot_() {
   // a report that loads the shared logic anyway, and loadSharedReportLogic_
   // caches it for the execution, so this costs nothing.
   var logic = loadSharedReportLogic_(map);
+  // Any month HR has finalised, put in force before a single figure is worked
+  // out — same reason the sequence is applied here: every caller of this
+  // function is a report, so a report added later inherits the freeze without
+  // being told about it. The lock rows are already in `map` (it is every row of
+  // the sheet), so this costs no extra read.
+  applyPayrollLocksFromMap_(logic, map);
   return { map: map, rows: rows,
            employees: logic.employeesInSequence(allEmployeesFromRows_(rows)) };
+}
+
+// The finalised months, read out of the sheet map and handed to the shared
+// logic. Anything unreadable is skipped rather than thrown on: a month whose
+// stored figures cannot be parsed is treated as still open, which recomputes
+// it — the same answer the app gave before finalising existed — instead of
+// failing the whole emailed pack at 8 AM on the 1st.
+function applyPayrollLocksFromMap_(logic, map) {
+  if (!logic || typeof logic.setPayrollLocks !== 'function') return;
+  var idx = {};
+  try { idx = JSON.parse(map[logic.PAYROLL_LOCK_INDEX_KEY] || '{}') || {}; } catch (e) { idx = {}; }
+  var inForce = {};
+  Object.keys(idx).forEach(function (ym) {
+    var raw = map[logic.payrollLockKey(ym)];
+    if (!raw) return;
+    var stored = null;
+    try { stored = JSON.parse(raw); } catch (e) { return; }
+    var rows = logic.payrollLockUnpack(stored);
+    if (rows && Object.keys(rows).length) inForce[ym] = rows;
+  });
+  logic.setPayrollLocks(inForce);
 }
 
 // Every date in a month, as the app builds it for a report.
