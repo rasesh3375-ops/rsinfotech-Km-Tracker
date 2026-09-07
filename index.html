@@ -17879,6 +17879,12 @@ function collectLoanRows(){
   const loans = editingEmployeeDraft.loans || [];
   loans.forEach((l, i) => {
     const amount = Number((document.getElementById('loan_amount_' + i) || {}).value) || 0;
+    // Same as the Advance for Temporary: an EMI change typed into this loan's
+    // boxes but never added is committed rather than dropped.
+    const pendingL = pendingRateChangePair_('loan_emichange_month_' + i, 'loan_emichange_amount_' + i, true);
+    if(pendingL.state === 'complete'){
+      l.emiHistory = applyPendingRateChange_(l.emiHistory, l.startMonth, l.instalment, pendingL);
+    }
     const hasEmiChanges = Array.isArray(l.emiHistory) && l.emiHistory.length > 1;
     const instalment = hasEmiChanges ? (Number(l.instalment) || 0) : (Number((document.getElementById('loan_emi_' + i) || {}).value) || 0);
     const startMonth = (document.getElementById('loan_start_' + i) || {}).value || '';
@@ -18113,6 +18119,65 @@ function syncAdvanceTempSchedule(){
   sched.startMonth = (document.getElementById('advTemp_start') || {}).value || '';
 }
 
+// A rate change typed into the "From month" / "New rate" boxes but never added.
+//
+// Those two boxes are an ENTRY row: nothing reaches the record until "+ Add
+// rate change" is pressed. HR filled them in and pressed Save employee
+// instead — the obvious thing to do, and the button they press after every
+// other change on this form — and the stop they had just typed was dropped
+// without a word. Reopening the employee showed the boxes blank again, which
+// reads as "it did not save" and is exactly what was reported.
+//
+// So the collect functions now commit a pair that is fully filled in, and
+// saveEmployeeForm refuses a pair that is half filled in rather than silently
+// discarding it. Returns 'none', 'partial', or 'complete' with the values.
+//
+// ₹0 is a legitimate new rate for the Advance for Temporary — it is how a
+// recovery is stopped — so an empty box and a typed zero are different things
+// there, and only the loan requires the amount to be above zero.
+function pendingRateChangePair_(monthId, amountId, requirePositive){
+  const monthEl = document.getElementById(monthId);
+  const amountEl = document.getElementById(amountId);
+  const from = (monthEl && monthEl.value) || '';
+  const raw = amountEl ? String(amountEl.value).trim() : '';
+  if(!from && raw === '') return { state: 'none' };
+  const amount = Number(raw);
+  if(!from || raw === '' || !Number.isFinite(amount) || (requirePositive && amount <= 0)) return { state: 'partial' };
+  return { state: 'complete', from: from, instalment: amount };
+}
+
+// Applies a complete pending pair to a rate history, with the same seeding and
+// de-duplication the "+ Add" buttons use — one rule, so a change committed by
+// pressing Save lands exactly where pressing Add would have put it.
+function applyPendingRateChange_(history, fallbackFrom, fallbackRate, pending){
+  let hist = Array.isArray(history) && history.length
+    ? history.slice()
+    : [{ from: fallbackFrom || null, instalment: Number(fallbackRate) || 0 }];
+  hist = hist.filter(h => h.from !== pending.from);
+  hist.push({ from: pending.from, instalment: pending.instalment });
+  return hist;
+}
+
+// What is stopping this save, if anything — checked before any of it is
+// collected, so a half-typed rate change is refused with a message instead of
+// vanishing into a save that otherwise reports success.
+function pendingRateChangeProblem_(){
+  const a = pendingRateChangePair_('advTemp_change_month', 'advTemp_change_amount', false);
+  if(a.state === 'partial'){
+    return 'The Advance for Temporary rate change is only half filled in. Enter both the month it ' +
+           'starts from and the new rate (₹0 to stop it), or clear both boxes — otherwise it would not be saved.';
+  }
+  const loans = (editingEmployeeDraft && editingEmployeeDraft.loans) || [];
+  for(let i = 0; i < loans.length; i++){
+    const l = pendingRateChangePair_('loan_emichange_month_' + i, 'loan_emichange_amount_' + i, true);
+    if(l.state === 'partial'){
+      return 'A loan EMI change is only half filled in. Enter both the month it starts from and a new ' +
+             'EMI above ₹0, or clear both boxes — otherwise it would not be saved.';
+    }
+  }
+  return '';
+}
+
 // The first rate change seeds the schedule's history from the flat rate —
 // same lazy-migration idea as addLoanEmiChange, so a schedule nobody has
 // ever changed the rate on still reads exactly as it always has.
@@ -18164,6 +18229,12 @@ function collectAdvanceTempSchedule(){
   // that blank field read rate as 0, and with hasRateChanges still false,
   // wiped rateHistory down to [] — the rate that WAS entered, and every
   // month's deduction with it, genuinely erased by the very next save.
+  // A rate change typed in but never added with "+ Add rate change" is
+  // committed here rather than dropped — see pendingRateChangePair_.
+  const pending = pendingRateChangePair_('advTemp_change_month', 'advTemp_change_amount', false);
+  if(pending.state === 'complete'){
+    sched.rateHistory = applyPendingRateChange_(sched.rateHistory, sched.startMonth, sched.instalment, pending);
+  }
   const rate = Number((document.getElementById('advTemp_rate') || {}).value) || 0;
   const hasRateChanges = Array.isArray(sched.rateHistory) && sched.rateHistory.length > 1;
   const instalment = hasRateChanges ? (Number(sched.instalment) || 0) : rate;
@@ -18895,6 +18966,10 @@ async function saveEmployeeForm(){
   }
   const id = document.getElementById('f_id').value.trim();
   const name = document.getElementById('f_name').value.trim();
+  // A half-typed rate change is refused, not silently dropped — the whole
+  // point of pendingRateChangeProblem_.
+  const pendingProblem = pendingRateChangeProblem_();
+  if(pendingProblem){ showEmpSaveError(pendingProblem); return; }
   if(!id || !name){
     showEmpSaveError('Employee ID and full name are required.');
     return;

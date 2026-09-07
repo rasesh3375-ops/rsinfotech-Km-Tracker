@@ -133,6 +133,62 @@ setTimeout(() => {
             [out.rateHistory.length, advAt(out, thisYm)], [1, 400]);
     }
 
+    // ---- a rate change typed in but never "added" --------------------------
+    //
+    // The From month / New rate boxes are an entry row: nothing reached the
+    // record until "+ Add rate change" was pressed. HR typed the stop and
+    // pressed Save employee instead — the button they press after every other
+    // change on that form — and it was dropped without a word. Reopening
+    // showed the boxes blank, which reads as "it did not save", which is
+    // exactly how it was reported.
+    console.log('\na rate change typed in but never added with the + button\n');
+    const advCollectPending = (schedule, month, amount) => {
+      w.eval('editingEmployeeDraft = ' + JSON.stringify({ advanceTempSchedule: schedule }));
+      let box = doc.getElementById('advanceTempScheduleBox');
+      if(!box){ box = doc.createElement('div'); box.id = 'advanceTempScheduleBox'; doc.body.appendChild(box); }
+      w.eval('renderAdvanceTempSchedule()');
+      doc.getElementById('advTemp_change_month').value = month;
+      doc.getElementById('advTemp_change_amount').value = amount;
+      w.eval('syncAdvanceTempSchedule()');
+      return w.eval('collectAdvanceTempSchedule()');
+    };
+    {
+      // Hardikbhai's stop, exactly as HR entered it.
+      const out = advCollectPending({ startMonth: '2026-04', instalment: 1600,
+                                      rateHistory: [{ from: '2026-04', instalment: 1600 }] }, '2026-08', '0');
+      check('pressing Save commits the stop instead of dropping it',
+            ['2026-06', '2026-07', '2026-08', '2026-09'].map(m => advAt(out, m)), [1600, 1600, 0, 0]);
+      check('  and it lands as a dated entry, exactly where + Add would put it',
+            out.rateHistory.length, 2);
+    }
+    {
+      // Re-entering a month that already has an entry replaces it rather than
+      // stacking a second one, same as the + button's own de-duplication.
+      const out = advCollectPending({ startMonth: '2026-04', instalment: 1600,
+        rateHistory: [{ from: '2026-04', instalment: 1600 }, { from: '2026-08', instalment: 0 }] }, '2026-08', '900');
+      check('re-entering the same month replaces that entry',
+            [out.rateHistory.length, advAt(out, '2026-08')], [2, 900]);
+    }
+    {
+      // Half filled in is refused by the save, not guessed at.
+      w.eval('editingEmployeeDraft = ' + JSON.stringify({ advanceTempSchedule:
+        { startMonth: '2026-04', instalment: 1600, rateHistory: [{ from: '2026-04', instalment: 1600 }] }, loans: [] }));
+      let box = doc.getElementById('advanceTempScheduleBox');
+      if(!box){ box = doc.createElement('div'); box.id = 'advanceTempScheduleBox'; doc.body.appendChild(box); }
+      w.eval('renderAdvanceTempSchedule()');
+      doc.getElementById('advTemp_change_month').value = '2026-08';
+      doc.getElementById('advTemp_change_amount').value = '';
+      check('a month with no rate stops the save and says why',
+            /only half filled in/.test(w.eval('pendingRateChangeProblem_()')), true);
+      doc.getElementById('advTemp_change_month').value = '';
+      doc.getElementById('advTemp_change_amount').value = '900';
+      check('and so does a rate with no month',
+            /only half filled in/.test(w.eval('pendingRateChangeProblem_()')), true);
+      doc.getElementById('advTemp_change_amount').value = '';
+      check('while two empty boxes are simply nothing to add',
+            w.eval('pendingRateChangeProblem_()'), '');
+    }
+
     // ---- Loan EMI ---------------------------------------------------------
     console.log('\nchanging the EMI on a loan that has already been recovering\n');
     const loanCollect = (loan, typedEmi) => {
@@ -175,6 +231,23 @@ setTimeout(() => {
                                 startMonth: thisYm, status: 'active' }, 1200);
       check('a loan starting this month is corrected, not split',
             [out.emiHistory.length, emiAt(out, thisYm)], [1, 1200]);
+    }
+    {
+      // The same never-added trap on the loan's own EMI change boxes.
+      w.eval('editingEmployeeDraft = ' + JSON.stringify({ loans: [
+        { id: 'L5', amount: 60000, instalment: 2500, startMonth: '2026-04', status: 'active' }] }));
+      let box = doc.getElementById('loanRowsBox');
+      if(!box){ box = doc.createElement('div'); box.id = 'loanRowsBox'; doc.body.appendChild(box); }
+      w.eval('renderLoanRows()');
+      doc.getElementById('loan_emichange_month_0').value = '2026-09';
+      doc.getElementById('loan_emichange_amount_0').value = '1500';
+      w.eval('syncLoanRow(0)');
+      const out = w.eval('collectLoanRows()')[0];
+      check('an EMI change typed in but never added is committed on save',
+            [emiAt(out, '2026-08'), emiAt(out, '2026-09')], [2500, 1500]);
+      doc.getElementById('loan_emichange_amount_0').value = '';
+      check('  and half of one stops the save',
+            /only half filled in/.test(w.eval('pendingRateChangeProblem_()')), true);
     }
 
     if(pageErrors.length){
