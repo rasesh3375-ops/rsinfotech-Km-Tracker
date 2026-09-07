@@ -4302,3 +4302,87 @@ function notCheckedInToday(users, byUser, today){
     (a.daysSince === null ? -1 : b.daysSince === null ? 1 : b.daysSince - a.daysSince) ||
     String(a.name).localeCompare(String(b.name)));
 }
+
+// ---- salary appraisal letter ----
+//
+// What the letter states is TAKE HOME, not Rate of Pay, and take home here
+// deliberately excludes every recovery: no loan EMI, no advance, no temporary
+// advance, no retention, and nothing attendance took off. An appraisal letter
+// is a statement of what the job now pays, and a loan the employee is repaying
+// is none of the letter's business — it would also make two people on the same
+// revised salary receive letters quoting different numbers.
+//
+// So: take home = Basic + HRA + LTA + other allowances + conveyance, less the
+// three statutory deductions that actually come out of the employee's hand
+// (employee PF, employee ESI, PT). The employer's own PF and ESI are paid on
+// top and never withheld, so they have no place in a take-home figure —
+// exactly the bridge salCalcTakeHomeOf_ uses for a new hire, applied here to a
+// real record instead of a hypothetical one.
+//
+// Everything is read through monthlyPayFor, which reads the employee's own
+// answers — PF eligibility, the flat 1,800 option, prior UAN, Form 11, ESI
+// covered-at-period-start, PT paid so far this year. A letter computed from
+// the heading percentages alone would quote deductions the Salary Sheet does
+// not take.
+function appraisalTakeHome_(p){
+  return p.salaryGross + p.other + p.conveyance - p.statutory;
+}
+// The percentage is applied to the RATE OF PAY, not to take home. Rate of Pay
+// is the figure the employee's record holds, the figure every increment in
+// salaryHistory is expressed in, and the figure the Salary Sheet works from —
+// so a 10% appraisal means a 10% rise in that, and the take home that results
+// is then computed rather than assumed. Raising take home by 10% instead would
+// need the rate solved backwards and would move by a different percentage the
+// moment somebody crosses the ESI ceiling, which is not what "a 10% rise"
+// means to anybody.
+function appraisalFigures(emp, opts){
+  opts = opts || {};
+  const ym = /^\d{4}-\d{2}$/.test(String(opts.ym || '')) ? String(opts.ym)
+    : financialYearLabel && todayStr ? todayStr().slice(0, 7) : '';
+  const y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
+  const asOf = ratePayAsOf(emp, ym + '-01');
+  const oldRate = Number(asOf.ratePay) || 0;
+  const pct = Number(opts.percent);
+  let newRate = Number(opts.newRate);
+  if(!Number.isFinite(newRate) || newRate <= 0){
+    newRate = Number.isFinite(pct) ? Math.round(oldRate * (1 + pct / 100)) : oldRate;
+  }
+  const before = monthlyPayFor(emp, y, m);
+  // salaryHistory emptied so ratePayAsOf falls back to the rate being asked
+  // about; the heading is carried over explicitly because it comes from the
+  // same history and would otherwise fall back to the record's current one.
+  const revised = Object.assign({}, emp, {
+    ratePay: newRate, salaryHeading: asOf.salaryHeading, salaryHistory: []
+  });
+  const after = monthlyPayFor(revised, y, m);
+  const takeBefore = appraisalTakeHome_(before);
+  const takeAfter = appraisalTakeHome_(after);
+  return {
+    ym: ym,
+    heading: asOf.salaryHeading,
+    oldRate: oldRate,
+    newRate: newRate,
+    // The rise actually granted, off the rate. Null rather than 0 when there
+    // was no previous rate to compare against — a new record with nothing on
+    // file is not a 0% appraisal.
+    ratePct: oldRate > 0 ? ((newRate - oldRate) / oldRate) * 100 : null,
+    before: before,
+    after: after,
+    takeHomeBefore: takeBefore,
+    takeHomeAfter: takeAfter,
+    takeHomeRise: takeAfter - takeBefore,
+    // Take home does NOT move by the same percentage as the rate, and the
+    // letter says so rather than letting HR discover it: PT is a flat 200 that
+    // does not scale, and crossing the ESI ceiling removes a 0.75% deduction
+    // outright, so a 10% rise in rate can land as more than 10% in hand.
+    takeHomePct: takeBefore > 0 ? ((takeAfter - takeBefore) / takeBefore) * 100 : null,
+    // Whether each statutory deduction applies at all, so the letter can list
+    // only the ones that do — an Apprentice attracts none of the three, and a
+    // line reading "PF: 0" invites the question of why it is there.
+    applies: {
+      pf: after.pf > 0 || before.pf > 0,
+      esi: after.esi > 0 || before.esi > 0,
+      pt: after.pt > 0 || before.pt > 0
+    }
+  };
+}

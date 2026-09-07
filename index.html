@@ -3469,6 +3469,23 @@
             <input type="date" id="genOfferReplyBy" />
             <div style="height:14px"></div>
           </div>
+          <div id="genApprFieldsWrap" class="hidden">
+            <p style="font-size:11.5px;color:var(--muted);margin:0 0 8px;">The rise is applied to the
+              <strong>Rate of Pay</strong> on the employee's record — the figure every increment is
+              expressed in and the one the Salary Sheet works from. The take-home shown on the letter
+              is then calculated from it, not assumed: PT is a flat ₹200 that does not scale, and
+              crossing the ESI ceiling removes a deduction outright, so a 10% rise in pay usually
+              lands as slightly more than 10% in hand.</p>
+            <label class="field">Increase %</label>
+            <input type="number" id="genApprPercent" step="0.5" min="0" placeholder="e.g. 10" />
+            <div style="height:12px"></div>
+            <label class="field">…or type the revised Rate of Pay instead (overrides the %)</label>
+            <input type="number" id="genApprNewRate" min="0" placeholder="leave blank to use the % above" />
+            <div style="height:12px"></div>
+            <label class="field">Effective from</label>
+            <input type="date" id="genApprEffective" />
+            <div style="height:14px"></div>
+          </div>
           <div id="genLeaveFieldsWrap" class="hidden">
             <div id="genLeavePendingBox"></div>
             <div class="sec-title">Leave requested</div>
@@ -12401,7 +12418,8 @@ const LETTER_TYPES = [
   'Full & Final Settlement Letter',
   'Loan/Advance Request Form',
   'Leave Application Form',
-  'Salary Slip'
+  'Salary Slip',
+  'Salary Appraisal Letter'
 ];
 // Which of the shared fields each letter actually puts on the page. Asking for
 // a last working date on a Salary Slip invites somebody to fill it in and
@@ -12418,7 +12436,8 @@ const LETTER_FIELDS = {
   'Full & Final Settlement Letter': { designation:true,  department:false, doj:false, lwd:true  },
   'Loan/Advance Request Form':      { designation:true,  department:true,  doj:true,  lwd:false },
   'Leave Application Form':         { designation:true,  department:true,  doj:false, lwd:false },
-  'Salary Slip':                    { designation:true,  department:true,  doj:false, lwd:false }
+  'Salary Slip':                    { designation:true,  department:true,  doj:false, lwd:false },
+  'Salary Appraisal Letter':        { designation:true,  department:true,  doj:false, lwd:false }
 };
 // A letter that asks for a last working date is a letter for somebody on their
 // way out, so those are the ones whose employee list includes people already
@@ -27869,6 +27888,8 @@ async function toggleGeneratorFieldsForType(){
   const isLoan = type === 'Loan/Advance Request Form';
   const isLeave = type === 'Leave Application Form';
   document.getElementById('genOfferFieldsWrap').classList.toggle('hidden', !isOffer);
+  const apprWrap = document.getElementById('genApprFieldsWrap');
+  if(apprWrap) apprWrap.classList.toggle('hidden', type !== 'Salary Appraisal Letter');
   document.getElementById('genEmpSelectWrap').classList.toggle('hidden', isOffer);
   const leaveWrap = document.getElementById('genLeaveFieldsWrap');
   if(leaveWrap){
@@ -28498,6 +28519,40 @@ function letterTemplate(type, f){
   switch(type){
     case 'Offer Letter':
       return `Dear ${name},\n\nFurther to your application and the discussions we have had with you, we are pleased to offer you employment with ${company} in the position of ${designation}${inDept}, on the following terms:\n\nDesignation: ${designation}\n${department ? 'Department: ' + department + '\n' : ''}Proposed date of joining: ${doj || '[to be confirmed]'}\n${f.offeredSalary ? 'Compensation: ' + f.offeredSalary + '\n' : ''}\nThis offer is extended on the basis of the information provided by you during the selection process and is subject to satisfactory verification of your documents, credentials and references. It does not by itself constitute a confirmed appointment — your appointment will be formally confirmed, and the detailed terms of your employment communicated, once you join us and receive your Appointment Letter.\n\n${f.replyBy ? 'Kindly confirm your acceptance of this offer on or before ' + niceDate_(f.replyBy) + ', failing which we will treat this offer as declined.\n\n' : ''}We look forward to welcoming you to the ${company} team.\n\nYours sincerely,`;
+    case 'Salary Appraisal Letter': {
+      const a = f.appraisal;
+      if(!a) return `Dear ${name},\n\nSelect an employee and enter the increase to generate this letter.`;
+      const R = n => 'Rs. ' + fmtMoney(Math.round(n));
+      const eff = niceDate_(f.appraisalEffective) || '[effective date]';
+      // The bifurcation of the REVISED figure, which is what the employee will
+      // want to check. Only the components the heading actually splits into —
+      // Junior Staff is a flat Basic, so printing "HRA: Rs. 0" beside it
+      // invites a question with no answer.
+      const bits = [['Basic', a.after.basic], ['HRA', a.after.hra], ['LTA', a.after.lta],
+                    ['Other allowances', a.after.other], ['Conveyance', a.after.conveyance]]
+        .filter(([, v]) => Math.round(v) > 0)
+        .map(([k, v]) => k + ': ' + R(v)).join('\n');
+      // Listed only where they apply. An Apprentice attracts none of the
+      // three, and a line reading "PF: Rs. 0" reads as an error.
+      const ded = [a.applies.pf ? 'Provident Fund (employee share): ' + R(a.after.pf) : '',
+                   a.applies.esi ? 'ESI (employee share): ' + R(a.after.esi) : '',
+                   a.applies.pt ? 'Professional Tax: ' + R(a.after.pt) : '']
+        .filter(Boolean).join('\n');
+      return `Dear ${name},\n\n` +
+`We are pleased to inform you that based on your performance, dedication, and contribution to the organization, the management of ${company} has decided to revise your salary as part of the appraisal process.\n\n` +
+`Your consistent efforts, sense of responsibility, and professional approach during the appraisal period are highly appreciated. Your contribution has added value to the growth and success of the company.\n\n` +
+`As per the appraisal decision, your revised salary details are as follows:\n\n` +
+`Previous Salary: ${R(a.takeHomeBefore)} per month\n` +
+`Revised Salary: ${R(a.takeHomeAfter)} per month\n` +
+`Effective From: ${eff}\n\n` +
+`Both figures above are your take-home salary — what is paid into your account each month — and are stated before any loan or advance instalment you may be repaying, which is unchanged by this revision.\n\n` +
+`Revised salary structure (per month):\n${bits}\nGross Salary: ${R(a.after.salaryGross + a.after.other + a.after.conveyance)}\n\n` +
+(ded ? `Statutory deductions (per month):\n${ded}\nTotal deductions: ${R(a.after.statutory)}\n\nNet Take Home: ${R(a.takeHomeAfter)} per month\n\n`
+     : `No statutory deductions apply to your salary heading, so your gross and take-home salary are the same.\n\n`) +
+`All other terms and conditions of your employment with ${company} will remain unchanged.\n\n` +
+`We look forward to your continued dedication and wish you success and growth in your career with ${company}.\n\n` +
+`Congratulations and best wishes.\n\nYours sincerely,`;
+    }
     case 'Appointment Letter':
       return `Dear ${name},\n\nFurther to your acceptance of our offer, we are pleased to confirm your appointment with ${company} as ${designation}${inDept}, with effect from ${doj}.\n\nYour employment will be governed by the Company's HR policies as in force from time to time, including those on working hours, leave entitlements, code of conduct and confidentiality, which will be shared with you separately. Please treat this letter as confirmation of your appointment, and report for duty on your date of joining with the documents requested of you.\n\nWe welcome you to ${company} and look forward to a long and mutually rewarding association.\n\nYours sincerely,`;
     case 'Experience Letter': {
@@ -28652,6 +28707,21 @@ async function generateLetter(){
   if(isOffer){
     f.offeredSalary = document.getElementById('genOfferedSalary').value.trim();
     f.replyBy = document.getElementById('genOfferReplyBy').value;
+  }
+  if(type === 'Salary Appraisal Letter' && matched){
+    const pctEl = document.getElementById('genApprPercent');
+    const rateEl = document.getElementById('genApprNewRate');
+    const effEl = document.getElementById('genApprEffective');
+    // Every figure on this letter comes from appraisalFigures, which reads the
+    // employee's own PF eligibility, ESI period status and PT paid so far —
+    // not the heading percentages alone, which would quote deductions the
+    // Salary Sheet does not take.
+    f.appraisal = appraisalFigures(matched, {
+      ym: (f.issueDate || todayStr()).slice(0, 7),
+      percent: pctEl && pctEl.value !== '' ? Number(pctEl.value) : undefined,
+      newRate: rateEl && rateEl.value !== '' ? Number(rateEl.value) : undefined
+    });
+    f.appraisalEffective = (effEl && effEl.value) || '';
   }
   if(type === 'Leave Application Form' && matched){
     const lr = readLeaveForm();
