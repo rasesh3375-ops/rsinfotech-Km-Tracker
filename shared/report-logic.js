@@ -4310,19 +4310,26 @@ function notCheckedInToday(users, byUser, today){
 
 // ---- salary appraisal letter ----
 //
-// What the letter states is TAKE HOME, not Rate of Pay, and take home here
-// deliberately excludes every recovery: no loan EMI, no advance, no temporary
-// advance, no retention, and nothing attendance took off. An appraisal letter
-// is a statement of what the job now pays, and a loan the employee is repaying
-// is none of the letter's business — it would also make two people on the same
-// revised salary receive letters quoting different numbers.
+// What the letter states is TAKE HOME, not Rate of Pay.
 //
-// So: take home = Basic + HRA + LTA + other allowances + conveyance, less the
+// Take home = Basic + HRA + LTA + other allowances + conveyance, less the
 // three statutory deductions that actually come out of the employee's hand
-// (employee PF, employee ESI, PT). The employer's own PF and ESI are paid on
-// top and never withheld, so they have no place in a take-home figure —
-// exactly the bridge salCalcTakeHomeOf_ uses for a new hire, applied here to a
-// real record instead of a hypothetical one.
+// (employee PF, employee ESI, PT), less Advance for Temporary. The employer's
+// own PF and ESI are paid on top and never withheld, so they have no place in
+// a take-home figure — exactly the bridge salCalcTakeHomeOf_ uses for a new
+// hire, applied here to a real record instead of a hypothetical one.
+//
+// The loan EMI, the salary advance and retention are deliberately NOT taken
+// off. An appraisal letter is a statement of what the job now pays, and a loan
+// the employee is repaying is none of the letter's business — it would also
+// make two people on the same revised salary receive letters quoting different
+// numbers.
+//
+// Advance for Temporary is the one recovery HR does want inside the figure,
+// and they were explicit about it: on 11,000 with 500 being recovered the
+// letter is to read 10,500 and say nothing about the 500. It is deducted on
+// both columns, so the rise the letter states is unaffected by it; only the
+// two take-home figures, and the Grand Total built from them, move.
 //
 // Everything is read through monthlyPayFor, which reads the employee's own
 // answers — PF eligibility, the flat 1,800 option, prior UAN, Form 11, ESI
@@ -4330,7 +4337,7 @@ function notCheckedInToday(users, byUser, today){
 // the heading percentages alone would quote deductions the Salary Sheet does
 // not take.
 function appraisalTakeHome_(p){
-  return p.salaryGross + p.other + p.conveyance - p.statutory;
+  return p.salaryGross + p.other + p.conveyance - p.statutory - (p.advanceTemp || 0);
 }
 // An appraisal is either being RECORDED or being REPORTED, and telling those
 // apart is the whole of this function.

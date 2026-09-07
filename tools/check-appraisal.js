@@ -207,6 +207,77 @@ console.log('\nheadings that attract nothing\n');
         Math.round(a.after.basic), Math.round(24000 * 0.65));
 }
 
+console.log('\nAdvance for Temporary is taken off, and never printed\n');
+{
+  // HR's FOURTH report, in their own words: "someone's salary is 11000 + PF +
+  // ESI + PT and 500 Advance for Temporary, so do not show Advance for
+  // Temporary, just consider take home is 10500". It comes off the take-home
+  // figure and gets no line of its own.
+  const base = withHist([{ from: '2020-01-01', ratePay: 30000, salaryHeading: 'managerial' }]);
+  const withAdv = Object.assign({}, base,
+    { advanceTempSchedule: { startMonth: '2026-01', instalment: 500 } });
+  const plain = L.appraisalFigures(base,    { ym: '2026-09', percent: 10 });
+  const adv   = L.appraisalFigures(withAdv, { ym: '2026-09', percent: 10 });
+  check('the previous take home is 500 lighter',
+        Math.round(plain.takeHomeBefore - adv.takeHomeBefore), 500);
+  check('and so is the revised one',
+        Math.round(plain.takeHomeAfter - adv.takeHomeAfter), 500);
+  // Taken off BOTH columns, so the rise the letter states — which is what the
+  // employee reads it for — is untouched by a recovery that has nothing to do
+  // with the appraisal.
+  check('the rise the letter states does not move',
+        Math.round(adv.takeHomeRise), Math.round(plain.takeHomeRise));
+  check('nor do the two rates or the percentage',
+        [adv.oldRate, adv.newRate, Math.round(adv.ratePct)],
+        [plain.oldRate, plain.newRate, Math.round(plain.ratePct)]);
+  // Nothing on the letter names it, so the Grand Total built from the printed
+  // lines has to move with take home or the letter stops adding up in front of
+  // the employee.
+  const grand = (p, t) => Math.round(t + p.pf + p.pfEmployer + p.esi + (p.esiEmployer || 0) + p.pt);
+  check('the Grand Total still equals the lines actually printed',
+        grand(adv.after, adv.takeHomeAfter),
+        Math.round(adv.takeHomeAfter + adv.after.pf + adv.after.pfEmployer + adv.after.pt));
+  check('and it is 500 below the same letter without the advance',
+        grand(plain.after, plain.takeHomeAfter) - grand(adv.after, adv.takeHomeAfter), 500);
+}
+{
+  // The other three recoveries stay out of it. A loan is the employee's own
+  // arrangement, not a statement of what the job pays, and deducting one would
+  // have two people on the same revised salary receive letters quoting
+  // different figures. Only Advance for Temporary was asked for.
+  const base = withHist([{ from: '2020-01-01', ratePay: 30000, salaryHeading: 'managerial' }]);
+  const loaded = Object.assign({}, base, {
+    loans: [{ id: 'L', amount: 60000, instalment: 2500, startMonth: '2026-01', status: 'active' }],
+    advanceHistory: [{ month: '2026-09', advance: 1000 }],
+    retentionMoney: 9000, retentionMonths: 12, bondStart: '2026-01-01' });
+  const a = L.appraisalFigures(base,   { ym: '2026-09', percent: 10 });
+  const b = L.appraisalFigures(loaded, { ym: '2026-09', percent: 10 });
+  check('a loan EMI, a salary advance and retention change nothing',
+        [Math.round(b.takeHomeBefore), Math.round(b.takeHomeAfter)],
+        [Math.round(a.takeHomeBefore), Math.round(a.takeHomeAfter)]);
+  check('  and they really were being recovered that month',
+        [Math.round(b.after.emi), Math.round(b.after.advance), Math.round(b.after.retention)],
+        [2500, 1000, 750]);
+}
+{
+  // A schedule that has not started yet, and one stopped with a ₹0 entry —
+  // both are "no advance this month", and the letter must not quietly take off
+  // last month's figure.
+  const base = withHist([{ from: '2020-01-01', ratePay: 30000, salaryHeading: 'managerial' }]);
+  const plain = L.appraisalFigures(base, { ym: '2026-09', percent: 10 });
+  const notYet = L.appraisalFigures(
+    Object.assign({}, base, { advanceTempSchedule: { startMonth: '2026-11', instalment: 500 } }),
+    { ym: '2026-09', percent: 10 });
+  check('a schedule starting in November takes nothing off September',
+        Math.round(notYet.takeHomeAfter), Math.round(plain.takeHomeAfter));
+  const stopped = L.appraisalFigures(
+    Object.assign({}, base, { advanceTempSchedule: { startMonth: '2026-01', instalment: 500,
+      rateHistory: [{ from: '2026-01', instalment: 500 }, { from: '2026-08', instalment: 0 }] } }),
+    { ym: '2026-09', percent: 10 });
+  check('and one stopped in August takes nothing off September either',
+        Math.round(stopped.takeHomeAfter), Math.round(plain.takeHomeAfter));
+}
+
 console.log('\nevery employee for one month\n');
 {
   const roster = [

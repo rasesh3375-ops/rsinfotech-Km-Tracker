@@ -23343,7 +23343,9 @@ async function renderAppraisalRoster_(){
             : '<span class="muted">proposed</span>'}</td></tr>`;
       }).join('')}</tbody></table></div>
     <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:8px 0 0;">
-      Salaries shown are <strong>take home</strong> — before any loan or advance instalment.
+      Salaries shown are <strong>take home</strong> — after Advance for Temporary, which HR asked
+      to be deducted without appearing on the letter, and before any loan instalment, salary
+      advance or retention, none of which is deducted or named.
       <strong>On record</strong> means the letter reports an increment actually saved against that
       employee — the most recent one on or before ${escapeHtml(monthLabel(ym))}, whichever month it
       was given in — so it states what was granted and the Increase % above is ignored for them.
@@ -28784,10 +28786,18 @@ function letterTemplate(type, f){
       // only the employee share made the letter read 34,258 where HR's read
       // 36,058, on a Take Home that already agreed to the rupee.
       //
-      // No loan or advance appears anywhere. HR's manual letter carried a
-      // "your loan" line and a "you received this month" figure; they asked for
-      // neither here. An appraisal states what the job pays, and two people on
-      // the same revised salary must receive the same letter.
+      // No loan, salary advance or retention appears anywhere, and none of them
+      // is deducted. HR's manual letter carried a "your loan" line and a "you
+      // received this month" figure; they asked for neither here. An appraisal
+      // states what the job pays, and two people on the same revised salary
+      // must receive the same letter.
+      //
+      // Advance for Temporary is the exception, and HR was explicit about it:
+      // it comes OFF Take Home and gets no line — on 11,000 with 500 being
+      // recovered the letter reads 10,500 and says nothing about the 500. It is
+      // taken off both columns inside appraisalTakeHome_, so the increment the
+      // letter states is unaffected; only the two Take Home figures move, and
+      // the Grand Total with them, so the printed lines still add up.
       const grand = (p, take) => take + p.pf + (p.pfEmployer || 0) +
         p.esi + (p.esiEmployer || 0) + p.pt;
       const block = (p, take) => [
@@ -28810,7 +28820,7 @@ function letterTemplate(type, f){
 prev +
 `Revised Salary (per month):\nIncrement: ${pct}\n${block(a.after, a.takeHomeAfter)}\n\n` +
 `Effective From: ${eff}\n\n` +
-`Take Home is what is paid into your account each month. It is stated before any loan or advance instalment you may be repaying, which is unchanged by this revision and is not part of this letter. Grand Total is Take Home plus everything listed above it — both sides of Provident Fund and ESI, and Professional Tax.\n\n` +
+`Take Home is what is paid into your account each month. Any loan instalment you may be repaying is unchanged by this revision and is not part of this letter. Grand Total is Take Home plus everything listed above it — both sides of Provident Fund and ESI, and Professional Tax.\n\n` +
 `All other terms and conditions of your employment with ${company} will remain unchanged.\n\n` +
 `We look forward to your continued dedication and wish you success and growth in your career with ${company}.\n\n` +
 `Congratulations and best wishes.\n\nYours sincerely,`;
