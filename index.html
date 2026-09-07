@@ -3430,6 +3430,7 @@
             <div class="gen-select-wrap">
               <span class="gen-select-ic">📄</span>
               <select class="field-input" id="genLetterTypeSelect" onchange="selectLetterType(Number(this.value))"></select>
+              <p id="genLoadWarning" class="pol-warn" style="font-size:11.5px;margin:8px 0 0;" hidden></p>
             </div>
             <p class="gen-step-hint">Select the type of letter you want to generate.</p>
           </div>
@@ -23204,36 +23205,65 @@ async function renderGeneratorTab(){
   // does for its own cards.
   if(!(kmtPendingCardRestore && kmtPendingCardRestore.route === 'generator')) showGeneratorLanding();
 
-  const employees = await getEmployees();
-  await refreshChecklistPickerCounts(employees);
+  // FIRST, and before any await. The letter list needs nothing from the
+  // backend — LETTER_TYPES is a constant in this file — but it used to be
+  // drawn after getEmployees() and refreshChecklistPickerCounts(), so one
+  // failed read threw and left "Choose a Letter" with no options at all. HR
+  // opened the Generator and could not pick a letter, with nothing on screen
+  // to say why. Nothing that needs no data should wait behind something that
+  // can fail.
+  renderLetterChoices_();
 
-  const letterItems = LETTER_TYPES.map((t,i) => `
-    <div class="letter-choice ${i===selectedLetterIdx?'active':''}" onclick="selectLetterType(${i})">
-      <span class="num">${String(i+1).padStart(2,'0')}</span> ${t}
-    </div>`).join('');
-  document.getElementById('letterChoiceList').innerHTML = letterItems;
-  // The "Choose a Letter" dropdown (Step 1) — same LETTER_TYPES, same
-  // selectLetterType() on change, so picking a type either way stays in
-  // sync with the quick-list grid below it.
-  const letterTypeSel = document.getElementById('genLetterTypeSelect');
-  if(letterTypeSel){
-    letterTypeSel.innerHTML = LETTER_TYPES.map((t,i) => `<option value="${i}">${t}</option>`).join('');
-    letterTypeSel.value = String(selectedLetterIdx);
-  }
+  // Each of the rest is allowed to fail on its own. They fetch different keys
+  // from a backend that answers one at a time, and a single slow read used to
+  // take the whole tab down with it — including the parts that had already
+  // succeeded.
+  const failed = [];
+  const step = async (what, fn) => { try{ await fn(); }catch(e){ failed.push(what); } };
 
+  let employees = [];
+  await step('the employee list', async () => { employees = await getEmployees(); });
+  await step('the checklist counts', () => refreshChecklistPickerCounts(employees));
   // The Role Reports card lives on this tab now, but its picker was only ever
   // populated from the Reports tab's render — fine when Reports was visited
   // first, empty if this card is opened straight from the Generator landing.
-  await populateRoleReportPickers();
-  await populateGeneratorEmployees();
+  await step('the role report pickers', () => populateRoleReportPickers());
+  await step('the employee pickers', () => populateGeneratorEmployees());
   // Office Documents moved here too — same reasoning: its uploads and lists
   // need to be ready the moment that card opens, not fetched then.
-  await renderOfficeDocumentsTab();
+  await step('Office Documents', () => renderOfficeDocumentsTab());
+
+  // Say which parts are missing rather than leaving half a screen looking
+  // complete. The letters themselves still work — they need no backend.
+  const warn = document.getElementById('genLoadWarning');
+  if(warn){
+    warn.hidden = !failed.length;
+    if(failed.length){
+      warn.textContent = 'Could not load ' + failed.join(', ') +
+        ' — the backend did not answer. Letters still work; reopen this tab to try the rest again.';
+    }
+  }
 
   document.getElementById('genIssueDate').value = document.getElementById('genIssueDate').value || todayStr();
   document.getElementById('letterOutput').classList.remove('show');
   document.getElementById('letterActionsBox').classList.add('hidden');
   toggleGeneratorFieldsForType();
+}
+// Both pickers for the letter type, from the same list and the same handler,
+// so choosing one way stays in sync with the other.
+function renderLetterChoices_(){
+  const list = document.getElementById('letterChoiceList');
+  if(list){
+    list.innerHTML = LETTER_TYPES.map((t, i) => `
+      <div class="letter-choice ${i === selectedLetterIdx ? 'active' : ''}" onclick="selectLetterType(${i})">
+        <span class="num">${String(i + 1).padStart(2, '0')}</span> ${escapeHtml(t)}
+      </div>`).join('');
+  }
+  const sel = document.getElementById('genLetterTypeSelect');
+  if(sel){
+    sel.innerHTML = LETTER_TYPES.map((t, i) => `<option value="${i}">${escapeHtml(t)}</option>`).join('');
+    sel.value = String(selectedLetterIdx);
+  }
 }
 
 // =======================================================================
