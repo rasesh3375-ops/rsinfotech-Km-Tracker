@@ -4424,16 +4424,38 @@ function appraisalFigures(emp, opts){
     effectiveFrom = ym + '-01';
   }
 
-  // Both sides costed on the same month, so PT's annual cap and the ESI
-  // half-year period are read against one point in time rather than two.
-  const at = (rate, heading) => monthlyPayFor(
-    Object.assign({}, emp, { ratePay: rate, salaryHeading: heading, salaryHistory: [] }), y, m);
-  const before = at(oldRate, oldHeading);
-  const after = at(newRate, newHeading);
+  // Each side is costed on the month it was actually paid in. The revised side
+  // is the month HR asked about; the previous side is the LAST MONTH THE OLD
+  // SALARY WAS IN FORCE — the month before the rise took effect — because that
+  // is the month whose recoveries belong to the old salary.
+  //
+  // Costing both on the appraisal month made a recovery recorded against the
+  // previous month invisible. Hardikbhai Parmar had an Advance for Temporary
+  // running in July, was raised on 1 August, and his letter — written in
+  // September, where nothing was running — stated a Previous take home with
+  // nothing deducted from it. The figure was for a month he was never paid.
+  //
+  // Only the recoveries actually move: monthlyPayFor's other month-dependent
+  // input is ratePayAsOf, and both sides pass an explicit rate with the history
+  // emptied, so neither side can read a rate from the wrong month. PT's annual
+  // cap and the ESI half-year status are read from stored answers on the record
+  // (ptPaidThisYear, esiCoveredAtPeriodStart), not from the month, so they stay
+  // identical across the two — which is what the old "one point in time"
+  // comment was protecting, and it still holds.
+  const prevYm = mode === 'recorded' ? prevMonthOf_(String(effectiveFrom).slice(0, 7)) : ym;
+  const [py, pm] = prevYm.split('-').map(Number);
+  const at = (rate, heading, cy, cm) => monthlyPayFor(
+    Object.assign({}, emp, { ratePay: rate, salaryHeading: heading, salaryHistory: [] }), cy, cm);
+  const before = at(oldRate, oldHeading, py, pm);
+  const after = at(newRate, newHeading, y, m);
   const takeBefore = appraisalTakeHome_(before);
   const takeAfter = appraisalTakeHome_(after);
   return {
     ym: ym,
+    // The month the previous side is costed on — the last month the old salary
+    // was in force, which is not the appraisal month whenever a rise is being
+    // reported rather than proposed.
+    prevYm: prevYm,
     heading: newHeading,
     // True when the rise is already on the record — the letter reports it, and
     // the form stops offering to apply a percentage on top of it.

@@ -207,6 +207,58 @@ console.log('\nheadings that attract nothing\n');
         Math.round(a.after.basic), Math.round(24000 * 0.65));
 }
 
+console.log('\neach side is costed on the month it was actually paid in\n');
+{
+  // HR's SIXTH report, and Hardikbhai Parmar's real letter. He was on an
+  // Advance for Temporary of 1,600 in July, was raised effective 1 August, and
+  // it was stopped after that. His letter — written in September, where nothing
+  // was running — stated a Previous take home of 26,120 with the 1,600 still
+  // in it, because BOTH sides were costed on the month the letter was printed
+  // rather than the month each salary was actually paid. The previous figure
+  // was for a month he was never paid on that salary.
+  const e = Object.assign({}, EMP, { salaryHeading: 'senior', pfContributionType: 'percent',
+    ratePay: 28766, advanceHistory: [{ month: '2026-07', advanceTemp: 1600 }],
+    salaryHistory: [{ from: null, ratePay: 28000, salaryHeading: 'senior' },
+                    { from: '2026-08-01', ratePay: 28766, salaryHeading: 'senior' }] });
+  const a = L.appraisalFigures(e, { ym: '2026-09' });
+  check('the previous side is costed on the last month of the old salary', a.prevYm, '2026-07');
+  check('so July\'s 1,600 comes off the previous take home', a.before.advanceTemp, 1600);
+  check('  and the revised side takes off what is actually running now, nil',
+        a.after.advanceTemp, 0);
+  check('his previous take home is the July figure, not the September one',
+        [Math.round(a.takeHomeBefore), Math.round(a.takeHomeAfter)], [24520, 26840]);
+  // The previous side is anchored to a real month, so the letter no longer says
+  // something different depending on when it is printed.
+  ['2026-08', '2026-09', '2026-12'].forEach(ym => {
+    const b = L.appraisalFigures(e, { ym: ym });
+    check('written in ' + ym + ' it still states the same previous figure',
+          Math.round(b.takeHomeBefore), 24520);
+  });
+}
+{
+  // The revised side must keep following the month HR asked about — a recovery
+  // that starts AFTER the rise belongs to the new salary, not the old one.
+  const e = Object.assign({}, EMP, { salaryHeading: 'senior', pfContributionType: 'percent',
+    ratePay: 28766,
+    advanceTempSchedule: { startMonth: '2026-09', instalment: 1000 },
+    salaryHistory: [{ from: null, ratePay: 28000, salaryHeading: 'senior' },
+                    { from: '2026-08-01', ratePay: 28766, salaryHeading: 'senior' }] });
+  const a = L.appraisalFigures(e, { ym: '2026-09' });
+  check('an advance starting after the rise comes off the revised side only',
+        [a.before.advanceTemp, a.after.advanceTemp], [0, 1000]);
+}
+{
+  // A proposal has no month of its own to look back to — nothing has happened
+  // yet — so both sides stay on the month HR asked about, exactly as before.
+  const e = Object.assign({}, EMP, { ratePay: 30000, pfEligible: 'no',
+    advanceHistory: [{ month: '2026-08', advanceTemp: 900 }],
+    salaryHistory: [{ from: '2020-01-01', ratePay: 30000, salaryHeading: 'managerial' }] });
+  const a = L.appraisalFigures(e, { ym: '2026-09', percent: 10 });
+  check('a proposal costs both sides on the month asked about', a.prevYm, '2026-09');
+  check('  so a rise not yet given cannot pick up last month\'s advance',
+        [a.before.advanceTemp, a.after.advanceTemp], [0, 0]);
+}
+
 console.log('\nthe percentage is measured on what the letter actually prints\n');
 {
   // HR's FIFTH report, and Trusharkumar Shah's real letter. His Rate of Pay
