@@ -17541,6 +17541,15 @@ function renderLoanRows(){
   const now = new Date(), y = now.getFullYear(), m = now.getMonth() + 1;
   const thisYm = y + '-' + String(m).padStart(2, '0');
   box.innerHTML = loans.map((l, i) => {
+    // Seed the EMI history from the flat fields as the form opens, same
+    // reasoning as renderAdvanceTempSchedule: loanEmiHistoryOf already reads
+    // exactly this when emiHistory is empty, so no figure moves, but it pins
+    // the EMI AS LOADED somewhere syncLoanRow does not overwrite — which is
+    // what lets collectLoanRows tell a rate change from the rate months have
+    // already been recovered at.
+    if(!(Array.isArray(l.emiHistory) && l.emiHistory.length) && (Number(l.instalment) || 0)){
+      l.emiHistory = [{ from: l.startMonth || null, instalment: Number(l.instalment) || 0 }];
+    }
     const amount = Number(l.amount) || 0;
     const bal = loanBalanceAfter(l, y, m);
     const recovered = Math.max(0, Math.round((amount - bal) * 100) / 100);
@@ -17723,6 +17732,7 @@ function removeLoanRow(i){
 // been added, when really it had been added and then silently erased.
 function collectLoanRows(){
   const out = [];
+  const thisYm_ = todayStr().slice(0, 7);
   const loans = editingEmployeeDraft.loans || [];
   loans.forEach((l, i) => {
     const amount = Number((document.getElementById('loan_amount_' + i) || {}).value) || 0;
@@ -17730,15 +17740,34 @@ function collectLoanRows(){
     const instalment = hasEmiChanges ? (Number(l.instalment) || 0) : (Number((document.getElementById('loan_emi_' + i) || {}).value) || 0);
     const startMonth = (document.getElementById('loan_start_' + i) || {}).value || '';
     if(!amount && !instalment && !startMonth) return;
+    // A month already recovered keeps the instalment it was recovered at —
+    // the same protection collectAdvanceTempSchedule carries, and for the same
+    // reason. loanEmiHistoryOf falls back to the flat instalment for EVERY
+    // month when emiHistory is empty, so editing the EMI on a loan whose rate
+    // had never been changed through the dated control restated every month
+    // already recovered. Worse than a wrong column: loanScheduleThrough walks
+    // the schedule from the start month, so the balance carried forward moved
+    // too, and the Loan Balance on old Salary Sheets stopped matching the ones
+    // printed at the time.
+    let emiHistory = Array.isArray(l.emiHistory) ? l.emiHistory : [];
+    const stored = emiHistory.length === 1 ? (Number(emiHistory[0].instalment) || 0) : 0;
+    if(!hasEmiChanges && stored > 0 && stored !== instalment && startMonth && startMonth <= thisYm_){
+      const from0 = emiHistory[0].from || startMonth || null;
+      emiHistory = String(from0 || '') === thisYm_
+        ? [{ from: from0, instalment }]
+        : [{ from: from0, instalment: stored }, { from: thisYm_, instalment }];
+    }
     out.push({
       id: l.id || ('L-' + Date.now() + '-' + i),
       amount,
-      instalment,
+      // The original rate, not today's — the dated history above is what
+      // decides any month's actual EMI.
+      instalment: emiHistory.length ? (Number(emiHistory[0].instalment) || 0) : instalment,
       startMonth,
       status: (document.getElementById('loan_status_' + i) || {}).value || 'active',
       reason: l.reason || '',
       approvedOn: l.approvedOn || '',
-      emiHistory: Array.isArray(l.emiHistory) ? l.emiHistory : [],
+      emiHistory,
       skipMonths: Array.isArray(l.skipMonths) ? l.skipMonths : []
     });
   });
@@ -17885,6 +17914,17 @@ function renderAdvanceTempSchedule(){
   const box = document.getElementById('advanceTempScheduleBox');
   if(!box) return;
   const sched = editingEmployeeDraft.advanceTempSchedule || (editingEmployeeDraft.advanceTempSchedule = { startMonth:'', rateHistory:[] });
+  // Seed the history from the flat rate the moment the form opens — the same
+  // lazy migration addAdvanceTempRateChange already does. It changes no
+  // figure, because advanceTempForMonth reads exactly this when rateHistory is
+  // empty; what it does is fix the rate AS LOADED in one place that
+  // syncAdvanceTempSchedule never writes to, so collectAdvanceTempSchedule can
+  // tell "HR changed the rate" from "this is the rate months have already been
+  // paid on". Without it the only copy of the old rate is sched.instalment,
+  // which sync overwrites on the first keystroke.
+  if(!(Array.isArray(sched.rateHistory) && sched.rateHistory.length) && (Number(sched.instalment) || 0)){
+    sched.rateHistory = [{ from: sched.startMonth || null, instalment: Number(sched.instalment) || 0 }];
+  }
   const hist = Array.isArray(sched.rateHistory) ? sched.rateHistory : [];
   const hasRateChanges = hist.length > 1;
   const thisYm = todayStr().slice(0, 7);
@@ -17985,6 +18025,40 @@ function collectAdvanceTempSchedule(){
   const hasRateChanges = Array.isArray(sched.rateHistory) && sched.rateHistory.length > 1;
   const instalment = hasRateChanges ? (Number(sched.instalment) || 0) : rate;
   if(!startMonth && !instalment && !hasRateChanges) return null;
+
+  // A month that has already been paid keeps the figure it was paid on.
+  //
+  // Editing this flat field rebuilt rateHistory from scratch, so changing the
+  // rate — or clearing it to nil to stop the recovery — rewrote every month
+  // the schedule had ever applied to, not only the ones still to come.
+  // Hardikbhai Parmar's ₹1,600 was stopped that way. May, June and July had
+  // already been paid with it deducted; the June and July Salary Sheets
+  // regenerated afterwards read ₹0, and no longer matched what had left the
+  // bank. Nothing warned anybody — the figure simply left history, and the
+  // same edit would have silently restated every past month for anyone else
+  // on a recurring recovery.
+  //
+  // So an edit to a rate that has ALREADY RUN becomes a dated change from this
+  // month on — exactly what "Change rate from a month" writes — leaving every
+  // earlier month on the rate it was actually paid, and letting the new rate
+  // (nil included, which is how a recovery is stopped) carry on from here.
+  // A schedule that has never deducted anything is still edited in place:
+  // there is no history to protect, and that is what keeps correcting a fresh
+  // entry — or repairing one already flattened to nil — possible.
+  const stored = (!hasRateChanges && Array.isArray(sched.rateHistory) && sched.rateHistory.length === 1)
+    ? (Number(sched.rateHistory[0].instalment) || 0) : 0;
+  const thisYm = todayStr().slice(0, 7);
+  if(stored > 0 && stored !== rate && startMonth && startMonth <= thisYm){
+    const from0 = sched.rateHistory[0].from || startMonth || null;
+    // A schedule that only starts this month has no earlier month to protect,
+    // so the edit still lands on the one entry rather than dating a change
+    // against itself.
+    const rateHistory = String(from0 || '') === thisYm
+      ? [{ from: from0, instalment: rate }]
+      : [{ from: from0, instalment: stored }, { from: thisYm, instalment: rate }];
+    return { startMonth, instalment: rateHistory[0].instalment, rateHistory };
+  }
+
   const rateHistory = hasRateChanges
     ? sched.rateHistory
     : (instalment ? [{ from: startMonth || null, instalment }] : []);
