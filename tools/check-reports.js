@@ -37,6 +37,7 @@ const CHECKS = [
   ['check-prepay.js',            'the pre-payroll check fires on a real fault and stays quiet otherwise'],
   ['check-tracking.js',          'an engineer is paid for driving, not walking, and never short-changed by traffic'],
   ['check-tracker-health.js',    'HR is told what is actually wrong with a phone, and who never checked in'],
+  ['check-email-triggers.js',    'a monthly email goes out monthly, not on every firing of its daily trigger'],
 ];
 
 let failed = 0;
