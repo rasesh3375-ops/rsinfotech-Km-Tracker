@@ -3480,7 +3480,13 @@
             <label class="field">Appraisal month</label>
             <input type="month" id="genApprMonth" onchange="renderAppraisalRoster_()" />
             <div style="height:12px"></div>
-            <label class="field">Increase %</label>
+            <label class="field">Base the letter on</label>
+            <select class="field-input" id="genApprMode" onchange="renderAppraisalRoster_()">
+              <option value="auto">The increment already recorded (recommended)</option>
+              <option value="proposed">A proposed increase, not yet recorded</option>
+            </select>
+            <div style="height:12px"></div>
+            <label class="field">Increase % — used only where nothing is recorded</label>
             <input type="number" id="genApprPercent" step="0.5" min="0" placeholder="e.g. 10"
                    onchange="renderAppraisalRoster_()" />
             <div style="height:12px"></div>
@@ -23268,13 +23274,15 @@ async function renderAppraisalRoster_(){
   const ym = (monthEl && monthEl.value) || todayStr().slice(0, 7);
   const pctEl = document.getElementById('genApprPercent');
   const percent = pctEl && pctEl.value !== '' ? Number(pctEl.value) : undefined;
+  const modeEl = document.getElementById('genApprMode');
+  const mode = (modeEl && modeEl.value) || 'auto';
   let employees = [];
   try{ employees = await getEmployees(); }
   catch(e){
     box.innerHTML = '<div class="empty">Could not load the employee list — reopen this card to try again.</div>';
     return;
   }
-  const rows = appraisalRoster(employees, { ym: ym, percent: percent });
+  const rows = appraisalRoster(employees, { ym: ym, percent: percent, mode: mode });
   if(!rows.length){ box.innerHTML = '<div class="empty">No employees on roll.</div>'; return; }
   const R = n => '₹' + fmtMoney(Math.round(n));
   const recorded = rows.filter(r => r.figures.alreadyRecorded).length;
@@ -23296,11 +23304,13 @@ async function renderAppraisalRoster_(){
       }).join('')}</tbody></table></div>
     <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:8px 0 0;">
       Salaries shown are <strong>take home</strong> — before any loan or advance instalment.
-      <strong>On record</strong> means an increment is already saved against that employee for
-      ${escapeHtml(monthLabel(ym))}, so the letter states what was actually granted and the
-      Increase % above is ignored for them — that is what stops a salary already raised being
-      raised a second time on paper. <strong>Proposed</strong> means nothing is recorded yet, so
-      the Increase % is applied to the rate in force that month.
+      <strong>On record</strong> means the letter reports an increment actually saved against that
+      employee — the most recent one on or before ${escapeHtml(monthLabel(ym))}, whichever month it
+      was given in — so it states what was granted and the Increase % above is ignored for them.
+      That is what stops a salary already raised being raised a second time on paper, and what
+      stops a rise given in August reading as 0% when the letter is written in September.
+      <strong>Proposed</strong> means there is nothing recorded to report, so the Increase % is
+      applied to the rate in force.
       ${recorded} of ${rows.length} already recorded.</p>`;
 }
 
@@ -28915,7 +28925,9 @@ async function generateLetter(){
     // not the heading percentages alone, which would quote deductions the
     // Salary Sheet does not take.
     const monthEl = document.getElementById('genApprMonth');
+    const modeEl = document.getElementById('genApprMode');
     f.appraisal = appraisalFigures(matched, {
+      mode: (modeEl && modeEl.value) || 'auto',
       ym: (monthEl && monthEl.value) || (f.issueDate || todayStr()).slice(0, 7),
       percent: pctEl && pctEl.value !== '' ? Number(pctEl.value) : undefined,
       newRate: rateEl && rateEl.value !== '' ? Number(rateEl.value) : undefined

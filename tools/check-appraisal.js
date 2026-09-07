@@ -48,25 +48,35 @@ console.log('an increment already recorded for the month\n');
         a.effectiveFrom, '2026-07-01');
 }
 {
-  // The same employee, same history, asked for TODAY's month instead — where
-  // nothing is recorded. Now the percentage is a proposal and does apply.
-  const e = withHist([{ from: '2020-01-01', ratePay: 10000, salaryHeading: 'managerial' },
-                      { from: '2026-07-01', ratePay: 11000, salaryHeading: 'managerial' }]);
-  const a = L.appraisalFigures(e, { ym: '2026-09', percent: 10 });
-  check('a month with no increment applies the percentage as a proposal',
-        [a.oldRate, a.newRate], [11000, 12100]);
-  check('and says it is not yet on the record', a.alreadyRecorded, false);
-  // It must start from the July rate, not the original 10,000.
-  check('starting from the rate actually in force that month', a.oldRate, 11000);
+  // HR's SECOND report, and the reason the rule is "the most recent increment"
+  // rather than "an increment inside this month". Manishkumar was raised on
+  // 1 August; HR opened his letter in September — the default month — and got
+  // "Increment: 0%" over two identical columns, because nothing was recorded
+  // in September. The rise is what the letter is about, whenever it happened.
+  const e = withHist([{ from: '2020-01-01', ratePay: 31000, salaryHeading: 'managerial' },
+                      { from: '2026-08-01', ratePay: 34258, salaryHeading: 'managerial' }]);
+  ['2026-08', '2026-09', '2026-12'].forEach(ym => {
+    const a = L.appraisalFigures(e, { ym: ym });
+    check('asked in ' + ym + ', it still reports the August rise',
+          [a.oldRate, a.newRate, a.alreadyRecorded], [31000, 34258, true]);
+    check('  and keeps the date the rise actually took effect', a.effectiveFrom, '2026-08-01');
+  });
 }
 {
-  // Generating the July letter twice must not compound.
-  const e = withHist([{ from: '2020-01-01', ratePay: 10000, salaryHeading: 'managerial' },
-                      { from: '2026-07-01', ratePay: 11000, salaryHeading: 'managerial' }]);
-  const a = L.appraisalFigures(e, { ym: '2026-07', percent: 10 });
-  const b = L.appraisalFigures(e, { ym: '2026-07', percent: 10 });
-  check('generating the same letter twice gives the same figures',
-        [a.oldRate, a.newRate], [b.oldRate, b.newRate]);
+  // Nothing on file to report, so the typed percentage is the appraisal.
+  const e = withHist([{ from: '2020-01-01', ratePay: 20000, salaryHeading: 'managerial' }]);
+  const a = L.appraisalFigures(e, { ym: '2026-09', percent: 10 });
+  check('an employee never increased gets the proposal',
+        [a.oldRate, a.newRate, a.alreadyRecorded], [20000, 22000, false]);
+}
+{
+  // Drafting a rise for somebody who already has one on file — HR asks for a
+  // proposal explicitly rather than the app guessing from a typed number.
+  const e = withHist([{ from: '2020-01-01', ratePay: 31000, salaryHeading: 'managerial' },
+                      { from: '2026-08-01', ratePay: 34258, salaryHeading: 'managerial' }]);
+  const a = L.appraisalFigures(e, { ym: '2026-09', percent: 10, mode: 'proposed' });
+  check('a proposal starts from the rate now in force, not the pre-August one',
+        [a.oldRate, a.newRate, a.alreadyRecorded], [34258, 37684, false]);
 }
 
 console.log('\ntwo rises inside one month\n');
@@ -83,14 +93,23 @@ console.log('\ntwo rises inside one month\n');
   check('with the effective date of the first of them', a.effectiveFrom, '2026-07-01');
 }
 
-console.log('\nan employee whose first record IS the increment\n');
+console.log('\nan employee with only one salary on file\n');
 {
   const e = withHist([{ from: '2026-07-01', ratePay: 11000, salaryHeading: 'managerial' }]);
+  // Nothing earlier to compare against, so there is no recorded increment to
+  // report and the typed percentage is the appraisal.
   const a = L.appraisalFigures(e, { ym: '2026-07', percent: 10 });
-  // There is no earlier rate, so there is nothing honest to call a previous
-  // salary — and 0% would be a claim, not a blank.
-  check('it says there is no previous salary to state', a.hasPrevious, false);
-  check('and does not invent a rise', [a.oldRate, a.newRate], [11000, 11000]);
+  check('the typed rise is treated as a proposal',
+        [a.oldRate, a.newRate, a.alreadyRecorded], [11000, 12100, false]);
+}
+{
+  const e = withHist([{ from: '2026-07-01', ratePay: 11000, salaryHeading: 'managerial' }]);
+  const a = L.appraisalFigures(e, { ym: '2026-07' });
+  // No history to report AND no rise proposed — there is no appraisal here to
+  // write about, and printing "Increment: 0%" over two identical columns would
+  // be a claim rather than a blank. That is exactly what HR was shown.
+  check('with no percentage either, it says there is nothing to state',
+        [a.hasPrevious, a.oldRate, a.newRate], [false, 11000, 11000]);
 }
 
 console.log('\nthe order the letter prints, and what adds up\n');

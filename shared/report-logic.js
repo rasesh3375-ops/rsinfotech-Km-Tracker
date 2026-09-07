@@ -4348,30 +4348,40 @@ function appraisalFigures(emp, opts){
   const ym = /^\d{4}-\d{2}$/.test(String(opts.ym || '')) ? String(opts.ym) : todayStr().slice(0, 7);
   const y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
   const hist = salaryHistoryOf(emp);
-  // Every increment effective inside this month, earliest first. Dates are
-  // YYYY-MM-DD, so a plain string compare bounds the month exactly — and
-  // '-31' as the upper bound is safe in February for the same reason.
-  const inMonth = hist
-    .filter(h => h && h.from && h.from >= ym + '-01' && h.from <= ym + '-31')
+  // The MOST RECENT increment on or before this month — not merely one inside
+  // it. HR generates the letter in September for a rise given on 1 August, and
+  // looking only inside the chosen month found nothing, compared the current
+  // rate with itself and printed "Increment: 0%" over two identical columns.
+  // What the letter is for is the last salary and the increment on top of it,
+  // whenever that increment happened.
+  const dated = hist.filter(h => h && h.from)
     .slice().sort((a, b) => String(a.from).localeCompare(String(b.from)));
-  const recorded = inMonth.length ? inMonth[inMonth.length - 1] : null;
+  const upTo = dated.filter(h => String(h.from) <= ym + '-31');
+  const current = upTo.length ? upTo[upTo.length - 1] : null;
+  // Rises within the same month are one appraisal, so two steps in August
+  // report August's whole movement rather than only its second half.
+  const block = current
+    ? upTo.filter(h => String(h.from).slice(0, 7) === String(current.from).slice(0, 7))
+    : [];
+  const priorTo = block.length
+    ? upTo.filter(h => String(h.from) < String(block[0].from))
+    : [];
+  const prior = priorTo.length ? priorTo[priorTo.length - 1] : null;
+
+  // Reporting a rise that happened beats proposing one that has not — that is
+  // what "always compare his last salary plus increment" means. A proposal is
+  // the fallback for somebody with no increment on file at all, and the
+  // explicit choice for HR drafting a rise before recording it.
+  const mode = opts.mode === 'proposed' || opts.mode === 'recorded' ? opts.mode
+    : (prior ? 'recorded' : 'proposed');
 
   let oldRate, newRate, oldHeading, newHeading, effectiveFrom, hasPrevious = true;
-  if(recorded){
-    // The rate in force immediately before the FIRST rise in the month, so two
-    // increments in one month report the month's whole movement rather than
-    // only the last step. Found by filtering the history rather than by
-    // subtracting a day from a date — a date-only string parses as UTC
-    // midnight, and the 1st of a month can land in the previous one.
-    const firstFrom = String(inMonth[0].from);
-    const before = hist.filter(h => h && String(h.from || '') < firstFrom)
-      .slice().sort((a, b) => String(a.from || '').localeCompare(String(b.from || ''))).pop();
-    hasPrevious = !!before;
-    oldRate = before ? (Number(before.ratePay) || 0) : (Number(recorded.ratePay) || 0);
-    oldHeading = (before && before.salaryHeading) || recorded.salaryHeading || 'managerial';
-    newRate = Number(recorded.ratePay) || 0;
-    newHeading = recorded.salaryHeading || oldHeading;
-    effectiveFrom = firstFrom;
+  if(mode === 'recorded' && prior && current){
+    oldRate = Number(prior.ratePay) || 0;
+    oldHeading = prior.salaryHeading || 'managerial';
+    newRate = Number(current.ratePay) || 0;
+    newHeading = current.salaryHeading || oldHeading;
+    effectiveFrom = String(block[0].from);
   }else{
     const asOf = ratePayAsOf(emp, ym + '-01');
     oldRate = Number(asOf.ratePay) || 0;
@@ -4381,6 +4391,9 @@ function appraisalFigures(emp, opts){
     const typed = Number(opts.newRate);
     newRate = (Number.isFinite(typed) && typed > 0) ? typed
       : (Number.isFinite(pct) ? Math.round(oldRate * (1 + pct / 100)) : oldRate);
+    // Nothing on file to call a previous salary, and no rise proposed either —
+    // there is no appraisal here to write about, and 0% would be a claim.
+    hasPrevious = !!prior || newRate !== oldRate;
     effectiveFrom = ym + '-01';
   }
 
@@ -4397,7 +4410,7 @@ function appraisalFigures(emp, opts){
     heading: newHeading,
     // True when the rise is already on the record — the letter reports it, and
     // the form stops offering to apply a percentage on top of it.
-    alreadyRecorded: !!recorded,
+    alreadyRecorded: mode === 'recorded',
     // False when the increment IS the first thing on the employee's history,
     // so there is no earlier rate to call a previous salary.
     hasPrevious: hasPrevious,
