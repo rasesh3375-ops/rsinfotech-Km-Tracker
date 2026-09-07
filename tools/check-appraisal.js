@@ -112,22 +112,44 @@ console.log('\nan employee with only one salary on file\n');
         [a.hasPrevious, a.oldRate, a.newRate], [false, 11000, 11000]);
 }
 
+console.log("\nHR's own letter, to the rupee\n");
+{
+  // Manishkumar's real letter, hand-written by HR and reconciled against this:
+  //   July   28,980 + 1,800 + 1,800 + 200 = 32,780
+  //   August 32,258 + 1,800 + 1,800 + 200 = 36,058
+  // The PF line is 3,600 in HR's letter — 1,800 each way. Printing only the
+  // employee share made the app read 34,258 against HR's 36,058, on a Take
+  // Home that already agreed exactly.
+  const e = Object.assign({}, EMP, { pfContributionType: 'fixed', ratePay: 34258,
+    salaryHistory: [{ from: '2020-01-01', ratePay: 30980, salaryHeading: 'managerial' },
+                    { from: '2026-08-01', ratePay: 34258, salaryHeading: 'managerial' }] });
+  const a = L.appraisalFigures(e, { ym: '2026-09' });
+  const grand = (p, t) => Math.round(t + p.pf + p.pfEmployer + p.esi + (p.esiEmployer || 0) + p.pt);
+  check('July take home matches HR\'s letter', Math.round(a.takeHomeBefore), 28980);
+  check('August take home too', Math.round(a.takeHomeAfter), 32258);
+  check('both sides of PF are 1,800 each, HR\'s 3,600',
+        [Math.round(a.after.pf), Math.round(a.after.pfEmployer)], [1800, 1800]);
+  check('July grand total is HR\'s 32,780', grand(a.before, a.takeHomeBefore), 32780);
+  check('August grand total is HR\'s 36,058', grand(a.after, a.takeHomeAfter), 36058);
+}
+
 console.log('\nthe order the letter prints, and what adds up\n');
 {
   const e = withHist([{ from: '2020-01-01', ratePay: 30000, salaryHeading: 'managerial' }]);
   const a = L.appraisalFigures(e, { ym: '2026-09', percent: 10 });
   check('the rate rises by the percentage typed', [a.oldRate, a.newRate], [30000, 33000]);
-  // Grand total is take home plus the three deductions, and must come back to
-  // the gross — that is what makes the block on the letter checkable by eye.
-  const grand = p => Math.round(p.salaryGross + p.other + p.conveyance);
-  check('previous take home plus PT, PF and ESI is the previous grand total',
-        Math.round(a.takeHomeBefore + a.before.pt + a.before.pf + a.before.esi), grand(a.before));
-  check('and the same holds on the revised side',
-        Math.round(a.takeHomeAfter + a.after.pt + a.after.pf + a.after.esi), grand(a.after));
-  check('the grand totals are the two rates of pay', [grand(a.before), grand(a.after)], [30000, 33000]);
-  // Take home does not move by the rate's percentage: PT is flat and PF caps.
-  check('take home moves by its own amount, not the rate\'s percentage',
-        [Math.round(a.takeHomeBefore), Math.round(a.takeHomeAfter)], [28000, 31000]);
+  // Grand Total is now take home plus BOTH sides of PF and ESI plus PT, so it
+  // no longer equals the Rate of Pay — it is what HR's letters have always
+  // called Gross, and it must reconcile as the sum of the printed lines.
+  const grand = (p, t) => Math.round(t + p.pf + p.pfEmployer + p.esi + (p.esiEmployer || 0) + p.pt);
+  check('the printed lines add up to the grand total on the previous side',
+        grand(a.before, a.takeHomeBefore),
+        Math.round(a.takeHomeBefore + a.before.pf + a.before.pfEmployer + a.before.pt));
+  check('and the employer share is on the record, not assumed equal',
+        Math.round(a.after.pfEmployer) > 0, true);
+  check('take home is still gross less the employee-side deductions only',
+        Math.round(a.after.salaryGross - a.after.pf - a.after.esi - a.after.pt),
+        Math.round(a.takeHomeAfter));
 }
 
 console.log('\nheadings that attract nothing\n');

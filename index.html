@@ -28734,16 +28734,30 @@ function letterTemplate(type, f){
       if(!a) return `Dear ${name},\n\nSelect an employee and the appraisal month to generate this letter.`;
       const R = n => 'Rs. ' + fmtMoney(Math.round(n));
       const eff = niceDate_(f.appraisalEffective || a.effectiveFrom) || '[effective date]';
-      // Take home first, then the deductions that were taken off it, then the
-      // total they add back up to — so the block can be checked by eye against
-      // the Salary Sheet. Only the deductions the heading actually attracts
-      // are listed; an Apprentice has none, and "PT: Rs. 0" reads as an error.
+      // The order and the arithmetic of HR's own hand-written letters, which
+      // reconcile to the rupee: take home, then PF, then ESI, then PT, then a
+      // Grand Total that is the sum of all of them.
+      //
+      // BOTH sides of PF and ESI are printed. HR has always shown the employee
+      // share beside the employer's — Manishkumar's letter reads 3,600 PF,
+      // which is 1,800 each way — and their Gross figure includes both. Showing
+      // only the employee share made the letter read 34,258 where HR's read
+      // 36,058, on a Take Home that already agreed to the rupee.
+      //
+      // No loan or advance appears anywhere. HR's manual letter carried a
+      // "your loan" line and a "you received this month" figure; they asked for
+      // neither here. An appraisal states what the job pays, and two people on
+      // the same revised salary must receive the same letter.
+      const grand = (p, take) => take + p.pf + (p.pfEmployer || 0) +
+        p.esi + (p.esiEmployer || 0) + p.pt;
       const block = (p, take) => [
         'Take Home: ' + R(take),
-        a.applies.pt ? 'Professional Tax: ' + R(p.pt) : '',
         a.applies.pf ? 'Provident Fund (employee share): ' + R(p.pf) : '',
+        a.applies.pf ? 'Provident Fund (employer share): ' + R(p.pfEmployer || 0) : '',
         a.applies.esi ? 'ESI (employee share): ' + R(p.esi) : '',
-        'Grand Total: ' + R(p.salaryGross + p.other + p.conveyance)
+        a.applies.esi ? 'ESI (employer share): ' + R(p.esiEmployer || 0) : '',
+        a.applies.pt ? 'Professional Tax: ' + R(p.pt) : '',
+        'Grand Total: ' + R(grand(p, take))
       ].filter(Boolean).join('\n');
       const pct = a.ratePct === null ? '—' : (Math.round(a.ratePct * 100) / 100) + '%';
       const prev = a.hasPrevious
@@ -28756,7 +28770,7 @@ function letterTemplate(type, f){
 prev +
 `Revised Salary (per month):\nIncrement: ${pct}\n${block(a.after, a.takeHomeAfter)}\n\n` +
 `Effective From: ${eff}\n\n` +
-`Take Home is what is paid into your account each month. It is stated before any loan or advance instalment you may be repaying, which is unchanged by this revision. Grand Total is your gross salary — Take Home plus the statutory deductions listed above it.\n\n` +
+`Take Home is what is paid into your account each month. It is stated before any loan or advance instalment you may be repaying, which is unchanged by this revision and is not part of this letter. Grand Total is Take Home plus everything listed above it — both sides of Provident Fund and ESI, and Professional Tax.\n\n` +
 `All other terms and conditions of your employment with ${company} will remain unchanged.\n\n` +
 `We look forward to your continued dedication and wish you success and growth in your career with ${company}.\n\n` +
 `Congratulations and best wishes.\n\nYours sincerely,`;

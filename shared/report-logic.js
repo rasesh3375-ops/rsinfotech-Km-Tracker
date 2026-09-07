@@ -1697,6 +1697,11 @@ function monthlyPayFor(emp, asOfYear, asOfMonth){
     gross: salaryGross + other,        // what the employee is paid before deductions
     ctcGross: salaryGross + other + perks + conveyance,  // plus what the company spends on dress and mobile
     pf: pfCalc.employee, esi: esiCalc.employee, pt,
+    // The employer's own PF, read as EPF + EPS only — never Admin Charges or
+    // EDLI, matching salCalcCtcOf_ and what the PF consultant states. The
+    // appraisal letter prints this beside the employee share because HR's own
+    // letters have always shown both, and their Gross figure includes both.
+    pfEmployer: pfCalc.applicable ? (pfCalc.employerEpf + pfCalc.employerEps) : 0,
     pfReason: pfCalc.reason,
     esiEmployer: esiCalc.employer, employerTotal: pfCalc.employerTotal + esiCalc.employer,
     emi, statutory, conveyance,
