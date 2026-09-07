@@ -3446,6 +3446,14 @@
               <select class="field-input" id="genEmpSelect" onchange="autoFillGeneratorFromEmployee()">
                 <option value="">— Select employee —</option>
               </select>
+              <!-- An employee list that failed to load and a company with no
+                   employees produced exactly the same empty dropdown, with
+                   nothing to say which it was and no way to try again short of
+                   leaving the tab. -->
+              <p id="genEmpMsg" class="pol-warn" style="font-size:11.5px;margin:6px 0 0;" hidden></p>
+              <button type="button" class="btn tiny ghost" id="genEmpRetry"
+                      style="margin-top:6px;" hidden
+                      onclick="withBusy(this,'Loading…',populateGeneratorEmployees)">Try loading employees again</button>
             </div>
             <p class="gen-step-hint">Choose the employee for this letter.</p>
           </div>
@@ -22652,10 +22660,30 @@ function outstandingAssets(emp){
 async function populateGeneratorEmployees(){
   const sel = document.getElementById('genEmpSelect');
   if(!sel) return;
+  const msg = document.getElementById('genEmpMsg');
+  const retry = document.getElementById('genEmpRetry');
+  const say = (text) => {
+    if(msg){ msg.hidden = !text; msg.textContent = text || ''; }
+    if(retry) retry.hidden = !text;
+  };
   const type = LETTER_TYPES[selectedLetterIdx];
   const includeLeavers = letterIsForLeavers(type);
-  const employees = await getEmployees();
+  let employees;
+  try{ employees = await getEmployees(); }
+  catch(err){
+    // The dropdown is left exactly as it was rather than being emptied — if a
+    // previous load succeeded, HR can still pick somebody while this retries.
+    say('Could not load the employee list — the backend did not answer. ' +
+        (sel.options.length > 1 ? 'The names below are from the last successful load.'
+                                : 'Press the button below to try again.'));
+    return;
+  }
   const list = employees.filter(e => includeLeavers || e.employmentStatus !== 'left');
+  // An empty roster and a failed read used to look identical. They are
+  // different problems and need different words.
+  say(list.length ? '' : (employees.length
+    ? 'Every employee on record has left, and this letter is only for current staff.'
+    : 'No employees on record yet — add them in Employee Master first.'));
   const prev = sel.value;
   sel.innerHTML = '<option value="">— Select employee —</option>' +
     list.map(e => `<option value="${e.id}">${escapeHtml(e.name)} (${e.id})${
