@@ -47,6 +47,7 @@ const CHECKS = [
   // there is nowhere else to test it from. It skips cleanly, without failing,
   // when jsdom is not installed.
   ['check-recovery-history.js',  'stopping or changing a recovery never restates a month already paid'],
+  ['check-payroll-lock.js',      'a finalised month does not move, whatever is edited afterwards'],
 ];
 
 let failed = 0;

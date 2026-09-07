@@ -1207,7 +1207,154 @@ function leaveUsedThisFinancialYear(att, upToDate, openingFrom){
   return { el, sl };
 }
 
+// ---- finalised months ----
+//
+// Every figure in this app is computed from the employee record at the moment
+// it is displayed, and nothing derived is stored. That is what lets a policy
+// change be one line with no migration, and it is right for a month still
+// being worked on. It is wrong for a month already paid.
+//
+// The record carries a Rate of Pay history, a Salary Advance per month, and
+// (since Hardikbhai Parmar's ₹1,600) a dated history for the Advance for
+// Temporary and the loan EMI. Eighteen other fields have no history at all:
+// conveyance, other allowances, retention money, the direct-paid amount, the
+// advance opening balance, the Diwali bonus, a loan's amount / start month /
+// status / skipped months, PF eligibility, contribution type, prior UAN,
+// Form 11, ESI eligibility, disability and covered-at-period-start, PT paid
+// this year, EL and SL openings, employee type, always-present-from, and
+// employment status. Editing any of them today silently restates every month
+// that employee has ever been paid, and the Salary Sheet for a month closed
+// six months ago quietly stops matching what left the bank.
+//
+// Giving each of those a dated history would be eighteen separate changes,
+// each a new place to get a salary wrong, and it still would not protect the
+// nineteenth field somebody adds next year. Finalising the month does all of
+// them at once and covers fields that do not exist yet: when a month is
+// finalised its figures are stored as they stand, and from then on this
+// function hands back what was stored instead of working it out again.
+//
+// Two properties are deliberate. With nothing finalised, payrollLocks_ is null
+// and every figure is computed exactly as it always was — the feature is inert
+// until HR uses it, which is what makes it safe to ship to live payroll. And
+// the freeze sits HERE, in the one function every sheet, export, payslip and
+// emailed report reaches its figures through, rather than in each of them, so
+// a report written next year is covered without being taught about locks.
+const PAYROLL_LOCK_PREFIX = 'payrollLock:';
+// One key lists which months are finalised, so a screen reads a single key to
+// find out rather than probing twelve.
+const PAYROLL_LOCK_INDEX_KEY = 'payrollLocks';
+// The employee record shares one Google Sheets cell with a 50,000 character
+// limit (see the note on attendance keys). A finalised month packs to about
+// 31,000 characters at 45 employees in the worst month measured — every day
+// late, five absences, the longest policy text — so this leaves real headroom
+// and, more to the point, fails loudly rather than truncating a payroll.
+const PAYROLL_LOCK_MAX_CHARS = 45000;
+
+function payrollLockKey(ym){ return PAYROLL_LOCK_PREFIX + ym; }
+
+// Stored as a field list plus one array of values per employee, not as an
+// object per employee: the key names are the same 45 strings forty-five times
+// over, and repeating them costs more than four times the figures themselves —
+// 786 characters an employee against 158, which is the difference between
+// fitting in that cell and not.
+function payrollLockPack(rowsById){
+  const ids = Object.keys(rowsById || {});
+  if(!ids.length) return { f: [], r: {} };
+  const f = Object.keys(rowsById[ids[0]]);
+  const r = {};
+  ids.forEach(id => { r[id] = f.map(k => rowsById[id][k]); });
+  return { f, r };
+}
+function payrollLockUnpack(stored){
+  const out = {};
+  if(!stored || !Array.isArray(stored.f) || !stored.r) return out;
+  Object.keys(stored.r).forEach(id => {
+    const vals = stored.r[id];
+    if(!Array.isArray(vals)) return;
+    const row = {};
+    stored.f.forEach((k, i) => { row[k] = vals[i]; });
+    out[id] = row;
+  });
+  return out;
+}
+
+// The months in force for whatever is being rendered, as { ym: { id: row } }.
+// Set from index.html and from Code 2.js after they have read the keys —
+// the same shape withSalaryCache uses, and for the same reason: this file may
+// not fetch anything itself, so the data is put in from outside.
+let payrollLocks_ = null;
+function setPayrollLocks(map){ payrollLocks_ = (map && Object.keys(map).length) ? map : null; }
+function payrollLocksInForce(){ return payrollLocks_; }
+function isPayrollMonthLocked(ym){ return !!(payrollLocks_ && payrollLocks_[ym]); }
+
+// The stored row for one employee in one month, or null to compute as usual.
+//
+// The range has to BE the whole calendar month, not merely start inside it:
+// the same function is called with part-month ranges — a joiner's first days,
+// a leaver's last — where a whole month's frozen figures would be the wrong
+// answer entirely, and paid to somebody who did not work the month.
+//
+// That is checked against the calendar rather than against the monthDays
+// argument. Deciding it from monthDays alone looked equivalent and was not:
+// a caller is free to pass the range's own length there, and a ten-day range
+// with monthDays ten then matched a full month exactly and was handed a
+// frozen month's pay. So the first date must be the 1st, the last must be the
+// real last day of that month, and the count must be every day in between.
+function payrollLockedRow_(empId, dateList, monthDays){
+  if(!payrollLocks_ || empId === undefined || empId === null) return null;
+  if(!Array.isArray(dateList) || !dateList.length) return null;
+  const first = String(dateList[0] || '');
+  if(first.slice(8) !== '01') return null;
+  const ym = first.slice(0, 7);
+  const y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
+  if(!y || !m) return null;
+  const days = new Date(y, m, 0).getDate();
+  if(dateList.length !== days || monthDays !== days) return null;
+  if(String(dateList[dateList.length - 1]) !== ym + '-' + String(days).padStart(2, '0')) return null;
+  const month = payrollLocks_[ym];
+  if(!month) return null;
+  const row = month[String(empId)];
+  return row ? row : null;
+}
+
+// Everything a month needs in order to be finalised.
+//
+// Any existing lock for that month is deliberately ignored while this runs:
+// finalising is the act of deciding what the figures ARE, so it must read the
+// record. Without that, re-finalising a reopened month would hand back the
+// freeze it was reopened to correct.
+function buildPayrollLock(employees, att, dateList, monthDays, holidayMap){
+  const outer = payrollLocks_;
+  payrollLocks_ = null;
+  try{
+    const rows = {};
+    (employees || []).forEach(e => {
+      if(!e || e.id === undefined || e.id === null) return;
+      rows[String(e.id)] = computeSalaryFromAttendance(
+        e, (att || {})[e.id] || {}, dateList, monthDays, holidayMap);
+    });
+    const packed = payrollLockPack(rows);
+    const size = JSON.stringify(packed).length;
+    return {
+      ym: String((dateList || [])[0] || '').slice(0, 7),
+      lockedAt: todayStr(),
+      employees: Object.keys(rows).length,
+      packed: packed,
+      size: size,
+      // Refusing to store beats storing a truncated payroll: a half-written
+      // cell would read back as a month where some people simply have no
+      // figures, which is worse than not finalising at all.
+      tooBig: size > PAYROLL_LOCK_MAX_CHARS
+    };
+  } finally { payrollLocks_ = outer; }
+}
+
 function computeSalaryFromAttendance(emp, att, dateList, monthDays, holidayMap){
+  // A finalised month is handed back exactly as it was finalised. Everything
+  // below — attendance, the record, the policy config — is ignored for it on
+  // purpose: that is what "once the salary is fixed it must not change" means.
+  const frozen = payrollLockedRow_(emp && emp.id, dateList, monthDays);
+  if(frozen) return frozen;
   const summary = computeAttendanceSummary(att, emp, dateList, holidayMap);
   // EL/SL are paid, so only Absent and LP reduce pay — plus the half days the
   // policy imposes for late coming and excess short leave, which used to be

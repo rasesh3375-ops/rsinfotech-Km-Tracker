@@ -29,6 +29,8 @@ const EXPORTS = ['prePayrollChecks','challanComparison','CHALLAN_ACCOUNTS','pars
   'appraisalFigures','appraisalRoster','monthlyBriefing','briefingFigures','briefingParagraphs',
   'monthLabel','MONTH_NAMES','monthDateList_','prevMonthOf_','esiPeriodKey_',
   'computeSalaryFromAttendance','computeAttendanceSummary','LEAVE_DETAIL_METRICS',
+  'buildPayrollLock','payrollLockPack','payrollLockUnpack','payrollLockKey','setPayrollLocks',
+  'isPayrollMonthLocked','payrollLocksInForce','PAYROLL_LOCK_INDEX_KEY','PAYROLL_LOCK_MAX_CHARS',
   'resolvedAttendanceCode_','loansOf','loanBalanceAfter','loanEmiRateAsOf','computeLoanEmiForMonth',
   'loanBalanceAfterMonth','advanceBalanceAfterMonth','salaryAdvanceForMonth','advanceTempForMonth',
   'diwaliBonusFor','monthlyPayFor','financialYearLabel','calculatePfFor','computeEsi','monthlyPtFor',
