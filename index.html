@@ -27782,7 +27782,8 @@ async function renderUniformIdForm(employeeId){
   if(!e){ box.innerHTML = ''; return; }
   const list = await getUniformIdList();
   const u = list.find(x => x.employeeId === e.id) ||
-    { employeeId: e.id, name: e.name, uniformIssued:false, uniformDate:'', uniformSize:'', idIssued:false, idNumber:'', idDate:'', docUrl:'', docName:'' };
+    { employeeId: e.id, name: e.name, uniformIssued:false, uniformDate:'', uniformSize:'', idIssued:false, idNumber:'', idDate:'', docs:[] };
+  const docs = uniformDocsOf_(u);
   box.innerHTML = `<div class="emp-row">
       <div class="head"><strong>${escapeHtml(e.name)}</strong></div>
       <div style="height:10px"></div>
@@ -27800,11 +27801,84 @@ async function renderUniformIdForm(employeeId){
       <label class="field">ID issue date</label>
       <input type="date" value="${u.idDate||''}" onchange="updateUniformField('${e.id}','${escapeJsAttr_(e.name)}','idDate',this.value)">
       <div style="height:10px"></div>
-      <label class="field">Supporting document (ID photo, receipt, etc.)</label>
-      <input type="file" accept=".pdf,.jpg,.jpeg,.png" onchange="uploadUniformDoc('${e.id}','${escapeJsAttr_(e.name)}', event)">
-      ${u.docUrl ? `<button type="button" class="doc-card" onclick="viewEmployeeDocument('${escapeJsAttr_(u.docUrl)}','${escapeJsAttr_(u.docName||'Document')}')">✓ ${escapeHtml(u.docName)}</button>` : ''}
+      <label class="field">Supporting documents (ID photo, uniform receipt, acknowledgement…)</label>
+      <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.heic" onchange="uploadUniformDoc('${e.id}','${escapeJsAttr_(e.name)}', event)">
+      <div id="uniformDocMsg" style="font-size:11.5px;color:var(--muted);margin:6px 0 0;"></div>
+      <div style="height:8px"></div>
+      ${uniformDocRows_(e, docs)}
     </div>`;
 }
+// One document used to be all there was — a single docUrl/docName pair that
+// every new upload overwrote, in the record AND in Drive, because the file was
+// always saved under the same name and doUploadDocument_ trashes a same-named
+// file before writing. HR uploaded the ID photo, then the uniform receipt, and
+// the photo was gone.
+//
+// Documents are now a list. The old pair is still read so nothing already
+// uploaded disappears — it is folded in as the first entry rather than
+// migrated destructively, so a record written by an older tab still opens
+// correctly here and is only rewritten when somebody actually changes it.
+function uniformDocsOf_(u){
+  const list = Array.isArray(u && u.docs) ? u.docs.slice() : [];
+  if((!list.length) && u && u.docUrl){
+    list.push({ url: u.docUrl, name: u.docName || 'Document', at: u.docAt || '' });
+  }
+  return list.filter(d => d && d.url);
+}
+// Drive's own download endpoint. The /d/<id>/view link opens the preview;
+// this one hands the file over, which is what "download" has to mean.
+function uniformDocDownloadUrl_(url){
+  const m = /\/d\/([^/]+)/.exec(String(url || ''));
+  return m ? 'https://drive.google.com/uc?export=download&id=' + encodeURIComponent(m[1]) : '';
+}
+function uniformDocRows_(e, docs){
+  if(!docs.length){
+    return '<div class="empty" style="padding:10px;">No documents uploaded for this employee yet.</div>';
+  }
+  return '<div class="payroll-docs-table-wrap"><table class="sal-table">' +
+    '<thead><tr><th>Document</th><th>Uploaded</th><th></th></tr></thead><tbody>' +
+    docs.map((d, i) => {
+      const dl = uniformDocDownloadUrl_(d.url);
+      return `<tr><td>${escapeHtml(d.name || 'Document')}</td>
+        <td>${d.at ? escapeHtml(fmtDateIN(String(d.at).slice(0, 10))) : '<span class="muted">—</span>'}</td>
+        <td style="white-space:nowrap;">
+          <button class="btn tiny" title="Open it here" onclick="viewEmployeeDocument('${escapeJsAttr_(d.url)}','${escapeJsAttr_(d.name || 'Document')}')">View</button>
+          ${dl ? `<button class="btn tiny ghost" title="Save a copy" onclick="window.open('${escapeJsAttr_(dl)}','_blank','noopener')">Download</button>` : ''}
+          <button class="btn tiny ghost" title="Remove this document" onclick="uniformDocRemove_('${e.id}','${escapeJsAttr_(e.name)}',${i})">Remove</button>
+        </td></tr>`;
+    }).join('') + '</tbody></table></div>';
+}
+// Removes the file from Drive as well as from the list — the same
+// deleteOfficeDoc the Office Documents archive uses, so a document deleted
+// here goes to Drive's bin and is recoverable for 30 days rather than being
+// orphaned in a folder nothing points at any more.
+async function uniformDocRemove_(employeeId, employeeName, idx){
+  const list = await getUniformIdList();
+  const entry = list.find(u => u.employeeId === employeeId);
+  const docs = uniformDocsOf_(entry || {});
+  const doc = docs[idx];
+  if(!doc) return;
+  if(!confirm('Remove "' + (doc.name || 'this document') + '"?\n\n' +
+    'It is moved to Google Drive\'s bin, where it can still be recovered for 30 days.')) return;
+  const m = /\/d\/([^/]+)/.exec(String(doc.url || ''));
+  if(m){
+    try{ await backendAction({ action: 'deleteOfficeDoc', fileId: m[1] }, OFFICE_DOCS_ONE_FETCH); }
+    catch(err){
+      alert('Could not remove it from Drive: ' + ((err && err.message) || 'the server did not respond') +
+        '\n\nNothing has been changed.');
+      return;
+    }
+  }
+  docs.splice(idx, 1);
+  entry.docs = docs;
+  // The legacy pair is cleared once the list has taken over, or uniformDocsOf_
+  // would keep resurrecting a document that has just been deleted.
+  entry.docUrl = ''; entry.docName = '';
+  await saveUniformIdList(list);
+  addActivityLog('Removed uniform/ID document "' + (doc.name || '') + '" for ' + employeeName).catch(() => {});
+  await renderUniformIdForm(employeeId);
+}
+
 async function updateUniformField(employeeId, employeeName, field, value){
   const list = await getUniformIdList();
   let entry = list.find(u => u.employeeId === employeeId);
@@ -27816,22 +27890,53 @@ async function updateUniformField(employeeId, employeeName, field, value){
   await saveUniformIdList(list);
 }
 async function uploadUniformDoc(employeeId, employeeName, event){
-  const file = event.target.files[0];
-  if(!file) return;
-  const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
-  const fileName = `${employeeName} - Uniform-ID Document${ext}`;
-  const url = await uploadDocumentToDrive(officeArchivePath_('Uniform and ID', employeeName), fileName, file);
-  if(!url){ alert('Upload failed — check your connection and try again.'); return; }
-  const list = await getUniformIdList();
-  let entry = list.find(u => u.employeeId === employeeId);
-  if(!entry){
-    entry = { employeeId, name: employeeName, uniformIssued:false, uniformDate:'', uniformSize:'', idIssued:false, idNumber:'', idDate:'' };
-    list.push(entry);
+  const files = Array.from((event.target && event.target.files) || []);
+  if(!files.length) return;
+  const msg = document.getElementById('uniformDocMsg');
+  const say = t => { if(msg) msg.textContent = t; };
+  const done = [], failed = [];
+  for(let i = 0; i < files.length; i++){
+    const file = files[i];
+    say('Uploading ' + (i + 1) + ' of ' + files.length + ' — ' + file.name + '…');
+    const dot = file.name.lastIndexOf('.');
+    const base = dot > 0 ? file.name.slice(0, dot) : file.name;
+    const ext = dot > 0 ? file.name.slice(dot) : '';
+    // The employee's name keeps the file findable in Drive; the original name
+    // is what makes it unique. Every upload used to be saved as
+    // "<name> - Uniform-ID Document", and doUploadDocument_ trashes a
+    // same-named file before writing — so the second document silently
+    // replaced the first in Drive as well as in the record.
+    const fileName = `${employeeName} - Uniform-ID - ${base}${ext}`;
+    let url = null;
+    try{ url = await uploadDocumentToDrive(officeArchivePath_('Uniform and ID', employeeName), fileName, file); }
+    catch(err){ url = null; }
+    if(url) done.push({ url: url, name: fileName, at: new Date().toISOString() });
+    else failed.push(file.name);
   }
-  entry.docUrl = url;
-  entry.docName = fileName;
-  await saveUniformIdList(list);
+  // Whatever got through is saved, even if some did not. Abandoning the lot
+  // because the fourth file failed would throw away three good uploads.
+  if(done.length){
+    const list = await getUniformIdList();
+    let entry = list.find(u => u.employeeId === employeeId);
+    if(!entry){
+      entry = { employeeId, name: employeeName, uniformIssued:false, uniformDate:'', uniformSize:'', idIssued:false, idNumber:'', idDate:'' };
+      list.push(entry);
+    }
+    entry.docs = uniformDocsOf_(entry).concat(done);
+    entry.docUrl = ''; entry.docName = '';
+    await saveUniformIdList(list);
+    addActivityLog('Uploaded ' + done.length + ' uniform/ID document(s) for ' + employeeName).catch(() => {});
+  }
+  if(event.target) event.target.value = '';
   await renderUniformIdForm(employeeId);
+  const after = document.getElementById('uniformDocMsg');
+  if(after){
+    after.textContent = failed.length
+      ? done.length + ' uploaded. These did not go up: ' + failed.join(', ') + ' — try them again.'
+      : (done.length ? done.length + ' document(s) uploaded.' : '');
+    after.className = failed.length ? 'pol-warn' : '';
+    after.style.cssText = 'font-size:11.5px;margin:6px 0 0;' + (failed.length ? '' : 'color:var(--muted);');
+  }
 }
 
 // These need nothing beyond what is already on the employee record —
