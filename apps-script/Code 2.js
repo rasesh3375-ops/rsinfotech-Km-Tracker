@@ -3483,7 +3483,15 @@ function prevMonthYmIst_() {
 function sendMonthlyReportsEmail(force) {
   var runStartedAt = Date.now();
   var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
-  if (!force && Number(istToday.slice(8, 10)) !== MONTHLY_EMAIL_DAY) return;
+// A time-based trigger calls this with an EVENT OBJECT as the first argument —
+// {authMode, triggerUid, year, month, day-of-month, ...} — and that object is
+// truthy. Written as `!force`, the date gate below was therefore skipped on
+// every single firing, and a monthly report went out daily. HR had four of
+// them arriving every morning. Compared against `true` so only a human typing
+// the argument can force a send; sendIncrementReminderEmail was already
+// written this way, which is why it alone kept to the 2nd while the rest did
+// not.
+  if (force !== true && Number(istToday.slice(8, 10)) !== MONTHLY_EMAIL_DAY) return;
 
   var ym = prevMonthYmIst_();
   var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
@@ -3613,7 +3621,15 @@ function removeLoanReportTrigger() {
 function sendLoanAdvanceReportEmail(force) {
   var runStartedAt = Date.now();
   var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
-  if (!force && Number(istToday.slice(8, 10)) !== MONTHLY_EMAIL_DAY) return;
+// A time-based trigger calls this with an EVENT OBJECT as the first argument —
+// {authMode, triggerUid, year, month, day-of-month, ...} — and that object is
+// truthy. Written as `!force`, the date gate below was therefore skipped on
+// every single firing, and a monthly report went out daily. HR had four of
+// them arriving every morning. Compared against `true` so only a human typing
+// the argument can force a send; sendIncrementReminderEmail was already
+// written this way, which is why it alone kept to the 2nd while the rest did
+// not.
+  if (force !== true && Number(istToday.slice(8, 10)) !== MONTHLY_EMAIL_DAY) return;
 
   var ym = prevMonthYmIst_();
   var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
@@ -3747,7 +3763,15 @@ function removeLeaveDetailReportTrigger() {
 function sendLeaveDetailReportEmail(force) {
   var runStartedAt = Date.now();
   var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
-  if (!force && Number(istToday.slice(8, 10)) !== MONTHLY_EMAIL_DAY) return;
+// A time-based trigger calls this with an EVENT OBJECT as the first argument —
+// {authMode, triggerUid, year, month, day-of-month, ...} — and that object is
+// truthy. Written as `!force`, the date gate below was therefore skipped on
+// every single firing, and a monthly report went out daily. HR had four of
+// them arriving every morning. Compared against `true` so only a human typing
+// the argument can force a send; sendIncrementReminderEmail was already
+// written this way, which is why it alone kept to the 2nd while the rest did
+// not.
+  if (force !== true && Number(istToday.slice(8, 10)) !== MONTHLY_EMAIL_DAY) return;
 
   var ym = prevMonthYmIst_();
   var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
@@ -3877,7 +3901,15 @@ function removeConsultantReportTrigger() {
 function sendConsultantReportEmail(force) {
   var runStartedAt = Date.now();
   var istToday = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
-  if (!force && Number(istToday.slice(8, 10)) !== MONTHLY_EMAIL_DAY) return;
+// A time-based trigger calls this with an EVENT OBJECT as the first argument —
+// {authMode, triggerUid, year, month, day-of-month, ...} — and that object is
+// truthy. Written as `!force`, the date gate below was therefore skipped on
+// every single firing, and a monthly report went out daily. HR had four of
+// them arriving every morning. Compared against `true` so only a human typing
+// the argument can force a send; sendIncrementReminderEmail was already
+// written this way, which is why it alone kept to the 2nd while the rest did
+// not.
+  if (force !== true && Number(istToday.slice(8, 10)) !== MONTHLY_EMAIL_DAY) return;
 
   var ym = prevMonthYmIst_();
   var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
@@ -4313,7 +4345,9 @@ function sendSalaryAdvanceAlertEmail(force) {
     });
   });
 
-  if (!taken.length && !force) {
+  // Same trigger-event trap as the date gates above: truthy `force` here meant
+  // a daily email saying nobody had taken an advance.
+  if (!taken.length && force !== true) {
     Logger.log('Salary advance alert — nothing recorded on ' + today + ', no email sent.');
     return;
   }
@@ -4466,7 +4500,15 @@ function removeAdvanceSummaryTrigger() {
 // Reporting the completed month a day later cannot miss anything.
 function sendMonthlyAdvanceSummaryEmail(force) {
   var today = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
-  if (!force && Number(today.slice(8, 10)) !== MONTHLY_EMAIL_DAY) return;
+// A time-based trigger calls this with an EVENT OBJECT as the first argument —
+// {authMode, triggerUid, year, month, day-of-month, ...} — and that object is
+// truthy. Written as `!force`, the date gate below was therefore skipped on
+// every single firing, and a monthly report went out daily. HR had four of
+// them arriving every morning. Compared against `true` so only a human typing
+// the argument can force a send; sendIncrementReminderEmail was already
+// written this way, which is why it alone kept to the 2nd while the rest did
+// not.
+  if (force !== true && Number(today.slice(8, 10)) !== MONTHLY_EMAIL_DAY) return;
 
   // prevMonthYmIst_ is the one place every monthly email works out its period,
   // so this cannot drift from the others or get the December rollover wrong.
