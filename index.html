@@ -3450,7 +3450,7 @@
                    employees produced exactly the same empty dropdown, with
                    nothing to say which it was and no way to try again short of
                    leaving the tab. -->
-              <p id="genEmpMsg" class="pol-warn" style="font-size:11.5px;margin:6px 0 0;" hidden></p>
+              <p id="genEmpMsg" style="font-size:11.5px;margin:6px 0 0;color:var(--red);line-height:1.5;" hidden></p>
               <button type="button" class="btn tiny ghost" id="genEmpRetry"
                       style="margin-top:6px;" hidden
                       onclick="withBusy(this,'Loading…',populateGeneratorEmployees)">Try loading employees again</button>
@@ -22669,7 +22669,14 @@ async function populateGeneratorEmployees(){
   const type = LETTER_TYPES[selectedLetterIdx];
   const includeLeavers = letterIsForLeavers(type);
   let employees;
-  try{ employees = await getEmployees(); }
+  // getEmployeesOrThrow_, NOT getEmployees. getEmployees swallows a failed read
+  // and returns an empty array — its own comment warns that this is what let a
+  // real backend failure show up as "Employee Master: 0" on the Dashboard. Here
+  // it meant a failed load reached HR as "No employees on record yet", telling
+  // them to go and add employees they already have. A genuinely empty roster
+  // still comes back as "[]" from a successful fetch, so this cannot misreport
+  // a real zero as a failure.
+  try{ employees = await getEmployeesOrThrow_(); }
   catch(err){
     // The dropdown is left exactly as it was rather than being emptied — if a
     // previous load succeeded, HR can still pick somebody while this retries.
@@ -23305,9 +23312,14 @@ async function renderAppraisalRoster_(){
   const modeEl = document.getElementById('genApprMode');
   const mode = (modeEl && modeEl.value) || 'auto';
   let employees = [];
-  try{ employees = await getEmployees(); }
+  // Same reason as populateGeneratorEmployees: getEmployees resolves to [] on a
+  // failed read, so this box would have said "No employees on roll" about a
+  // roster that is simply unreachable.
+  try{ employees = await getEmployeesOrThrow_(); }
   catch(e){
-    box.innerHTML = '<div class="empty">Could not load the employee list — reopen this card to try again.</div>';
+    box.innerHTML = '<div class="empty">Could not load the employee list — ' +
+      escapeHtml(String((e && e.message) || 'the backend did not answer')) +
+      '. Use the retry button above, then reopen this card.</div>';
     return;
   }
   const rows = appraisalRoster(employees, { ym: ym, percent: percent, mode: mode });
