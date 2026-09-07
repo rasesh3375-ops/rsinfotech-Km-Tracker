@@ -79,6 +79,39 @@ console.log('an increment already recorded for the month\n');
         [a.oldRate, a.newRate, a.alreadyRecorded], [34258, 37684, false]);
 }
 
+console.log("\nan employee whose history starts with the unnamed seed entry\n");
+{
+  // HR's THIRD report. salaryHistoryOf gives an employee with no history a seed
+  // entry carrying their original rate and no `from` date, meaning "from the
+  // beginning"; recordIncrement appends to it, so a first increment leaves
+  // exactly [seed, the rise]. Filtering entries without a date threw the seed
+  // away, and Hardikbhai Parmar's letter read "This is the first salary
+  // recorded for you" over an August effective date — having discarded the one
+  // figure it existed to compare against.
+  const e = Object.assign({}, EMP, { ratePay: 30492, salaryHistory: [
+    { from: null, ratePay: 27720, salaryHeading: 'managerial' },
+    { from: '2026-08-01', ratePay: 30492, salaryHeading: 'managerial' } ] });
+  ['2026-08', '2026-09'].forEach(ym => {
+    const a = L.appraisalFigures(e, { ym: ym });
+    check('asked in ' + ym + ', the seed is the previous salary',
+          [a.oldRate, a.newRate], [27720, 30492]);
+    check('  so there IS a previous figure to state', a.hasPrevious, true);
+    check('  and the rise reads as recorded, not proposed', a.alreadyRecorded, true);
+    check('  with the date the rise took effect', a.effectiveFrom, '2026-08-01');
+  });
+}
+{
+  // Only the seed and nothing else — a genuine first salary, which must still
+  // say so rather than comparing the seed with itself.
+  const e = Object.assign({}, EMP, { ratePay: 20000,
+    salaryHistory: [{ from: null, ratePay: 20000, salaryHeading: 'managerial' }] });
+  const a = L.appraisalFigures(e, { ym: '2026-09' });
+  check('a seed on its own is still no previous salary', a.hasPrevious, false);
+  const p = L.appraisalFigures(e, { ym: '2026-09', percent: 10 });
+  check('and a percentage against it is a proposal',
+        [p.oldRate, p.newRate, p.alreadyRecorded], [20000, 22000, false]);
+}
+
 console.log('\ntwo rises inside one month\n');
 {
   const e = withHist([{ from: '2020-01-01', ratePay: 10000, salaryHeading: 'managerial' },

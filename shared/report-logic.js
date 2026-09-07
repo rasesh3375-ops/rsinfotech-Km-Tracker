@@ -4359,18 +4359,25 @@ function appraisalFigures(emp, opts){
   // rate with itself and printed "Increment: 0%" over two identical columns.
   // What the letter is for is the last salary and the increment on top of it,
   // whenever that increment happened.
-  const dated = hist.filter(h => h && h.from)
-    .slice().sort((a, b) => String(a.from).localeCompare(String(b.from)));
-  const upTo = dated.filter(h => String(h.from) <= ym + '-31');
+  // An entry with no `from` is the seed salaryHistoryOf creates for an employee
+  // who had no history — it carries their ORIGINAL rate and means "from the
+  // beginning". recordIncrement appends to it, so a first increment leaves
+  // exactly [seed, the rise]. Filtering entries without a date threw that seed
+  // away, and Hardikbhai Parmar's letter said "this is the first salary
+  // recorded for you" over an August effective date, having discarded the very
+  // figure it was meant to compare against. Empty string sorts before every
+  // YYYY-MM-DD, which is what "from the beginning" means to a string compare.
+  const key = h => String((h && h.from) || '');
+  const dated = hist.filter(h => h).slice().sort((a, b) => key(a).localeCompare(key(b)));
+  const upTo = dated.filter(h => key(h) <= ym + '-31');
   const current = upTo.length ? upTo[upTo.length - 1] : null;
   // Rises within the same month are one appraisal, so two steps in August
-  // report August's whole movement rather than only its second half.
+  // report August's whole movement rather than only its second half. The seed
+  // has no month of its own, so it only ever groups with other undated entries.
   const block = current
-    ? upTo.filter(h => String(h.from).slice(0, 7) === String(current.from).slice(0, 7))
+    ? upTo.filter(h => key(h).slice(0, 7) === key(current).slice(0, 7))
     : [];
-  const priorTo = block.length
-    ? upTo.filter(h => String(h.from) < String(block[0].from))
-    : [];
+  const priorTo = block.length ? upTo.filter(h => key(h) < key(block[0])) : [];
   const prior = priorTo.length ? priorTo[priorTo.length - 1] : null;
 
   // Reporting a rise that happened beats proposing one that has not — that is
@@ -4386,7 +4393,9 @@ function appraisalFigures(emp, opts){
     oldHeading = prior.salaryHeading || 'managerial';
     newRate = Number(current.ratePay) || 0;
     newHeading = current.salaryHeading || oldHeading;
-    effectiveFrom = String(block[0].from);
+    // The seed has no date; nothing else in this branch can, because prior
+    // only exists when something dated sits after it.
+    effectiveFrom = String(block[0].from || (ym + '-01'));
   }else{
     const asOf = ratePayAsOf(emp, ym + '-01');
     oldRate = Number(asOf.ratePay) || 0;
