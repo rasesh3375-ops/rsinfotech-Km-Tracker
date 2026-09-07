@@ -12739,14 +12739,23 @@ const HR_ROUTES = {
   // is always the empty state, never a resurrected old figure.
   salary:     { label:'Salary Sheet',        icon:'₹',  show:['hrTabMgmt','hrSubDash','dashSubSalary'],
                 run:() => { cancelSalarySheetView(); populateMonthYearSelects('salSheetMonthSel', 'salSheetYearSel'); } },
-  reminders:  { label:'Increment Reminders', icon:'📈', show:['hrTabMgmt','hrSubDash','dashSubReminders'], run:() => refreshDashboard() },
-  expiry:     { label:'Document Expiry',     icon:'📄', show:['hrTabMgmt','hrSubDash','dashSubExpiry'], run:() => renderDocExpiryList() },
+  // sidebar:false — off the sidebar at HR's request, but the route stays.
+  // Reached from the Dashboard's Increments tile and from Global Search.
+  reminders:  { label:'Increment Reminders', icon:'📈', sidebar:false, show:['hrTabMgmt','hrSubDash','dashSubReminders'], run:() => refreshDashboard() },
+  // Reached from the Dashboard's "Documents Expiring" card, which carries
+  // the count and is the way HR actually opens this.
+  expiry:     { label:'Document Expiry',     icon:'📄', sidebar:false, show:['hrTabMgmt','hrSubDash','dashSubExpiry'], run:() => renderDocExpiryList() },
   loans:      { label:'Employee Loan & EMI', icon:'💳', show:['hrTabMgmt','hrSubDash','dashSubLoans'], run:() => populateDashLoanTab() },
   advpay:     { label:'Salary Advance Payment', icon:'💵', show:['hrTabMgmt','hrSubDash','dashSubAdvpay'], run:() => populateDashAdvTab() },
-  activity:   { label:'Activity Log',        icon:'🕘', show:['hrTabMgmt','hrSubDash','dashSubActivity'], run:() => renderActivityLogList() },
+  // Reached from the clock icon in the header and from the Admin menu.
+  activity:   { label:'Activity Log',        icon:'🕘', sidebar:false, show:['hrTabMgmt','hrSubDash','dashSubActivity'], run:() => renderActivityLogList() },
   reports:    { label:'Reports',             icon:'📊', show:['hrTabMgmt','hrSubReports'], run:() => renderReportsTab() },
   generator:  { label:'Generator',           icon:'✉️', show:['hrTabMgmt','hrSubGenerator'], run:() => renderGeneratorTab() },
-  settings:   { label:'Settings',            icon:'⚙️', show:['hrTabTracking','hrSubSettings'],
+  // Reached from the Admin menu's "Admin Settings". Hidden from the sidebar,
+  // never from the app: the expense rate, geofences, the employee sequence,
+  // document storage and the backend connection all live in here, and a
+  // route nothing can reach would strand every one of them.
+  settings:   { label:'Settings',            icon:'⚙️', sidebar:false, show:['hrTabTracking','hrSubSettings'],
                 run: async () => {
                   if(!(kmtPendingCardRestore && kmtPendingCardRestore.route === 'settings')) showSettingsLanding();
                   const el = document.getElementById('rateInput');
@@ -13279,7 +13288,11 @@ function renderHrSideNav(){
   // people stop seeing, which is the one thing this one must not become.
   const badge = k => (k === 'prepay' && prepayResult_ && prepayResult_.counts.stop)
     ? `<span class="pp-badge">${prepayResult_.counts.stop}</span>` : '';
-  nav.innerHTML = Object.keys(HR_ROUTES).map(k =>
+  // sidebar:false hides a route from this list without removing it. Each of
+  // the hidden ones has its own way in — the Admin menu, the header clock, a
+  // Dashboard card — so hiding is a shorter sidebar, not a lost screen.
+  // hrNavigate, Global Search and every deep link are untouched by this.
+  nav.innerHTML = Object.keys(HR_ROUTES).filter(k => HR_ROUTES[k].sidebar !== false).map(k =>
     `<button class="side-link${k === hrRoute ? ' active' : ''}" onclick="hrNavigate('${k}')">
        <span class="ic">${HR_ROUTES[k].icon}</span><span>${HR_ROUTES[k].label}</span>${badge(k)}
      </button>`).join('');
