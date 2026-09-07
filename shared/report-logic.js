@@ -4353,8 +4353,14 @@ function appraisalTakeHome_(p){
 // If there is no increment recorded in that month, nothing has happened yet and
 // the typed percentage is applied to the rate in force, as a proposal.
 //
-// Either way the percentage on the letter is derived from the two rates rather
-// than echoed back from the input, so it cannot disagree with them.
+// Either way the percentage is derived from the two figures rather than echoed
+// back from the input, so it cannot disagree with them. Both percentages are
+// returned: ratePct measures the Rate of Pay movement, takeHomePct the take
+// home movement, and they are NOT the same number — PT's flat 200 and the
+// fixed 1,800 PF come off both sides without scaling, so the identical rupee
+// rise is a larger share of take home than of Rate of Pay. The letter prints
+// take home, so it prints takeHomePct; printing ratePct over take-home figures
+// is how Trusharkumar's letter said 9.95% above a rise of exactly 10%.
 function appraisalFigures(emp, opts){
   opts = opts || {};
   const ym = /^\d{4}-\d{2}$/.test(String(opts.ym || '')) ? String(opts.ym) : todayStr().slice(0, 7);

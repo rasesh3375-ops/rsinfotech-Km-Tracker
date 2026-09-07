@@ -207,6 +207,48 @@ console.log('\nheadings that attract nothing\n');
         Math.round(a.after.basic), Math.round(24000 * 0.65));
 }
 
+console.log('\nthe percentage is measured on what the letter actually prints\n');
+{
+  // HR's FIFTH report, and Trusharkumar Shah's real letter. His Rate of Pay
+  // went 40,100 to 44,090 and his Take Home 39,900 to 43,890 — the same 3,990
+  // either way. Measured on Rate of Pay that is 9.95%; measured on the Take
+  // Home the letter prints either side of it, exactly 10%. The letter had been
+  // printing the first over the second, so its headline number could not be
+  // checked against its own figures and HR had to explain it to the employee.
+  //
+  // They differ because PT's flat 200 comes off both sides without scaling, so
+  // the base take home is measured against is 200 smaller. No single figure can
+  // read 10% on both, which is why the letter uses the one it shows.
+  const e = Object.assign({}, EMP, { pfEligible: 'no', ratePay: 44090,
+    salaryHistory: [{ from: '2020-01-01', ratePay: 40100, salaryHeading: 'managerial' },
+                    { from: '2026-08-01', ratePay: 44090, salaryHeading: 'managerial' }] });
+  const a = L.appraisalFigures(e, { ym: '2026-09' });
+  check('his take home is the pair HR read off the letter',
+        [Math.round(a.takeHomeBefore), Math.round(a.takeHomeAfter)], [39900, 43890]);
+  check('the take-home percentage is the 10% HR granted',
+        Math.round(a.takeHomePct * 100) / 100, 10);
+  check('and the rate percentage really is the 9.95% that confused them',
+        Math.round(a.ratePct * 100) / 100, 9.95);
+  // The assertion that matters: whatever the two take-home figures are, the
+  // percentage printed between them must reproduce them.
+  check('the printed percentage reproduces the two printed figures',
+        Math.round(a.takeHomeBefore * (1 + a.takeHomePct / 100)), Math.round(a.takeHomeAfter));
+}
+{
+  // The flat 1,800 PF pulls the two apart much further than PT alone, and the
+  // letter must still quote the take-home one. 30,000 to 33,000 is 10% of Rate
+  // of Pay and 10.71% of take home; the employee reading 28,000 and 31,000 can
+  // only verify the second.
+  const e = Object.assign({}, EMP, { pfContributionType: 'fixed', ratePay: 33000,
+    salaryHistory: [{ from: '2020-01-01', ratePay: 30000, salaryHeading: 'managerial' },
+                    { from: '2026-08-01', ratePay: 33000, salaryHeading: 'managerial' }] });
+  const a = L.appraisalFigures(e, { ym: '2026-09' });
+  check('a clean 10% on Rate of Pay is 10.71% of take home',
+        [Math.round(a.ratePct * 100) / 100, Math.round(a.takeHomePct * 100) / 100], [10, 10.71]);
+  check('  and the take-home pair is what the employee can check',
+        [Math.round(a.takeHomeBefore), Math.round(a.takeHomeAfter)], [28000, 31000]);
+}
+
 console.log('\nAdvance for Temporary is taken off, and never printed\n');
 {
   // HR's FOURTH report, in their own words: "someone's salary is 11000 + PF +

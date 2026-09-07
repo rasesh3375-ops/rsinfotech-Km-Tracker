@@ -23336,8 +23336,8 @@ async function renderAppraisalRoster_(){
         return `<tr><td class="sal-name">${escapeHtml(r.name)}</td>
           <td class="num">${a.hasPrevious ? R(a.takeHomeBefore) : '<span class="muted">—</span>'}</td>
           <td class="num">${R(a.takeHomeAfter)}</td>
-          <td class="num">${a.ratePct === null ? '<span class="muted">—</span>'
-            : (Math.round(a.ratePct * 100) / 100) + '%'}</td>
+          <td class="num">${a.takeHomePct === null ? '<span class="muted">—</span>'
+            : (Math.round(a.takeHomePct * 100) / 100) + '%'}</td>
           <td>${a.alreadyRecorded
             ? '<span class="pill live">on record</span>'
             : '<span class="muted">proposed</span>'}</td></tr>`;
@@ -28809,7 +28809,16 @@ function letterTemplate(type, f){
         a.applies.pt ? 'Professional Tax: ' + R(p.pt) : '',
         'Grand Total: ' + R(grand(p, take))
       ].filter(Boolean).join('\n');
-      const pct = a.ratePct === null ? '—' : (Math.round(a.ratePct * 100) / 100) + '%';
+      // The percentage is measured on TAKE HOME, because take home is what the
+      // two blocks below it print. Measuring it on Rate of Pay — which the
+      // letter never shows — is how Trusharkumar's letter read "Increment:
+      // 9.95%" above a Take Home that had gone 39,900 to 43,890, which is
+      // exactly 10%: the same 3,990 rise is a larger share of take home than of
+      // Rate of Pay, because PT's flat 200 (and the fixed 1,800 PF where it
+      // applies) comes off both sides without scaling. A letter whose headline
+      // number cannot be checked against its own figures is one HR has to
+      // defend to the employee.
+      const pct = a.takeHomePct === null ? '—' : (Math.round(a.takeHomePct * 100) / 100) + '%';
       const prev = a.hasPrevious
         ? `Previous Salary (per month):\n${block(a.before, a.takeHomeBefore)}\n\n`
         : 'This is the first salary recorded for you, so there is no previous figure to state.\n\n';
@@ -28820,7 +28829,7 @@ function letterTemplate(type, f){
 prev +
 `Revised Salary (per month):\nIncrement: ${pct}\n${block(a.after, a.takeHomeAfter)}\n\n` +
 `Effective From: ${eff}\n\n` +
-`Take Home is what is paid into your account each month. Any loan instalment you may be repaying is unchanged by this revision and is not part of this letter. Grand Total is Take Home plus everything listed above it — both sides of Provident Fund and ESI, and Professional Tax.\n\n` +
+`Take Home is what is paid into your account each month, and Increment is the increase in it. Any loan instalment you may be repaying is unchanged by this revision and is not part of this letter. Grand Total is Take Home plus everything listed above it — both sides of Provident Fund and ESI, and Professional Tax.\n\n` +
 `All other terms and conditions of your employment with ${company} will remain unchanged.\n\n` +
 `We look forward to your continued dedication and wish you success and growth in your career with ${company}.\n\n` +
 `Congratulations and best wishes.\n\nYours sincerely,`;
