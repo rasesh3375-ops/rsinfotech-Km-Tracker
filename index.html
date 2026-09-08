@@ -25647,7 +25647,7 @@ function odTableHtml_(title, docs, sub, showWhere){
       ${isChallan ? `<button class="btn tiny ghost" title="Read the figures off this challan and compare them with what payroll came to" onclick="withBusy(this,'Reading…',()=>challanCheck_('${d.fileId}', ${q(d.name)}))">Check</button>` : ''}
       <button class="btn tiny ghost" title="Open the original in Google Drive" onclick="window.open('${officeDocDriveUrl_(d.fileId)}','_blank','noopener')">Drive</button>
       ${officeDocEditUrl_(d.fileId, d.mimeType, d.name)
-        ? `<button class="btn tiny ghost" title="Edit this file in Google Sheets or Docs — it saves straight back to this same file" onclick="window.open('${officeDocEditUrl_(d.fileId, d.mimeType, d.name)}','_blank','noopener')">Edit</button>`
+        ? `<button class="btn tiny ghost" title="Edit this file in Google Sheets or Docs — it saves straight back to this same file" onclick="officeDocEditOpen_('${d.fileId}', ${q(d.mimeType || '')}, ${q(d.name)})">Edit</button>`
         : ''}
       <button class="btn tiny ghost" title="Upload a newer copy over this file, keeping the same link" onclick="officeDocReplace_(${q(d.folderId)}, '${d.year}', '${d.fileId}', ${q(d.name)})">Replace</button>
       <button class="btn tiny ghost" title="Rename this file" onclick="officeDocRename_(${q(d.folderId)}, '${d.year}', '${d.fileId}', ${q(d.name)})">Rename</button>
@@ -26038,6 +26038,37 @@ function officeDocEditUrl_(fileId, mimeType, name){
   const n = String(name || ''), m = String(mimeType || '');
   const hit = OFFICE_DOC_EDITABLE_.find(t => t.ext.test(n) || t.mime.test(m));
   return hit ? 'https://docs.google.com/' + hit.app + '/d/' + fileId + '/edit' : '';
+}
+
+// Opens the Google editor, but warns first about the one thing it cannot do.
+//
+// Google Sheets edits an .xlsx in place, which is the whole point of the Edit
+// button — but it cannot follow a formula that points at ANOTHER workbook.
+// Every such formula shows #REF! ("Unresolved sheet name '[1]April-26'"), and
+// because Office editing saves as you type, one keystroke can bake those #REF!
+// into the real file and destroy the links for good.
+//
+// This is not hypothetical: R.S. Infotech's own master salary workbook is built
+// that way, and opening it here filled the screen with #REF!. The file was
+// unharmed only because nobody typed. Excel on a computer resolves those links
+// and Replace puts the edited copy back, which is the right route for a
+// workbook like that — so the warning names it rather than just saying no.
+//
+// Spreadsheets only. Cross-workbook links are an Excel habit; a Word document
+// or a deck opened here behaves, and a confirm on those would be noise.
+function officeDocEditOpen_(fileId, mimeType, name){
+  const url = officeDocEditUrl_(fileId, mimeType, name);
+  if(!url) return;
+  if(url.indexOf('/spreadsheets/') !== -1){
+    if(!confirm('Open “' + name + '” in Google Sheets?\n\n' +
+      'Edits save straight back into this same file — that is what makes this quicker than ' +
+      'downloading it.\n\n' +
+      'One thing it CANNOT do: follow formulas that point at another Excel workbook. Those ' +
+      'show as #REF! here, and saving would make that permanent.\n\n' +
+      'If this workbook pulls figures from other files, press Cancel and use Replace instead: ' +
+      'edit it in Excel on your computer, then upload it back over this one.')) return;
+  }
+  window.open(url, '_blank', 'noopener');
 }
 
 // Puts a newer copy INTO the file that is already there, rather than filing a
