@@ -25646,6 +25646,10 @@ function odTableHtml_(title, docs, sub, showWhere){
     return `<button class="btn tiny" title="View in the app" onclick="officeDocView_('${d.fileId}', ${q(d.name)})">View</button>
       ${isChallan ? `<button class="btn tiny ghost" title="Read the figures off this challan and compare them with what payroll came to" onclick="withBusy(this,'Reading…',()=>challanCheck_('${d.fileId}', ${q(d.name)}))">Check</button>` : ''}
       <button class="btn tiny ghost" title="Open the original in Google Drive" onclick="window.open('${officeDocDriveUrl_(d.fileId)}','_blank','noopener')">Drive</button>
+      ${officeDocEditUrl_(d.fileId, d.mimeType, d.name)
+        ? `<button class="btn tiny ghost" title="Edit this file in Google Sheets or Docs — it saves straight back to this same file" onclick="window.open('${officeDocEditUrl_(d.fileId, d.mimeType, d.name)}','_blank','noopener')">Edit</button>`
+        : ''}
+      <button class="btn tiny ghost" title="Upload a newer copy over this file, keeping the same link" onclick="officeDocReplace_(${q(d.folderId)}, '${d.year}', '${d.fileId}', ${q(d.name)})">Replace</button>
       <button class="btn tiny ghost" title="Rename this file" onclick="officeDocRename_(${q(d.folderId)}, '${d.year}', '${d.fileId}', ${q(d.name)})">Rename</button>
       <button class="btn tiny ghost" title="Remove from the archive" onclick="officeDocDelete_(${q(d.folderId)}, '${d.year}', '${d.fileId}', ${q(d.name)})">Delete</button>`;
   };
@@ -26013,6 +26017,129 @@ async function officeDocsDeleteFolder_(folderId){
 // Renames one filed document. Drive decides the final name — it applies the
 // same "keep both" rule the upload does — so the record is written from what
 // came back rather than from what was typed.
+// Google's own editor, on THIS file — not a converted copy.
+//
+// Drive edits .xlsx and .docx in place ("Office editing"), so what opens here
+// saves straight back into the same file in the archive, and the next person to
+// press View sees the change. Offered only for the types Google can actually
+// edit: a PDF or a scan opens read-only, and a button that cannot do what it
+// says is worse than no button. Google's own formats are included because a
+// Sheet filed here is editable for the same reason.
+const OFFICE_DOC_EDITABLE_ = [
+  { app: 'spreadsheets', ext: /\.(xlsx|xlsm|xls|csv|ods)$/i,
+    mime: /(spreadsheetml|ms-excel|vnd\.google-apps\.spreadsheet|opendocument\.spreadsheet|text\/csv)/i },
+  { app: 'document', ext: /\.(docx|doc|odt|rtf|txt)$/i,
+    mime: /(wordprocessingml|msword|vnd\.google-apps\.document|opendocument\.text|text\/plain)/i },
+  { app: 'presentation', ext: /\.(pptx|ppt|odp)$/i,
+    mime: /(presentationml|ms-powerpoint|vnd\.google-apps\.presentation|opendocument\.presentation)/i }
+];
+function officeDocEditUrl_(fileId, mimeType, name){
+  if(!fileId) return '';
+  const n = String(name || ''), m = String(mimeType || '');
+  const hit = OFFICE_DOC_EDITABLE_.find(t => t.ext.test(n) || t.mime.test(m));
+  return hit ? 'https://docs.google.com/' + hit.app + '/d/' + fileId + '/edit' : '';
+}
+
+// Puts a newer copy INTO the file that is already there, rather than filing a
+// second one beside it. HR asked for exactly this: edit the document, and have
+// the update land on the file already in Drive, keeping its link.
+//
+// The extension has to match. Writing a PDF into a file still called
+// ".xlsx" produces something no program will open, and the archive would go on
+// describing it as a spreadsheet — the record is keyed by id, so nothing would
+// ever notice. Deleting and uploading is the right move for a genuine change of
+// format, and the message says so instead of just refusing.
+async function officeDocReplace_(folderId, year, fileId, currentName){
+  const extOf = s => { const m = /\.[^.]+$/.exec(String(s || '')); return m ? m[0].toLowerCase() : ''; };
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.style.display = 'none';
+  document.body.appendChild(input);
+  const picked = await new Promise(resolve => {
+    input.onchange = () => resolve((input.files || [])[0] || null);
+    // No 'cancel' event to rely on across these browsers, so the picker being
+    // dismissed simply leaves this promise unresolved and the element behind —
+    // harmless, and better than a timeout that fires while somebody is still
+    // looking for the file.
+    input.click();
+  });
+  input.remove();
+  if(!picked) return;
+
+  if(extOf(picked.name) !== extOf(currentName)){
+    alert('That is a ' + (extOf(picked.name) || 'different kind of') + ' file and “' + currentName +
+          '” is ' + (extOf(currentName) || 'another type') + '.\n\n' +
+          'Replacing keeps the original file name, so the two have to match. To file a different ' +
+          'kind of document, upload it as a new one and delete the old.');
+    return;
+  }
+  if(!confirm('Replace “' + currentName + '” with “' + picked.name + '”?\n\n' +
+              'The file in Google Drive keeps its name and its link — only its contents change. ' +
+              'Drive keeps the old version under File › Version history if you need it back.')) return;
+
+  let res = null;
+  try{
+    const dataUrl = await readDocForDrive(picked);
+    const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl || '');
+    if(!m){ alert('That file could not be read.'); return; }
+    res = await backendAction({
+      action: 'replaceOfficeDoc', fileId: fileId,
+      base64Data: m[2], mimeType: m[1] || picked.type
+    }, uploadFetchOpts_(m[2].length, false));
+  }catch(err){ res = null; }
+
+  if(!res){
+    // Same reasoning as the upload path: a request that never came back may
+    // still have landed. Unlike an upload it cannot have created a duplicate —
+    // there is only ever one file — so the safe advice is to look, not to avoid.
+    alert('The replacement did not get through, so it is not clear whether it reached Drive. ' +
+          'Press View to see which version is there before trying again.');
+    return;
+  }
+  if(!res.ok){
+    alert('Could not replace it: ' + (res.error || lastBackendError || 'the server did not respond'));
+    return;
+  }
+
+  // Drive is updated; now the archive's own record of the size and date, so the
+  // list does not go on showing the old file's details.
+  try{
+    const idx = await loadOfficeDocIndex_();
+    const slug = folderId;
+    const y = (((idx[slug] || {}).years || {})[String(year)]) || null;
+    const parts = Number((y || {}).p) || 0;
+    for(let p = 0; p < parts; p++){
+      const key = officeDocPartKey_(slug, year, p);
+      const raw = (await officeDocsReadKeys_([key]))[key];
+      let v = null;
+      try{ v = raw ? JSON.parse(raw) : null; }catch(e){ v = null; }
+      const recs = (v && v.records) || [];
+      const hit = recs.find(r => r.f === fileId);
+      if(!hit) continue;
+      const wasSize = Number(hit.s) || 0;
+      hit.s = Number(res.size) || wasSize;
+      hit.m = res.mimeType || hit.m;
+      hit.u = Date.now();
+      hit.b = sessionUserName || sessionRole || 'HR';
+      const ok = await remoteSet(key, JSON.stringify({ savedAt: Date.now(), records: recs }));
+      if(!ok) throw new Error(lastBackendError || 'the server did not respond');
+      if(y){
+        y.b = Math.max(0, (Number(y.b) || 0) - wasSize + (Number(hit.s) || 0));
+        await saveOfficeDocIndex_(idx);
+      }
+      break;
+    }
+  }catch(err){
+    alert('The file in Drive was replaced, but the app\'s own record of its size and date was not updated: ' +
+      ((err && err.message) || 'the server did not respond') + '\n\nReload the page.');
+  }
+  addActivityLog('Replaced "' + currentName + '" in Office Documents with a newer copy (' +
+                 officeDocSize_(Number(res.size) || 0) + ')').catch(() => {});
+  await officeDocsApply_(null);
+  alert('“' + currentName + '” has been updated. Same file, same link — Drive keeps the previous ' +
+        'version under File › Version history.');
+}
+
 async function officeDocRename_(folderId, year, fileId, currentName){
   const name = (prompt('Rename this document.', currentName) || '').trim();
   if(!name || name === currentName) return;

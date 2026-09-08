@@ -768,6 +768,46 @@ function doRenameOfficeFolder_(body) {
 // already taken in that folder gets " (2)" rather than two files HR cannot
 // tell apart. The final name is returned because it may not be the one asked
 // for, and the app has to record what Drive actually holds.
+// Writes new content into an EXISTING Drive file, rather than filing a second
+// one beside it. The file keeps its id, its link, its name and its folder, and
+// Drive keeps what was there before in its own File > Version history, so a
+// replacement can always be undone from Drive itself.
+//
+// DriveApp cannot do this — it can create, rename, trash and read, but it has
+// no way to put new bytes into a file that already exists. Drive.Files.update
+// (the advanced Drive service, the same one the challan OCR uses) is the only
+// route, which is why this action needs Services (+) > Drive API added to the
+// script; without it the call throws "Drive is not defined" and the message
+// below says so rather than leaving HR guessing.
+//
+// The title is set explicitly to the name the file already has. Left out, the
+// media blob's own filename can rename the file, which would break the app's
+// archive index — that record is keyed by id but shows the name, and the two
+// silently disagreeing is worse than either being wrong.
+function doReplaceOfficeDoc_(body) {
+  try {
+    var fileId = String(body.fileId || '');
+    if (!fileId) return { ok: false, error: 'No file was named.' };
+    var b64 = String(body.base64Data || '');
+    if (!b64) return { ok: false, error: 'No file content was sent.' };
+    if (typeof Drive === 'undefined' || !Drive.Files || !Drive.Files.update) {
+      return { ok: false, error: 'The Drive API service is not enabled on this script. ' +
+        'Open the Apps Script editor, press + next to Services, add Drive API, and try again.' };
+    }
+    var file = DriveApp.getFileById(fileId);
+    var keepName = file.getName();
+    var before = file.getSize();
+    var mime = String(body.mimeType || '') || file.getMimeType();
+    var blob = Utilities.newBlob(Utilities.base64Decode(b64), mime, keepName);
+    Drive.Files.update({ title: keepName }, fileId, blob);
+    var after = DriveApp.getFileById(fileId);
+    return { ok: true, fileId: fileId, fileName: after.getName(),
+             mimeType: after.getMimeType(), size: after.getSize(), previousSize: before };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
 function doRenameOfficeDoc_(body) {
   try {
     const file = DriveApp.getFileById(body.fileId);
@@ -1877,6 +1917,11 @@ function doPost(e) {
   if (body.action === 'renameOfficeDoc') {
     if (isEngineer) return forbidden_();
     return jsonOut_(doRenameOfficeDoc_(body));
+  }
+
+  if (body.action === 'replaceOfficeDoc') {
+    if (isEngineer) return forbidden_();
+    return jsonOut_(doReplaceOfficeDoc_(body));
   }
 
   if (body.action === 'getDriveFileMeta') {
