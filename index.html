@@ -50,6 +50,10 @@
      for. Two identical icons on one home screen are impossible to tell
      apart, which makes tapping the wrong one look like a broken login. -->
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<!-- Full-screen home-screen app on iOS — for the ENGINEER entry at "/" only.
+     The HR bootstrap below removes this tag at "/hr/", because a full-screen
+     web app on iOS gets no pinch-zoom, and HR needs to be able to magnify a
+     report. See the comment where it is removed. -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" id="appleTitle" content="RS KM Tracker">
@@ -88,6 +92,23 @@
       document.getElementById('appManifest').setAttribute('href', '/manifest-hr.json');
       document.getElementById('appleTitle').setAttribute('content', 'RS HR');
       document.title = 'R.S. Infotech — HR';
+      // The HR icon opens in Safari, not as a full-screen app, and this meta
+      // is the switch that decides that on iOS — removed here rather than
+      // deleted from the <head>, because the ENGINEER app at "/" keeps it.
+      //
+      // Not a preference: iOS gives a home-screen web app no pinch-zoom at
+      // all. HR could not reach the bottom of a report at 200% (the CSS
+      // magnification the app had to do for itself breaks WebKit's scrolling,
+      // twice measured correct in Chromium and twice still broken on the
+      // phone), and with the gesture handed back to the browser, nothing
+      // zoomed either — because in standalone there is no browser zoom to
+      // hand it to. Opening in Safari is what makes the iPhone's own zoom
+      // exist, and HR chose the address bar over the full-screen frame.
+      // manifest-hr.json says display:browser for the same reason; both are
+      // set because iOS versions differ over which one they read, and Android
+      // reads only the manifest.
+      var appleCapable = document.querySelector('meta[name="apple-mobile-web-app-capable"]');
+      if(appleCapable) appleCapable.remove();
       // Remembering the entry is a last resort for an icon that was installed
       // before the manifest was served per-path and still launches at "/".
       // It cannot rescue an iPhone: a home-screen web app there gets its own
@@ -13551,10 +13572,13 @@ function kmtCommitArrival(){
 
 // The shared "go back one view" used by every in-app Back control (not just
 // the hardware/browser button) — this is what makes it work on an iOS
-// home-screen install, where there is no OS back gesture at all
-// (manifest.json/manifest-hr.json both declare "standalone"): the app's own
-// buttons are the only Back that exists there, and now they drive the exact
-// same restore path a hardware Back would on Android/desktop.
+// home-screen install, where there is no OS back gesture at all — the
+// engineer app at "/" is exactly that (manifest.json declares "standalone"),
+// so its own buttons are the only Back that exists, and they drive the exact
+// same restore path a hardware Back would on Android/desktop. HR's entry now
+// opens in Safari instead (see the apple-mobile-web-app-capable comment in
+// the head), so there it has Safari's Back as well as these — which is a
+// second way to the same history stack, not a different one.
 function kmtBack(){
   if(history.state && history.state.kmtView) history.back();
   else showReportsLanding();

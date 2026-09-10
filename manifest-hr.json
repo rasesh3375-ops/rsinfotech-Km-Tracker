@@ -4,7 +4,7 @@
   "description": "HR dashboard for R.S. Infotech km tracking",
   "start_url": "/hr/",
   "scope": "/hr/",
-  "display": "standalone",
+  "display": "browser",
   "orientation": "portrait",
   "background_color": "#F7F6F2",
   "theme_color": "#16213E",
