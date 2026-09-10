@@ -503,6 +503,13 @@
     justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;
     padding:10px 13px;border-radius:10px;background:#FEF7EB;border:1px solid #F0DFC0;
     font-size:13px;font-weight:700;color:var(--amber-dark);}
+  /* In full screen the bar sticks against #fullscreenBody's own 16px padding
+     rather than the very top of it, so as the sheet scrolled, table rows slid
+     visibly through the strip above the bar and through its 12px bottom
+     margin — a Save bar that looked like it was breaking apart mid-scroll.
+     Its own background is extended over both gaps with a plain offset shadow,
+     rather than stripping padding the rest of the viewer needs. */
+  #fullscreenBody .att-save-bar{box-shadow:0 -17px 0 var(--paper), 0 13px 0 var(--paper);}
   .att-save-actions{display:flex;align-items:center;gap:12px;}
   .att-save-bar .btn{width:auto;padding:8px 16px;font-size:13px;}
   /* An edited cell stays visibly unsaved until Save is pressed. */
@@ -9763,6 +9770,19 @@ function openFullscreenView(title, sourceId){
   fullscreenActiveId = sourceId;
   document.getElementById('fullscreenTitle').textContent = title;
   fsBody.appendChild(el);
+  // The Attendance Sheet's Save/Discard bar is a SIBLING of #attendanceSheetBox,
+  // not a child of it — it has to outlive renderAttendanceSheet() replacing the
+  // box's whole innerHTML on every re-render. So this function, which moves only
+  // the one box it was named, left Save behind on the page underneath the
+  // overlay: in full screen — and on a phone, where the grid is only usable full
+  // screen — HR could edit cells and had no way at all to save them. The only
+  // route left was pressing ✕ and answering "Save them before closing?", a
+  // confirmation being used as the Save button. Moved with the sheet, and put
+  // back beside it in closeFullscreenView.
+  if(sourceId === 'attendanceSheetBox'){
+    const saveBar = document.getElementById('attSaveBar');
+    if(saveBar) fsBody.insertBefore(saveBar, el);
+  }
   const fsRoot = document.getElementById('fullscreenSheetRoot');
   // The two boxes here that scroll their own content rather than needing the
   // shell to widen for them, which at app zoom would feed their own width back
@@ -9831,6 +9851,15 @@ function closeFullscreenView(){
     // Close button of its own since it's no longer actually in full screen
     // — which is exactly what looked like "there's no way to close this."
     if(el && (fullscreenActiveId === 'docViewerRoot' || fullscreenActiveId === 'payrollDocsRoot')) el.classList.add('hidden');
+    // ...and the Save bar openFullscreenView brought along with the sheet goes
+    // back to the one place it is ever declared: immediately before the sheet
+    // box, whichever parent that box was just restored to. Keyed off the box
+    // rather than a remembered sibling because that is the whole of its
+    // position — it has no other home on the page.
+    if(fullscreenActiveId === 'attendanceSheetBox'){
+      const saveBar = document.getElementById('attSaveBar');
+      if(saveBar && el && el.parentElement) el.parentElement.insertBefore(saveBar, el);
+    }
   }
   // Closing the document viewer specifically (not payrollDocsRoot being
   // displaced to make room for it — see openFullscreenView, where that
