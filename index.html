@@ -19184,6 +19184,22 @@ const KMT_IS_STANDALONE = window.matchMedia('(display-mode: standalone)').matche
 function resettleFixedOverlays_(){
   if(!window.visualViewport) return;
   const vv = window.visualViewport;
+  // A pinch is not a keyboard, and this could not tell them apart.
+  //
+  // Everything below keys off the visual viewport being shorter than the
+  // layout viewport, which is a reliable signal for a keyboard — and an
+  // equally reliable one for somebody having zoomed in, because that is
+  // precisely what zooming does. So a pinch made this pin an inline
+  // height/top onto whatever was open, every frame, for as long as the zoom
+  // lasted. On a report that meant #fullscreenSheetRoot's height forced down
+  // to the zoomed viewport's, over the top of the stylesheet, which is why
+  // zoom worked everywhere in the app EXCEPT after generating a report.
+  //
+  // A keyboard shrinks the visual viewport at scale 1. A zoom shrinks it by
+  // changing the scale. Checked first, so a zoom is left entirely alone —
+  // there is nothing to resettle for it, and the app has no business moving
+  // anything while somebody is looking at it through a pinch.
+  if(kmtPageIsZoomed_()) return;
   let h, t;
   if(KMT_IS_STANDALONE){
     // Always window.innerHeight/0, never visualViewport, not even while a
@@ -19221,8 +19237,16 @@ function resettleFixedOverlays_(){
     t = keyboardOpen ? vv.offsetTop + 'px' : '';
   }
   document.querySelectorAll('.modal-overlay').forEach(el => { el.style.height = h; el.style.top = t; });
+  // ...but never onto a report that is page content rather than an overlay.
+  // An inline height beats the stylesheet, so writing one here squashed an
+  // in-flow report to a fixed height and undid the whole point of it. Nothing
+  // in flow needs resettling: it is laid out by the document, like any page.
   const sheetRoot = document.getElementById('fullscreenSheetRoot');
-  if(sheetRoot && !sheetRoot.classList.contains('hidden')){ sheetRoot.style.height = h; sheetRoot.style.top = t; }
+  const sheetIsOverlay = sheetRoot && !document.documentElement.classList.contains('kmt-fs-inflow');
+  if(sheetIsOverlay && !sheetRoot.classList.contains('hidden')){ sheetRoot.style.height = h; sheetRoot.style.top = t; }
+  // Any inline height/top left over from a previous open, so switching into
+  // flow does not inherit a pinned height from the overlay it used to be.
+  if(sheetRoot && !sheetIsOverlay){ sheetRoot.style.height = ''; sheetRoot.style.top = ''; }
   // Global Search has the same real text input (#gsInput) as any Employee
   // Master field — same keyboard, same exposure.
   const gsOverlay = document.getElementById('gsOverlay');
