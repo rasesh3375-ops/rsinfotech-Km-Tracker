@@ -1511,8 +1511,21 @@
      overridden here, or the header text and its own background become the
      same colour and the "SR NO" label disappears. */
   table.sal-table th.sal-sr-h{z-index:3;}
-  table.sal-table td.sal-name{text-align:left;font-weight:600;position:sticky;left:34px;background:var(--paper);z-index:1;}
-  table.sal-table th.sal-name-h{text-align:left;position:sticky;left:34px;z-index:3;}
+  /* left:0, not left:34px — the offset only applies when an SR column is
+     actually in front of this one.
+     Hard-coding 34px assumed every table using .sal-name also had .sal-sr.
+     Two do; forty-four do not. In all of those the frozen name column pinned
+     34px further right than the row it belongs to, and since it carries an
+     opaque background it painted over the start of whatever column came next
+     — the Apprentice Salary Report showed ",000" where "32,000" should be.
+     It only appears once the table is narrow enough to scroll, which is why a
+     wide monitor looked perfect and a 13" laptop did not.
+     The adjacent-sibling rule puts the offset back exactly where it is earned,
+     so a report written next year gets the right one without being told. */
+  table.sal-table td.sal-name{text-align:left;font-weight:600;position:sticky;left:0;background:var(--paper);z-index:1;}
+  table.sal-table th.sal-name-h{text-align:left;position:sticky;left:0;z-index:3;}
+  table.sal-table td.sal-sr + td.sal-name{left:34px;}
+  table.sal-table th.sal-sr-h + th.sal-name-h{left:34px;}
   table.sal-table tr.sal-subtotal td.sal-sr,
   table.sal-table tr.sal-subtotal td.sal-name{background:var(--cream);}
   table.sal-table tr.sal-grandtotal td.sal-sr,
