@@ -23621,15 +23621,38 @@ async function renderGeneratorTab(){
 
   let employees = [];
   await step('the employee list', async () => { employees = await getEmployees(); });
-  await step('the checklist counts', () => refreshChecklistPickerCounts(employees));
-  // The Role Reports card lives on this tab now, but its picker was only ever
-  // populated from the Reports tab's render — fine when Reports was visited
-  // first, empty if this card is opened straight from the Generator landing.
-  await step('the role report pickers', () => populateRoleReportPickers());
-  await step('the employee pickers', () => populateGeneratorEmployees());
-  // Office Documents moved here too — same reasoning: its uploads and lists
-  // need to be ready the moment that card opens, not fetched then.
-  await step('Office Documents', () => renderOfficeDocumentsTab());
+
+  // The remaining four go TOGETHER, not one after another.
+  //
+  // They read different keys and none of them needs anything another produces,
+  // but they were awaited in sequence — so opening the Generator cost the sum
+  // of five round trips to Apps Script rather than the longest one, and Office
+  // Documents alone makes several of its own. HR saw an expanded card with
+  // nothing in it for as long as that took, which is what "Checklists takes a
+  // long time to open" actually was: the card opens instantly, it just had
+  // nothing to show yet.
+  //
+  // Nothing here races: two of them ask for the employee list, and the shared
+  // read cache already collapses concurrent reads of one key into a single
+  // request (see inFlightReads), so asking at the same moment is cheaper than
+  // asking one after the other, not dearer.
+  //
+  // Failures are collected in a fixed order rather than in the order they
+  // happen to finish, so the warning below names them the same way every time.
+  const rest = [
+    ['the checklist counts', () => refreshChecklistPickerCounts(employees)],
+    // The Role Reports card lives on this tab now, but its picker was only ever
+    // populated from the Reports tab's render — fine when Reports was visited
+    // first, empty if this card is opened straight from the Generator landing.
+    ['the role report pickers', () => populateRoleReportPickers()],
+    ['the employee pickers', () => populateGeneratorEmployees()],
+    // Office Documents moved here too — same reasoning: its uploads and lists
+    // need to be ready the moment that card opens, not fetched then.
+    ['Office Documents', () => renderOfficeDocumentsTab()]
+  ];
+  (await Promise.all(rest.map(async ([what, fn]) => {
+    try{ await fn(); return null; }catch(e){ return what; }
+  }))).forEach(what => { if(what) failed.push(what); });
 
   // Say which parts are missing rather than leaving half a screen looking
   // complete. The letters themselves still work — they need no backend.
@@ -23733,11 +23756,19 @@ async function renderOfficeDocumentsTab(){
   // longer on the page: the apprentice dropdown and the Important Documents list
   // were both unguarded, so the first would have thrown on a null element and
   // taken this whole function — and with it the entire Generator tab — down.
-  await refreshPayrollDocCardStat_();
-  await renderCompanyDocList('holidaylist');
-  await renderCompanyDocList('profile');
-  await renderUniformIdList(employees);
-  await renderHandbookSection();
+  // Five more independent reads, together rather than in a queue — same
+  // reasoning as renderGeneratorTab, and this function is the reason that one
+  // was slow: nested inside its fifth step, it added five round trips of its
+  // own, so the Generator was paying for ten before a card could show anything.
+  // Each still fails on its own; one unreachable key must not blank the four
+  // lists that loaded perfectly well.
+  await Promise.all([
+    refreshPayrollDocCardStat_(),
+    renderCompanyDocList('holidaylist'),
+    renderCompanyDocList('profile'),
+    renderUniformIdList(employees),
+    renderHandbookSection()
+  ].map(p => p.catch(() => {})));
 }
 
 // ---- 7. Employee Handbook ----
