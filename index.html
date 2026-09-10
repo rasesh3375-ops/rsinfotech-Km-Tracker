@@ -892,9 +892,23 @@
      #hrSidebar is deliberately excluded: it is a fixed-WIDTH drawer, so
      scaling its contents would spill them out of it rather than enlarge
      it — exactly the overlap this whole approach exists to avoid. */
+  /* The rule stated just above — zoom the CONTENT box, never the scrolling
+     element — held for the two overlays that scroll themselves (.modal-overlay
+     scrolls, .modal-box is its content; .gs-overlay scrolls, .gs-panel is its
+     content) and was broken for the third. #fullscreenSheetRoot does NOT
+     scroll: it is a flex column, and the scrolling element is .fullscreen-body,
+     which `> *` then put the zoom on. So the report viewer was the one place
+     where a scroll container was itself zoomed, and it is the one place HR
+     reported the bottom of a report being unreachable — at 200% the Apprentice
+     Salary Report stopped a card and a half short of its own total, and no
+     amount of dragging would bring it up.
+     Split so the shell's header still scales while the zoom lands INSIDE the
+     scroll box, on the report, where the scroll range is measured from real
+     laid-out children in every engine rather than from a scaled scroller. */
   .modal-overlay > .modal-box,
   .gs-overlay > .gs-panel,
-  #fullscreenSheetRoot > *{ zoom:var(--kmt-fixed-zoom, 1); }
+  #fullscreenSheetRoot > .fullscreen-header,
+  #fullscreenBody > *{ zoom:var(--kmt-fixed-zoom, 1); }
   /* ...and the other half of the same browser difference, which the rule above
      does not cover.
      Where fixed descendants ARE scaled by the app's zoom, the overlay ITSELF
@@ -11254,7 +11268,12 @@ async function renderApprenticeSalaryReport(){
   // Same field set the table's own columns show — Rate of Pay through Paid
   // Directly — reused for both the row and the compact card so neither can
   // show a figure the other does not.
-  const apprenticeCardRows = s => hrRow('Rate of Pay', fmtMoney(s.rate)) + hrRow('Leave Days', s.leaveDays) +
+  // s.leaveDays ?? '—', the same as the Salary Sheet's own card. Leave days are
+  // deliberately not totalled across employees — the table prints an empty cell
+  // for them on the Grand Total row and the CSV an empty field — but this card
+  // is built from the same accumulator, which simply has no leaveDays on it, so
+  // the Grand Total card read "Leave Days undefined" on every phone.
+  const apprenticeCardRows = s => hrRow('Rate of Pay', fmtMoney(s.rate)) + hrRow('Leave Days', s.leaveDays ?? '—') +
     hrRow('Leave Amount', fmtMoney(s.leaveAmount)) + hrRow('Basic', fmtMoney(s.basic)) + hrRow('HRA', fmtMoney(s.hra)) +
     hrRow('LTA', fmtMoney(s.lta)) + hrRow('Gross', fmtMoney(s.gross)) +
     hrRow('Advance Temp', fmtMoney(s.advanceTemp)) + hrRow('Advance', fmtMoney(s.advance) + (s.advanceMissingThisMonth ? ' <span class="pol-warn" title="This employee has a Salary Advance Payment entry for another month, but none for this one">(no entry this month)</span>' : '')) + hrRow('Loan EMI', fmtMoney(s.loanEmi)) +
