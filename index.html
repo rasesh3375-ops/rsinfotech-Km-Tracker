@@ -50,11 +50,20 @@
      for. Two identical icons on one home screen are impossible to tell
      apart, which makes tapping the wrong one look like a broken login. -->
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<!-- Full-screen home-screen app on iOS — for the ENGINEER entry at "/" only.
-     The HR bootstrap below removes this tag at "/hr/", because a full-screen
-     web app on iOS gets no pinch-zoom, and HR needs to be able to magnify a
-     report. See the comment where it is removed. -->
-<meta name="apple-mobile-web-app-capable" content="yes">
+<!-- apple-mobile-web-app-capable is deliberately NOT here. It is added by the
+     bootstrap below, for the engineer entry at "/" only.
+     That way round because iOS reads this tag out of the HTML AS SERVED, at
+     the moment somebody taps Add to Home Screen — not out of the live DOM. It
+     was written here and REMOVED by script at "/hr/" first, which looked
+     equivalent and was not: HR added the icon from Safari exactly as asked and
+     still got a full-screen app with no address bar and no pinch-zoom, because
+     the tag iOS actually read was the one in the file. Written the other way
+     round, "/hr/" is served without it, which is the only version of this that
+     iOS can see.
+     The cost, if iOS ignores the added tag for the same reason: the ENGINEER
+     app loses its full-screen frame and opens in Safari too. That is the right
+     way to be wrong — engineers check in and out of a job, HR reads salary
+     sheets and needs to magnify them. -->
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" id="appleTitle" content="RS KM Tracker">
 
@@ -92,23 +101,21 @@
       document.getElementById('appManifest').setAttribute('href', '/manifest-hr.json');
       document.getElementById('appleTitle').setAttribute('content', 'RS HR');
       document.title = 'R.S. Infotech — HR';
-      // The HR icon opens in Safari, not as a full-screen app, and this meta
-      // is the switch that decides that on iOS — removed here rather than
-      // deleted from the <head>, because the ENGINEER app at "/" keeps it.
+      // Nothing here adds apple-mobile-web-app-capable, which is the whole
+      // point: at "/hr/" the served HTML does not contain it, so the icon iOS
+      // creates opens in Safari and the iPhone's own pinch-zoom exists.
       //
-      // Not a preference: iOS gives a home-screen web app no pinch-zoom at
-      // all. HR could not reach the bottom of a report at 200% (the CSS
+      // Not a preference. iOS gives a home-screen web app no pinch-zoom at
+      // all. HR could not reach the bottom of a report at 200% — the CSS
       // magnification the app had to do for itself breaks WebKit's scrolling,
-      // twice measured correct in Chromium and twice still broken on the
-      // phone), and with the gesture handed back to the browser, nothing
-      // zoomed either — because in standalone there is no browser zoom to
-      // hand it to. Opening in Safari is what makes the iPhone's own zoom
-      // exist, and HR chose the address bar over the full-screen frame.
-      // manifest-hr.json says display:browser for the same reason; both are
-      // set because iOS versions differ over which one they read, and Android
-      // reads only the manifest.
-      var appleCapable = document.querySelector('meta[name="apple-mobile-web-app-capable"]');
-      if(appleCapable) appleCapable.remove();
+      // twice measured correct in Chromium and twice still broken on the phone
+      // — and once the gesture was handed back to the browser, nothing zoomed
+      // either, because in standalone there is no browser zoom to hand it to.
+      // Opening in Safari is what makes zoom exist, and HR chose the address
+      // bar over the full-screen frame. manifest-hr.json says display:browser
+      // for the same reason: both switches point the same way, because iOS
+      // versions differ over which they read and Android reads only the
+      // manifest.
       // Remembering the entry is a last resort for an icon that was installed
       // before the manifest was served per-path and still launches at "/".
       // It cannot rescue an iPhone: a home-screen web app there gets its own
@@ -116,6 +123,17 @@
       // visible to it on first launch. Such an icon has to be deleted and
       // added again.
       try{ localStorage.setItem('kmt_entry', 'hr'); }catch(e){}
+    } else {
+      // The engineer entry keeps its full-screen home-screen app. Added by
+      // script rather than left in the <head>, because the served HTML at
+      // "/hr/" is the same file and must not carry it — see the comment where
+      // the tag used to be. If iOS turns out to read only the file and ignores
+      // this, engineers get Safari's chrome too, which costs them a strip of
+      // screen and nothing else; HR getting zoom is worth that.
+      var cap = document.createElement('meta');
+      cap.setAttribute('name', 'apple-mobile-web-app-capable');
+      cap.setAttribute('content', 'yes');
+      document.head.appendChild(cap);
     }
     // Only trust the remembered entry when running as an installed app. In a
     // browser tab the URL is deliberate and must always decide, so somebody who
