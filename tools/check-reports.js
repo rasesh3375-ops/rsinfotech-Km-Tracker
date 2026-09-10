@@ -56,6 +56,12 @@ const CHECKS = [
   // it to Drive over the correct copy, and it never recomputes a month that
   // was finalised.
   ['check-report-reads.js',      'a report shows the month\'s real figures, or it shows nothing'],
+  // Not a payroll figure, but it belongs in the one command that gets run
+  // every time: it is a static scan with no dependencies, and it guards
+  // against re-introducing the line that switched HR's zoom off after every
+  // pinch — which took five rounds to find and will look like a reasonable
+  // fix to the next person who meets an iOS repaint bug.
+  ['check-no-zoom-lock.js',      'nothing in the app takes the user\'s zoom away'],
 ];
 
 let failed = 0;

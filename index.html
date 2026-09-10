@@ -9309,6 +9309,21 @@ function kmtResettleLoop_(){
 // content-only change a stale layer can end up skipping) -- run once
 // whenever a modal opens, and again whenever the page becomes visible
 // again, directly replicating what "sweeping tabs" was shown to fix.
+// Is anything actually painted over the page as a fixed overlay? A modal, or
+// the full-screen shell while it is still a shell — on a phone a report is now
+// ordinary page content (.kmt-fs-inflow) and is deliberately not one.
+function kmtAnyFixedOverlayOpen_(){
+  if(document.querySelector('.modal-overlay')) return true;
+  const fsRoot = document.getElementById('fullscreenSheetRoot');
+  return !!(fsRoot && !fsRoot.classList.contains('hidden') &&
+            window.getComputedStyle(fsRoot).position === 'fixed');
+}
+// Has the person pinched the page in? visualViewport.scale is the browser's
+// own zoom, which is the only zoom there is on touch now.
+function kmtPageIsZoomed_(){
+  const vv = window.visualViewport;
+  return !!(vv && Math.abs(vv.scale - 1) > 0.01);
+}
 function kmtNudgeRepaint_(){
   const els = document.querySelectorAll('.modal-overlay');
   // A real scroll event, not just a style/transform change -- tried first,
@@ -9346,26 +9361,34 @@ function kmtNudgeRepaint_(){
   // mid pinch-zoom), so the nudge needs a target even when neither of the
   // above exists. window is what actually scrolls the page here (see the
   // hrContent/window.scrollTo split throughout hrNavigate), not body.
-  const py = window.scrollY;
-  window.scrollTo(window.scrollX, py + 1);
-  window.scrollTo(window.scrollX, py);
-  // Retrying the scroll+transform combination five times over the settle
-  // window (see kmtSettleAndReveal_) STILL didn't reliably fix it --
-  // confirmed on a real device, cut-off diagnostic line and bleed-through
-  // both still present. That means the technique itself, not just the
-  // number of attempts, wasn't forcing what an app-switch forces. Toggling
-  // the viewport meta tag's own content attribute is a more authoritative,
-  // widely-documented lever for forcing iOS to fully reprocess viewport
-  // metrics than any in-page style or scroll change -- worth trying
-  // alongside the scroll/transform nudge, not instead of it, since there's
-  // no certainty yet which (if either) actually works on this device.
-  const meta = document.querySelector('meta[name="viewport"]');
-  const metaOriginal = meta ? meta.getAttribute('content') : null;
-  if(meta) meta.setAttribute('content', metaOriginal + ', maximum-scale=1');
+  // ...but not while the page is zoomed in. Scrolling the document out from
+  // under somebody who has pinched in to read a figure throws away where they
+  // were looking, and the bleed-through this repairs is a fixed-overlay
+  // problem, which a zoomed in-flow report does not have.
+  if(!kmtPageIsZoomed_()){
+    const py = window.scrollY;
+    window.scrollTo(window.scrollX, py + 1);
+    window.scrollTo(window.scrollX, py);
+  }
+  // There used to be a third lever here: writing `maximum-scale=1` onto the
+  // viewport meta and taking it off a frame later, as a way of forcing iOS to
+  // reprocess viewport metrics. It has been removed, and must not come back.
+  //
+  // maximum-scale=1 does not merely nudge WebKit — it tells iOS the page may
+  // not be zoomed. Written five times over 200ms (kmtRetryNudgeRepaint_), from
+  // a touchend that fires at the end of every pinch, it switched the user's
+  // zoom off the instant they let go. That is exactly what HR reported once
+  // the browser owned the gesture: "sometimes zoom working and many times not
+  // working... then one time it works, then zoom not working at all." The app
+  // was undoing the pinch a fraction of a second after each one succeeded.
+  //
+  // It was written for a bug that no longer exists here — fixed overlays
+  // bleeding through in an iOS home-screen app, where nothing could zoom
+  // anyway — and turning off a person's ability to zoom is never a repair
+  // worth making. The scroll and transform nudges above remain.
   window.requestAnimationFrame(() => {
     els.forEach(el => { el.style.transform = 'translateZ(0)'; });
     if(fsOpen) fsRoot.style.transform = 'translateZ(0)';
-    if(meta) meta.setAttribute('content', metaOriginal);
     resettleFixedOverlays_();
   });
 }
@@ -9460,7 +9483,15 @@ if(!window.KMT_NUDGE_LISTENERS_ARMED_){
   document.addEventListener('touchend', e => {
     if(kmtPinchInProgress_ && e.touches.length === 0){
       kmtPinchInProgress_ = false;
-      kmtRetryNudgeRepaint_();
+      // Only when there is actually a fixed overlay to repair. This repairs
+      // WebKit leaving a position:fixed overlay painted stale after a pinch —
+      // so with no overlay open there is nothing to repair, and running it
+      // anyway meant five rounds of scroll-and-transform on the plain page at
+      // the end of every single pinch, which is the other half of why zoom
+      // felt like it worked sometimes and not others. A report on a phone is
+      // in flow now (see .kmt-fs-inflow), so this correctly does nothing for
+      // the screen HR was actually trying to zoom.
+      if(kmtAnyFixedOverlayOpen_()) kmtRetryNudgeRepaint_();
     }
   }, { passive:true });
   document.addEventListener('touchcancel', () => { kmtPinchInProgress_ = false; }, { passive:true });
