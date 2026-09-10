@@ -1769,9 +1769,9 @@
   border:1px solid var(--amber);background:#FEF8EC;border-radius:10px;
   padding:12px 14px;margin:0 0 14px;}
 .od-merge-offer>div{flex:1;min-width:200px;}
-/* The compact-view card's own action row. The table's .od-actions relies on a
-   cell to sit in; a card has the full width, so these wrap onto a second line
-   rather than running off the right edge the way the table's did. */
+/* The compact-view card's own action row. The table's buttons wrap inside
+   .od-acts, sized to a table cell; a card has the full width, so these wrap
+   against that instead of running off the right edge the way the table's did. */
 .od-card-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px;}
 .od-card-actions .btn{flex:0 0 auto;}
 /* A document's name is the one thing that must stay readable, and file names
@@ -2002,9 +2002,52 @@
 .od-main-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;}
 .od-main-title{font-size:16px;font-weight:800;color:var(--navy);}
 .od-main-sub{font-size:12px;color:var(--muted);margin-top:2px;}
-.od-table{margin-top:10px;}
-.od-table .od-name{font-weight:600;word-break:break-word;}
-.od-actions{white-space:nowrap;}
+/* .table-wrap and .tbl were in the markup from the start but never had a line
+   of CSS, so the browser fell back to shrink-to-fit: every column narrowed
+   until the row fitted the panel, and the File name column — the one thing
+   nobody can identify a document by without — lost. Adding Edit and Replace
+   took it to six buttons and finished the job: the name collapsed to about
+   eight characters and broke a letter at a time, "2026-2027 Rene / wal
+   List.xl / sx", while Replace fell off the right-hand edge.
+   So the wrapper scrolls instead of the columns crushing, every cell stays on
+   its own line, and a name too long for its column ends in an ellipsis with
+   the full text on hover rather than being folded into a paragraph. The phone
+   never reaches any of this — below 760px these are cards (see the note above
+   the card markup, which is the same bug found on a phone first). */
+.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+.od-table{margin-top:10px;width:100%;border-collapse:collapse;}
+.od-table th,.od-table td{padding:8px 10px;text-align:left;vertical-align:middle;
+  white-space:nowrap;border-bottom:1px solid var(--line);font-size:12.5px;}
+/* Headers wrap, cells do not. "UPLOADED ON" is wider than any date under it,
+   so a nowrap header was setting that column's width from the label rather
+   than the data — about 60px of the panel spent on two words. */
+.od-table th{font-size:11px;font-weight:700;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.04em;white-space:normal;}
+/* The name column takes whatever the other columns leave, and no more.
+   width:100% with max-width:0 is the standard way to say that to an
+   auto-layout table: the cell absorbs the slack, and because it may shrink
+   below its content it ellipsises instead of forcing the table wider. A fixed
+   max-width instead of this looked fine and pushed Actions off the right of
+   the panel, where six buttons are no use to anybody. min-width is the floor —
+   below that the wrapper scrolls rather than the name shrinking to nothing. */
+.od-table .od-name{font-weight:600;width:100%;max-width:0;min-width:200px;
+  overflow:hidden;text-overflow:ellipsis;}
+/* Six buttons do not always fit beside five columns, so they wrap onto a second
+   line rather than the table growing wider than the panel and carrying Delete
+   off the right-hand edge. A slightly taller row beats a button nobody can
+   reach.
+   The wrapping is done by a flex box INSIDE the cell, not by the cell: a table
+   cell in auto layout will happily overflow its table rather than shrink below
+   its content, so white-space:normal on the <td> alone changed nothing — the
+   buttons stayed on one line and the column stayed 355px wide.
+   The floor is a min-width on the flex box rather than a width on the <td>,
+   because the <td> loses. The name cell asks for width:100% to soak up the
+   slack, and against that a stated width on this column counted for nothing —
+   it collapsed to 81px, the widest single button, stacking all six on top of
+   one another in 169px rows. A min-width the flex box cannot go below is the
+   one thing auto layout has to honour. Three buttons across, two down. */
+.od-acts{display:flex;flex-wrap:wrap;gap:4px;min-width:210px;}
+.od-acts .btn.tiny{padding:4px 8px;margin:0;}
 .btn.tiny{padding:4px 9px;font-size:11px;min-height:0;}
 </style>
 </head>
@@ -25657,13 +25700,13 @@ function odTableHtml_(title, docs, sub, showWhere){
     ? fmtDateIN(new Date(d.uploadedAt).toISOString().slice(0, 10)) : '—';
 
   const rows = docs.map(d => `<tr>
-    <td class="od-name">${escapeHtml(d.name)}</td>
+    <td class="od-name" title="${escapeHtml(d.name)}">${escapeHtml(d.name)}</td>
     <td>${escapeHtml(officeDocKind_(d.name, d.mimeType))}</td>
     <td>${escapeHtml(officeDocSize_(d.size))}</td>
     <td>${escapeHtml(uploadedOn(d))}</td>
     <td>${escapeHtml(d.uploadedBy || '—')}</td>
     ${showWhere ? `<td>${escapeHtml(d.folder)} › ${escapeHtml(d.year)}</td>` : ''}
-    <td class="od-actions">${actionsFor(d)}</td>
+    <td class="od-actions"><div class="od-acts">${actionsFor(d)}</div></td>
   </tr>`).join('');
 
   // A seven-column table cannot be made to fit a phone. Squeezed into 390px it
