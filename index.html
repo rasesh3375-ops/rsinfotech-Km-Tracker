@@ -909,6 +909,28 @@
   .gs-overlay > .gs-panel,
   #fullscreenSheetRoot > .fullscreen-header,
   #fullscreenBody > *{ zoom:var(--kmt-fixed-zoom, 1); }
+  /* ...except that the title bar is app furniture, not the report. Left to
+     grow with everything else it took a fifth of a phone screen at 200% —
+     three wrapped lines of "Apprentice Salary Report — September 2026" before
+     a single figure — so zooming in to read a report gave back a good part of
+     what it cost. Its growth is capped instead: enlarge what HR zoomed in to
+     read, not the frame around it.
+     Capped rather than pinned at 1. The ✕ is a touch target, and somebody at
+     200% is there because things are hard to see; 1.25 keeps it comfortably
+     bigger than at rest while holding the bar to two lines at the longest
+     report title. Written as one min() so there is no second breakpoint to
+     keep in step with the zoom range. */
+  #fullscreenSheetRoot > .fullscreen-header{ zoom:min(var(--kmt-fixed-zoom, 1), 1.25); }
+  /* The same cap on the other browser behaviour. Where fixed descendants DO
+     inherit the app's zoom (Chromium), --kmt-fixed-zoom is 1 and the rule above
+     has nothing to hold back — the bar is already being scaled from <body>, so
+     the cap has to be a counter-scale rather than a smaller zoom. Divided so
+     the product lands on the same 1.25 either way: one figure to change, not
+     two that can drift. Measured at 1280x800 — 114px of title bar at 200%
+     becomes 71px, the same as the branch above. */
+  html.kmt-fixed-zooms #fullscreenSheetRoot > .fullscreen-header{
+    zoom:min(1, calc(1.25 / var(--kmt-app-zoom, 1)));
+  }
   /* ...and the other half of the same browser difference, which the rule above
      does not cover.
      Where fixed descendants ARE scaled by the app's zoom, the overlay ITSELF
