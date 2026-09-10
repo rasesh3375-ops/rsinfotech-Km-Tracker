@@ -5748,15 +5748,54 @@ async function hashPassword(password, salt){
 }
 
 // ---- server-side auth calls (backend now verifies logins itself) ----
+
+// Logging in is the one call that is worth waiting for. Everything else can
+// fail and leave a screen half-built; this one locks HR out of the app
+// entirely, and it is also the call most likely to meet a cold Apps Script —
+// it is the first request of the day, every day.
+//
+// The default 9,000ms budget with an 8,000ms per-attempt cap gave login ONE
+// real attempt: the first try could use 8s of the 9s, the 400ms backoff took
+// most of what was left, and the loop's own "don't open an attempt there is no
+// time to finish" guard then broke out. So the three retries apiFetch exists
+// for were unreachable from the login screen, which is precisely where the
+// backend's flakiness is least survivable. Sized here for three genuine tries.
+const LOGIN_BUDGET_MS = 25000;
+const LOGIN_ATTEMPT_MS = 10000;
+
+// Why the backend could not be reached, in its own terms.
+//
+// Every one of these used to reach HR as "Network error. Check your connection
+// and try again." — a timeout, a Google error page, the script lock being busy,
+// and an actually-dropped connection alike. So the one instruction it gave was
+// the wrong one for three of the four, HR checked a connection that was fine,
+// and there was nothing to tell anyone which of the four it was. The same
+// fault, in the same words, as the "Upload failed" that turned out to be the
+// server being busy.
+function backendFailureMessage_(e){
+  const m = String((e && e.message) || '');
+  if(e && e.name === 'AbortError')
+    return 'The server did not answer in time. Google Apps Script is often slow on the ' +
+           'first request of the day — wait a few seconds and press Log in again.';
+  if(/non-JSON/i.test(m))
+    return 'Google sent an error page instead of the app’s data. If this keeps happening, ' +
+           'the backend may need to be re-deployed — tell whoever maintains the app.';
+  if(/busy/i.test(m))
+    return 'The server was busy with another save. Try again in a moment.';
+  if(/Failed to fetch|NetworkError|Load failed/i.test(m))
+    return 'Could not reach the server at all. Check your connection and try again.';
+  return m ? ('The server said: ' + m) : 'Could not reach the server. Try again.';
+}
+
 async function serverLogin(role, username, password){
   try{
     const res = await apiFetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'login', role, username, password })
-    });
+    }, 3, LOGIN_BUDGET_MS, LOGIN_ATTEMPT_MS);
     return await res.json();
-  }catch(e){ return { error: 'Network error. Check your connection and try again.' }; }
+  }catch(e){ return { error: backendFailureMessage_(e) }; }
 }
 async function serverLogout(){
   try{
@@ -5884,11 +5923,14 @@ async function checkHrAccountExists(){
     // Cache-busted for the same reason as remoteGet/remoteGetAllEmployees_ —
     // this one's answer barely ever changes, but a cached "no account yet"
     // from a stale response would wrongly hide the login form.
-    const res = await apiFetch(API_URL + '?action=hrAccountExists&_=' + Date.now() + Math.random().toString(36).slice(2));
+    // The same room as the login it gates — this runs first, against the same
+    // cold Apps Script, and on the same screen.
+    const res = await apiFetch(API_URL + '?action=hrAccountExists&_=' + Date.now() + Math.random().toString(36).slice(2),
+                               undefined, 3, LOGIN_BUDGET_MS, LOGIN_ATTEMPT_MS);
     const data = await res.json();
     if(data && typeof data.exists === 'boolean') return data;
     return { error: 'Unexpected response from the server.' };
-  }catch(e){ return { error: 'Could not reach the server.' }; }
+  }catch(e){ return { error: backendFailureMessage_(e) }; }
 }
 async function serverRecoverHr(){
   try{
