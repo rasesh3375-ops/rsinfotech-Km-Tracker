@@ -4899,6 +4899,17 @@ window.addEventListener('unhandledrejection', ev => {
   const e = ev.reason;
   if(!e || !(e.readFailed || e.writeFailed)) return;
   ev.preventDefault();
+  // A read that fails part way through a report leaves whichever box was
+  // building stuck on its "Building…" placeholder for good, which reads as the
+  // app having hung rather than as the failure the alert is about to describe.
+  // Every transient placeholder carries .report-building for this.
+  if(e.readFailed){
+    Array.prototype.forEach.call(document.querySelectorAll('.report-building'), el => {
+      const box = el.parentElement;
+      if(box) box.innerHTML = '<div class="empty">This report could not be built — ' + e.message +
+        ' Nothing was filed to Drive and nothing was changed. Try again in a moment.</div>';
+    });
+  }
   alert(e.readFailed
     ? 'Could not read that list from the server: ' + e.message + '\n\n' +
       'Nothing was changed. Check your connection and try again.'
@@ -5228,8 +5239,17 @@ async function getAttendanceMany(ids){
       }
     }catch(e){}
     if(!handledByBatch){
-      // Older backend, or the call failed — one at a time, as before.
-      const each = await Promise.all(ids.map(id => getAttendance(id).catch(() => ({}))));
+      // One at a time — a batch of forty can fail on size where each of them
+      // succeeds. What is gone is the `.catch(() => ({}))` that used to sit
+      // here: an employee whose read failed was handed back as an employee
+      // with no attendance at all, and an unmarked past day scores as Absent,
+      // so their salary came out ₹0 and was printed, subtotalled into the
+      // grand total, and filed to Drive over the correct copy. Nobody was
+      // told anything had failed. This is the same fault the save side had
+      // (see tools/check-attendance-save.js) — the read side kept it, where
+      // it is worse, because a wrong figure on a report gets acted on.
+      // Now one unreadable employee stops the whole report.
+      const each = await Promise.all(ids.map(id => getAttendance(id)));
       ids.forEach((id, i) => { out[id] = each[i] || {}; });
     }
   }
@@ -5325,18 +5345,30 @@ async function getAttendance(employeeId){
     // Whole history, merged on the backend across every financial year this
     // employee has, plus whatever is still in the legacy attendance:<id> key.
     const data = await backendAction({ action: 'getAttendanceAll', ids: [employeeId] });
-    let att;
-    if(data && data.values){
-      att = data.values[employeeId] || {};
-    } else {
-      // Backend without getAttendanceAll — the legacy whole-record key,
-      // exactly as before, so this still works before the Apps Script side
-      // is pasted in.
-      const v = await remoteGet(key);
-      const remoteVal = (v && v.value !== undefined && v.value !== null) ? v.value : null;
-      try{ att = remoteVal ? JSON.parse(remoteVal) : {}; }catch(e){ att = {}; }
+    // No answer means no attendance figure, and it must say so rather than
+    // hand back {}. An empty record is not neutral here: computeAttendanceSummary
+    // scores every unmarked past day as Absent, so {} for a month somebody
+    // worked is a salary of ₹0 — printed, subtotalled, and filed to Drive over
+    // the correct copy. That is what one phone showed for August 2026, the
+    // Accountant sheet totalling ₹2,67,573 against the other phone's ₹8,46,321.
+    //
+    // There used to be a fallback here to the legacy attendance:<id> key for a
+    // backend too old to have getAttendanceAll. It has been removed, because
+    // since attendance was split per financial year that key is only a BASELINE
+    // — the real days live in attendance:<id>:<FY> and the backend overlays
+    // them (mergedAttendanceForId_). Reading it alone answers with a fraction
+    // of the year and no sign that anything is missing, which is a worse
+    // failure than not answering: backendAction returns the same null whether
+    // an action is unknown or the server was merely busy, so the fallback fired
+    // far more often for "busy" than for "old backend".
+    if(!(data && data.values)){
+      const err = new Error('Attendance could not be read' +
+                            (lastBackendError ? ' — ' + lastBackendError : '') + '.');
+      err.readFailed = true;
+      throw err;
     }
-    att = await withAlwaysPresentFill_(employeeId, att);
+    // The batch answered, so an id it does not mention has nothing recorded.
+    const att = await withAlwaysPresentFill_(employeeId, data.values[employeeId] || {});
     primeSharedRead(key, JSON.stringify(att));
     return att;
   })();
@@ -10565,9 +10597,16 @@ function salaryMobileTotalsCard(label, t, cssClass){
 let payrollLockIndex_ = null;
 const payrollLockRows_ = {};
 
+// safeGetOrThrow_, never safeGet. safeGet answers null for a read that failed
+// and for a key that was never set alike, and here those two mean opposite
+// things: "no month is finalised" against "I could not find out". Taking the
+// first for the second unlocked every finalised month — and then cached that
+// answer in payrollLockIndex_ for the rest of the session, so one bad moment at
+// load time recomputed August's payroll on that device until it was reloaded.
+// Nothing is remembered unless it actually came back.
 async function payrollLockIndex(force){
   if(payrollLockIndex_ && !force) return payrollLockIndex_;
-  const raw = await safeGet(PAYROLL_LOCK_INDEX_KEY, true);
+  const raw = await safeGetOrThrow_(PAYROLL_LOCK_INDEX_KEY);
   let idx = {};
   try{ idx = raw ? (JSON.parse(raw) || {}) : {}; }catch(e){ idx = {}; }
   payrollLockIndex_ = idx;
@@ -10578,22 +10617,46 @@ async function payrollLockIndex(force){
 // follows, loading any it has not read yet. Everything already loaded stays in
 // force: a finalised month is finalised on every screen, not only on the one
 // that happened to ask for it.
+// Every month whose finalised-state this session has actually established —
+// the list handed to setPayrollLocks so shared/report-logic.js can refuse to
+// price a whole month nobody looked up, rather than pricing it as though it
+// were open. Grows as screens ask; never shrinks, because a month that was
+// read once stays read.
+const payrollLockMonthsRead_ = new Set();
+
 async function usePayrollLocks_(yms, force){
   const idx = await payrollLockIndex(force);
   const want = (Array.isArray(yms) ? yms : [yms]).filter(Boolean);
   for(const ym of want){
-    if(!idx[ym] || payrollLockRows_[ym] !== undefined) continue;
-    const raw = await safeGet(payrollLockKey(ym), true);
+    if(!idx[ym]){ payrollLockMonthsRead_.add(ym); continue; }   // read, and open
+    if(payrollLockRows_[ym] !== undefined){ payrollLockMonthsRead_.add(ym); continue; }
+    // safeGetOrThrow_ for the same reason as the index above: safeGet's null
+    // for a failed read is indistinguishable from its null for "nothing
+    // stored", and here that difference is a finalised month either standing
+    // or being recomputed. A month left unestablished raises out of this call
+    // rather than being remembered as empty and quietly unlocked.
+    const raw = await safeGetOrThrow_(payrollLockKey(ym));
     let stored = null;
     try{ stored = raw ? JSON.parse(raw) : null; }catch(e){ stored = null; }
-    payrollLockRows_[ym] = payrollLockUnpack(stored);
+    const rows = payrollLockUnpack(stored);
+    if(!rows || !Object.keys(rows).length){
+      // The index says this month is finalised but its figures are not there
+      // or will not parse. Recomputing it is precisely what finalising exists
+      // to prevent, so nothing is shown at all.
+      const err = new Error('Finalised figures for ' + monthLabel(ym) + ' could not be read, ' +
+                            'so its salaries cannot be shown. Nothing has been changed.');
+      err.readFailed = true;
+      throw err;
+    }
+    payrollLockRows_[ym] = rows;
+    payrollLockMonthsRead_.add(ym);
   }
   const inForce = {};
   Object.keys(payrollLockRows_).forEach(ym => {
     const rows = payrollLockRows_[ym];
     if(idx[ym] && rows && Object.keys(rows).length) inForce[ym] = rows;
   });
-  setPayrollLocks(inForce);
+  setPayrollLocks(inForce, Array.from(payrollLockMonthsRead_));
   return idx;
 }
 
@@ -10913,6 +10976,10 @@ async function renderStatutoryReport(key, label){
   const dateList = [];
   for(let d=1; d<=monthDays; d++) dateList.push(year + '-' + String(month).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
 
+  // Whether this month is finalised decides every figure below it, so it is
+  // established before one of them is worked out. See usePayrollLocks_.
+  await usePayrollLocks_(monthVal);
+
   const employees = (await getEmployees()).filter(e => employedDuringPeriod_(e, dateList[0], dateList[dateList.length-1]));
   if(!employees.length){
     box.innerHTML = '<div class="empty">Add employees in Employee Master first.</div>';
@@ -11163,6 +11230,10 @@ async function renderApprenticeSalaryReport(){
   const dateList = [];
   for(let d=1; d<=monthDays; d++) dateList.push(year + '-' + String(month).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
 
+  // Whether this month is finalised decides every figure below it, so it is
+  // established before one of them is worked out. See usePayrollLocks_.
+  await usePayrollLocks_(monthVal);
+
   // Whoever was under the Apprentices heading THIS month, not whoever is
   // today — a since-recorded promotion off apprentice must not pull them out
   // of a month they were still on it for.
@@ -11254,9 +11325,15 @@ async function renderFinalSalarySheet(){
   const dateList = [];
   for(let d = 1; d <= monthDays; d++) dateList.push(monthVal + '-' + String(d).padStart(2,'0'));
 
+  // Whether this month is finalised decides every figure below it, so it is
+  // established before one of them is worked out. This report is where the
+  // absence of it showed: finalised August 2026 was recomputed here on one
+  // phone and read from the freeze on another. See usePayrollLocks_.
+  await usePayrollLocks_(monthVal);
+
   const employees = (await getEmployees()).filter(e => employedDuringPeriod_(e, dateList[0], dateList[dateList.length-1]));
   if(!employees.length){ box.innerHTML = '<div class="empty">No employees on roll.</div>'; return; }
-  box.innerHTML = '<p class="dash-muted">Building…</p>';
+  box.innerHTML = '<p class="dash-muted report-building">Building…</p>';
   const holidayMap = await getHolidayMap_local();
   await getAttendanceMany(employees.map(e => e.id));
 
@@ -11489,6 +11566,10 @@ async function renderConsultantReport(){
   const dateList = [];
   for(let d=1; d<=monthDays; d++) dateList.push(year + '-' + String(month).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
 
+  // Whether this month is finalised decides every figure below it, so it is
+  // established before one of them is worked out. See usePayrollLocks_.
+  await usePayrollLocks_(monthVal);
+
   // The consultant works R.S. Infotech's own payroll only. Apprentices,
   // Contractors and R.S.IT Solution are separate books that were being folded
   // into this sheet, overstating every column and the headcount with it.
@@ -11616,6 +11697,11 @@ async function renderConsultantSummaryReport(){
   const monthDays = new Date(year, month, 0).getDate();
   const dateList = [];
   for(let d=1; d<=monthDays; d++) dateList.push(year + '-' + String(month).padStart(2,'0') + '-' + String(d).padStart(2,'0'));
+
+  // Whether this month is finalised decides every figure below it — the
+  // summary totals and the wage register both — so it is established before
+  // one of them is worked out. See usePayrollLocks_.
+  await usePayrollLocks_(monthVal);
 
   // R.S.IT Solution has no PF or ESI, but PT still applies to it (see
   // SALARY_HEADINGS.rsit.pt and the standalone PT Report, which already
@@ -11799,6 +11885,11 @@ async function renderSalaryComparisonReport(){
   const [year, month] = monthVal.split('-').map(Number);
   const curr = monthContext_(year, month);
   const prev = monthContext_(month === 1 ? year - 1 : year, month === 1 ? 12 : month - 1);
+
+  // Both months, because this report prices both. Whether each is finalised
+  // decides its own column, and one of the two being finalised is the normal
+  // case here — last month closed, this month still open. See usePayrollLocks_.
+  await usePayrollLocks_([prev.monthVal, curr.monthVal]);
 
   const employees = await getEmployees();
   if(!employees.length){
@@ -14133,6 +14224,10 @@ const CHALLAN_FIELDS = [
 async function challanAppTotals_(ym){
   const dateList = monthDateList_(ym);
   const monthDays = dateList.length;
+  // The challan is compared against the month as it was FINALISED, when it has
+  // been — otherwise a challan that matches what was actually paid would be
+  // reported as disagreeing with a freshly recomputed figure. See usePayrollLocks_.
+  await usePayrollLocks_(ym);
   const employees = (await getEmployees()).filter(e =>
     employedDuringPeriod_(e, dateList[0], dateList[monthDays - 1]));
   const holidayMap = await getHolidayMap_local();
@@ -14311,13 +14406,15 @@ async function renderMonthlyBriefing(){
   if(!box) return;
   const ym = getMonthYearValue('briefMonthSel', 'briefYearSel');
   if(!ym){ box.innerHTML = '<div class="empty">Pick a month first.</div>'; return; }
-  box.innerHTML = '<div class="empty">Reading the month…</div>';
+  box.innerHTML = '<div class="empty report-building">Reading the month…</div>';
 
   const dateList = monthDateList_(ym);
   const monthDays = dateList.length;
   const prevList = monthDateList_(prevMonthOf_(ym));
   let brief;
   try{
+    // Both months, because the briefing prices both. See usePayrollLocks_.
+    await usePayrollLocks_([prevMonthOf_(ym), ym]);
     const employees = await getEmployees();
     const holidayMap = await getHolidayMap_local();
     const active = employees.filter(e => e.employmentStatus !== 'left');
@@ -14403,6 +14500,9 @@ async function runPrePayrollCheck_(ym){
   const monthDays = dateList.length;
   const prevYm = prevMonthOf_(ym);
   const prevList = monthDateList_(prevYm);
+  // Both months, because the check compares one against the other. Whether
+  // each is finalised decides its own figures. See usePayrollLocks_.
+  await usePayrollLocks_([prevYm, ym]);
 
   const employees = await getEmployees();
   const holidayMap = await getHolidayMap_local();
@@ -20841,7 +20941,7 @@ async function generateRoleReport(){
   const empId = document.getElementById('roleRptEmp').value;
   const typeKey = (ROLE_REPORT_TYPES[selectedRoleReportIdx] || ROLE_REPORT_TYPES[0]).key;
   if(!empId){ box.innerHTML = '<p class="dash-muted">Add an employee in Employee Master first.</p>'; return; }
-  box.innerHTML = '<p class="dash-muted">Building report…</p>';
+  box.innerHTML = '<p class="dash-muted report-building">Building report…</p>';
   const emp = (await getEmployees()).find(e => e.id === empId);
   if(!emp){ box.innerHTML = '<p class="dash-muted">That employee could not be found.</p>'; return; }
   const html = await buildRoleReportHtml(emp, typeKey);
@@ -29738,6 +29838,10 @@ async function generateLetter(){
     const dateList = datesBetween_(salaryMonth + '-01',
       salaryMonth + '-' + String(monthDays).padStart(2, '0'));
     const holidayMap = await getHolidayMap_local();
+    // A slip for a finalised month prints what was finalised, not a fresh
+    // recomputation of it — the slip and the sheet cannot disagree about what
+    // somebody was paid, and that is only true if this knows. See usePayrollLocks_.
+    await usePayrollLocks_(salaryMonth);
     const sal = await computeSalaryForEmployee(matched, dateList, monthDays, holidayMap);
     f.basic = Math.round(sal.basic); f.hra = Math.round(sal.hra); f.lta = Math.round(sal.lta);
     f.other = 0; f.gross = Math.round(sal.gross); f.conveyance = Math.round(sal.conveyance);

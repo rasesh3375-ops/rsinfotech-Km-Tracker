@@ -237,6 +237,58 @@ console.log('\nstoring it\n');
   check('a real roster is not', small.tooBig, false);
 }
 
+// A finalised month is only honoured if something LOADED it first, and doing
+// that was left to each screen — where exactly one screen ever did it.
+// renderSalarySheet called usePayrollLocks_; the Final Salary Sheet for
+// Accountant, both statutory returns, the Consultant Report, the Consultant
+// Summary, the Apprentice report and the salary slips did not. So finalised
+// August 2026 stood or was recomputed depending on whether HR had happened to
+// open the Salary Sheet first in that session — one phone showed ₹8,46,321 and
+// Behra Abhimanyu at ₹27,580, the other ₹2,67,573 and Behra at ₹0, same login,
+// same report, same month.
+//
+// setPayrollLocks now takes the months whose state was actually established,
+// and pricing a whole month that is not among them raises instead of quietly
+// computing. That is what makes the NEXT report — one written next year, by
+// somebody who has never heard of locks — fail loudly rather than pay wrongly.
+console.log('\na whole month nobody looked up is a fault, not an open month\n');
+{
+  L.setPayrollLocks({ '2026-07': julBefore ? { '8': julBefore } : {} }, ['2026-07']);
+  let threw = null;
+  try{ salOf(EMP(), attOf(), AUG); }catch(e){ threw = e; }
+  check('August was never established, so it refuses to price it',
+        !!(threw && threw.payrollLockNotEstablished === '2026-08'), true);
+  check('  and says which month, so it can be fixed',
+        /2026-08/.test(String(threw && threw.message)), true);
+
+  // The whole point of establishing it: an OPEN month that was looked up and
+  // found open computes exactly as it always did.
+  L.setPayrollLocks({}, ['2026-07', '2026-08']);
+  check('an open month that WAS looked up still computes',
+        salOf(EMP(), attOf(), AUG).netSalary > 0, true);
+
+  // A part month — a joiner's first days, a leaver's last — is priced from the
+  // record either way and needs no lock, so it must not be caught by this.
+  L.setPayrollLocks({}, ['2026-07']);
+  const partAug = AUG.slice(0, 10);
+  check('a part month is not caught by the guard',
+        salOf(EMP(), attOf(), partAug, partAug.length).netSalary > 0, true);
+
+  // Passing no list at all leaves the guard off, which is how Code 2.js runs:
+  // it reads every key of the sheet in one go and deliberately degrades to
+  // recomputing a month it cannot parse rather than failing the 8 AM pack.
+  L.setPayrollLocks({});
+  check('a caller that establishes nothing is unaffected',
+        salOf(EMP(), attOf(), AUG).netSalary > 0, true);
+
+  // Finalising must ignore the guard as well as the locks — it is the act of
+  // deciding what the figures ARE, and the month it is deciding has by
+  // definition not been established yet.
+  L.setPayrollLocks({}, ['2026-07']);
+  const built = L.buildPayrollLock([EMP()], { '8': attOf() }, AUG, AUG.length, {});
+  check('finalising a month builds it rather than refusing', built.employees, 1);
+}
+
 L.setPayrollLocks(null);
 console.log('\n' + (fails.length ? fails.length + ' FAILURE(S):\n  ' + fails.join('\n  ') : 'PASS'));
 process.exit(fails.length ? 1 : 0);

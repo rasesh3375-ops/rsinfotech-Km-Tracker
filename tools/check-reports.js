@@ -51,6 +51,11 @@ const CHECKS = [
   // Kept for the same reason as check-recovery-history.js: it guards data
   // already recorded, and the code it covers only exists as browser functions.
   ['check-attendance-save.js',   'saving attendance never deletes the days it was not asked to change'],
+  // The read-side counterpart of the one above, and kept for the same reason.
+  // A report that cannot read the month says so; it never prints ₹0 and files
+  // it to Drive over the correct copy, and it never recomputes a month that
+  // was finalised.
+  ['check-report-reads.js',      'a report shows the month\'s real figures, or it shows nothing'],
 ];
 
 let failed = 0;

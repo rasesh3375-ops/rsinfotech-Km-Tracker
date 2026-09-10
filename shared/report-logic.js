@@ -1283,7 +1283,35 @@ function payrollLockUnpack(stored){
 // the same shape withSalaryCache uses, and for the same reason: this file may
 // not fetch anything itself, so the data is put in from outside.
 let payrollLocks_ = null;
-function setPayrollLocks(map){ payrollLocks_ = (map && Object.keys(map).length) ? map : null; }
+// Which months have actually had their finalised-state ESTABLISHED — looked up
+// and found either finalised (rows loaded above) or open. That is not the same
+// as payrollLocks_ having an entry: a month nobody looked up has no entry
+// either, and telling those two apart is the whole of the fault below.
+//
+// The comment further up says the freeze sits in computeSalaryFromAttendance so
+// that a report written next year is covered without being taught about locks.
+// It only held if something had put the month in force first, and doing THAT
+// was left to each screen — where exactly one screen ever did it.
+// renderSalarySheet called usePayrollLocks_; the Final Salary Sheet for
+// Accountant, both statutory returns, the Consultant Report, the Consultant
+// Summary, the Apprentice report and the salary slips never did. So whether
+// finalised August was honoured came down to whether HR happened to open the
+// Salary Sheet first in that session. One phone had, and showed ₹8,46,321 with
+// Behra Abhimanyu at ₹27,580; the other went straight to the Accountant sheet,
+// recomputed the finalised month live over attendance it had failed to read,
+// and showed ₹2,67,573 with Behra at ₹0 — same login, same month, same report.
+//
+// So a whole calendar month whose state was never established is a fault, and
+// it is raised here rather than quietly paid. Enforcement is opt-in per caller,
+// by passing the established list: index.html does, and gets it. Code 2.js
+// reads every key of the sheet in one go and deliberately degrades to
+// recomputing a month it cannot parse (see applyPayrollLocksFromMap_) rather
+// than failing the 8 AM report pack, so it passes nothing and is unaffected.
+let payrollLockMonthsKnown_ = null;
+function setPayrollLocks(map, knownMonths){
+  payrollLocks_ = (map && Object.keys(map).length) ? map : null;
+  payrollLockMonthsKnown_ = Array.isArray(knownMonths) ? knownMonths.slice() : null;
+}
 function payrollLocksInForce(){ return payrollLocks_; }
 function isPayrollMonthLocked(ym){ return !!(payrollLocks_ && payrollLocks_[ym]); }
 
@@ -1301,7 +1329,7 @@ function isPayrollMonthLocked(ym){ return !!(payrollLocks_ && payrollLocks_[ym])
 // frozen month's pay. So the first date must be the 1st, the last must be the
 // real last day of that month, and the count must be every day in between.
 function payrollLockedRow_(empId, dateList, monthDays){
-  if(!payrollLocks_ || empId === undefined || empId === null) return null;
+  if(empId === undefined || empId === null) return null;
   if(!Array.isArray(dateList) || !dateList.length) return null;
   const first = String(dateList[0] || '');
   if(first.slice(8) !== '01') return null;
@@ -1311,6 +1339,18 @@ function payrollLockedRow_(empId, dateList, monthDays){
   const days = new Date(y, m, 0).getDate();
   if(dateList.length !== days || monthDays !== days) return null;
   if(String(dateList[dateList.length - 1]) !== ym + '-' + String(days).padStart(2, '0')) return null;
+  // A whole month is being priced, so whether it is finalised decides the
+  // answer — and nobody established that. Computing it anyway is how a
+  // finalised month got recomputed on one phone and not the other, so this
+  // stops instead. Checked only after the whole-calendar-month tests above: a
+  // joiner's part month is priced from the record either way and needs no lock.
+  if(payrollLockMonthsKnown_ && payrollLockMonthsKnown_.indexOf(ym) === -1){
+    const err = new Error('Whether ' + ym + ' is a finalised month was never checked, so its ' +
+                          'salary cannot be worked out here. Reload the screen and try again.');
+    err.payrollLockNotEstablished = ym;
+    throw err;
+  }
+  if(!payrollLocks_) return null;
   const month = payrollLocks_[ym];
   if(!month) return null;
   const row = month[String(empId)];
@@ -1325,7 +1365,12 @@ function payrollLockedRow_(empId, dateList, monthDays){
 // freeze it was reopened to correct.
 function buildPayrollLock(employees, att, dateList, monthDays, holidayMap){
   const outer = payrollLocks_;
+  const outerKnown = payrollLockMonthsKnown_;
   payrollLocks_ = null;
+  // ...and with it the "was this month's state established?" guard below.
+  // Finalising is the one operation that must ignore any existing lock, so the
+  // question it guards does not arise here: the answer is being decided.
+  payrollLockMonthsKnown_ = null;
   try{
     const rows = {};
     (employees || []).forEach(e => {
@@ -1346,7 +1391,7 @@ function buildPayrollLock(employees, att, dateList, monthDays, holidayMap){
       // figures, which is worse than not finalising at all.
       tooBig: size > PAYROLL_LOCK_MAX_CHARS
     };
-  } finally { payrollLocks_ = outer; }
+  } finally { payrollLocks_ = outer; payrollLockMonthsKnown_ = outerKnown; }
 }
 
 function computeSalaryFromAttendance(emp, att, dateList, monthDays, holidayMap){

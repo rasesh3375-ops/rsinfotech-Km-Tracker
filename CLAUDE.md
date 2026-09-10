@@ -167,6 +167,36 @@ Three consequences worth knowing before touching it:
   `tools/check-undeclared.js` already reads both files and treats them as one
   global scope, which is what the browser does — the baseline is still 9.
 
+**A finalised month is read, not recomputed — and every report has to say so.**
+Eighteen fields on the employee record have no dated history, so editing any of
+them restated every month that employee had ever been paid. Finalising a month
+stores its figures as they stand, and `computeSalaryFromAttendance` then hands
+back what was stored. That freeze sits in the one function every sheet, export,
+payslip and emailed report reaches its figures through — but it only applies to
+months that have been **loaded**, and loading them was left to each screen.
+Exactly one screen did it. So the Final Salary Sheet for Accountant, both
+statutory returns, the Consultant Report and Summary, the Apprentice report and
+the salary slips all recomputed finalised August 2026 from scratch — unless HR
+happened to have opened the Salary Sheet first in the same session, which is why
+two phones on the same login showed ₹8,46,321 and ₹2,67,573 for the same report.
+So: **`await usePayrollLocks_(ym)` before any figure for `ym` is worked out**,
+and `setPayrollLocks` is told which months were established, so pricing a whole
+month nobody looked up raises instead of quietly computing.
+`tools/check-report-reads.js` asserts both — the runtime guard, and statically
+that no function calling `computeSalaryForEmployee`,
+`computeSalaryFromAttendance` or one of the shared builders is missing the call.
+
+**An empty read and a failed read are never the same thing.** `getAttendance`
+and `getAttendanceMany` used to answer `{}` for both. An empty record means
+every past day is unmarked, an unmarked past day scores as Absent, and Absent
+means ₹0 — printed, added into the grand total, and filed to Drive over the
+correct copy, with nothing on screen to say a read had failed. They now raise.
+The same rule holds for the finalised-month keys: read them with
+`safeGetOrThrow_`, never `safeGet`, whose null means "nothing stored" and
+"could not find out" alike — and there that difference is a finalised month
+either standing or being recomputed. A report shows the month's real figures or
+it shows nothing.
+
 **Rules live in config, not in code.** `SALARY_HEADINGS`, `PF_RULES`,
 `ESI_RULES`, `LEAVE_POLICY`, `PAYROLL_MASTER`, `LETTER_FIELDS`,
 `IMPORT_COLUMNS`, `FINANCIAL_YEAR`. Changing PF from Basic + HRA to Basic only
