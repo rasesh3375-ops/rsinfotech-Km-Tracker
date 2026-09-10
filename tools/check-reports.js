@@ -48,6 +48,9 @@ const CHECKS = [
   // when jsdom is not installed.
   ['check-recovery-history.js',  'stopping or changing a recovery never restates a month already paid'],
   ['check-payroll-lock.js',      'a finalised month does not move, whatever is edited afterwards'],
+  // Kept for the same reason as check-recovery-history.js: it guards data
+  // already recorded, and the code it covers only exists as browser functions.
+  ['check-attendance-save.js',   'saving attendance never deletes the days it was not asked to change'],
 ];
 
 let failed = 0;

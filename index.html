@@ -5084,16 +5084,42 @@ async function getAttendanceRange(ids, from, to){
 // by the Attendance Sheet's save, which only ever needs the one or two years
 // the edited dates fall in. `pairs` is [{employeeId, fy}, ...]; the result is
 // keyed by 'employeeId|fy' to match.
+// An empty record and an unreadable one are NOT the same thing, and this
+// function is where they used to be confused. It answers {} for a bucket that
+// genuinely holds nothing, and null for one it could not read.
+//
+// The only caller merges its edits into what comes back and writes the result
+// over the whole financial-year key. So a failed read answered as {} did not
+// mean "nothing to merge into" — it meant the save wrote just the days being
+// edited and DELETED every other day of that year. Reload, and those days are
+// unmarked; unmarked past days score as Absent. That is exactly what HR
+// reported: attendance edited, saved, and everyone turning up absent.
+//
+// It only bit when a read failed, which on a backend whose write lock waits
+// six seconds is precisely when the sheet is busiest — so it looked random.
+//
+// The two soft answers are the ones that had to change. backendAction returns
+// null for any error, busy included, and safeGet swallows a failed read and
+// returns null exactly as it does for a key that was never set. Neither can be
+// distinguished from empty, so this reads through safeGetOrThrow_, which
+// raises rather than answering, and a parse failure is unreadable too — a
+// corrupt value is the last thing that should be quietly overwritten.
 async function getAttendanceBuckets(pairs){
   const out = {};
   if(!pairs.length) return out;
+  const parseOr = (raw, whenEmpty) => {
+    if(raw === null || raw === undefined || raw === '') return whenEmpty;
+    try{ return JSON.parse(raw); }catch(e){ return null; }
+  };
   const missing = [];
   pairs.forEach(p => {
     const bk = p.employeeId + '|' + p.fy;
     const key = 'attendance:' + p.employeeId + ':' + p.fy;
     const hit = sharedReadCache.get(key);
     if(hit && Date.now() < hit.until){
-      try{ out[bk] = hit.value ? JSON.parse(hit.value) : {}; }catch(e){ out[bk] = {}; }
+      // A cached null is the backend having answered "no such key" — genuinely
+      // empty, and safe to merge into. Only a failed read goes uncached.
+      out[bk] = parseOr(hit.value, {});
     } else {
       missing.push(p);
     }
@@ -5107,7 +5133,8 @@ async function getAttendanceBuckets(pairs){
         const key = 'attendance:' + p.employeeId + ':' + p.fy;
         const raw = data.values[key];
         primeSharedRead(key, raw === undefined ? null : raw);
-        try{ out[p.employeeId + '|' + p.fy] = raw ? JSON.parse(raw) : {}; }catch(e){ out[p.employeeId + '|' + p.fy] = {}; }
+        // The batch answered, so a key it did not mention has nothing stored.
+        out[p.employeeId + '|' + p.fy] = parseOr(raw, {});
       });
       return out;
     }
@@ -5115,8 +5142,11 @@ async function getAttendanceBuckets(pairs){
   // getBatch not answering — one key at a time, as elsewhere in this file.
   await Promise.all(missing.map(async p => {
     const key = 'attendance:' + p.employeeId + ':' + p.fy;
-    const v = await safeGet(key, true);
-    try{ out[p.employeeId + '|' + p.fy] = v ? JSON.parse(v) : {}; }catch(e){ out[p.employeeId + '|' + p.fy] = {}; }
+    try{
+      out[p.employeeId + '|' + p.fy] = parseOr(await safeGetOrThrow_(key), {});
+    }catch(e){
+      out[p.employeeId + '|' + p.fy] = null;   // unreadable — must not be written over
+    }
   }));
   return out;
 }
@@ -8765,9 +8795,19 @@ async function saveAttendanceChanges(){
   const stillPending = {};
 
   // Merge every bucket's edits into its record first, then write the lot.
+  //
+  // A bucket whose current contents could not be read is NOT written. The
+  // payload replaces the whole financial-year key, so merging into a record we
+  // failed to fetch would save the handful of days being edited and delete the
+  // rest of the year — every other day left unmarked, which reads as Absent.
+  // getAttendanceBuckets answers null for exactly that case; those edits stay
+  // pending and are reported, so Save can be pressed again once the backend is
+  // free instead of quietly destroying a month.
   const payload = {};
+  const unreadable = [];
   bucketKeys.forEach(bk => {
-    const att = attByBucket[bk] || {};
+    const att = attByBucket[bk];
+    if(att === null || att === undefined){ unreadable.push(bk); return; }
     byBucket[bk].forEach(it => {
       // Everything already known about that day is kept and only the code
       // replaced — a check-in time, a late flag, the leave request it came
@@ -8795,19 +8835,27 @@ async function saveAttendanceChanges(){
     }
   };
 
+  // Nothing readable to write is not a save — say so and keep every edit.
+  unreadable.forEach(bk => settle(bk, false));
+  const writable = bucketKeys.filter(bk => unreadable.indexOf(bk) === -1);
+
   if(btn) btn.textContent = 'Saving…';
   // One request for everybody. A dozen employees used to be a dozen sequential
   // round trips, each one waiting on the last.
   let confirmed = null;
-  try{ confirmed = await remoteSetMany(payload); }catch(e){ confirmed = null; }
+  if(writable.length){
+    try{ confirmed = await remoteSetMany(payload); }catch(e){ confirmed = null; }
+  }
 
-  if(confirmed){
-    bucketKeys.forEach(bk => settle(bk, confirmed.has('attendance:' + bk.replace('|', ':'))));
+  if(!writable.length){
+    // nothing attempted
+  } else if(confirmed){
+    writable.forEach(bk => settle(bk, confirmed.has('attendance:' + bk.replace('|', ':'))));
   } else {
     // Backend without setMany — one at a time, exactly as before, so a save
     // still works while the Apps Script side is being updated.
     let done = 0;
-    for(const bk of bucketKeys){
+    for(const bk of writable){
       const key = 'attendance:' + bk.replace('|', ':');
       let ok = false;
       // remoteSet reports whether the backend actually confirmed the write.
@@ -8815,7 +8863,7 @@ async function saveAttendanceChanges(){
       try{ ok = await remoteSet(key, payload[key]); }catch(e){ ok = false; }
       settle(bk, ok);
       done++;
-      if(btn) btn.textContent = 'Saving… ' + done + ' of ' + bucketKeys.length;
+      if(btn) btn.textContent = 'Saving… ' + done + ' of ' + writable.length;
     }
   }
 
@@ -8829,8 +8877,13 @@ async function saveAttendanceChanges(){
   await renderAttendanceSheet();
   if(failedCells){
     alert(failedCells + ' change(s) could not be saved and are still showing as unsaved.\n\n' +
-          savedCells + ' did save. Check the connection and press Save again — only the ones that ' +
-          'failed will be retried.');
+          savedCells + ' did save. ' +
+          (unreadable.length
+            ? 'The server did not answer when this asked what was already recorded for ' +
+              unreadable.length + ' employee-year(s), and writing without that would have erased ' +
+              'the rest of their year — so nothing was written for them. '
+            : '') +
+          'Press Save again in a moment — only the ones that failed will be retried.');
   } else if(savedCells){
     showSavedToast(savedCells + ' attendance change(s) saved');
   }
