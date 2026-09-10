@@ -4520,15 +4520,20 @@ async function postOrLegacyGet_(payload, legacyQuery, retries, budgetMs, perTryM
                   undefined, retries, budgetMs, perTryMs);
 }
 
-async function remoteGet(key){
+// opts ({tries, budgetMs, attemptMs}) for a caller that is worth waiting for —
+// safeGetOrThrow_ passes a real budget, because the shared default starves
+// apiFetch's retry down to a single 8-second attempt. See READ_BUDGET_MS.
+async function remoteGet(key, opts){
   if(key === 'employees') return remoteGetAllEmployees_();
+  opts = opts || {};
   try{
     // See the matching comment in remoteGetAllEmployees_ above — same
     // cache-busting, same reason: this URL is otherwise identical every time
     // this key is read within one login session.
     const res = await postOrLegacyGet_(
       { action: 'get', key },
-      '?action=get&key=' + encodeURIComponent(key) + '&token=' + encodeURIComponent(sessionToken || ''));
+      '?action=get&key=' + encodeURIComponent(key) + '&token=' + encodeURIComponent(sessionToken || ''),
+      opts.tries, opts.budgetMs, opts.attemptMs);
     const text = await res.text();
     let data;
     try{ data = JSON.parse(text); }
@@ -5010,24 +5015,40 @@ async function safeGet(key, shared){
 //
 // So every list of that shape reads through here. The shared cache is still
 // used, because a cache hit is an answer that already came back.
+// A read that somebody is sitting and waiting for — opening a report,
+// finalising a month, anything reached by pressing a button. It can afford to
+// wait, and waiting is what it should do: an answer at 12 seconds is worth far
+// more than a refusal at 8.
+//
+// The old numbers came from the shared default of a 9,000ms budget with an
+// 8,000ms per-attempt cap, and that pair starves apiFetch's own retry exactly
+// as it starved login's: after one 8s attempt there is not enough budget left
+// to open another, so "three tries" was one try. The outer loop below was
+// making up for that by calling the whole thing three times, which is three
+// single attempts of 8s and no more room for any of them.
+// Given a real budget, apiFetch retries properly by itself and the outer loop
+// is redundant — so a read now gets three genuine tries of up to 12s inside
+// 28s, rather than three cut off at 8.
+const READ_BUDGET_MS = 28000;
+const READ_ATTEMPT_MS = 12000;
+
 async function safeGetOrThrow_(key){
   const hit = sharedReadCache.get(key);
   if(hit && Date.now() < hit.until) return hit.value;
   // remoteGet returns an object when the backend answered — including when it
   // answered "no such key" — and null only when the call itself failed.
-  //
-  // Tried more than once before giving up, which safeGet never needed to do
-  // because it had somewhere soft to land. Raising instead of answering is the
-  // right behaviour and it makes a slow moment cost the whole screen, so a
-  // second and third go at it is the least this owes the person looking at it.
-  // apiFetch retries within one call; this retries the call.
-  let r = null;
-  for(let attempt = 0; attempt < 3 && !r; attempt++){
-    if(attempt) await new Promise(res => setTimeout(res, 800 * attempt));
-    r = await remoteGet(key);
-  }
+  const startedAt = Date.now();
+  const r = await remoteGet(key, { tries: 3, budgetMs: READ_BUDGET_MS, attemptMs: READ_ATTEMPT_MS });
   if(!r){
-    const err = new Error(lastBackendError || 'the server did not respond');
+    // How long it actually waited, and for what. "Fetch is aborted" on its own
+    // says the app gave up but not whether it gave up after one second or
+    // twenty-eight, and those mean completely different things: the first is a
+    // backend that is not there, the second one that is merely slow. Naming
+    // the key matters too — a report that cannot start says which read stopped
+    // it rather than only that something did.
+    const waited = Math.round((Date.now() - startedAt) / 1000);
+    const why = lastBackendError || 'the server did not respond';
+    const err = new Error(why + ' (reading "' + key + '", 3 tries over ' + waited + 's)');
     // Marked so the listener below can tell it apart from any other rejection
     // and say something useful. Most of these are called straight from an
     // onclick, where a rejection goes nowhere at all — the bad write is
