@@ -4558,6 +4558,21 @@ document.addEventListener('visibilitychange', () => {
 // what format it started as, so the file's extension is corrected to match
 // what's actually being uploaded — otherwise a file uploaded as "scan.png"
 // could end up holding JPEG bytes.
+// What to tell HR when an upload came back with nothing.
+//
+// Only an empty lastUploadError means the request never got through, and that
+// is the only case where the connection is worth blaming. Anything else is the
+// server having answered — say what it said. See uploadDocumentToDrive.
+function uploadFailedMsg_(){
+  if(!lastUploadError) return 'Upload failed — check your connection and try again.';
+  // The backend's messages are written to be read by HR and already carry their
+  // own advice, so they are quoted rather than decorated — "please try again in
+  // a moment. Try again in a moment." helps nobody. Advice is added only for a
+  // bare error code, which is the one case with nothing useful to say.
+  let why = String(lastUploadError).trim().replace(/\.+$/, '');
+  if(/^[A-Z][a-z]/.test(why)) why = why.charAt(0).toLowerCase() + why.slice(1);
+  return 'Upload failed — ' + why + (/\s/.test(why) ? '.' : '. Try again in a moment.');
+}
 async function uploadDocumentToDrive(folderPath, fileName, file){
   try{
     const dataUrl = await readDocForDrive(file);
@@ -4573,14 +4588,45 @@ async function uploadDocumentToDrive(folderPath, fileName, file){
     // allowed a second go because doUploadDocument_ trashes a same-named file
     // before writing — so a retry replaces rather than duplicates.
     const o = uploadFetchOpts_(base64Data.length, true);
-    const res = await apiFetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'uploadDocument', folderPath, fileName: outName, base64Data, mimeType, token: sessionToken })
-    }, o.tries, o.budgetMs, o.attemptMs);
-    const data = await res.json();
-    return data && data.fileUrl ? data.fileUrl : null;
+
+    // "busy" is not a failed upload and must not be reported as one.
+    //
+    // Every write in the app queues on one script-wide lock that waits six
+    // seconds (doPost). Anything already holding it — an attendance save, a
+    // report CSV being filed in the background — makes this come back
+    // {error:'busy'}, with no fileUrl. That was collapsed to null along with
+    // genuine failures, and HR was told "Upload failed — check your connection"
+    // about a connection that was perfectly fine. It worked on the next press,
+    // which is exactly the "keeps coming and then goes" HR reported.
+    //
+    // Retried here rather than left to HR, because a repeat is safe by
+    // construction: outName is computed before the first attempt and
+    // doUploadDocument_ trashes a same-named file before writing, so a second
+    // go replaces rather than files a duplicate. Backing off gives whatever
+    // holds the lock time to finish; the server itself fails fast on busy, so
+    // this costs seconds, not minutes.
+    const BUSY_WAITS_MS = [1500, 4000, 8000];
+    for(let attempt = 0; ; attempt++){
+      const res = await apiFetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'uploadDocument', folderPath, fileName: outName, base64Data, mimeType, token: sessionToken })
+      }, o.tries, o.budgetMs, o.attemptMs);
+      const data = await res.json();
+      if(data && data.fileUrl){ lastUploadError = ''; return data.fileUrl; }
+      const busy = data && data.error === 'busy';
+      if(busy && attempt < BUSY_WAITS_MS.length){
+        await new Promise(r => setTimeout(r, BUSY_WAITS_MS[attempt]));
+        continue;
+      }
+      // Why it failed, in the backend's own words where it gave any, so the
+      // caller can say something truer than "check your connection".
+      lastUploadError = (data && (data.message || data.error)) ||
+        (busy ? 'the server stayed busy with another save' : '');
+      return null;
+    }
   }catch(e){
+    lastUploadError = '';
     return null;
   }
 }
@@ -4649,6 +4695,10 @@ function csvEscape(v){
 }
 
 let lastBackendError = '';
+// Why the last uploadDocumentToDrive failed, when the backend said. Empty means
+// the call never got through, which is the only case worth blaming a connection
+// for — see uploadDocumentToDrive.
+let lastUploadError = '';
 async function testBackendConnection(){
   const box = document.getElementById('backendTestResult');
   box.textContent = 'Testing…';
@@ -23530,7 +23580,7 @@ async function uploadPrintChecklistDoc_(key){
   const url = await uploadDocumentToDrive(
     hrYearPath('', 'Office Documents', 'Checklists', cfg.folder), fileName, file);
   if(!url){
-    msg.textContent = 'Upload failed — check your connection and try again.';
+    msg.textContent = uploadFailedMsg_();
     msg.classList.add('error');
     return;
   }
@@ -23798,7 +23848,7 @@ async function uploadEmployeeHandbook(){
   const fileName = `Employee Handbook${year ? ' - ' + year : ''}${ext}`;
   const url = await uploadDocumentToDrive(officeArchivePath_('Employee Handbook'), fileName, file);
   if(!url){
-    msg.textContent = 'Upload failed — check your connection and try again.';
+    msg.textContent = uploadFailedMsg_();
     msg.classList.add('error');
     return;
   }
@@ -27081,7 +27131,7 @@ async function savePayrollDocForm_(){
     const driveFileName = cleanName.replace(/(\.[^.]*)?$/, m => '_' + randomHex(4) + m);
     const folderPath = hrYearPath(docDate, 'Office Documents', 'Payroll Documents', payrollDocMonthLabel_(month), payrollDocCategoryByKey_(category).label);
     const url = await uploadDocumentToDrive(folderPath, driveFileName, file);
-    if(!url){ msg.textContent = 'Upload failed — check your connection and try again.'; msg.classList.add('error'); return; }
+    if(!url){ msg.textContent = uploadFailedMsg_(); msg.classList.add('error'); return; }
     // Only this one month's key is read and written back — see
     // savePayrollDocsMonth_'s comment for why that matters here.
     const monthList = (await getPayrollDocsForFY(fy)).filter(r => r.month === month);
@@ -27259,7 +27309,7 @@ async function savePayrollDocForm_(){
     const driveFileName = cleanName.replace(/(\.[^.]*)?$/, m => '_' + randomHex(4) + m);
     const folderPath = hrYearPath(rec.docDate, 'Office Documents', 'Payroll Documents', rec.monthLabel, payrollDocCategoryByKey_(rec.category).label);
     const url = await uploadDocumentToDrive(folderPath, driveFileName, file);
-    if(!url){ msg.textContent = 'Upload failed — check your connection and try again.'; msg.classList.add('error'); return; }
+    if(!url){ msg.textContent = uploadFailedMsg_(); msg.classList.add('error'); return; }
     // Re-read this one month fresh rather than reusing the snapshot taken
     // before the (potentially slow) Drive upload above — narrows the race
     // window to just this save, the same reason 'upload' re-reads after its
@@ -27480,7 +27530,7 @@ async function uploadApprenticeDoc(){
   const fileName = uniqueDocFileName_([emp && emp.name, category], docId, ext);
   const url = await uploadDocumentToDrive(officeArchivePath_('Apprentice Documents', category), fileName, file);
   if(!url){
-    msg.textContent = 'Upload failed — check your connection and try again.';
+    msg.textContent = uploadFailedMsg_();
     msg.classList.add('error');
     return;
   }
@@ -28377,7 +28427,7 @@ async function uploadCompanyDoc(category, folderLabel){
   const fileName = uniqueDocFileName_([docName], docId, ext);
   const url = await uploadDocumentToDrive(officeArchivePath_(folderLabel), fileName, file);
   if(!url){
-    msg.textContent = 'Upload failed — check your connection and try again.';
+    msg.textContent = uploadFailedMsg_();
     msg.classList.add('error');
     return;
   }
