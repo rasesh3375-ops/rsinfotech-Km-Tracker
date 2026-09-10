@@ -1250,6 +1250,61 @@
      never a descendant of it. */
   #fullscreenBody .rpt-actions-top, #fullscreenBody .rpt-fullscreen-btn{display:none;}
 
+  /* ---- A report on a touch screen is a PAGE, not an overlay ----
+     Now that the pinch belongs to the browser, a position:fixed full-screen
+     overlay is the wrong shape for a report and produced exactly what HR
+     filmed: pinch once and the PT Report zoomed, then the Reports list
+     appeared THROUGH it and the two screens sat on top of each other, then it
+     snapped back to 100% and would not zoom again.
+     That is not a bug in the overlay. iOS lays position:fixed out against the
+     LAYOUT viewport, and a pinch shrinks the VISUAL viewport inside it — so
+     panning around a zoomed page walks past the edges of anything fixed and
+     shows whatever is behind it, and the content inside the overlay's own
+     inner scroller does not come with you. Every app that zooms properly is
+     zooming ordinary document content; so is this, now.
+     The rest of the app is hidden rather than merely covered — with nothing
+     fixed there is no "on top of", so a screen left visible would simply be
+     more page. And the body scroll lock is skipped in this mode (see
+     openFullscreenView): the document itself is what scrolls.
+     Touch only. On a laptop the overlay is untouched, along with the app's own
+     zoom, neither of which has ever been the problem. */
+  @media (pointer: coarse){
+    /* By id, with no ancestry: these three sit inside an unnamed wrapper div
+       rather than directly under <body>, so a `body > #hrScreen` selector
+       matched nothing at all and the Reports list stayed painted behind the
+       report exactly as before. */
+    html.kmt-fs-inflow #roleScreen,
+    html.kmt-fs-inflow #engineerScreen,
+    html.kmt-fs-inflow #hrScreen,
+    /* ...and the R.S. Infotech logo bar, which is a sibling of all three
+       rather than part of any of them, so hiding the screens left it sitting
+       above the report taking a strip of a phone screen. The <header> rather
+       than the .brand inside it: hiding the inner one left the bar's own
+       padding and rule behind as an empty strip. */
+    html.kmt-fs-inflow header.top{display:none !important;}
+    html.kmt-fs-inflow #fullscreenSheetRoot{
+      position:static;height:auto;min-height:100dvh;
+    }
+    /* <body> carries overflow-x:hidden (the anti-rubber-band fix), and a
+       non-visible overflow on either axis makes the OTHER axis compute to
+       auto — so body is a scroll container, and a sticky descendant sticks
+       against body's own scrollport, which never scrolls. The title bar
+       therefore slid away with the page and the ✕ went with it. Restored to
+       visible for as long as a report is in flow, which is also the mode where
+       a zoomed page genuinely needs to pan sideways. */
+    html.kmt-fs-inflow body{overflow:visible;}
+    /* Sticky, not fixed: it scrolls with the document and pans with a zoom,
+       where fixed would be back to walking off the edge of it. */
+    html.kmt-fs-inflow .fullscreen-header{position:sticky;top:0;z-index:5;}
+    /* The shell no longer owns a scrollport, so the report extends the page
+       instead of scrolling inside a box the zoom cannot reach into. */
+    html.kmt-fs-inflow .fullscreen-body{flex:none;overflow:visible;}
+    /* Sat at top:0 like the header and landed on top of it. 56px is the
+       header's height, which is fixed here — no CSS zoom is applied in this
+       mode, so nothing moves it. */
+    html.kmt-fs-inflow .att-save-bar{top:56px;}
+  }
+
   /* ===== Role reports: real A4 sheets, branded on every page ===== */
   .rpt-page-probe{position:absolute;left:-10000px;top:0;width:718px;visibility:hidden;}
   .rpt-wrap{background:#E9E9E4;padding:16px;overflow-x:auto;}
@@ -9874,6 +9929,13 @@ document.addEventListener('wheel', e => {
   }, 150);
 }, { passive:false });
 
+// Whether this box should be shown as page content rather than as a fixed
+// overlay. Touch only, and never for the two boxes that scroll and zoom
+// themselves — see the .kmt-fs-inflow rules in the stylesheet.
+function kmtFsInFlow_(sourceId){
+  if(sourceId === 'docViewerRoot' || sourceId === 'payrollDocsRoot') return false;
+  return window.matchMedia('(pointer: coarse)').matches;
+}
 function openFullscreenView(title, sourceId){
   const el = document.getElementById(sourceId);
   if(!el) return;
@@ -9987,7 +10049,18 @@ function openFullscreenView(title, sourceId){
   // when the viewer is the thing being opened.
   kmtSuspendAppZoom_(sourceId === 'docViewerRoot');
   fsRoot.classList.remove('hidden');
-  kmtLockBodyScroll('fullscreen');
+  // A report on a touch screen becomes ordinary page content rather than a
+  // fixed overlay, so the browser's own pinch can zoom and pan it the way it
+  // does any other page — see the .kmt-fs-inflow rules in the stylesheet for
+  // what HR filmed when it could not. The two document boxes are excluded:
+  // they carry their own scroller and their own zoom, which re-renders a PDF
+  // sharply, and that arrangement already works.
+  const inFlow = kmtFsInFlow_(sourceId);
+  document.documentElement.classList.toggle('kmt-fs-inflow', inFlow);
+  // The document is what scrolls in that mode, so locking it would leave a
+  // report that cannot be scrolled at all.
+  if(inFlow) kmtUnlockBodyScroll('fullscreen');
+  else kmtLockBodyScroll('fullscreen');
   resettleFixedOverlays_();
   // #fullscreenBody is one element reused for every report and letter — it
   // never gets torn down between them, only its contents swapped out — so
@@ -10077,6 +10150,9 @@ function closeFullscreenView(){
     fullscreenReturnTo_ = null;
   }
   document.getElementById('fullscreenSheetRoot').classList.add('hidden');
+  // Whatever was hidden behind the in-flow report comes back, and the shell
+  // goes back to being an overlay for the next thing that opens as one.
+  document.documentElement.classList.remove('kmt-fs-inflow');
   kmtUnlockBodyScroll('fullscreen');
   fullscreenActiveId = null;
   // The app's own zoom comes back exactly as it was left, whatever the document
