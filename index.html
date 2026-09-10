@@ -5005,9 +5005,22 @@ async function backendAction(payload, opts){
     }, opts.tries, opts.budgetMs, opts.attemptMs);
     const data = JSON.parse(await res.text());
     if(data && data.error === 'unauthorized'){ onSessionExpired(); return null; }
-    if(data && data.error) return null;
+    // Why it refused, in the backend's own words. Every action reached through
+    // here — setMany included — returned a bare null for "busy", "not
+    // deployed", "quota exceeded" and everything else alike, so a caller could
+    // report that something had not saved but never what had stopped it. An
+    // attendance save that fails on all twelve cells and cannot say why costs
+    // an evening working out which of those it was.
+    if(data && data.error){
+      lastBackendError = String(data.message || data.error);
+      return null;
+    }
+    lastBackendError = '';
     return data || null;
-  }catch(e){ return null; }
+  }catch(e){
+    lastBackendError = 'the request did not get through (' + ((e && e.message) || 'no answer') + ')';
+    return null;
+  }
 }
 
 // The engineer's own employee record and whether their login is still enabled.
@@ -8883,6 +8896,10 @@ async function saveAttendanceChanges(){
               unreadable.length + ' employee-year(s), and writing without that would have erased ' +
               'the rest of their year — so nothing was written for them. '
             : '') +
+          // What the backend actually said, when it said anything. Without this
+          // every failure reads the same and there is no way to tell a busy
+          // server from one that is refusing.
+          (lastBackendError ? 'The server said: ' + lastBackendError + '. ' : '') +
           'Press Save again in a moment — only the ones that failed will be retried.');
   } else if(savedCells){
     showSavedToast(savedCells + ' attendance change(s) saved');
