@@ -141,13 +141,32 @@
      the backend before it can restore it — so a stray thumb swipe dropped
      people back at the login screen mid-task. Scrolling inside the page is
      unaffected; only the overscroll gesture is swallowed. */
-  /* touch-action:pan-x pan-y — one-finger panning stays native (that's the
-     "pan-x pan-y"), but the browser's own pinch-zoom and double-tap-zoom are
-     told not to start here at all. The two-finger touch handler further
-     down in the JS (search kmtApplyZoom_) is the only thing left to handle
-     a two-finger gesture, so there is no native zoom left to race or
-     double-fire against it. */
-  html{overscroll-behavior-y:contain;overflow-x:hidden;touch-action:pan-x pan-y;}
+  /* No touch-action restriction here any more, and that is the whole of how
+     zoom now works on a phone: the browser does it.
+     This used to say `touch-action:pan-x pan-y`, which tells the browser not
+     to start a pinch at all, leaving the app's own two-finger handler to
+     reimplement zoom with the CSS `zoom` property. That is why zoom on this
+     app could be broken when zoom on every other app on the same phone is
+     not — no other app implements it. It has to be scaled somehow, and every
+     way of doing that has to be reconciled with a screen full of fixed
+     overlays, sticky headers and inner scroll boxes, one of which will be
+     wrong. HR could not reach the bottom of a report at 200%: the Apprentice
+     Salary Report and then the PF Return both froze part way down with the
+     Grand Total off the bottom edge, dragging doing nothing. Two attempts at
+     the geometry (moving the zoom off the scroll container, then capping the
+     header) each measured correct in Chromium and neither fixed the phone,
+     because the fault is in an engine there is no way to run here.
+     So the gesture goes back to iOS, which zooms the screen itself — nothing
+     in the page participates, nothing can be computed wrongly, and it behaves
+     like every other app on the phone. See the pinch handlers in the JS, which
+     now claim a gesture only over an open document. */
+  html{overscroll-behavior-y:contain;overflow-x:hidden;}
+  /* The one exception, and the reason the handlers were not simply deleted.
+     A pinch over a document must reach the DOCUMENT'S own zoom, which
+     re-renders a PDF sharply at the new size — letting iOS magnify a page
+     rendered at 1x instead would just enlarge a blurry one. So the browser is
+     still told to keep its hands off here, and only here. */
+  #docViewerRoot{touch-action:pan-x pan-y;}
 
   /* overflow-x:hidden on top of that: with no explicit horizontal bound, iOS
      Safari lets the whole page rubber-band sideways the moment ANY element
@@ -9459,6 +9478,17 @@ if(!window.KMT_ZOOM_ARMED_){
     let saved = 1;
     try{ saved = parseFloat(localStorage.getItem('kmt_zoom_level')); }catch(e){}
     if(!(saved >= KMT_ZOOM_MIN && saved <= KMT_ZOOM_MAX)) saved = 1;
+    // ...but not on a touch device, where a pinch no longer drives this and a
+    // saved level would have no way back down. HR's phones are sitting on a
+    // stored 200% from before the gesture went to iOS, and restoring it would
+    // reapply the very CSS `zoom` that this change exists to stop applying —
+    // permanently, since the only control that ever set it is gone. Cleared
+    // rather than merely ignored, so it cannot come back if this device is
+    // later used with a mouse.
+    if(window.matchMedia('(pointer: coarse)').matches && saved !== 1){
+      saved = 1;
+      try{ localStorage.removeItem('kmt_zoom_level'); }catch(e){}
+    }
     kmtApplyZoom_(saved, false);
   })();
   // That first apply runs inline, before <body> necessarily exists, so
@@ -9545,11 +9575,17 @@ if(!window.KMT_ZOOM_ARMED_){
   }
   document.addEventListener('touchstart', e => {
     if(e.touches.length !== 2) return;
+    // Over anything but a document, this is the browser's gesture now — see
+    // the touch-action comment in the stylesheet. Returning without
+    // preventDefault is what hands it over: iOS zooms the screen itself, the
+    // way it does in every other app, and no CSS `zoom` is applied anywhere.
+    if(kmtPinchTarget_() !== 'doc') return;
     if(e.cancelable) e.preventDefault();
     kmtBeginPinch_(e.touches);
   }, { passive:false });
   document.addEventListener('touchmove', e => {
     if(e.touches.length !== 2) return;
+    if(kmtPinchTarget_() !== 'doc') return;
     // Self-starting rather than giving up when no start distance was
     // captured: a touchstart can be missed entirely (it fired while the
     // fingers were still coincident, a third finger came and went, the
@@ -9580,20 +9616,27 @@ if(!window.KMT_ZOOM_ARMED_){
   // the touch path never saw a clean two-finger sequence at all — the
   // other half of the same intermittency.
   let kmtGestureStartZoom_ = 1, kmtGestureOnDoc_ = false;
+  // Gated on a document being open for the same reason as the touch handlers
+  // above: off a document these must NOT preventDefault, or WebKit's own
+  // pinch — the whole point of the change — never starts.
   document.addEventListener('gesturestart', e => {
     if(kmtPinchStartDist_ !== null) return;
+    if(kmtPinchTarget_() !== 'doc') return;
     if(e.cancelable) e.preventDefault();
-    kmtGestureOnDoc_ = kmtPinchTarget_() === 'doc';
-    kmtGestureStartZoom_ = kmtGestureOnDoc_ ? docViewerZoom_ : kmtZoomLevel_;
+    kmtGestureOnDoc_ = true;
+    kmtGestureStartZoom_ = docViewerZoom_;
   }, { passive:false });
   document.addEventListener('gesturechange', e => {
     if(kmtPinchStartDist_ !== null) return;
+    if(!kmtGestureOnDoc_) return;
     if(e.cancelable) e.preventDefault();
-    if(e.scale > 0) kmtZoomFor_(kmtGestureOnDoc_ ? 'doc' : 'app', kmtGestureStartZoom_ * e.scale);
+    if(e.scale > 0) kmtZoomFor_('doc', kmtGestureStartZoom_ * e.scale);
   }, { passive:false });
   document.addEventListener('gestureend', e => {
+    if(!kmtGestureOnDoc_) return;
     if(e.cancelable) e.preventDefault();
-    if(kmtGestureOnDoc_){ kmtGestureOnDoc_ = false; docViewerCommitPreview_(); }
+    kmtGestureOnDoc_ = false;
+    docViewerCommitPreview_();
   }, { passive:false });
 }
 
