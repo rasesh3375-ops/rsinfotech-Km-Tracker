@@ -200,12 +200,14 @@
      like every other app on the phone. See the pinch handlers in the JS, which
      now claim a gesture only over an open document. */
   html{overscroll-behavior-y:contain;overflow-x:hidden;}
-  /* The one exception, and the reason the handlers were not simply deleted.
-     A pinch over a document must reach the DOCUMENT'S own zoom, which
-     re-renders a PDF sharply at the new size — letting iOS magnify a page
-     rendered at 1x instead would just enlarge a blurry one. So the browser is
-     still told to keep its hands off here, and only here. */
-  #docViewerRoot{touch-action:pan-x pan-y;}
+  /* No exception for documents either, any more. There used to be one here so
+     a pinch over a document reached the DOCUMENT'S own zoom, which re-renders
+     a PDF sharply rather than magnifying one drawn at 1x. That reasoning held
+     while the browser's zoom did not work at all; it does not hold now that it
+     does. A handbook or a scanned receipt should pinch exactly like every
+     other screen — HR asked for this setting "in entire app" — and the −/+/Fit
+     buttons are still there for the times a PDF is worth re-rendering sharp at
+     a new size rather than magnifying what is already drawn. */
 
   /* overflow-x:hidden on top of that: with no explicit horizontal bound, iOS
      Safari lets the whole page rubber-band sideways the moment ANY element
@@ -1310,6 +1312,12 @@
        header's height, which is fixed here — no CSS zoom is applied in this
        mode, so nothing moves it. */
     html.kmt-fs-inflow .att-save-bar{top:56px;}
+    /* A document read in flow extends the page like everything else. Left as
+       its own flex:1 scrollport it would be an inner scroll box again, which
+       is the arrangement a pinch cannot pan into — the same fault reports had.
+       The Download and −/+/Fit bar simply scrolls with it; the ✕ is in the
+       sticky title bar above and stays put. */
+    html.kmt-fs-inflow .doc-view-scroll{flex:none;overflow:visible;}
   }
 
   /* ===== Role reports: real A4 sheets, branded on every page ===== */
@@ -9768,19 +9776,24 @@ if(!window.KMT_ZOOM_ARMED_){
     kmtPinchStartZoom_ = kmtPinchOnDoc_ ? docViewerZoom_ : kmtZoomLevel_;
     return true;
   }
+  // On a touch screen the app never claims a pinch, over a document or over
+  // anything else. Returning without preventDefault is what hands it to the
+  // browser, which zooms the screen itself the way it does in every other app.
+  // Documents were the last exception and are one no longer: HR asked for this
+  // setting "in entire app", and the reason for the exception — that the
+  // document's own zoom re-renders a PDF sharply — only outweighed a working
+  // browser zoom back when there wasn't one. The −/+/Fit buttons still do that
+  // re-render for the times it is worth having.
+  const kmtBrowserOwnsPinch_ = () => window.matchMedia('(pointer: coarse)').matches;
   document.addEventListener('touchstart', e => {
     if(e.touches.length !== 2) return;
-    // Over anything but a document, this is the browser's gesture now — see
-    // the touch-action comment in the stylesheet. Returning without
-    // preventDefault is what hands it over: iOS zooms the screen itself, the
-    // way it does in every other app, and no CSS `zoom` is applied anywhere.
-    if(kmtPinchTarget_() !== 'doc') return;
+    if(kmtBrowserOwnsPinch_()) return;
     if(e.cancelable) e.preventDefault();
     kmtBeginPinch_(e.touches);
   }, { passive:false });
   document.addEventListener('touchmove', e => {
     if(e.touches.length !== 2) return;
-    if(kmtPinchTarget_() !== 'doc') return;
+    if(kmtBrowserOwnsPinch_()) return;
     // Self-starting rather than giving up when no start distance was
     // captured: a touchstart can be missed entirely (it fired while the
     // fingers were still coincident, a third finger came and went, the
@@ -9814,8 +9827,13 @@ if(!window.KMT_ZOOM_ARMED_){
   // Gated on a document being open for the same reason as the touch handlers
   // above: off a document these must NOT preventDefault, or WebKit's own
   // pinch — the whole point of the change — never starts.
+  // Same rule: on a touch screen these must not claim the gesture either, or
+  // WebKit's own pinch — the whole point — never starts. They remain for a
+  // macOS trackpad pinch, where Safari fires these and there is no browser
+  // zoom competing for them.
   document.addEventListener('gesturestart', e => {
     if(kmtPinchStartDist_ !== null) return;
+    if(kmtBrowserOwnsPinch_()) return;
     if(kmtPinchTarget_() !== 'doc') return;
     if(e.cancelable) e.preventDefault();
     kmtGestureOnDoc_ = true;
@@ -9992,7 +10010,14 @@ document.addEventListener('wheel', e => {
 // overlay. Touch only, and never for the two boxes that scroll and zoom
 // themselves — see the .kmt-fs-inflow rules in the stylesheet.
 function kmtFsInFlow_(sourceId){
-  if(sourceId === 'docViewerRoot' || sourceId === 'payrollDocsRoot') return false;
+  // payrollDocsRoot stays an overlay: it is a whole module (Dashboard, Browse,
+  // Search, Unclassified) with its own drill-down, not one document being read,
+  // and nothing about it needs magnifying.
+  if(sourceId === 'payrollDocsRoot') return false;
+  // docViewerRoot used to be excluded here too. It is not any more — a document
+  // is exactly the thing HR most needs to magnify, and as a fixed overlay a
+  // zoomed one had the same fault a zoomed report had: pan past its edge and
+  // you are looking at whatever is behind it.
   return window.matchMedia('(pointer: coarse)').matches;
 }
 function openFullscreenView(title, sourceId){
