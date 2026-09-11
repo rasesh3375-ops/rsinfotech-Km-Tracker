@@ -9684,20 +9684,16 @@ if(!window.KMT_ZOOM_ARMED_){
   // view someone deliberately set is the same continuity the rest of the
   // app already gives scroll position and open sections.
   (function kmtRestoreZoom_(){
-    let saved = 1;
-    try{ saved = parseFloat(localStorage.getItem('kmt_zoom_level')); }catch(e){}
-    if(!(saved >= KMT_ZOOM_MIN && saved <= KMT_ZOOM_MAX)) saved = 1;
-    // ...but not on a touch device, where a pinch no longer drives this and a
-    // saved level would have no way back down. HR's phones are sitting on a
-    // stored 200% from before the gesture went to iOS, and restoring it would
-    // reapply the very CSS `zoom` that this change exists to stop applying —
-    // permanently, since the only control that ever set it is gone. Cleared
-    // rather than merely ignored, so it cannot come back if this device is
-    // later used with a mouse.
-    if(window.matchMedia('(pointer: coarse)').matches && saved !== 1){
-      saved = 1;
-      try{ localStorage.removeItem('kmt_zoom_level'); }catch(e){}
-    }
+    // Always 1, on every device, and the stored level is thrown away.
+    //
+    // Nothing can set it any more — every control that did is gone — so a
+    // level left over from before would be permanent, with no way back down.
+    // Phones are carrying a stored 200% from when the pinch drove this, and
+    // laptops whatever Ctrl+ was last left at. Cleared rather than merely
+    // ignored, so it cannot reappear if this browser later runs an older copy
+    // of the app from cache.
+    const saved = 1;
+    try{ localStorage.removeItem('kmt_zoom_level'); }catch(e){}
     kmtApplyZoom_(saved, false);
   })();
   // That first apply runs inline, before <body> necessarily exists, so
@@ -9709,154 +9705,37 @@ if(!window.KMT_ZOOM_ARMED_){
       () => kmtApplyZoom_(kmtZoomLevel_, false), { once:true });
   }
 
-  // Ctrl/Cmd + (zoom in), Ctrl/Cmd - (zoom out), Ctrl/Cmd 0 (reset) — the
-  // same three shortcuts every browser already binds to its own native
-  // page zoom; preventDefault here means these three keys drive this zoom
-  // instead, everywhere in the app, not just where focus happens to sit.
-  // '=' alongside '+': the physical key is the same on a US layout, and an
-  // unshifted Ctrl+= is the common real-world way people actually press
-  // "zoom in" without needing to also hold Shift.
-  document.addEventListener('keydown', e => {
-    if(!(e.ctrlKey || e.metaKey)) return;
-    if(e.key === '+' || e.key === '='){ e.preventDefault(); kmtApplyZoom_(kmtZoomLevel_ + KMT_ZOOM_STEP, true); }
-    else if(e.key === '-' || e.key === '_'){ e.preventDefault(); kmtApplyZoom_(kmtZoomLevel_ - KMT_ZOOM_STEP, true); }
-    else if(e.key === '0'){ e.preventDefault(); kmtResetZoom_(); }
-  }, { passive:false });
-
-  // Trackpad pinch (Mac, and a Windows precision touchpad) and a literal
-  // Ctrl+scroll both arrive here as a wheel event with ctrlKey set — the
-  // browser's own native-zoom trigger, now taken over by this instead so it
-  // drives the same zoom level as everything else. preventDefault stops the
-  // browser's own native zoom from ALSO firing on top of this one — without
-  // it, the page would zoom twice, fighting itself, once natively and once
-  // here. deltaY's sign already matches "pinch out / scroll up == zoom in"
-  // on every browser that sends this gesture as a wheel event.
-  document.addEventListener('wheel', e => {
-    if(!(e.ctrlKey || e.metaKey)) return;
-    e.preventDefault();
-    kmtApplyZoom_(kmtZoomLevel_ - e.deltaY * 0.01, false);
-  }, { passive:false });
-
-  // Two-finger touch pinch (phone, tablet, Windows touchscreen). A single
-  // finger is deliberately left completely alone — nothing below acts on
-  // touches.length === 1, and nothing below ever calls preventDefault for
-  // it — which is what keeps ordinary one-finger scrolling working exactly
-  // as before.
+  // ---- the app no longer implements zoom on ANY device ----
   //
-  // Why touchstart is NOT passive, and preventDefaults on the second
-  // finger: this was the "zooms sometimes, not others" bug. touch-action
-  // on <html>/<body> disables the browser's own pinch-zoom, but still
-  // permits panning (pan-x pan-y) — so a two-finger drag is something the
-  // browser is free to claim as a two-finger SCROLL instead. Which one won
-  // came down to timing: land both fingers together and the pinch handler
-  // got there first, land one and then the other (the far more common way
-  // people actually pinch) and the scroller had already claimed the
-  // gesture, after which preventDefault on touchmove is ignored and no
-  // amount of finger movement zoomed anything. preventDefault right at
-  // touchstart, the moment a second finger arrives, claims the gesture
-  // up front and settles it deterministically instead of by race.
-  let kmtPinchStartDist_ = null, kmtPinchStartZoom_ = 1, kmtPinchOnDoc_ = false;
-  const kmtTouchDist_ = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-  // With a document open, a pinch means the DOCUMENT — which is what somebody
-  // pinching a document is asking for, and what they were getting instead was
-  // the whole app scaled up and left that way, because the app's zoom persists.
-  // HR ended up with a stuck, enormous interface after trying to read a PF
-  // receipt. Routing the gesture is the fix; the buttons stay for the PDF case,
-  // where an <embed> swallows the touches before this ever sees them.
-  const kmtPinchTarget_ = () => {
-    // Either shape of document: a rendered PDF is #docViewPages, an image or
-    // the <embed> fallback is #docViewContent. Checking only the second meant
-    // a pinch over a rendered PDF — the case this exists for — still went to
-    // the app and scaled the whole interface instead.
-    const el = document.getElementById('docViewPages') ||
-               document.getElementById('docViewContent');
-    return el && el.offsetParent !== null ? 'doc' : 'app';
-  };
-  const kmtZoomFor_ = (where, level) =>
-    where === 'doc' ? docViewerPreviewZoom_(level) : kmtApplyZoom_(level, false);
-  function kmtBeginPinch_(touches){
-    const d = kmtTouchDist_(touches);
-    if(d < 1) return false;            // both fingers on the same spot — nothing to measure yet
-    kmtPinchStartDist_ = d;
-    kmtPinchOnDoc_ = kmtPinchTarget_() === 'doc';
-    kmtPinchStartZoom_ = kmtPinchOnDoc_ ? docViewerZoom_ : kmtZoomLevel_;
-    return true;
-  }
-  // On a touch screen the app never claims a pinch, over a document or over
-  // anything else. Returning without preventDefault is what hands it to the
-  // browser, which zooms the screen itself the way it does in every other app.
-  // Documents were the last exception and are one no longer: HR asked for this
-  // setting "in entire app", and the reason for the exception — that the
-  // document's own zoom re-renders a PDF sharply — only outweighed a working
-  // browser zoom back when there wasn't one. The −/+/Fit buttons still do that
-  // re-render for the times it is worth having.
-  const kmtBrowserOwnsPinch_ = () => window.matchMedia('(pointer: coarse)').matches;
-  document.addEventListener('touchstart', e => {
-    if(e.touches.length !== 2) return;
-    if(kmtBrowserOwnsPinch_()) return;
-    if(e.cancelable) e.preventDefault();
-    kmtBeginPinch_(e.touches);
-  }, { passive:false });
-  document.addEventListener('touchmove', e => {
-    if(e.touches.length !== 2) return;
-    if(kmtBrowserOwnsPinch_()) return;
-    // Self-starting rather than giving up when no start distance was
-    // captured: a touchstart can be missed entirely (it fired while the
-    // fingers were still coincident, a third finger came and went, the
-    // gesture began life as a scroll). Beginning the pinch here instead of
-    // returning means a gesture already in progress still zooms, rather
-    // than staying dead until every finger lifts and the user tries again.
-    if(kmtPinchStartDist_ === null && !kmtBeginPinch_(e.touches)) return;
-    if(e.cancelable) e.preventDefault();
-    kmtZoomFor_(kmtPinchOnDoc_ ? 'doc' : 'app',
-                kmtPinchStartZoom_ * (kmtTouchDist_(e.touches) / kmtPinchStartDist_));
-  }, { passive:false });
-  document.addEventListener('touchend', e => {
-    if(e.touches.length >= 2) return;
-    kmtPinchStartDist_ = null;
-    if(kmtPinchOnDoc_){ kmtPinchOnDoc_ = false; docViewerCommitPreview_(); }
-  }, { passive:true });
-  document.addEventListener('touchcancel', () => {
-    kmtPinchStartDist_ = null;
-    if(kmtPinchOnDoc_){ kmtPinchOnDoc_ = false; docViewerCommitPreview_(); }
-  }, { passive:true });
-
-  // iOS Safari emits its own proprietary gesture events for a pinch,
-  // carrying the scale factor directly. Deliberately a fallback, not the
-  // primary path: whenever the touch handlers above already claimed the
-  // gesture (kmtPinchStartDist_ is set) these bail out, so the two can
-  // never both apply and double-zoom. They earn their place on the runs
-  // where WebKit decided to report the pinch only as a gesture event and
-  // the touch path never saw a clean two-finger sequence at all — the
-  // other half of the same intermittency.
-  let kmtGestureStartZoom_ = 1, kmtGestureOnDoc_ = false;
-  // Gated on a document being open for the same reason as the touch handlers
-  // above: off a document these must NOT preventDefault, or WebKit's own
-  // pinch — the whole point of the change — never starts.
-  // Same rule: on a touch screen these must not claim the gesture either, or
-  // WebKit's own pinch — the whole point — never starts. They remain for a
-  // macOS trackpad pinch, where Safari fires these and there is no browser
-  // zoom competing for them.
-  document.addEventListener('gesturestart', e => {
-    if(kmtPinchStartDist_ !== null) return;
-    if(kmtBrowserOwnsPinch_()) return;
-    if(kmtPinchTarget_() !== 'doc') return;
-    if(e.cancelable) e.preventDefault();
-    kmtGestureOnDoc_ = true;
-    kmtGestureStartZoom_ = docViewerZoom_;
-  }, { passive:false });
-  document.addEventListener('gesturechange', e => {
-    if(kmtPinchStartDist_ !== null) return;
-    if(!kmtGestureOnDoc_) return;
-    if(e.cancelable) e.preventDefault();
-    if(e.scale > 0) kmtZoomFor_('doc', kmtGestureStartZoom_ * e.scale);
-  }, { passive:false });
-  document.addEventListener('gestureend', e => {
-    if(!kmtGestureOnDoc_) return;
-    if(e.cancelable) e.preventDefault();
-    kmtGestureOnDoc_ = false;
-    docViewerCommitPreview_();
-  }, { passive:false });
+  // Everything that used to drive kmtApplyZoom_ from a gesture or a keystroke
+  // has been removed from here: Ctrl/Cmd +, -, 0; Ctrl+scroll and a precision-
+  // touchpad pinch, which both arrive as a wheel event with ctrlKey set; the
+  // two-finger touch pinch; and WebKit's gesturestart/change/end.
+  //
+  // Every one of them called preventDefault, which is what made this zoom
+  // REPLACE the browser's own rather than sit beside it. So a 13" Windows
+  // laptop pressing Ctrl and + was not zooming the way it zooms every other
+  // site — it was driving a CSS `zoom` reimplementation, with all the
+  // machinery that needs: a probe for whether fixed elements inherit it, a
+  // per-overlay counter-zoom, a resettle loop, a saved level. That
+  // reimplementation is what took six rounds to get right on a phone, and the
+  // last of those rounds was only won by giving the gesture back to the
+  // browser. Keeping it on desktop would have left one device behaving
+  // differently from the others for no reason anybody could defend — which is
+  // exactly what HR asked to end: "same zoom setting will apply in all the
+  // devices and my 13 inch windows laptop too".
+  //
+  // So: Ctrl +/-/0 and Ctrl+scroll are the browser's native page zoom again on
+  // a laptop, a pinch is the browser's on a phone or tablet, and nothing in
+  // this app competes with either. The one zoom the app still owns is the
+  // document viewer's own -/+/Fit, which is a different thing entirely: it
+  // RE-RENDERS a PDF at a new size rather than magnifying what is drawn.
+  //
+  // kmtApplyZoom_ and the CSS variables it writes are left below, inert at 1.
+  // They are scaffolding now, not behaviour, and are worth deleting outright —
+  // kept for one change rather than pulled out in the same commit that changes
+  // what HR sees, so that if anything here is wrong it is obvious which half
+  // caused it.
 }
 
 function kmtLockBodyScroll(owner){
