@@ -4440,6 +4440,29 @@ async function remoteGet(key, opts){
     return (data && data.value !== undefined) ? data : null;
   }catch(e){ lastBackendError = 'GET network error: ' + e.message; return null; }
 }
+// A write is worth waiting for, and these are the numbers it waits with.
+//
+// Writes ran on the shared 9,000ms budget with an 8,000ms per-attempt cap —
+// the same starved pair that gave login one attempt out of three and threw
+// away reads that were already on their way. It is worst here. The backend
+// serialises every write on one script-wide lock that itself waits SIX
+// seconds before giving up (lock.waitLock(6000) in doPost), so an attempt
+// capped at eight has two seconds left for the write once the lock has been
+// waited for — and none at all if Apps Script is cold on top of that.
+//
+// That is what HR's attendance save looked like: "8 change(s) could not be
+// saved and are still showing as unsaved. 0 did save." All eight failing
+// together is not eight failures, it is one aborted request, and a month of
+// attendance is somebody's pay.
+//
+// Three genuine tries of up to 15s inside 34s. Safe to retry for the reason
+// already given below: both actions overwrite a key outright, so a retry
+// re-sends the same thing and lands in the same place. A caller with its own
+// opts (a genuinely large value, an OCR conversion) still overrides these.
+const WRITE_BUDGET_MS = 34000;
+const WRITE_ATTEMPT_MS = 15000;
+const WRITE_TRIES = 3;
+
 // opts, for a caller whose value is genuinely large. Both actions overwrite a
 // key outright, so a retry re-sends the same thing and lands in the same place
 // — they are safe to retry in a way an upload is not.
@@ -4450,7 +4473,9 @@ async function remoteSet(key, value, opts){
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'set', key, value, token: sessionToken })
-    }, opts.tries, opts.budgetMs, opts.attemptMs);
+    }, opts.tries || WRITE_TRIES,
+       opts.budgetMs || WRITE_BUDGET_MS,
+       opts.attemptMs || WRITE_ATTEMPT_MS);
     const text = await res.text();
     try{
       const data = JSON.parse(text);
@@ -4476,6 +4501,11 @@ async function remoteSet(key, value, opts){
 async function remoteSetMany(entries, opts){
   const keys = Object.keys(entries);
   if(!keys.length) return new Set();
+  // The same budget as remoteSet, and for the same reason — more so, if
+  // anything: this is the call a whole month of attendance goes through, and
+  // one aborted request is every cell in it reported as unsaved at once.
+  opts = Object.assign({ tries: WRITE_TRIES, budgetMs: WRITE_BUDGET_MS, attemptMs: WRITE_ATTEMPT_MS },
+                       opts || {});
   const data = await backendAction({ action: 'setMany', entries }, opts);
   if(!data || !data.many) return null;
   keys.forEach(invalidateSharedRead);
