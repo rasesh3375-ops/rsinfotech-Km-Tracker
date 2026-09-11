@@ -941,128 +941,16 @@
   .modal-overlay{position:fixed;inset:0;height:100vh;height:100dvh;background:rgba(22,33,62,0.55);display:flex;align-items:flex-start;justify-content:center;padding:20px 12px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scroll-padding-top:env(safe-area-inset-top, 0px);scroll-padding-bottom:env(safe-area-inset-bottom, 0px);z-index:var(--z-modal);transform:translateZ(0);backface-visibility:hidden;}
   .modal-box{background:var(--paper);border-radius:14px;max-width:520px;width:100%;padding:22px;margin:20px 0 40px;}
 
-  /* ---- Zoom inside position:fixed overlays ----
-     The app's zoom is carried by <body> (see kmtApplyZoom_). A `zoom` does
-     not reach position:fixed descendants on WebKit/iOS — they are sized and
-     positioned against the viewport and escape it entirely — which is why
-     the page behind zoomed fine while an open Add Employee modal, the
-     fullscreen report viewer and global search all stayed at 100%.
-     Applied to the CONTENT box inside each overlay, never to the fixed
-     element itself: the overlay keeps its exact inset:0 viewport size, so
-     nothing can overflow the screen or overlap anything, and its own
-     overflow-y:auto simply scrolls the now-larger box — which is what
-     zooming a dialog should do.
-     --kmt-fixed-zoom is set to 1 wherever the browser DOES already scale
-     fixed descendants (Chromium), so this can never double-scale; see
-     kmtFixedInheritsZoom_, which measures that for real rather than
-     sniffing a user-agent string.
-     #hrSidebar is deliberately excluded: it is a fixed-WIDTH drawer, so
-     scaling its contents would spill them out of it rather than enlarge
-     it — exactly the overlap this whole approach exists to avoid. */
-  /* The rule stated just above — zoom the CONTENT box, never the scrolling
-     element — held for the two overlays that scroll themselves (.modal-overlay
-     scrolls, .modal-box is its content; .gs-overlay scrolls, .gs-panel is its
-     content) and was broken for the third. #fullscreenSheetRoot does NOT
-     scroll: it is a flex column, and the scrolling element is .fullscreen-body,
-     which `> *` then put the zoom on. So the report viewer was the one place
-     where a scroll container was itself zoomed, and it is the one place HR
-     reported the bottom of a report being unreachable — at 200% the Apprentice
-     Salary Report stopped a card and a half short of its own total, and no
-     amount of dragging would bring it up.
-     Split so the shell's header still scales while the zoom lands INSIDE the
-     scroll box, on the report, where the scroll range is measured from real
-     laid-out children in every engine rather than from a scaled scroller. */
-  .modal-overlay > .modal-box,
-  .gs-overlay > .gs-panel,
-  #fullscreenSheetRoot > .fullscreen-header,
-  #fullscreenBody > *{ zoom:var(--kmt-fixed-zoom, 1); }
-  /* ...except that the title bar is app furniture, not the report. Left to
-     grow with everything else it took a fifth of a phone screen at 200% —
-     three wrapped lines of "Apprentice Salary Report — September 2026" before
-     a single figure — so zooming in to read a report gave back a good part of
-     what it cost. Its growth is capped instead: enlarge what HR zoomed in to
-     read, not the frame around it.
-     Capped rather than pinned at 1. The ✕ is a touch target, and somebody at
-     200% is there because things are hard to see; 1.25 keeps it comfortably
-     bigger than at rest while holding the bar to two lines at the longest
-     report title. Written as one min() so there is no second breakpoint to
-     keep in step with the zoom range. */
-  #fullscreenSheetRoot > .fullscreen-header{ zoom:min(var(--kmt-fixed-zoom, 1), 1.25); }
-  /* The same cap on the other browser behaviour. Where fixed descendants DO
-     inherit the app's zoom (Chromium), --kmt-fixed-zoom is 1 and the rule above
-     has nothing to hold back — the bar is already being scaled from <body>, so
-     the cap has to be a counter-scale rather than a smaller zoom. Divided so
-     the product lands on the same 1.25 either way: one figure to change, not
-     two that can drift. Measured at 1280x800 — 114px of title bar at 200%
-     becomes 71px, the same as the branch above. */
-  html.kmt-fixed-zooms #fullscreenSheetRoot > .fullscreen-header{
-    zoom:min(1, calc(1.25 / var(--kmt-app-zoom, 1)));
-  }
-  /* ...and the other half of the same browser difference, which the rule above
-     does not cover.
-     Where fixed descendants ARE scaled by the app's zoom, the overlay ITSELF
-     is scaled too — so inset:0 and height:100dvh resolve against the viewport
-     and are then multiplied by the zoom. At 80% a full-screen report measured
-     531px tall in a 664px viewport: the overlay stopped four fifths of the way
-     down and the page it was covering showed underneath it, which is what HR
-     photographed. At 150% it ran off the bottom instead.
-     Divided by the zoom here so that, once scaled, it lands on the viewport
-     exactly. Only under .kmt-fixed-zooms, which kmtApplyZoom_ sets from the
-     same probe as --kmt-fixed-zoom — where fixed does NOT inherit the zoom
-     (iOS/WebKit) the overlay was never scaled and needs no correction, and
-     applying one there would break the case that already worked. */
-  html.kmt-fixed-zooms.kmt-zoomed .modal-overlay,
-  html.kmt-fixed-zooms.kmt-zoomed .gs-overlay,
-  html.kmt-fixed-zooms.kmt-zoomed #hrNavScrim,
-  html.kmt-fixed-zooms.kmt-zoomed #fullscreenSheetRoot{
-    width:calc(100vw / var(--kmt-app-zoom, 1));
-    height:calc(100dvh / var(--kmt-app-zoom, 1));
-  }
-  /* The sidebar is a fixed-WIDTH drawer, so only its height is corrected —
-     scaling its width along with its contents is what zooming a drawer should
-     do, and forcing it back would spill them out of it. */
-  html.kmt-fixed-zooms.kmt-zoomed #hrSidebar{ height:calc(100dvh / var(--kmt-app-zoom, 1)); }
-  /* A report inside this shell is app content and scales with the app. A
-     scanned PF receipt is not, and has a zoom of its own — but it is NOT
-     exempted here with a reciprocal zoom of its own. That was tried and it
-     stacked three zooms whose product only approximated 1; see
-     kmtSuspendAppZoom_, which switches the app's zoom off outright for as long
-     as a document is on screen. */
-  /* Only once actually zoomed. At 100% the deliberate overflow-x:hidden
-     above stays exactly as it was (it is the anti-rubber-band fix, see its
-     own comment); zoomed in, a box wider than the screen has to be
-     reachable rather than silently clipped — on the page itself just as
-     much as inside a modal. */
-  html.kmt-zoomed .modal-overlay{overflow-x:auto;}
-  html.kmt-zoomed, html.kmt-zoomed body{overflow-x:auto;}
-  /* #hrContent clips its own x-axis on purpose — no screen may scroll sideways
-     as a whole, wide content scrolls inside its own box (see that rule). At
-     100% that is right. Zoomed in it is the same fault the modals and the
-     fullscreen shell were fixed for and this one was not: the page is wider
-     than the screen by definition, so hiding the overflow does not tidy
-     anything away, it puts the right-hand edge of every ordinary screen out of
-     reach with no scrollbar and nothing to pan. Office Documents' folder tree
-     was found 245px past the edge with no way to get to it. */
-  html.kmt-zoomed #hrContent{overflow-x:auto;}
-  /* The fullscreen viewer was left out of that, and it is the one place it
-     mattered most. Its content box IS scaled by the rule above, but the fixed
-     shell around it stays exactly viewport-sized and is a flex column with no
-     horizontal overflow of its own — so at 200% a PF receipt was rendered
-     twice the width of the screen with its right-hand half simply gone, no
-     scrollbar, no pan, nothing. Modals got this fix; this never did. */
-  html.kmt-zoomed #fullscreenSheetRoot{overflow-x:auto;}
-  /* ...but not when the box on show scrolls its own content. That rule is for
-     a report table wider than the screen; the document viewer already has its
-     own scroller (.doc-view-scroll), and letting the shell grow around it was
-     a feedback loop rather than a cosmetic problem. A PDF canvas drawn at 8x
-     made #fullscreenBody 2540px wide, which made .doc-view-scroll 2540px wide
-     — and that box is exactly what the NEXT render fits the page to. Pressing
-     Fit redrew the page at 2540px and still called it 100%, so a document that
-     had once been zoomed in could never be made small again, and the toolbar
-     sat off the side of the screen. Toggled in openFullscreenView rather than
-     written as :has(), which iOS 15.3 and earlier would drop the whole rule
-     for. */
-  html.kmt-zoomed #fullscreenSheetRoot:not(.fs-self-scroll) > *{min-width:min-content;}
+  /* There is no app-wide zoom any more, so the ~120 lines that used to sit
+     here have gone with it: a `zoom` written onto the content box inside each
+     fixed overlay, a counter-scale for the browsers that scale fixed elements
+     already, width/height corrections dividing the viewport back out of an
+     overlay that had been scaled twice, a cap on the full-screen title bar,
+     and overflow-x rules re-opening every box that the anti-rubber-band
+     overflow-x:hidden had put out of reach once the page was wider than the
+     screen. Every one of them existed to make a hand-rolled zoom survive
+     contact with position:fixed. The browser's own zoom needs none of it —
+     see the note where kmtApplyZoom_ used to be defined. */
   .modal-box h2{margin:0 0 6px;font-size:19px;}
   /* Title bar that stays put. The overlay is the scrolling element, so sticky
      children of the box pin against it without the box having to become its own
@@ -1876,13 +1764,6 @@
 /* Shown only while the app itself is zoomed, which is the only time it means
    anything. Sits in the header rather than floating over the page so it cannot
    cover what somebody zoomed in to read. */
-#kmtZoomReset{position:fixed;left:12px;bottom:calc(12px + env(safe-area-inset-bottom));
-  z-index:var(--z-modal-top);display:inline-flex;align-items:center;gap:6px;
-  border:1px solid var(--amber-dark);background:var(--amber);color:var(--navy);
-  font:inherit;font-size:12px;font-weight:700;padding:8px 12px;border-radius:20px;
-  cursor:pointer;white-space:nowrap;box-shadow:0 2px 10px rgba(0,0,0,.25);}
-#kmtZoomReset[hidden]{display:none;}
-#kmtZoomReset span{font-variant-numeric:tabular-nums;}
 
 /* The document viewer's own zoom bar. Wraps on a phone so the Download link
    and the zoom controls each keep a tappable size instead of being squeezed
@@ -4066,13 +3947,6 @@
        #fullscreenBody and viewEmployeeDocument() fills it in; empty and
        hidden the rest of the time. -->
   <div id="docViewerRoot" class="hidden"></div>
-  <!-- Fixed to the corner rather than placed in the header, and outside every
-       scrolling container. In the header it was laid out inside a bar wider
-       than the viewport, and html{overflow-x:hidden} clipped it away — off
-       screen at exactly the zoom it exists to undo. Only shown while the app
-       is zoomed; see kmtSyncZoomChip_. -->
-  <button id="kmtZoomReset" type="button" hidden onclick="kmtResetZoom_()"
-          title="Back to normal size">Zoom <span>100%</span> ✕</button>
 
   <!-- Uses --z-modal-top (300), above #fullscreenSheetRoot's --z-fullscreen
        (200), since this can be opened from the Salary Sheet's Close button
@@ -9539,204 +9413,45 @@ if(!window.KMT_NUDGE_LISTENERS_ARMED_){
   document.addEventListener('touchcancel', () => { kmtPinchInProgress_ = false; }, { passive:true });
 }
 
-// ---- Universal pinch/trackpad/keyboard zoom ----
-// Built on the CSS `zoom` property, deliberately not `transform: scale()`.
-// `transform` on an ancestor becomes the containing block for every
-// `position:fixed` descendant, per spec — and this app leans hard on fixed
-// positioning for the top bar, every modal and every overlay, each already
-// carrying its own hard-won iOS-specific handling (see resettleFixedOverlays_
-// and everything around it, just above). Wrapping the app in a scaled
-// transform would silently break every one of those the moment zoom left
-// 100%. `zoom` doesn't create a new containing block — WebKit/Chromium use
-// it internally for their own native page zoom — so a fixed header or modal
-// stays exactly where it belongs at any zoom level, and nothing needs to
-// know zoom exists. Applied to <html> itself, the same element that ships
-// the app's one real breakpoint media queries key off, so zooming in/out
-// reflows the page the same way an actual narrower/wider viewport would,
-// not a distorted scale of a fixed-size snapshot.
-if(!window.KMT_ZOOM_ARMED_){
-  window.KMT_ZOOM_ARMED_ = true;
-  const KMT_ZOOM_MIN = 0.5, KMT_ZOOM_MAX = 2.0, KMT_ZOOM_STEP = 0.1;
-  let kmtZoomLevel_ = 1;
-
-  // Does a `zoom` on <html> actually reach position:fixed descendants?
-  // Chromium: yes. WebKit/iOS: no — a fixed element is sized and positioned
-  // against the viewport and escapes the root's zoom entirely, which is
-  // exactly why an open modal, the fullscreen viewer and global search all
-  // stayed at 100% while the page behind them zoomed correctly.
-  // Measured for real, once, rather than sniffed from a user-agent string:
-  // a fixed probe of known width is measured under a temporary 2x root
-  // zoom, and whatever the browser actually did is the answer. Returns null
-  // (rather than caching a wrong guess) if <body> doesn't exist yet — the
-  // very first call can happen at parse time, restoring a saved level.
-  // <body>, not <html>, is the element that carries the zoom. `zoom` on a
-  // normal block element is the oldest, best-supported form of this
-  // property in every engine; on the ROOT element WebKit has long-standing
-  // quirks where it interacts with viewport and scroll metrics instead of
-  // simply scaling. Nothing else needs to know: --kmt-fixed-zoom and the
-  // .kmt-zoomed class still live on <html> so the stylesheet's :root-level
-  // custom property and html.kmt-zoomed selectors keep working unchanged.
-  const kmtZoomSurface_ = () => document.body || document.documentElement;
-  let kmtFixedZoomInherits_ = null;
-  function kmtFixedInheritsZoom_(){
-    if(kmtFixedZoomInherits_ !== null) return kmtFixedZoomInherits_;
-    if(!document.body) return null;
-    const probe = document.createElement('div');
-    probe.style.cssText = 'position:fixed;top:0;left:0;width:100px;height:1px;opacity:0;pointer-events:none;';
-    document.body.appendChild(probe);
-    const surface = kmtZoomSurface_();
-    const before = surface.style.zoom;
-    surface.style.zoom = '2';
-    const measured = probe.getBoundingClientRect().width;
-    surface.style.zoom = before;
-    probe.remove();
-    kmtFixedZoomInherits_ = measured > 150; // ~200 if it scaled, ~100 if it didn't
-    return kmtFixedZoomInherits_;
-  }
-
-  // smooth:true (keyboard/trackpad-step changes, a handful of discrete jumps)
-  // gets a brief eased transition so a step doesn't read as a jump-cut.
-  // smooth:false (live touch-pinch, and continuous trackpad pinch deltas)
-  // applies immediately — a transition there would make the zoom visibly
-  // lag behind where the fingers actually are, which is the "lag" this was
-  // explicitly asked to avoid, not the smoothness it was asked for.
-  // Deliberately no early return when the level hasn't changed: the
-  // fixed-overlay half below can still need setting on a call that lands on
-  // the same number (the first post-DOMContentLoaded re-apply is exactly
-  // that), and writing an identical style value is a no-op in the browser
-  // anyway.
-  // While a document is on screen the app's zoom is switched off entirely, and
-  // the document's own zoom is the only one in play.
-  //
-  // This replaces a counter-zoom (--kmt-doc-unzoom) that tried to cancel the
-  // app's zoom out of the viewer with a reciprocal. It could not work. There
-  // were three zooms stacked — <body>, each fixed overlay's own box, then the
-  // viewer's reciprocal of that — and their product is only ever approximately
-  // 1, with each one laying out in a different coordinate space. What HR saw at
-  // 67% was the result: a receipt overflowing its box on the right with no way
-  // to pan to the rest, and spilling down over the file list behind it.
-  //
-  // No other app on the phone has this problem because no other app has an
-  // app-wide zoom to fight. Opening a document takes over the screen, and the
-  // pinch belongs to the document. So the app's own level is remembered, not
-  // applied, and comes back exactly as it was when the document is closed.
-  let kmtZoomSuspended_ = false;
-  function kmtSuspendAppZoom_(on){
-    const want = !!on;
-    if(want === kmtZoomSuspended_) return;
-    kmtZoomSuspended_ = want;
-    kmtApplyZoom_(kmtZoomLevel_, false);
-  }
-  let kmtZoomSaveTimer_ = null;
-  function kmtApplyZoom_(level, smooth){
-    kmtZoomLevel_ = Math.min(KMT_ZOOM_MAX, Math.max(KMT_ZOOM_MIN, level));
-    // What is remembered and what is on screen are two different things while a
-    // document is open — everything below works off `shown`, so nothing else
-    // has to know about the suspension.
-    const shown = kmtZoomSuspended_ ? 1 : kmtZoomLevel_;
-    const root = document.documentElement;
-    const surface = kmtZoomSurface_();
-    surface.style.transition = smooth ? 'zoom .12s ease-out' : 'none';
-    surface.style.zoom = shown;
-    // Where fixed descendants are NOT scaled by the line above, each
-    // overlay's own content box carries the zoom itself — see the
-    // --kmt-fixed-zoom rule in the stylesheet.
-    const fixedByCss = kmtFixedInheritsZoom_() === false;
-    root.style.setProperty('--kmt-fixed-zoom', fixedByCss ? String(shown) : '1');
-    // The zoom actually on screen, whatever the browser does with fixed
-    // elements — the overlay-size correction above divides by this, and it must
-    // be the real figure rather than the 1 that --kmt-fixed-zoom carries here.
-    root.style.setProperty('--kmt-app-zoom', String(shown));
-    // Which of the two browser behaviours we are in. Measured once by the same
-    // probe, not sniffed from a user-agent string.
-    root.classList.toggle('kmt-fixed-zooms', !fixedByCss);
-    root.classList.toggle('kmt-zoomed', shown !== 1);
-    kmtSyncZoomChip_();
-    // Debounced, deliberately not written on every call: a live pinch runs
-    // this once per frame, and a synchronous localStorage write per frame
-    // is on its own enough to make the zoom visibly stutter on a phone —
-    // the exact "lag" this was asked not to have.
-    clearTimeout(kmtZoomSaveTimer_);
-    kmtZoomSaveTimer_ = setTimeout(() => {
-      try{ localStorage.setItem('kmt_zoom_level', String(kmtZoomLevel_)); }catch(e){}
-    }, 250);
-  }
-  function kmtResetZoom_(){ kmtApplyZoom_(1, true); }
-  // The app's zoom persists across reloads and has no control anywhere — pinch
-  // is the whole interface for it. That is fine until somebody pinches meaning
-  // to zoom a document, and then cannot find their way back: HR ended up with a
-  // 175% interface twice, and at that size html{overflow-x:hidden} puts the
-  // right-hand edge of every screen out of reach entirely. So while the app is
-  // zoomed, and only then, there is a button that says so and undoes it.
-  function kmtSyncZoomChip_(){
-    const chip = document.getElementById('kmtZoomReset');
-    if(!chip) return;
-    // Nothing on screen is zoomed while a document is open, so a chip saying
-    // 67% would be describing something the person cannot see — and it sat on
-    // top of the document, which is worse than useless.
-    chip.hidden = kmtZoomLevel_ === 1 || kmtZoomSuspended_;
-    const pct = chip.querySelector('span');
-    if(pct) pct.textContent = Math.round(kmtZoomLevel_ * 100) + '%';
-  }
-
-  // Restore whatever this device was last left at, once, before anything
-  // else below can move it — a fresh reload landing back at a zoomed-in
-  // view someone deliberately set is the same continuity the rest of the
-  // app already gives scroll position and open sections.
-  (function kmtRestoreZoom_(){
-    // Always 1, on every device, and the stored level is thrown away.
-    //
-    // Nothing can set it any more — every control that did is gone — so a
-    // level left over from before would be permanent, with no way back down.
-    // Phones are carrying a stored 200% from when the pinch drove this, and
-    // laptops whatever Ctrl+ was last left at. Cleared rather than merely
-    // ignored, so it cannot reappear if this browser later runs an older copy
-    // of the app from cache.
-    const saved = 1;
-    try{ localStorage.removeItem('kmt_zoom_level'); }catch(e){}
-    kmtApplyZoom_(saved, false);
-  })();
-  // That first apply runs inline, before <body> necessarily exists, so
-  // kmtFixedInheritsZoom_ had nothing to measure and the overlay half of
-  // the zoom was left at 1. Re-apply once the document is ready so a
-  // restored zoom is right in modals too, from the first paint.
-  if(document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded',
-      () => kmtApplyZoom_(kmtZoomLevel_, false), { once:true });
-  }
-
-  // ---- the app no longer implements zoom on ANY device ----
-  //
-  // Everything that used to drive kmtApplyZoom_ from a gesture or a keystroke
-  // has been removed from here: Ctrl/Cmd +, -, 0; Ctrl+scroll and a precision-
-  // touchpad pinch, which both arrive as a wheel event with ctrlKey set; the
-  // two-finger touch pinch; and WebKit's gesturestart/change/end.
-  //
-  // Every one of them called preventDefault, which is what made this zoom
-  // REPLACE the browser's own rather than sit beside it. So a 13" Windows
-  // laptop pressing Ctrl and + was not zooming the way it zooms every other
-  // site — it was driving a CSS `zoom` reimplementation, with all the
-  // machinery that needs: a probe for whether fixed elements inherit it, a
-  // per-overlay counter-zoom, a resettle loop, a saved level. That
-  // reimplementation is what took six rounds to get right on a phone, and the
-  // last of those rounds was only won by giving the gesture back to the
-  // browser. Keeping it on desktop would have left one device behaving
-  // differently from the others for no reason anybody could defend — which is
-  // exactly what HR asked to end: "same zoom setting will apply in all the
-  // devices and my 13 inch windows laptop too".
-  //
-  // So: Ctrl +/-/0 and Ctrl+scroll are the browser's native page zoom again on
-  // a laptop, a pinch is the browser's on a phone or tablet, and nothing in
-  // this app competes with either. The one zoom the app still owns is the
-  // document viewer's own -/+/Fit, which is a different thing entirely: it
-  // RE-RENDERS a PDF at a new size rather than magnifying what is drawn.
-  //
-  // kmtApplyZoom_ and the CSS variables it writes are left below, inert at 1.
-  // They are scaffolding now, not behaviour, and are worth deleting outright —
-  // kept for one change rather than pulled out in the same commit that changes
-  // what HR sees, so that if anything here is wrong it is obvious which half
-  // caused it.
-}
+// ---- zoom is the browser's, on every device ----
+//
+// There is no app-wide zoom here any more, and there must not be one again.
+//
+// This is where roughly 200 lines of it used to live: a CSS `zoom` written onto
+// <body>, a runtime probe for whether WebKit scales position:fixed descendants
+// with it, a counter-zoom applied to each fixed overlay to make up for the
+// answer, a requestAnimationFrame loop re-pinning every overlay to the visual
+// viewport, a level saved to the device, a floating chip to undo it, and
+// handlers claiming Ctrl +/-/0, Ctrl+scroll, a two-finger touch pinch and
+// WebKit's gesture events — every one of them calling preventDefault, which is
+// what made it REPLACE the browser's zoom rather than sit beside it.
+//
+// It existed because the app ran as an iOS home-screen web app, where there is
+// no pinch-zoom at all. The answer to that turned out to be to stop being a
+// home-screen web app (manifest-hr.json declares display:browser), not to
+// rebuild zoom by hand. Reimplementing it cost six rounds of bugs that a
+// screen recording found rather than a test: reports that could not be
+// scrolled to their own total, a title bar eating a fifth of a phone screen,
+// pinches undone a fraction of a second after they worked because the repaint
+// workaround wrote maximum-scale=1, and a report squashed every frame because
+// a pinch and the keyboard look identical to a viewport listener.
+//
+// What replaced all of it: nothing. Ctrl +/-/0 and Ctrl+scroll are native page
+// zoom on a laptop, a pinch is the browser's on a phone or tablet, reports and
+// documents are ordinary page content so a zoomed page pans the way any page
+// does (.kmt-fs-inflow), and tools/check-no-zoom-lock.js fails the build if
+// anything ever takes that away again.
+//
+// The one zoom the app still owns is the document viewer's own -/+/Fit
+// (docViewerApplyZoom_). That is a different thing and stays: it RE-RENDERS a
+// PDF at a new size, which magnifying an already-drawn page cannot do.
+//
+// The level the old zoom saved is dropped from every device it is still on.
+// Nothing reads it any more, so it is only stale data — but it is stale data
+// that says 200% on HR's phones, and the one way it could ever be applied
+// again is a browser serving a cached copy of the old app. A key that no
+// longer exists cannot be.
+try{ localStorage.removeItem('kmt_zoom_level'); }catch(e){}
 
 function kmtLockBodyScroll(owner){
   const wasEmpty = !kmtBodyLockOwners.size;
@@ -10008,16 +9723,6 @@ function openFullscreenView(title, sourceId){
     if(saveBar) fsBody.insertBefore(saveBar, el);
   }
   const fsRoot = document.getElementById('fullscreenSheetRoot');
-  // The two boxes here that scroll their own content rather than needing the
-  // shell to widen for them, which at app zoom would feed their own width back
-  // into the next render — see the .fs-self-scroll rule's comment.
-  fsRoot.classList.toggle('fs-self-scroll',
-    sourceId === 'docViewerRoot' || sourceId === 'payrollDocsRoot');
-  // A document takes the screen over, and the pinch with it. Switching a report
-  // to a document suspends the app's zoom; switching a document back to a
-  // report restores it, which is why this is set on every open and not only
-  // when the viewer is the thing being opened.
-  kmtSuspendAppZoom_(sourceId === 'docViewerRoot');
   fsRoot.classList.remove('hidden');
   // A report on a touch screen becomes ordinary page content rather than a
   // fixed overlay, so the browser's own pinch can zoom and pan it the way it
@@ -10128,7 +9833,6 @@ function closeFullscreenView(){
   // The app's own zoom comes back exactly as it was left, whatever the document
   // was zoomed to. If a returnTo reopens something below, its own
   // openFullscreenView sets this again for whatever that box is.
-  kmtSuspendAppZoom_(false);
   try{ if(document.fullscreenElement) document.exitFullscreen().catch(()=>{}); }catch(e){}
   if(returnTo){
     // The close just above (this same function, the first time it ran for
@@ -17857,14 +17561,17 @@ function base64ToBytes_(b64){
   for(let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
 }
-// The document viewer's own zoom, because nothing else can reach in here.
+// The document viewer's own zoom, which does what a pinch cannot.
 //
-// A PDF renders in an <embed>, which on iOS is a native view with its own
-// touch handling: a pinch over it never reaches this page, so the app's own
-// pinch handler (kmtApplyZoom_) never fires. And native pinch is off across
-// the whole app — touch-action on <html> disables it deliberately, so that
-// handler has no gesture to race. Between the two, a document was the one
-// thing on screen that could not be zoomed at all, in or out.
+// A pinch magnifies what is already drawn. These buttons RE-RENDER: a PDF is
+// rasterised again at the new size, so the text comes back sharp instead of
+// enlarged. That is worth having on a scanned challan at 400%, and it is the
+// reason this survived the removal of the app's own zoom — everything else
+// about zooming is the browser's now.
+//
+// It also still covers the case a pinch cannot reach at all: a PDF falling
+// back to an <embed> is a native view on iOS with its own touch handling, so
+// a gesture over it never reaches the page.
 //
 // So it gets buttons. They resize the ELEMENT rather than scaling the page:
 // width is set as a percentage of the scrolling box, which is ordinary layout
@@ -17880,10 +17587,11 @@ const DOC_VIEW_ZOOM_STEPS = [0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8];
 const DOC_VIEW_ZOOM_MAX = 8, DOC_VIEW_ZOOM_MIN = 0.5;
 function docViewerApplyZoom_(z){
   docViewerZoom_ = Math.min(DOC_VIEW_ZOOM_MAX, Math.max(DOC_VIEW_ZOOM_MIN, Number(z) || 1));
-  // Whatever a live pinch was showing is now baked into the render.
+  // Any transform a previous version's live-pinch preview left on the pages is
+  // cleared here, so a document opened by a browser still holding an old copy
+  // of the app cannot come back scaled twice.
   const pagesEl = document.getElementById('docViewPages');
   if(pagesEl){ pagesEl.style.transform = ''; pagesEl.style.transformOrigin = ''; }
-  docViewerPreviewAt_ = null;
   const lbl = document.getElementById('docViewZoomLabel');
   if(lbl) lbl.textContent = Math.round(docViewerZoom_ * 100) + '%';
   // A rendered PDF is redrawn at the new size. Debounced, because a live pinch
@@ -17912,37 +17620,6 @@ function docViewerApplyZoom_(z){
   }
 }
 let docViewerZoomTimer_ = null;
-// A live pinch, shown as it happens and committed when the fingers lift.
-//
-// Re-rasterising every page on every frame is not something a phone can do, so
-// a pinch used to wait on a debounce and the document sat still while the
-// fingers moved — which reads as broken, not as slow. So the drawn pages are
-// scaled with a CSS transform for the duration of the gesture, which is free
-// and immediate, and re-rendered once at the end so the text comes back sharp
-// instead of staying an enlarged photograph. This is what a document viewer on
-// a phone is expected to feel like.
-let docViewerPreviewAt_ = null;
-function docViewerPreviewZoom_(level){
-  const want = Math.min(DOC_VIEW_ZOOM_MAX, Math.max(DOC_VIEW_ZOOM_MIN, Number(level) || 1));
-  const pages = document.getElementById('docViewPages');
-  const lbl = document.getElementById('docViewZoomLabel');
-  if(lbl) lbl.textContent = Math.round(want * 100) + '%';
-  if(!pages || !docViewerPdf_){ docViewerApplyZoom_(want); return; }
-  docViewerPreviewAt_ = want;
-  // Relative to what is actually drawn, not to 100% — the pages on screen were
-  // rendered at docViewerZoom_.
-  pages.style.transformOrigin = 'center top';
-  pages.style.transform = 'scale(' + (want / docViewerZoom_) + ')';
-}
-// Fingers lifted: draw it properly at whatever the pinch settled on.
-function docViewerCommitPreview_(){
-  if(docViewerPreviewAt_ === null) return;
-  const level = docViewerPreviewAt_;
-  docViewerPreviewAt_ = null;
-  docViewerApplyZoom_(level);
-}
-// Steps rather than a fixed multiplier, so zooming out goes 100 → 75 → 50 → 40
-// → 25 instead of creeping toward zero and never arriving.
 function docViewerZoomBy_(dir){
   const at = DOC_VIEW_ZOOM_STEPS.findIndex(s => Math.abs(s - docViewerZoom_) < 0.001);
   const from = at === -1
