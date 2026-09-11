@@ -63,6 +63,11 @@ const CHECKS = [
   // pinch — which took five rounds to find and will look like a reasonable
   // fix to the next person who meets an iOS repaint bug.
   ['check-no-zoom-lock.js',      'nothing in the app takes the user\'s zoom away'],
+  // Also not a payroll figure, and here for the same reason: a static scan
+  // with no dependencies, guarding a fault that has now reached HR four times
+  // as four different screens failing — a retry budget too small to fit a
+  // second attempt, so `tries: 3` silently means one.
+  ['check-fetch-budgets.js',     'every backend call can actually use the retries it asks for'],
 ];
 
 let failed = 0;

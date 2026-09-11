@@ -5131,7 +5131,16 @@ async function backendAction(payload, opts){
     lastBackendError = '';
     return data || null;
   }catch(e){
-    lastBackendError = 'the request did not get through (' + ((e && e.message) || 'no answer') + ')';
+    // An abort here is OUR deadline firing, not the network failing. It used
+    // to be reported with the browser's own words — "the request did not get
+    // through (Fetch is aborted)" — over an alert ending "check your
+    // connection", which sent HR looking for a connection problem that was
+    // not there while the actual cause was this app hanging up on a backend
+    // that was still answering. Say which of the two it was.
+    const aborted = e && (e.name === 'AbortError' || /abort/i.test((e && e.message) || ''));
+    lastBackendError = aborted
+      ? 'the server took too long to answer'
+      : 'the request did not get through (' + ((e && e.message) || 'no answer') + ')';
     return null;
   }
 }
@@ -5182,7 +5191,7 @@ async function getAttendanceRange(ids, from, to){
   });
   if(!missing.length) return out;
 
-  const data = await backendAction({ action: 'getAttendanceRange', ids: missing, from, to });
+  const data = await backendAction({ action: 'getAttendanceRange', ids: missing, from, to }, ATT_READ_OPTS);
   if(data && data.range && data.values){
     missing.forEach(id => {
       const v = data.values[id] || {};
@@ -5327,7 +5336,7 @@ async function getAttendanceMany(ids){
     // Whole history, merged on the backend across every financial year each
     // employee has plus whatever is still in their legacy attendance:<id> key.
     try{
-      const data = await backendAction({ action:'getAttendanceAll', ids });
+      const data = await backendAction({ action:'getAttendanceAll', ids }, ATT_READ_OPTS);
       if(data && data.values){
         ids.forEach(id => { out[id] = data.values[id] || {}; });
         handledByBatch = true;
@@ -5439,7 +5448,7 @@ async function getAttendance(employeeId){
   const request = (async () => {
     // Whole history, merged on the backend across every financial year this
     // employee has, plus whatever is still in the legacy attendance:<id> key.
-    const data = await backendAction({ action: 'getAttendanceAll', ids: [employeeId] });
+    const data = await backendAction({ action: 'getAttendanceAll', ids: [employeeId] }, ATT_READ_OPTS);
     // No answer means no attendance figure, and it must say so rather than
     // hand back {}. An empty record is not neutral here: computeAttendanceSummary
     // scores every unmarked past day as Absent, so {} for a month somebody
@@ -5836,15 +5845,57 @@ async function serverSetupHr(value){
     return await res.json();
   }catch(e){ return { error: 'Network error. Check your connection and try again.' }; }
 }
-// How long one call to the backend may take, in total, across all of its
-// retries. This is the single number the rest of the app schedules around —
-// anything that puts a deadline on backend work derives it from here rather
-// than choosing its own (see buildHrDashboardHome).
-const BACKEND_BUDGET_MS = 9000;
-// Cap on any one attempt within that budget. Sized for an Apps Script cold
-// start, which can genuinely take several seconds on a first hit.
+// Cap on any one attempt. Sized for an Apps Script cold start, which can
+// genuinely take several seconds on a first hit.
 const BACKEND_ATTEMPT_MS = 8000;
 const BACKEND_BACKOFF_MS = 400;
+// How long one call to the backend may take, in total, across all of its
+// retries.
+//
+// This was 9000 against an 8000 cap, which is one attempt and no retry:
+// apiFetch spends 8s on the first try and then correctly refuses to open a
+// second with under a second left. Every backendAction call that does not ask
+// for its own budget was in that state, and the retry exists for a real
+// fault — the Apps Script web app intermittently serves a Google Drive HTML
+// error page instead of running, measured at roughly half of requests during
+// one bad spell.
+//
+// Derived from the attempt cap rather than typed as a number, so `tries: 3`
+// means three whatever anyone changes the cap to, and tools/check-fetch-budgets.js
+// fails if a pair is ever starved like this again.
+const BACKEND_BUDGET_MS = BACKEND_ATTEMPT_MS * 3 + BACKEND_BACKOFF_MS * 2;
+// What the Dashboard is prepared to WAIT before painting a card as degraded —
+// a different question from how long a call may take, and it has to stay
+// short: the Dashboard is a screen you glance at, and a card that says
+// "couldn't load" is a better answer there than thirty seconds of skeleton.
+// It used to be BACKEND_BUDGET_MS + 1000, which quietly tied the two
+// together; raising the retry budget above would then have made every
+// Dashboard card wait 25s, undoing the load-time fix.
+const DASH_PHASE_MS = 10000;
+
+// Reading attendance is the heaviest thing this app asks the backend for, and
+// it was the one path left on the defaults above.
+//
+// getAttendanceAll returns every day every employee has ever worked, merged on
+// the backend across the legacy attendance:<id> key and every
+// attendance:<id>:<FY> key each of them has — for the whole roster in one
+// call. Against a cold Apps Script, behind the 6-second script lock, with the
+// payload for forty people coming back over a phone connection, that does not
+// reliably finish inside BACKEND_ATTEMPT_MS. And 9000 total against an 8000
+// cap is the starved-retry shape already found and fixed three times in this
+// file — login, single-key reads, writes: attempt 1 takes the 8s, ~1s is left,
+// apiFetch correctly refuses to open an attempt it has no time to finish, and
+// the two retries that exist for the backend's flakiness never run. So a
+// Salary Sheet that needed nine seconds failed three times running with
+// "Fetch is aborted", reported to HR as a connection problem it was not.
+//
+// Sized so all three attempts genuinely fit: 14s each inside a 40s total.
+// Long, but every one of these sits behind a "Building…" placeholder, and the
+// figures are worth waiting for — the alternative HR actually had was a report
+// that would not open at all.
+const ATT_READ_BUDGET_MS = 40000;
+const ATT_READ_ATTEMPT_MS = 14000;
+const ATT_READ_OPTS = { tries: 3, budgetMs: ATT_READ_BUDGET_MS, attemptMs: ATT_READ_ATTEMPT_MS };
 
 // The Apps Script web app intermittently serves a Google Drive HTML error page
 // ("Sorry, unable to open the file at present") instead of running — measured at
@@ -14761,15 +14812,23 @@ async function buildHrDashboardHome(box){
   // group left them the 400ms floor and they fell back to empty every time —
   // the roster count would be right while the live counts sat at 0.
   //
-  // Each phase is sized from BACKEND_BUDGET_MS — the cap apiFetch now enforces
-  // across all of its retries — plus margin for the sync work between reads,
-  // rather than a hardcoded number of its own. Sizing a phase to clear a single
-  // attempt only ever let the FIRST try land; attempts 2 and 3 finished after
-  // this screen had stopped listening, so the retry that exists for the
-  // backend's flakiness could never actually help here. Deriving both ends from
-  // one constant is what keeps them reconciled.
+  // Each phase is sized from DASH_PHASE_MS — how long this screen is willing
+  // to wait before painting a card as degraded — rather than a hardcoded
+  // number of its own.
+  //
+  // That used to be BACKEND_BUDGET_MS + 1000, which tied this screen's
+  // patience to apiFetch's retry budget. The two are different questions, and
+  // keeping them as one number meant neither could move: raising the retry
+  // budget so a retry could actually run would have made every card here wait
+  // twenty-five seconds instead of ten. A Dashboard is glanced at, and a card
+  // that says it could not load beats half a minute of skeleton; a report or a
+  // save is worth waiting for. Hence two constants.
+  //
+  // The consequence is deliberate and unchanged: a read that needs a retry
+  // finishes after this screen has stopped listening, so the card shows
+  // degraded — correctly — rather than the retry helping here.
   const budget = ms => { const end = Date.now() + ms; return () => Math.max(400, end - Date.now()); };
-  const left = budget(BACKEND_BUDGET_MS + 1000);
+  const left = budget(DASH_PHASE_MS);
   // The employee list gets its own, longer budget, matching the 32s one
   // remoteGetAllEmployees_ itself now asks apiFetch for (2 attempts of up to
   // 15s each) — reading and parsing the whole roster is genuinely the
@@ -14794,7 +14853,7 @@ async function buildHrDashboardHome(box){
 
   // --- live engineer status, same rules the Tracking page uses ---
   // Its own budget, started here rather than inherited from the group above.
-  const left2 = budget(BACKEND_BUDGET_MS + 1000);
+  const left2 = budget(DASH_PHASE_MS);
   const actives = await softly(
     Promise.all(users.map(u => getActive(u.username).catch(() => null))),
     left2(), [], 'engineer positions');
@@ -15081,7 +15140,7 @@ async function loadDashboardAbsentToday(onRoll){
   const today = todayStr();
   // Off the critical path deliberately: this is one attendance read per
   // employee, so the dashboard paints first and the figure lands after.
-  const ms = BACKEND_BUDGET_MS + 1000;
+  const ms = DASH_PHASE_MS;
   const read = p => Promise.race([
     Promise.resolve(p).catch(() => null),
     new Promise(r => setTimeout(() => r(null), ms))
