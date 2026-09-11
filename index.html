@@ -16117,7 +16117,8 @@ function employeeModalHtml(emp){
         <div id="headingCalcBox"></div>
       </div>
 
-      <div class="field-group ${emp.salaryHeading==='apprentice'?'':'hidden'}" id="familyFields">
+      <div class="field-group ${empWasApprentice_(emp)?'':'hidden'}" id="familyFields">
+        <p id="directPayPastNote" class="hidden" style="font-size:11.5px;color:var(--muted);margin:0 0 12px;background:var(--warn-bg,#fff8e1);border-left:3px solid var(--warn,#e6a700);padding:8px 10px;">This employee is not an Apprentice any more, but they were. Everything in this section is still shown because it describes a period that happened: the months they were an apprentice are still paid from the direct deposit below, and the contract dates still evidence the apprenticeship. Nothing here is applied to any month after their heading changed.</p>
         <div class="sec-title">Family information</div>
         <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Required for apprentices — the apprenticeship registration and the NAPS/board records ask for parents' names in full.</p>
         <label class="field">Father's full name</label>
@@ -16147,7 +16148,6 @@ function employeeModalHtml(emp){
         <textarea class="field-input" id="f_apprenticeContractDetails" rows="2" placeholder="e.g. 12 Months Training Program as per Apprenticeship Act">${escapeHtml(emp.apprenticeContractDetails||'')}</textarea>
         <div id="directPayWrap" class="hidden">
           <div style="height:12px"></div>
-          <p id="directPayPastNote" class="hidden" style="font-size:11.5px;color:var(--muted);margin:0 0 8px;background:var(--warn-bg,#fff8e1);border-left:3px solid var(--warn,#e6a700);padding:8px 10px;">This employee is not an Apprentice any more, but they were. The direct deposit is still shown because the months they were an apprentice are still paid from it — the Salary Sheet for those months reads these figures. It is not taken off any month after their heading changed.</p>
           <label class="field">Paid directly to the employee's account?</label>
           <select class="field-input" id="f_directPaid" onchange="toggleDirectPay()">
             <option value="no" ${emp.directPaid==='yes'?'':'selected'}>No</option>
@@ -16752,21 +16752,38 @@ function toggleLeaveFieldsForType(){
   }
 }
 
-// Parents' names are asked for apprentices only, because only the
-// apprenticeship registration needs them. Same rule as the direct-pay question:
-// switch the heading away and the answers go with it.
+// Was this employee an Apprentice at any point on file? Read through
+// salaryHistoryOf, never the flat salaryHeading field, for the same reason
+// every figure is: the flat field is only what they are today, and an
+// apprenticeship that has ended still has months that were paid under it and
+// a registration that still has to be evidenced.
+function empWasApprentice_(emp){
+  return salaryHistoryOf(emp || {}).some(h => (h.salaryHeading || '') === 'apprentice');
+}
+
+// Parents' names, the apprenticeship category and the contract period are
+// asked for apprentices only, because only the apprenticeship registration
+// needs them.
+//
+// This used to hide the whole group AND blank all six fields the moment the
+// heading was not Apprentices, which is the same erase toggleDirectPay was
+// doing, on the same form, in the same breath — and it hid toggleDirectPay's
+// own fix, because #directPayWrap lives inside this group. Unhiding the inner
+// block while its parent stayed hidden showed HR nothing at all: the direct
+// deposit was still invisible on Nikhil Somavanshi's record after the erase
+// itself had been fixed.
+//
+// It also threw away real records. The apprenticeship contract start and end,
+// the category and the contract details are what a NAPS claim and the
+// Apprentice documents module are evidenced from; they describe a period that
+// happened, not a state that is current, so a heading change has no business
+// deleting them. Nothing is cleared here any more, and the group stays on
+// screen for anyone with an Apprentices spell anywhere in their history.
 function toggleFamilyFields(){
   const isApprentice = (document.getElementById('f_salaryHeading') || {}).value === 'apprentice';
   const box = document.getElementById('familyFields');
   if(!box) return;
-  box.classList.toggle('hidden', !isApprentice);
-  if(!isApprentice){
-    ['f_fatherName','f_motherName','f_apprenticeCategory','f_apprenticeContractStart',
-     'f_apprenticeContractEnd','f_apprenticeContractDetails'].forEach(id => {
-      const el = document.getElementById(id);
-      if(el) el.value = '';
-    });
-  }
+  box.classList.toggle('hidden', !(isApprentice || empWasApprentice_(editingEmployeeDraft)));
 }
 
 function toggleStatutoryFieldsForHeading(){
