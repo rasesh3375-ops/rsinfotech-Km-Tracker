@@ -16590,6 +16590,17 @@ function addDirectPaidChange(){
   if(String(amountRaw || '').trim() === '') return say('Enter the new amount — 0 to stop it from that month.');
   const amount = Number(amountRaw) || 0;
   if(amount < 0) return say('The amount cannot be negative.');
+  // Stopping something that was never running writes a record saying an
+  // arrangement ended, on somebody who never had one — and it flips the
+  // question above to "No", which is what HR reads as the answer. Pressing
+  // Add with 0 on a blank record left a form reading "Direct deposit history
+  // (1) — From September 2026 — stopped" on an employee with no deposit at
+  // all, which says the opposite of the truth. Nothing to stop is not a
+  // change; say so and write nothing.
+  if(amount === 0 && !directPaidAsOf(editingEmployeeDraft, from)){
+    return say('There is no direct deposit running in ' + monthLabel(from) + ' to stop. ' +
+               'To record one, answer "Yes" above and enter the monthly amount.');
+  }
   // Seed from whatever the record holds now, so the first change on a record
   // that only ever had the flat field keeps that figure for the months it
   // already covered instead of dropping them to zero.
