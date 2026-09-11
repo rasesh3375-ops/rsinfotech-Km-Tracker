@@ -16147,6 +16147,7 @@ function employeeModalHtml(emp){
         <textarea class="field-input" id="f_apprenticeContractDetails" rows="2" placeholder="e.g. 12 Months Training Program as per Apprenticeship Act">${escapeHtml(emp.apprenticeContractDetails||'')}</textarea>
         <div id="directPayWrap" class="hidden">
           <div style="height:12px"></div>
+          <p id="directPayPastNote" class="hidden" style="font-size:11.5px;color:var(--muted);margin:0 0 8px;background:var(--warn-bg,#fff8e1);border-left:3px solid var(--warn,#e6a700);padding:8px 10px;">This employee is not an Apprentice any more, but they were. The direct deposit is still shown because the months they were an apprentice are still paid from it — the Salary Sheet for those months reads these figures. It is not taken off any month after their heading changed.</p>
           <label class="field">Paid directly to the employee's account?</label>
           <select class="field-input" id="f_directPaid" onchange="toggleDirectPay()">
             <option value="no" ${emp.directPaid==='yes'?'':'selected'}>No</option>
@@ -16157,10 +16158,21 @@ function employeeModalHtml(emp){
             <label class="field">Amount paid directly (per month)</label>
             <input type="number" class="field-input" id="f_directPaidAmount" placeholder="0" value="${emp.directPaidAmount||''}" oninput="renderPayrollBreakdown()">
             <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Money already in their account, so it comes off Net Payable and shows as its own line on the Salary Sheet. Everything above it — Gross, PF, ESI, PT — is untouched.</p>
+            <p id="directPayAmountDatedNote" class="hidden" style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">This shows the amount in force this month. It is dated now, so change it under "Change the amount from a month" below — that is what keeps months already paid at the figure they were actually paid.</p>
             <div style="height:10px"></div>
             <label class="field">Last month this applies (optional)</label>
             <input type="month" class="field-input" id="f_directPaidEndMonth" value="${escapeHtml(emp.directPaidEndMonth||'')}" oninput="renderPayrollBreakdown()">
             <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Direct deposit always runs for a fixed period, not indefinitely. After this month the Salary Sheet stops taking it off Net Payable on its own — nobody has to remember to switch it off. Leave blank while the arrangement is still ongoing.</p>
+            <div id="directPaidHistoryBox"></div>
+            <div style="height:12px"></div>
+            <label class="field">Change the amount from a month</label>
+            <div class="row-inline">
+              <div><input type="month" class="field-input" id="f_directPaidChangeFrom"></div>
+              <div><input type="number" class="field-input" id="f_directPaidChangeAmount" placeholder="New amount"></div>
+              <div><button type="button" class="btn ghost" onclick="addDirectPaidChange()">Add</button></div>
+            </div>
+            <p id="directPaidChangeMsg" class="hint" style="min-height:16px;margin:6px 0 0;"></p>
+            <p style="font-size:11.5px;color:var(--muted);margin:2px 0 0;">Every month before the one you choose keeps the figure it was actually paid — the same way Record Increment leaves earlier months alone. Enter 0 to stop the deposit from that month without erasing what came before it.</p>
           </div>
         </div>
       </div>
@@ -16480,8 +16492,30 @@ function toggleTrackingFields(){
 // out: a form asking for a bond end date for somebody who has no bond is a
 // question that should not be on screen at all.
 // Only the Apprentices heading pays anything directly, so the question is not
-// put to anyone else. Switching heading away clears it, so a stipend cannot be
-// left behind on somebody it no longer applies to.
+// put to anyone else — but "anyone else" has to mean anyone who was never an
+// apprentice, not anyone who is not one today.
+//
+// This function used to CLEAR directPaid, directPaidAmount and
+// directPaidEndMonth whenever the heading on the form was not Apprentices,
+// and it runs on every render of this form (see the call in
+// employeeModalHtml's tail), so the next Save wrote that erase down. Those
+// three fields carried no dated history, so the erase reached backwards and
+// took the stipend off every Apprentice month the employee had ever been
+// paid. Nikhil Somavanshi moved to Contractors on 1 August 2026 and his
+// April 2026 net went from ₹14,700 to ₹16,200 — a month nobody had touched,
+// four months before the change that caused it.
+//
+// The erase was protecting nothing. directPaidForMonth already refuses any
+// month whose heading was not Apprentices, and it resolves that heading from
+// salary history per month, so a stipend cannot be paid to a Contractor
+// whether the field is cleared or not. Clearing only destroyed the record of
+// what had been paid.
+//
+// So: nothing is cleared here, ever. The block stays on screen for anyone
+// with an Apprentices spell anywhere in their salary history, because a
+// stipend that applied in the past still has to be visible and correctable
+// once the heading has moved on — otherwise the figures for those months can
+// never be put right.
 function toggleDirectPay(){
   const heading = (document.getElementById('f_salaryHeading') || {}).value;
   const wrap = document.getElementById('directPayWrap');
@@ -16489,22 +16523,112 @@ function toggleDirectPay(){
   const amtWrap = document.getElementById('directPayAmountWrap');
   if(!wrap || !sel) return;
   const isApprentice = heading === 'apprentice';
-  wrap.classList.toggle('hidden', !isApprentice);
-  if(!isApprentice){
-    sel.value = 'no';
-    const amt = document.getElementById('f_directPaidAmount');
-    if(amt) amt.value = '';
-    const endMonth = document.getElementById('f_directPaidEndMonth');
-    if(endMonth) endMonth.value = '';
+  const draft = editingEmployeeDraft || {};
+  const wasApprentice = salaryHistoryOf(draft).some(h => (h.salaryHeading || '') === 'apprentice');
+  wrap.classList.toggle('hidden', !(isApprentice || wasApprentice));
+  const past = document.getElementById('directPayPastNote');
+  if(past) past.classList.toggle('hidden', isApprentice || !wasApprentice);
+  // Shown whenever there is something to show: an arrangement running now, or
+  // one that ran in the past and whose figures still have to add up.
+  const hasHistory = directPaidHistoryOf(draft).length > 0;
+  if(amtWrap) amtWrap.classList.toggle('hidden', sel.value !== 'yes' && !hasHistory);
+  // Once the stipend is dated, the flat box is no longer what decides a
+  // month — the history is. Left editable it would accept a figure and change
+  // nothing, which is the quietest kind of wrong a payroll form can be; so it
+  // becomes a read-out of the amount in force today, and changes go through
+  // the dated control below it.
+  const dated = Array.isArray(draft.directPaidHistory) && draft.directPaidHistory.length > 0;
+  const amtField = document.getElementById('f_directPaidAmount');
+  if(amtField){
+    amtField.readOnly = dated;
+    if(dated) amtField.value = directPaidAsOf(draft, todayStr().slice(0, 7)) || '';
   }
-  if(amtWrap) amtWrap.classList.toggle('hidden', sel.value !== 'yes');
-  if(sel.value !== 'yes'){
-    const amt = document.getElementById('f_directPaidAmount');
-    if(amt) amt.value = '';
-    const endMonth = document.getElementById('f_directPaidEndMonth');
-    if(endMonth) endMonth.value = '';
-  }
+  const amtNote = document.getElementById('directPayAmountDatedNote');
+  if(amtNote) amtNote.classList.toggle('hidden', !dated);
+  renderDirectPaidHistoryBox();
   try{ renderPayrollBreakdown(); }catch(e){}
+}
+
+// The stipend's own dated history, the same shape and the same reasoning as
+// renderSalaryHistoryBox above it: an entry per month the amount changed, so
+// changing it today cannot restate a month already paid at the old figure.
+// The earliest entry is removable here, unlike a salary history's, because
+// unlike a Rate of Pay a stipend legitimately did not exist before it — there
+// is nothing it has to fall back to.
+function renderDirectPaidHistoryBox(){
+  const box = document.getElementById('directPaidHistoryBox');
+  if(!box) return;
+  const hist = directPaidHistoryOf(editingEmployeeDraft || {});
+  if(!hist.length){ box.innerHTML = ''; return; }
+  const sorted = hist.slice().sort((a, b) => (a.from || '').localeCompare(b.from || ''));
+  box.innerHTML = `
+    <div style="height:10px"></div>
+    <details open><summary style="font-size:12.5px;color:var(--muted);cursor:pointer;">Direct deposit history (${sorted.length})</summary>
+      <div style="font-size:12.5px;color:var(--muted);margin-top:6px;">
+        ${sorted.map((h, hi) => `
+          <div class="row-inline" style="padding:4px 0;border-bottom:1px solid var(--border,#e5e5e5);align-items:center;">
+            <span style="flex:1;">${h.from ? 'From ' + monthLabel(h.from) : 'For the whole apprenticeship'} — ${Number(h.amount) > 0 ? '₹' + fmtMoney(Number(h.amount)) + ' a month' : 'stopped'}</span>
+            <a href="#" onclick="removeDirectPaidEntry(${hi});return false;" style="font-size:12px;color:var(--muted);">Remove</a>
+          </div>`).join('')}
+      </div>
+    </details>`;
+}
+
+// Changes the stipend from a chosen month on, leaving every month before it
+// exactly as it was paid — the same mechanism, and the same reason, as
+// Record Increment. Entering ₹0 is how an arrangement is stopped partway
+// through an apprenticeship without erasing what came before it.
+function addDirectPaidChange(){
+  const fromEl = document.getElementById('f_directPaidChangeFrom');
+  const amtEl = document.getElementById('f_directPaidChangeAmount');
+  const msg = document.getElementById('directPaidChangeMsg');
+  const say = t => { if(msg){ msg.textContent = t; msg.classList.add('error'); } };
+  if(msg){ msg.textContent = ''; msg.classList.remove('error'); }
+  const from = (fromEl || {}).value || '';
+  const amountRaw = (amtEl || {}).value;
+  if(!from) return say('Choose the month the new amount starts from.');
+  if(String(amountRaw || '').trim() === '') return say('Enter the new amount — 0 to stop it from that month.');
+  const amount = Number(amountRaw) || 0;
+  if(amount < 0) return say('The amount cannot be negative.');
+  // Seed from whatever the record holds now, so the first change on a record
+  // that only ever had the flat field keeps that figure for the months it
+  // already covered instead of dropping them to zero.
+  const hist = directPaidHistoryOf(editingEmployeeDraft).slice()
+    .filter(h => (h.from || '') !== from);
+  hist.push({ from: from, amount: amount });
+  editingEmployeeDraft.directPaidHistory = hist;
+  // Once there is a history, the flat amount is only a stale seed — keep it
+  // matching the figure in force today so nothing reading it directly (the
+  // Apprentice list's Yes/No pill) contradicts the Salary Sheet.
+  const nowYm = todayStr().slice(0, 7);
+  editingEmployeeDraft.directPaidAmount = directPaidAsOf(editingEmployeeDraft, nowYm);
+  editingEmployeeDraft.directPaid = editingEmployeeDraft.directPaidAmount > 0 ? 'yes' : 'no';
+  const sel = document.getElementById('f_directPaid');
+  if(sel) sel.value = editingEmployeeDraft.directPaid;
+  const amtField = document.getElementById('f_directPaidAmount');
+  if(amtField) amtField.value = editingEmployeeDraft.directPaidAmount || '';
+  if(fromEl) fromEl.value = '';
+  if(amtEl) amtEl.value = '';
+  if(msg) msg.textContent = amount > 0
+    ? 'From ' + monthLabel(from) + ' the Salary Sheet takes off ₹' + fmtMoney(amount) + '. Months before it keep what they were paid.'
+    : 'Stopped from ' + monthLabel(from) + '. Months before it keep what they were paid.';
+  toggleDirectPay();
+}
+
+// Undoes an entry added by mistake. Every month it covered recomputes from
+// whichever entry is in force once it is gone — same as if it had never been
+// added, exactly like removeSalaryHistoryEntry.
+function removeDirectPaidEntry(hi){
+  const hist = directPaidHistoryOf(editingEmployeeDraft);
+  const sorted = hist.slice().sort((a, b) => (a.from || '').localeCompare(b.from || ''));
+  const target = sorted[hi];
+  if(!target) return;
+  if(!confirm('Remove this direct-deposit entry — ' +
+    (Number(target.amount) > 0 ? '₹' + fmtMoney(Number(target.amount)) + ' a month' : 'stopped') +
+    (target.from ? ' from ' + monthLabel(target.from) : '') +
+    '?\n\nEvery month it covered will recompute using whichever entry is in force once it is gone.')) return;
+  editingEmployeeDraft.directPaidHistory = hist.filter(h => h !== target);
+  toggleDirectPay();
 }
 
 function toggleBondFields(){
@@ -19338,6 +19462,24 @@ async function saveEmployeeForm(){
   if(payrollErrors.length){
     showEmpSaveError(payrollBlockingMessage());
     return;
+  }
+  // Switching the direct deposit off is a statement about now, and this app
+  // no longer lets a statement about now reach backwards — so it has to say
+  // WHEN it stopped, or the months already paid would keep resolving to the
+  // last figure on the list forever. Asked rather than guessed: only HR knows
+  // the last month the money actually went in, and a date invented here would
+  // be a deduction invented in somebody's salary.
+  {
+    const sel = document.getElementById('f_directPaid');
+    const endEl = document.getElementById('f_directPaidEndMonth');
+    const stillApprentice = (document.getElementById('f_salaryHeading') || {}).value === 'apprentice';
+    if(sel && sel.value !== 'yes' && stillApprentice &&
+       directPaidHistoryOf(editingEmployeeDraft).length && !((endEl || {}).value)){
+      showEmpSaveError('This apprentice has a direct deposit on file and it is being switched off. ' +
+        'Enter the last month it applied under "Last month this applies" — without it, the months ' +
+        'already paid cannot tell when it stopped.');
+      return;
+    }
   }
   const needsTracking = document.getElementById('f_needsTracking').value;
   const draft = editingEmployeeDraft;

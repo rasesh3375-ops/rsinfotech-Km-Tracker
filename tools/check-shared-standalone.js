@@ -34,6 +34,7 @@ const EXPORTS = ['prePayrollChecks','challanComparison','CHALLAN_ACCOUNTS','pars
   'resolvedAttendanceCode_','loansOf','loanBalanceAfter','loanEmiRateAsOf','computeLoanEmiForMonth',
   'loanBalanceAfterMonth','advanceBalanceAfterMonth','salaryAdvanceForMonth','advanceTempForMonth',
   'diwaliBonusFor','monthlyPayFor','financialYearLabel','calculatePfFor','computeEsi','monthlyPtFor',
+  'directPaidHistoryOf','directPaidAsOf','directPaidForMonth','apprenticeStipendReview',
   'ratePayAsOf','SALARY_HEADINGS','PF_RULES','ESI_RULES','LEAVE_POLICY','leaveWorkingDays',
   'applyAlwaysPresentFill','leaveDetailRowFor','leaveDetailReportRows','leaveDetailCsvHeader',
   'leaveDetailCsvRows','loanLedgerRows','loanLedgerCsvHeader','loanLedgerCsvRows',
@@ -139,6 +140,13 @@ run('statutoryAmountCsv', () => {
   return box.statutoryAmountCsv(d.rows, d.grandTotal, 'pt');
 });
 run('policyRowsFor', () => box.policyRowsFor(employees, att, dateList, holidayMap));
+// The apprentice stipend, whose whole point is that it resolves per month —
+// run it rather than only counting it as an export, since the fault it exists
+// for hid behind a branch nothing exercised.
+run('directPaidHistoryOf', () => box.directPaidHistoryOf(employees[0]));
+run('directPaidAsOf', () => box.directPaidAsOf(employees[0], '2026-07'));
+run('directPaidForMonth', () => box.directPaidForMonth(employees[0], box.SALARY_HEADINGS.apprentice, '2026-07'));
+run('apprenticeStipendReview', () => box.apprenticeStipendReview(employees));
 run('evaluateAttendanceDay', () => box.evaluateAttendanceDay({ inMin: 585, outMin: 1170 }));
 run('consultantReportRows', () => box.consultantReportRows(
   box.consultantReportEmployees(employees, dateList), att, dateList, 31, holidayMap, 2026, 7));

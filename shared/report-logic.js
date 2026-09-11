@@ -1070,10 +1070,108 @@ function legacyAdvanceTempForMonth_(emp, ym){
 // bondStart/retentionMonths already uses for retention money. Blank end
 // month means the arrangement is still ongoing, same as every other
 // open-ended field in this file.
+//
+// The stipend as a dated list, whatever shape the record is in — the same
+// idea as salaryHistoryOf and loanEmiHistoryOf. A record with no history yet
+// is one implicit entry built from the flat directPaidAmount, in force
+// before anything else (`from: null`), which is exactly right here: the
+// heading guard in directPaidForMonth already bounds the arrangement to the
+// months the employee was actually an Apprentice, so a null `from` has no
+// earlier month it could wrongly reach into.
+//
+// This is dated for the reason every other figure in this file is. The three
+// flat fields carried no history at all, so changing the amount restated
+// every month the employee had already been paid at the old one — the same
+// class of fault the finalised-month freeze exists for, and it had already
+// happened once in a worse form (see apprenticeStipendReview).
+function directPaidHistoryOf(emp){
+  if(!emp) return [];
+  if(Array.isArray(emp.directPaidHistory) && emp.directPaidHistory.length) return emp.directPaidHistory;
+  if(emp.directPaid !== 'yes') return [];
+  return [{ from: null, amount: Number(emp.directPaidAmount) || 0 }];
+}
+
+// The stipend in force in one month — the entry with the latest `from` on or
+// before it, the same resolution rule as ratePayAsOf and loanEmiRateAsOf. An
+// entry of 0 is how an arrangement is stopped from a given month without
+// erasing what was actually paid in the months before it.
+function directPaidAsOf(emp, monthYm){
+  const hist = directPaidHistoryOf(emp);
+  let chosen = null;
+  hist.forEach(h => {
+    if(h.from && h.from > monthYm) return; // not in force yet in this month
+    if(!chosen || (h.from || '') > (chosen.from || '')) chosen = h;
+  });
+  // A month earlier than every entry on the list is a month the arrangement
+  // had not started. This is the one place the rule differs from ratePayAsOf,
+  // which falls back to its earliest entry — deliberately: a Rate of Pay
+  // always existed, a stipend did not, and falling back here would invent a
+  // deduction in a month nobody was paid one.
+  return chosen ? Number(chosen.amount) || 0 : 0;
+}
+
+// The `directPaid` flag deliberately does NOT appear below. It means "is
+// there an arrangement running now", and a question about now must never
+// reach backwards into months already paid — reading it here is precisely
+// what took ₹1,500 a month off Nikhil Somavanshi's whole apprenticeship the
+// day his heading moved to Contractors. What a month gets is decided by the
+// dated history, the heading in force that month, and the end month; all
+// three are per-month facts. directPaidHistoryOf still consults the flag,
+// but only to seed a record that has no history at all.
 function directPaidForMonth(emp, heading, monthYm){
-  if((emp || {}).directPaid !== 'yes' || heading !== SALARY_HEADINGS.apprentice) return 0;
-  if(emp.directPaidEndMonth && monthYm > emp.directPaidEndMonth) return 0;
-  return Number(emp.directPaidAmount) || 0;
+  if(heading !== SALARY_HEADINGS.apprentice) return 0;
+  if((emp || {}).directPaidEndMonth && monthYm > emp.directPaidEndMonth) return 0;
+  return directPaidAsOf(emp, monthYm);
+}
+
+// Everyone who has ever been an Apprentice, and what stipend is on file for
+// them — HR's one-time review list after a fault that has already done its
+// damage.
+//
+// The Edit employee form used to ERASE directPaid, directPaidAmount and
+// directPaidEndMonth the moment a heading moved off Apprentices, and it ran
+// on every render of that form, so the next Save wrote the erase down. Those
+// three fields had no dated history, so the erase reached backwards and took
+// the stipend off every Apprentice month the employee had ever been paid:
+// Nikhil Somavanshi's April 2026 went from ₹14,700 to ₹16,200 without anyone
+// touching April. The erase is gone (see toggleDirectPay in index.html), but
+// the amounts it destroyed are not recoverable from anything this app still
+// holds.
+//
+// So this lists who to CHECK, never who is wrong — an apprentice who simply
+// never had a direct-deposit arrangement is a perfectly ordinary "none on
+// file", and nothing here can tell that apart from one that was erased. The
+// roster arrives in sequence order and is not re-sorted.
+function apprenticeStipendReview(employees){
+  const rows = [];
+  (employees || []).forEach(e => {
+    const hist = salaryHistoryOf(e).slice().sort((a, b) => (a.from || '').localeCompare(b.from || ''));
+    const spells = hist.filter(h => (h.salaryHeading || '') === 'apprentice');
+    if(!spells.length) return;
+    const nowApprentice = (ratePayAsOf(e, todayStr()).salaryHeading || '') === 'apprentice';
+    // The first month they moved OFF Apprentices, if they have — the point
+    // after which the old form would have erased the stipend on the next save.
+    let movedOff = null;
+    for(let i = 0; i < hist.length; i++){
+      if((hist[i].salaryHeading || '') !== 'apprentice' && hist[i].from &&
+         spells.some(s => (s.from || '') < hist[i].from)){ movedOff = hist[i].from; break; }
+    }
+    const stipend = directPaidHistoryOf(e);
+    const onFile = stipend.reduce((t, h) => t + (Number(h.amount) || 0), 0) > 0;
+    rows.push({
+      id: e.id, name: e.name || e.id,
+      nowApprentice: nowApprentice,
+      apprenticeFrom: spells[0].from || null,
+      movedOffOn: movedOff,
+      stipendOnFile: onFile,
+      stipendEntries: stipend.length,
+      // Someone whose heading has moved on and who has no stipend on file is
+      // the exact shape the erase left behind. It is not proof — say "check",
+      // not "wrong".
+      checkThis: !!movedOff && !onFile
+    });
+  });
+  return rows;
 }
 
 // What is still owed on Salary Advance Payment once the given month's
@@ -3725,6 +3823,35 @@ function prePayrollChecks(employees, attByEmp, ym, holidayMap, sal, prevSal, opt
     add('warn', 'el-at-risk', 'Earned leave heading for encashment',
         PREPAY_EL_AT_RISK + ' days or more still unused. Neither EL nor SL carries forward, ' +
         'so what is not granted before 31 March is encashed at 70% of Basic + HRA.', who);
+  }
+
+  // --- 11. Apprentice stipend missing from a month it should cover ---------
+  // Fires only on a month the employee was actually an Apprentice in, where
+  // no direct deposit resolves, and whose heading has since moved on — the
+  // exact shape left behind by the erase this app used to do (see
+  // apprenticeStipendReview, and toggleDirectPay in index.html). So it speaks
+  // up while HR prices April 2026, where ₹1,500 really is missing, and stays
+  // silent for every month after the apprenticeship ended, where nothing is.
+  //
+  // Deliberately a warning, not a stop. An apprentice who genuinely never had
+  // a direct-deposit arrangement is an ordinary record, and nothing this app
+  // still holds can tell that apart from one whose figure was erased — only
+  // HR can. A stop would block payroll on a question the app cannot answer.
+  {
+    const who = [];
+    apprenticeStipendReview(active).forEach(r => {
+      if(!r.checkThis) return;
+      const e = active.find(x => x.id === r.id);
+      if(!e) return;
+      if((ratePayAsOf(e, dateList[0]).salaryHeading || '') !== 'apprentice') return;
+      who.push(noted(e, 'apprentice this month, heading changed ' + (r.movedOffOn || 'later')));
+    });
+    add('warn', 'apprentice-stipend-missing', 'Apprentice with no direct deposit on file',
+        'They were an Apprentice in ' + monthLabel(ym) + ' and their heading has changed since, ' +
+        'but no direct bank deposit is recorded. Until 11 September 2026 this app erased a direct ' +
+        'deposit whenever a heading moved off Apprentices, and the erase reached back into months ' +
+        'already paid. If a deposit did apply, enter it on their record — the Salary Sheet for this ' +
+        'month is over by that amount until it is. If they never had one, nothing needs doing.', who);
   }
 
   const order = { stop: 0, warn: 1 };

@@ -197,6 +197,27 @@ The same rule holds for the finalised-month keys: read them with
 either standing or being recomputed. A report shows the month's real figures or
 it shows nothing.
 
+**A statement about today must never reach into a month already paid, and a
+form must never erase the evidence.** Two rules, one failure. The apprentice
+direct-deposit stipend was three flat fields with no dated history —
+`directPaid`, `directPaidAmount`, `directPaidEndMonth` — and
+`directPaidForMonth` opened with `emp.directPaid !== 'yes'`, so the on/off
+flag, which means "is this running now", decided months paid a year ago.
+Worse, `toggleDirectPay()` in the form *cleared* all three whenever the
+heading on screen was not Apprentices, and it ran on every render, so the next
+Save wrote the erase down. Nikhil Somavanshi moved to Contractors on 1 August
+2026 and his April 2026 net went from ₹14,700 to ₹16,200 — a month nobody had
+touched, four months before the change that caused it, and no way left in the
+app to even see the figure, because the Apprentice screens filter on today's
+heading. The erase was protecting nothing: the per-month heading guard already
+refuses to pay a stipend to a Contractor. So: anything that decides a month's
+pay resolves **as of that month** — `directPaidHistoryOf`/`directPaidAsOf`
+alongside `salaryHistoryOf`/`ratePayAsOf` and `loanEmiHistoryOf`/
+`loanEmiRateAsOf` — a dated `0` is how something stops, and **a form never
+clears a field because it is currently irrelevant**; hide it, or better, show
+it and say why it is still there. `tools/check-apprentice-stipend.js` asserts
+both halves.
+
 **Rules live in config, not in code.** `SALARY_HEADINGS`, `PF_RULES`,
 `ESI_RULES`, `LEAVE_POLICY`, `PAYROLL_MASTER`, `LETTER_FIELDS`,
 `IMPORT_COLUMNS`, `FINANCIAL_YEAR`. Changing PF from Basic + HRA to Basic only
