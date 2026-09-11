@@ -10010,14 +10010,15 @@ document.addEventListener('wheel', e => {
 // overlay. Touch only, and never for the two boxes that scroll and zoom
 // themselves — see the .kmt-fs-inflow rules in the stylesheet.
 function kmtFsInFlow_(sourceId){
-  // payrollDocsRoot stays an overlay: it is a whole module (Dashboard, Browse,
-  // Search, Unclassified) with its own drill-down, not one document being read,
-  // and nothing about it needs magnifying.
-  if(sourceId === 'payrollDocsRoot') return false;
-  // docViewerRoot used to be excluded here too. It is not any more — a document
-  // is exactly the thing HR most needs to magnify, and as a fixed overlay a
-  // zoomed one had the same fault a zoomed report had: pan past its edge and
-  // you are looking at whatever is behind it.
+  // No exceptions left, on purpose. This started as "reports only", then
+  // documents were added, and Payroll Documents was the last one held back on
+  // the grounds that it is a module to browse rather than a page to read. HR's
+  // answer to that was "each and every place in this app same zoom setting",
+  // and they are right: a screen that behaves differently from every other
+  // screen is a bug in its own right, whatever the reasoning behind it.
+  // sourceId is kept in the signature because this is the one decision every
+  // caller of openFullscreenView passes through, and the next box added here
+  // should have to argue its way OUT rather than be forgotten into place.
   return window.matchMedia('(pointer: coarse)').matches;
 }
 function openFullscreenView(title, sourceId){
