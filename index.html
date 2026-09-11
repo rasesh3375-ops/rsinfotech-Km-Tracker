@@ -4415,6 +4415,12 @@ function setSession(token, role, username){
     localStorage.removeItem('kmt_session_role');
     localStorage.removeItem('kmt_session_user');
     localStorage.removeItem('kmt_hr_session_started_at');
+    // The dashboard is now kept on the device between opens, which means it
+    // would otherwise outlive the session it was rendered for — headcount and
+    // live engineer status sitting there for whoever logs in next. Signing out
+    // takes it with everything else. Inlined rather than calling
+    // invalidateDashboardSnapshot(), which is declared far below this.
+    try{ localStorage.removeItem('kmt_dash_snapshot'); }catch(e){}
   }
 }
 // Called when the backend rejects a call as unauthorized. Only acts if we
@@ -14487,10 +14493,58 @@ let dashboardSnapshot = { html:'', at:0 };
 let dashLastMapInfos = [];
 const DASHBOARD_FRESH_MS = 60000;
 
-function invalidateDashboardSnapshot(){ dashboardSnapshot = { html:'', at:0 }; }
+// ...and kept on the device as well as in memory, because in memory it is
+// empty at exactly the moment it is worth the most: the first open of the day.
+// A cold dashboard waits on the employee list, which is the heaviest read on
+// the screen and is allowed 33 seconds before it gives up — so HR opening the
+// app on a slow morning sat looking at grey placeholder cards for most of that,
+// with nothing on screen at all. Photographed, and fairly described as "taking
+// long time".
+//
+// This is the same trade the in-memory stale path above already makes — put the
+// last known screen up at once and rebuild underneath — extended across closing
+// the app. Bounded at half a day so nothing genuinely old is ever shown, size-
+// capped so one enormous render cannot fill the device's storage, and cleared
+// whenever the in-memory one is, which includes every write that could change a
+// figure on it.
+const DASH_SNAPSHOT_KEY = 'kmt_dash_snapshot';
+const DASH_SNAPSHOT_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+const DASH_SNAPSHOT_MAX_CHARS = 300000;
+
+function invalidateDashboardSnapshot(){
+  dashboardSnapshot = { html:'', at:0 };
+  try{ localStorage.removeItem(DASH_SNAPSHOT_KEY); }catch(e){}
+}
 
 function captureDashboard(box){
-  if(box) dashboardSnapshot = { html: box.innerHTML, at: Date.now() };
+  if(!box) return;
+  dashboardSnapshot = { html: box.innerHTML, at: Date.now() };
+  try{
+    if(dashboardSnapshot.html.length <= DASH_SNAPSHOT_MAX_CHARS){
+      localStorage.setItem(DASH_SNAPSHOT_KEY, JSON.stringify(dashboardSnapshot));
+    }
+  }catch(e){}   // a full or disabled store is not worth failing a render over
+}
+
+// The device's copy, if there is one worth using. Read once and promoted into
+// the in-memory snapshot, so every path below this stays exactly as it was.
+function loadStoredDashboard_(){
+  if(dashboardSnapshot.html) return;
+  try{
+    const raw = localStorage.getItem(DASH_SNAPSHOT_KEY);
+    if(!raw) return;
+    const s = JSON.parse(raw);
+    if(!s || typeof s.html !== 'string' || !s.html || typeof s.at !== 'number') return;
+    if(Date.now() - s.at > DASH_SNAPSHOT_MAX_AGE_MS){
+      localStorage.removeItem(DASH_SNAPSHOT_KEY);
+      return;
+    }
+    // Deliberately NOT treated as fresh however recent it is: it came off the
+    // disk, so the screen it describes is from before the app was last closed
+    // and a rebuild must always run underneath it. Ageing it past
+    // DASHBOARD_FRESH_MS is what forces that, without a second code path.
+    dashboardSnapshot = { html: s.html, at: Math.min(s.at, Date.now() - DASHBOARD_FRESH_MS - 1) };
+  }catch(e){}
 }
 
 // A restored snapshot is just markup — the map instance and the increment
@@ -14985,6 +15039,9 @@ async function renderHrDashboardHome(force){
   const box = document.getElementById('hrPageDashboard');
   if(!box) return;
 
+  // The device's copy counts as a snapshot, so the first open of the day takes
+  // the "stale but usable" path below instead of the skeleton.
+  if(!force) loadStoredDashboard_();
   const age = Date.now() - dashboardSnapshot.at;
   if(!force && dashboardSnapshot.html && age < DASHBOARD_FRESH_MS){
     // Straight back on screen, no network at all.
