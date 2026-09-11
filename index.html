@@ -14235,10 +14235,29 @@ async function challanAppTotals_(ym){
 // box stays editable whatever the conversion comes back with.
 async function challanCheck_(fileId, name){
   challanForm_(name);
+  // A ticking count of how long it has been reading.
+  //
+  // Converting a challan is Drive copying the PDF into a Doc with OCR, which
+  // genuinely takes tens of seconds on a scan — CHALLAN_OCR_FETCH allows 95 of
+  // them. The screen said "Reading the challan…" for all of it and nothing
+  // else, so a conversion that was working looked identical to one that had
+  // hung: HR photographed it at that message with every box empty, and
+  // reasonably read it as broken. Every outcome below already writes a real
+  // answer over this line; what was missing was any sign of life before one
+  // arrives.
+  const started = Date.now();
+  const tick = setInterval(() => {
+    const n = document.getElementById('chOcrNote');
+    if(!n) return;
+    const s = Math.round((Date.now() - started) / 1000);
+    n.textContent = 'Reading the challan… ' + s + 's. Converting a scan can take up to a ' +
+      'minute and a half; the figures can be typed in from the document instead at any point.';
+  }, 1000);
   let res;
   try{
     res = await backendAction({ action: 'ocrChallan', fileId: fileId }, CHALLAN_OCR_FETCH);
   }catch(err){ res = null; }
+  finally{ clearInterval(tick); }
   const note = document.getElementById('chOcrNote');
   // The form is still open and still usable, so a failure here is a note on it
   // rather than an alert that takes the screen away and loses what was typed.
@@ -14285,12 +14304,20 @@ async function challanCheck_(fileId, name){
   if(ex.reliable){
     note.className = '';
     note.textContent = 'Filled in from the challan — the five accounts add up to the total ' +
-      'printed on it. Check them against the document, then compare.';
+      'printed on it. Check them against the document, then press "Compare with payroll" ' +
+      'below to see whether the PF Report matches what was actually paid.';
   }else{
     note.className = 'pol-warn';
     note.textContent = 'Filled in from the challan, but the accounts do not add up to the total ' +
-      'on it, so the reading is not trusted. Check every box against the document before comparing.';
+      'on it, so the reading is not trusted. Check every box against the document, then press ' +
+      '"Compare with payroll" below.';
   }
+  // The figures are in; the comparison is the point of the screen and it is at
+  // the bottom of a form long enough to scroll. Brought into view rather than
+  // pressed automatically — see the note at CHALLAN_OCR_FETCH for why a
+  // machine may not decide a challan looks fine on its own.
+  const cmpBtn = document.querySelector('[onclick*="challanCompare_"]');
+  if(cmpBtn && cmpBtn.scrollIntoView) cmpBtn.scrollIntoView({ block: 'center' });
 }
 // The form. Deliberately in docViewerRoot, the same place the result lands, so
 // comparing replaces the form rather than stacking a second screen behind it.

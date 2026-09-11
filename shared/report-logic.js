@@ -4030,7 +4030,21 @@ function challanMonthIn_(seg){
   let m = /(\d{4})\s*-\s*(0[1-9]|1[0-2])(?!\d)/.exec(s);
   if(m) return m[1] + '-' + m[2];
   m = /(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s*[-\/ ]\s*(\d{4})/i.exec(s);
-  return m ? m[2] + '-' + CHALLAN_MONTH_NUM[m[1].toLowerCase()] : null;
+  if(m) return m[2] + '-' + CHALLAN_MONTH_NUM[m[1].toLowerCase()];
+  // Month-number then year — "08/2026", "8-2026" — which is how EPFO prints
+  // the wage month on a good many challans, and was the one common form not
+  // recognised here. It cost more than a blank box: chFld_month is an
+  // <input type="month">, which silently REJECTS a value it cannot parse, so
+  // the wage month sat empty on a challan whose every other figure had filled
+  // correctly, with nothing on screen to say why.
+  //
+  // Reading a full date this way is harmless: dd/mm/yyyy gives the mm and
+  // yyyy, and mm/dd/yyyy gives the mm and yyyy too. Only the wage-month
+  // segment reaches here — the dated labels either side of it (Challan
+  // Generated On, and the rest) are boundaries in CHALLAN_LABELS precisely so
+  // their dates cannot be read as this one.
+  m = /(?:^|[^\d])(0?[1-9]|1[0-2])\s*[\/-]\s*((?:19|20)\d{2})(?!\d)/.exec(s);
+  return m ? m[2] + '-' + String(m[1]).padStart(2, '0') : null;
 }
 // An establishment ID is letters then digits — VDBRD3096973000. Spelled out
 // rather than "the last word" because the last word next to it on the page is

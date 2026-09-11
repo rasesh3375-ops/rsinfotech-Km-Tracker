@@ -315,5 +315,33 @@ console.log('\nfrom the document straight through to the comparison\n');
         L.challanComparison(L.parseChallanText(LAYOUT_A), t, { ym: '2025-09' }).monthMatches, false);
 }
 
+// ------------------------------------------------- every way a wage month prints
+//
+// The wage month is the field that decides WHICH month a challan is compared
+// against, so failing to read it is not cosmetic. It is also the one that can
+// fail invisibly: chFld_month is an <input type="month">, which silently
+// rejects a value it cannot parse — so an unrecognised format left the box
+// empty on a challan whose every other figure had filled correctly, with
+// nothing on screen to say why. HR photographed exactly that.
+//
+// "08/2026" — month number then year — is a common EPFO form and was the one
+// not recognised. All four are asserted together so the next format added
+// cannot quietly displace one of the others.
+console.log('\nthe wage month, however the challan prints it\n');
+{
+  const monthOf = txt => L.parseChallanText('Wage Month : ' + txt + '\nTotal Amount (Rs.) : 1').month;
+  check('2026-08   (ISO, as some print it)',      monthOf('2026-08'),      '2026-08');
+  check('Aug-2026  (short name)',                 monthOf('Aug-2026'),     '2026-08');
+  check('August 2026 (full name)',                monthOf('August 2026'),  '2026-08');
+  check('08/2026   (month number then year)',     monthOf('08/2026'),      '2026-08');
+  check('8-2026    (unpadded, hyphenated)',       monthOf('8-2026'),       '2026-08');
+  // A full date in that segment still yields its month and year, whichever way
+  // round it is written — both readings agree on those two.
+  check('01/08/2026 reads the month and year',    monthOf('01/08/2026'),   '2026-08');
+  // And nothing is invented from a segment with no month in it at all.
+  check('a segment with no month reads as none',  monthOf('R S INFOTECH'), null);
+  check('13/2026 is not a month',                 monthOf('13/2026'),      null);
+}
+
 console.log('\n' + (fails.length ? fails.length + ' FAILURE(S):\n  ' + fails.join('\n  ') : 'PASS'));
 process.exit(fails.length ? 1 : 0);
