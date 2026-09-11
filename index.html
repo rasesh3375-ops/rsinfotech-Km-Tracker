@@ -220,7 +220,14 @@
     margin:0;
     overscroll-behavior-y:contain;
     overflow-x:hidden;
-    touch-action:pan-x pan-y;
+    /* No touch-action here either. It was declared twice — once on <html> and
+       again here — and only the <html> one was taken off when the pinch was
+       handed back to the browser, so this second copy went on telling Safari
+       not to start a pinch anywhere on the page. It is why a generated report
+       still would not zoom after everything else had been fixed: the report is
+       ordinary page content now, and ordinary page content sits inside <body>.
+       See the comment on the <html> rule above for why neither may come back.
+       #docViewerRoot keeps its own, deliberately and in one scoped place. */
     background:var(--cream);
     color:var(--navy);
     min-height:100vh;

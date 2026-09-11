@@ -32,22 +32,54 @@ const BANNED = [
   [/maximum-scale/i,          'maximum-scale (caps how far the page may be zoomed)'],
   [/minimum-scale/i,          'minimum-scale (caps how far it may be zoomed out)'],
   [/user-scalable\s*=\s*(no|0)/i, 'user-scalable=no (forbids zooming outright)'],
+  // The third way, and the one that cost an extra round on its own.
+  //
+  // touch-action:pan-x pan-y permits one-finger panning and excludes
+  // pinch-zoom, so it tells the browser not to start a pinch at all. It was
+  // declared TWICE — once on <html> and again on <body> — and when the gesture
+  // was handed back to the browser only the <html> one was taken off. The
+  // second copy went on blocking every pinch on the page, which is why a
+  // generated report still would not zoom after everything else had been
+  // fixed: a report is ordinary page content, and ordinary page content sits
+  // inside <body>.
+  //
+  // Scoped to the page roots, because one scoped exception is legitimate and
+  // deliberate: #docViewerRoot keeps it so a pinch over a document reaches the
+  // document's OWN zoom, which re-renders a PDF sharply instead of magnifying
+  // a blurry one.
+  [/^\s*(html|body|:root|html\s*,\s*body)\s*[,{]/i, null],
 ];
 
 let failed = 0;
 FILES.forEach(file => {
   const src = fs.readFileSync(path.join(R, file), 'utf8');
-  src.split('\n').forEach((line, i) => {
+  const lines = src.split('\n');
+  // Which lines belong to an html/body/:root rule block, so a touch-action
+  // inside one can be told from the scoped exception.
+  let rootBlockUntil = -1;
+  lines.forEach((line, i) => {
     // A line that only talks about it is fine — this file's own comments
     // explain at length why it must not be used, and so do index.html's.
     const code = line.replace(/^\s*(\/\/|\*|<!--).*$/, '');
+    if (/^\s*(html|body|:root)\b[^{]*\{/.test(code) || /^\s*html\s*,\s*body\s*\{/.test(code)) {
+      // Until the closing brace, or the end of a one-liner.
+      rootBlockUntil = /\}/.test(code) ? i : i + 60;
+    }
+    if (/\}/.test(code) && i <= rootBlockUntil) rootBlockUntil = Math.min(rootBlockUntil, i);
     BANNED.forEach(([re, what]) => {
+      if (!what) return;               // the root-selector matcher, handled above
       if (re.test(code)) {
         console.log('  FAIL  ' + file + ':' + (i + 1) + '  ' + what);
         console.log('        ' + line.trim().slice(0, 120));
         failed++;
       }
     });
+    if (i <= rootBlockUntil && /touch-action\s*:/.test(code) && !/pinch-zoom|auto|manipulation/.test(code)) {
+      console.log('  FAIL  ' + file + ':' + (i + 1) +
+                  '  touch-action on the page root that excludes pinch-zoom');
+      console.log('        ' + line.trim().slice(0, 120));
+      failed++;
+    }
   });
 });
 
