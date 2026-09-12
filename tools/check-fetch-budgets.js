@@ -59,12 +59,17 @@ const num = name => {
 };
 
 // Every budget/attempt pair in the app, by the names they are declared under.
+// The third entry is how many attempts that pair is actually asked for — the
+// budget only has to fit that many. Login deliberately asks for fewer than the
+// rest: every login attempt that reaches the backend creates a session row
+// whether or not the browser is still listening, so a retry there has a real
+// cost the others do not have.
 const PAIRS = [
-  ['BACKEND_BUDGET_MS',  'BACKEND_ATTEMPT_MS',  'the default every uncustomised backendAction call gets'],
-  ['READ_BUDGET_MS',     'READ_ATTEMPT_MS',     'safeGetOrThrow_, one key at a time'],
-  ['WRITE_BUDGET_MS',    'WRITE_ATTEMPT_MS',    'every write, including attendance saves'],
-  ['LOGIN_BUDGET_MS',    'LOGIN_ATTEMPT_MS',    'signing in'],
-  ['ATT_READ_BUDGET_MS', 'ATT_READ_ATTEMPT_MS', 'reading attendance for the whole roster'],
+  ['BACKEND_BUDGET_MS',  'BACKEND_ATTEMPT_MS',  3, 'the default every uncustomised backendAction call gets'],
+  ['READ_BUDGET_MS',     'READ_ATTEMPT_MS',     2, 'safeGetOrThrow_, one key at a time'],
+  ['WRITE_BUDGET_MS',    'WRITE_ATTEMPT_MS',    2, 'every write, including attendance saves'],
+  ['LOGIN_BUDGET_MS',    'LOGIN_ATTEMPT_MS',    2, 'signing in — LOGIN_TRIES attempts, each one creates a session'],
+  ['ATT_READ_BUDGET_MS', 'ATT_READ_ATTEMPT_MS', 2, 'reading attendance for the whole roster'],
 ];
 
 // apiFetch's own refusal threshold, and its backoff between attempts. Read out
@@ -83,23 +88,23 @@ if (!BACKOFF) {
   failed++;
 }
 
-PAIRS.forEach(([bName, aName, what]) => {
+PAIRS.forEach(([bName, aName, wantAttempts, what]) => {
   const budget = num(bName), attempt = num(aName);
   if (budget === null || attempt === null) {
     console.log('  FAIL  ' + bName + ' / ' + aName + ' — not found. Renamed, or the pair was removed?');
     failed++;
     return;
   }
-  // Two attempts, the backoff between them, and enough left over that apiFetch
-  // will actually open the second one.
-  const needed = attempt * 2 + Number(BACKOFF || 0);
+  // Enough for the attempts this pair is actually asked for, and the backoff
+  // between them, with enough left over that apiFetch will open the last one.
+  const needed = attempt * wantAttempts + Number(BACKOFF || 0) * (wantAttempts - 1);
   if (budget < needed) {
-    console.log('  FAIL  ' + bName + ' (' + budget + 'ms) leaves no room for a second attempt of ' +
-                aName + ' (' + attempt + 'ms)');
+    console.log('  FAIL  ' + bName + ' (' + budget + 'ms) leaves no room for ' + wantAttempts +
+                ' attempts of ' + aName + ' (' + attempt + 'ms)');
     console.log('         ' + what);
-    console.log('         needs at least ' + needed + 'ms for two attempts plus ' + BACKOFF +
-                'ms backoff; apiFetch will not open an attempt with under ' + MIN_REMAINING + 'ms left.');
-    console.log('         As written the caller gets ONE try, whatever `tries` says.');
+    console.log('         needs at least ' + needed + 'ms; apiFetch will not open an attempt ' +
+                'with under ' + MIN_REMAINING + 'ms left.');
+    console.log('         As written the caller gets fewer tries than it asks for.');
     failed++;
   } else {
     const fits = Math.floor((budget + Number(BACKOFF || 0)) / (attempt + Number(BACKOFF || 0)));
@@ -107,6 +112,16 @@ PAIRS.forEach(([bName, aName, what]) => {
                 budget + 'ms / ' + attempt + 'ms — ' + fits + ' attempts fit  (' + what + ')');
   }
 });
+
+// Login must ask for LOGIN_TRIES, not a hardcoded number. Passing 3 here again
+// would silently reinstate the session churn this exists to stop.
+if (!/\}, LOGIN_TRIES, LOGIN_BUDGET_MS, LOGIN_ATTEMPT_MS\)/.test(src)) {
+  console.log('  FAIL  serverLogin does not pass LOGIN_TRIES — a hardcoded try count there');
+  console.log('         means every extra attempt leaves another session row behind.');
+  failed++;
+} else {
+  console.log('  ok    serverLogin asks for LOGIN_TRIES, not a hardcoded count');
+}
 
 // Every attendance read goes through backendAction, and backendAction falls
 // back to the 9s default when a caller passes no options. These three are the

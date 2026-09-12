@@ -5788,8 +5788,34 @@ async function hashPassword(password, salt){
 // time to finish" guard then broke out. So the three retries apiFetch exists
 // for were unreachable from the login screen, which is precisely where the
 // backend's flakiness is least survivable. Sized here for three genuine tries.
-const LOGIN_BUDGET_MS = 25000;
-const LOGIN_ATTEMPT_MS = 10000;
+//
+// Then measurement moved it again, and in the other direction. HR could not
+// log in at all on 12 September 2026 — "The server did not answer in time",
+// three times over nine minutes, on a laptop, with the backend demonstrably
+// healthy (a plain GET to /exec answered {"error":"unknown action"} instantly).
+// diagnoseSessions settled it: the SESSIONS sheet held a newly created
+// hr/admin session timestamped 12:49:15 that same day, minutes AFTER the
+// failures. The logins were succeeding. This screen was hanging up at 10s on
+// an answer that was already on its way, and then telling HR the server had
+// not answered.
+//
+// Two changes, and the second matters as much as the first.
+//
+//   - 22s per attempt, not 10. A login that takes twelve seconds is slow, not
+//     broken, and the cost of waiting for it is nothing next to being locked
+//     out of payroll.
+//
+//   - TWO attempts, not three. A login is not a free thing to repeat: every
+//     attempt that reaches the backend runs createSession_ and appends a row,
+//     whether or not this browser is still listening for the answer. That is
+//     why the same diagnostic showed SIX live hr/admin sessions against a cap
+//     of five — each abandoned retry had left one behind. The purge then drops
+//     the oldest to get back under the cap, so a retry storm can evict a
+//     session somebody is still using. Retrying a call with a side effect is
+//     worth far less here than waiting properly for the first one.
+const LOGIN_BUDGET_MS = 46000;
+const LOGIN_ATTEMPT_MS = 22000;
+const LOGIN_TRIES = 2;
 
 // Why the backend could not be reached, in its own terms.
 //
@@ -5803,8 +5829,9 @@ const LOGIN_ATTEMPT_MS = 10000;
 function backendFailureMessage_(e){
   const m = String((e && e.message) || '');
   if(e && e.name === 'AbortError')
-    return 'The server did not answer in time. Google Apps Script is often slow on the ' +
-           'first request of the day — wait a few seconds and press Log in again.';
+    return 'The server did not answer within ' + Math.round(LOGIN_ATTEMPT_MS / 1000) + ' seconds. ' +
+           'It may still have accepted the login — wait a few seconds and press Log in again ' +
+           'before assuming anything is wrong, and do not press it repeatedly.';
   if(/non-JSON/i.test(m))
     return 'Google sent an error page instead of the app’s data. If this keeps happening, ' +
            'the backend may need to be re-deployed — tell whoever maintains the app.';
@@ -5821,7 +5848,7 @@ async function serverLogin(role, username, password){
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'login', role, username, password })
-    }, 3, LOGIN_BUDGET_MS, LOGIN_ATTEMPT_MS);
+    }, LOGIN_TRIES, LOGIN_BUDGET_MS, LOGIN_ATTEMPT_MS);
     return await res.json();
   }catch(e){ return { error: backendFailureMessage_(e) }; }
 }
@@ -5994,7 +6021,11 @@ async function checkHrAccountExists(){
     // this one's answer barely ever changes, but a cached "no account yet"
     // from a stale response would wrongly hide the login form.
     // The same room as the login it gates — this runs first, against the same
-    // cold Apps Script, and on the same screen.
+    // cold Apps Script, and on the same screen. It keeps three tries where the
+    // login itself is down to two (LOGIN_TRIES): this one only asks a
+    // question, so repeating it costs nothing, whereas every login attempt
+    // that lands creates a session whether or not this browser is still
+    // listening for the answer.
     const res = await apiFetch(API_URL + '?action=hrAccountExists&_=' + Date.now() + Math.random().toString(36).slice(2),
                                undefined, 3, LOGIN_BUDGET_MS, LOGIN_ATTEMPT_MS);
     const data = await res.json();
