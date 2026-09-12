@@ -25045,7 +25045,21 @@ async function loadOfficeDocsConfig_(){
     primeSharedRead(iKey, i);
     return { folders: officeDocFoldersFrom_(f), idx: asIdx(i) };
   }
-  return { folders: await loadOfficeDocFolders_(), idx: await loadOfficeDocIndex_() };
+  // Reached only when the batch above FAILED — getBatch has been in the
+  // backend throughout, so this is never "a backend too old to have it", it is
+  // always busy, slow or an error page. backendAction returns the same null
+  // for all of them, which is the same trap the getAttendanceAll fallback was
+  // removed for; here it costs time rather than correctness, because these two
+  // reads fetch the identical keys.
+  //
+  // They used to be awaited one after the other, and each is its own
+  // safeGetOrThrow_ with the full read budget. So a slow moment cost up to 25s
+  // for the batch, then 28s for the folders, then 28s more for the index —
+  // over eighty seconds on "Loading the archive…" before the screen said
+  // anything at all. In parallel it is one read's wait, not two, and neither
+  // depends on the other.
+  const [folders, idx] = await Promise.all([loadOfficeDocFolders_(), loadOfficeDocIndex_()]);
+  return { folders: folders, idx: idx };
 }
 async function saveOfficeDocFolders_(folders){
   const json = JSON.stringify(folders);
@@ -25979,7 +25993,20 @@ function officeDocsDropUnusedYears_(folders, idx){
 async function renderOfficeDocsModule_(){
   const box = document.getElementById('officeDocsBox');
   if(!box) return;
-  box.innerHTML = '<div class="empty">Loading the archive…</div>';
+  box.innerHTML = '<div class="empty"><span id="officeDocsLoadNote">Loading the archive…</span></div>';
+  // Counted out loud, for the same reason the challan check is: this read can
+  // legitimately take most of a minute on mobile data, and a screen that says
+  // the same four words throughout is indistinguishable from one that has
+  // hung. HR reported exactly that — "taking long time to loading office
+  // documents" — on a read that was working.
+  const startedAt = Date.now();
+  const tick = setInterval(() => {
+    const n = document.getElementById('officeDocsLoadNote');
+    if(!n) return;
+    const s = Math.round((Date.now() - startedAt) / 1000);
+    n.textContent = 'Loading the archive… ' + s + 's. A slow connection can take up to a ' +
+      'minute; nothing is wrong unless this stops with an error.';
+  }, 1000);
   let folders, idx;
   try{
     const cfg = await loadOfficeDocsConfig_();
@@ -26014,6 +26041,11 @@ async function renderOfficeDocsModule_(){
       '<div style="margin-top:10px;font-size:12px;color:var(--muted);">' +
       'Nothing has been lost — no folder or document is changed by a failed read.</div></div>';
     return;
+  }finally{
+    // Every path, the early return in the catch above included — a counter
+    // still ticking behind an error message, or behind the drawn archive,
+    // would be worse than the silence it replaced.
+    clearInterval(tick);
   }
   if(!officeDocsState_.folderId || !folders.some(f => f.id === officeDocsState_.folderId)){
     officeDocsState_.folderId = (folders[0] || {}).id || null;
