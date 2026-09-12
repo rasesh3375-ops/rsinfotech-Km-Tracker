@@ -4896,6 +4896,54 @@ function removeLegacyEmployeesKey() {
     'A copy was saved to Drive under HR Management.');
 }
 
+// Why a challan could not be converted, in words that name the menu somebody
+// has to click. Pure — no Drive, no Docs, nothing to stub — so
+// tools/check-ocr-errors.js can assert on the message HR actually reads.
+//
+// It is split out because the wording IS the feature here. This screen only
+// ever runs when something has gone wrong, and what it says is the entire
+// difference between a one-minute fix and an evening lost. Google's own text
+// for a missing permission is "You do not have permission to call
+// DocumentApp.openById. Required permissions:
+// https://www.googleapis.com/auth/documents", followed by a developer
+// troubleshooting URL — which reached HR verbatim, mid-payroll, explaining
+// nothing and suggesting nothing. That is what this exists to stop.
+function ocrChallanErrorFor_(msg) {
+  msg = String(msg || '');
+  // The Drive advanced service was never switched on for this script.
+  if (/Drive is not defined|Drive\.Files/.test(msg)) {
+    return { ok: false, error: 'no-drive-service',
+      message: 'The Drive service is not switched on for this script yet. In the Apps Script ' +
+        'editor: Services (+) > Drive API > Add. Then press Check again. The figures can ' +
+        'always be typed in by hand in the meantime.' };
+  }
+  // The script has never been granted permission to read a Google Doc, so the
+  // OCR copy cannot be opened.
+  //
+  // Not a broken challan, and not a mistake by whoever pressed Check: reading
+  // a challan was added AFTER this script was first authorised, and Apps
+  // Script never asks again on its own — a deployment keeps running on the
+  // permissions it was given and refuses the one call that needs more.
+  //
+  // Matched on the scope URL and on Apps Script's own phrasings rather than on
+  // DocumentApp by name, because the same refusal is what any newly added
+  // service would produce here, and the answer would be the same for all of
+  // them.
+  if (/auth\/documents|do not have permission to call|authorization is required/i.test(msg)) {
+    return { ok: false, error: 'needs-authorisation',
+      message: 'This script has not been given permission to read a PDF yet, so the figures ' +
+        'could not be filled in automatically. This is a one-off, and only the owner of the ' +
+        'script can do it: open the KM Tracker Data sheet > Extensions > Apps Script, pick ' +
+        'any function in the dropdown, press Run, and press Allow when Google asks about ' +
+        'Google Docs. Then Deploy > Manage deployments > edit the EXISTING deployment > New ' +
+        'version — never a new deployment, because the address is fixed in the app. Press ' +
+        'Check again afterwards. Until then the figures can be typed in below and compared ' +
+        'exactly as normal.' };
+  }
+  return { ok: false, error: 'convert-failed',
+    message: 'Drive could not convert that challan to text: ' + msg };
+}
+
 // ---- reading the text off a PF challan ----
 //
 // Drive converts the document and hands back its text; that is the whole of
@@ -4940,15 +4988,8 @@ function doOcrChallan_(body) {
     tempId = copy.id || copy.getId();
     text = DocumentApp.openById(tempId).getBody().getText() || '';
   } catch (err) {
-    var msg = (err && err.message) ? err.message : String(err);
-    if (/Drive is not defined|Drive\.Files/.test(msg)) {
-      return { ok: false, error: 'no-drive-service',
-        message: 'The Drive service is not switched on for this script yet. In the Apps Script ' +
-          'editor: Services (+) > Drive API > Add. Then press Check again. The figures can ' +
-          'always be typed in by hand in the meantime.' };
-    }
-    return { ok: false, error: 'convert-failed',
-      message: 'Drive could not convert that challan to text: ' + msg };
+    var classified = ocrChallanErrorFor_((err && err.message) ? err.message : String(err));
+    return classified;
   } finally {
     if (tempId) { try { DriveApp.getFileById(tempId).setTrashed(true); } catch (e) {} }
   }
