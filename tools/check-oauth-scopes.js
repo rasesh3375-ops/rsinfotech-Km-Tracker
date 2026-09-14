@@ -115,6 +115,33 @@ if (/\bDrive\s*\.\s*Files\b/.test(code)) {
   }
 }
 
+// authorizeBackend() is the only thing that makes Google show the consent
+// screen — Apps Script asks for a permission when a call needs one it does not
+// hold, and nothing else in this project touches every service. So it has to
+// touch ALL of them: a service missing from it is a permission that never gets
+// asked for, and the refusal shows up in production instead.
+{
+  const m = /\nfunction authorizeBackend\(\) \{[\s\S]*?\n\}\n/.exec(code);
+  if (!m) {
+    console.log('\n  FAIL  authorizeBackend() is gone. It is the only way to trigger Google\'s');
+    console.log('        consent screen — running any other function is answered by the');
+    console.log('        permissions already granted and prompts for nothing.');
+    failed++;
+  } else {
+    const body = m[0];
+    const missing = Object.keys(NEEDS)
+      .filter(svc => used.has(svc) && !new RegExp('\\b' + svc + '\\s*\\.').test(body));
+    if (missing.length) {
+      console.log('\n  FAIL  authorizeBackend() never touches: ' + missing.join(', '));
+      console.log('        Those permissions will never be asked for, so the calls that need');
+      console.log('        them are refused in production — exactly how DocumentApp failed.');
+      failed++;
+    } else {
+      console.log('  ok    authorizeBackend() touches every service that needs a permission');
+    }
+  }
+}
+
 // Not a failure, but worth saying out loud on a payroll backend: a scope
 // nothing uses is access granted for no reason.
 const unused = declared.filter(sc =>

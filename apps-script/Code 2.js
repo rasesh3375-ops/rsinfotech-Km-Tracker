@@ -360,6 +360,82 @@ function diagnoseSessions() {
   Logger.log('now: ' + new Date(now).toString());
 }
 
+// Ask Google, once, for every permission this backend needs.
+//
+// Run this from the function dropdown after pasting a new Code 2.js. It is the
+// ONLY reliable way to make Apps Script show the consent screen, and the
+// reason is worth writing down, because two obvious approaches both fail:
+//
+//   - Running any other function does nothing. Apps Script asks for a
+//     permission when a call needs one it does not hold, so running
+//     diagnoseSessions — which touches the Sheet and nothing else — is
+//     answered entirely by permissions already granted. It completes, no
+//     prompt appears, and it looks like the authorisation is fine when it is
+//     not. That happened twice on 14 September 2026.
+//
+//   - Declaring oauthScopes in appsscript.json does not prompt on its own
+//     either. It states what the project needs; it does not make anything
+//     ask.
+//
+// So this touches every service deliberately, and Google has to ask for the
+// lot. Nothing here changes any data: it reads a name, counts triggers, asks
+// how much mail quota is left, and creates one empty Google Doc purely
+// because creating a Doc is what requires the Docs permission — the one the
+// challan reader was refused for — then trashes it again on the next line.
+//
+// Safe to run as many times as you like. Read the log afterwards: a service
+// that is NOT working says so on its own line rather than stopping the rest.
+function authorizeBackend() {
+  var line = function (label, fn) {
+    try { Logger.log(label + ': ' + fn()); }
+    catch (err) { Logger.log(label + ': NOT WORKING — ' + ((err && err.message) || err)); }
+  };
+
+  Logger.log('Asking Google for every permission this backend needs.');
+  Logger.log('If a consent screen appeared before this ran, it worked.');
+  Logger.log('');
+
+  line('Sheets   ', function () {
+    return 'reading "' + SpreadsheetApp.openById(SPREADSHEET_ID).getName() + '"';
+  });
+  line('Drive    ', function () {
+    return 'reading "' + DriveApp.getRootFolder().getName() + '"';
+  });
+  // The permission the challan reader was refused for. doOcrChallan_ converts
+  // a challan into a temporary Google Doc and reads the text out of it, and
+  // opening that Doc is what needs this. Created and trashed in two lines so
+  // nothing is left behind in Drive.
+  line('Docs     ', function () {
+    var doc = DocumentApp.create('authorise-check-' + Date.now());
+    var id = doc.getId();
+    DriveApp.getFileById(id).setTrashed(true);
+    return 'created and trashed a test document — the challan reader can now work';
+  });
+  line('Drive API', function () {
+    if (typeof Drive === 'undefined' || !Drive.Files) {
+      throw new Error('advanced service not switched on — Services (+) > Drive API > Add');
+    }
+    return 'advanced service available';
+  });
+  line('Triggers ', function () {
+    return ScriptApp.getProjectTriggers().length + ' scheduled job(s) on file';
+  });
+  line('Mail     ', function () {
+    return MailApp.getRemainingDailyQuota() + ' message(s) left in today\'s quota';
+  });
+  line('Internet ', function () {
+    // The report emails fetch shared/report-logic.js from the live site, so
+    // this permission is real. A tiny no-content endpoint, so nothing is
+    // downloaded to prove it.
+    return 'HTTP ' + UrlFetchApp.fetch('https://www.google.com/generate_204',
+      { muteHttpExceptions: true }).getResponseCode();
+  });
+
+  Logger.log('');
+  Logger.log('Every line above that does not say NOT WORKING is authorised.');
+  Logger.log('Next: Deploy > Manage deployments > edit the EXISTING deployment > New version.');
+}
+
 function deleteSession_(token) {
   const sheet = getSessionSheet_();
   const data = sheet.getDataRange().getValues();
