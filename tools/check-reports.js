@@ -38,6 +38,10 @@ const CHECKS = [
   // which earns its place because this screen only ever appears when something
   // has already gone wrong, and Google's own error text reached HR verbatim.
   ['check-ocr-errors.js',        'a challan that cannot be read says what to click, not what Google said'],
+  // The cause behind that message rather than the message itself: a backend
+  // service called without its permission declared. Apps Script does not warn
+  // about it, and the refusal only shows when somebody presses the button.
+  ['check-oauth-scopes.js',      'every Google service the backend calls has its permission declared'],
   ['check-briefing.js',          'the monthly briefing says what the figures say, and nothing it cannot'],
   ['check-prepay.js',            'the pre-payroll check fires on a real fault and stays quiet otherwise'],
   ['check-apprentice-stipend.js', 'an apprentice\'s direct deposit stays on the months it was actually paid'],
