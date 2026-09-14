@@ -14497,6 +14497,20 @@ async function challanCompare_(name){
     alert('Which month is this challan for? Fill in the wage month before comparing.');
     return;
   }
+  // Nothing to compare against is not a comparison.
+  //
+  // Every empty box is correctly reported as "not compared" rather than as
+  // zero — that part matters and is deliberate. But with ALL of them empty the
+  // result is a full table of dashes, which on a screen you have just pressed
+  // a button on is indistinguishable from the button doing nothing at all.
+  // That is exactly how it was reported: "compare press nothing is happening".
+  // Say what is actually missing instead.
+  if(CHALLAN_FIELDS.every(f => ex[f.k] === null)){
+    alert('None of the figures have been entered yet, so there is nothing to compare.\n\n' +
+          'Type them in from the challan first — A/c 1, A/c 2, A/c 10, A/c 21, A/c 22 and ' +
+          'the total — then press Compare with payroll.');
+    return;
+  }
   let totals;
   try{ totals = await challanAppTotals_(ym); }
   catch(err){
