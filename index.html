@@ -14333,19 +14333,32 @@ async function challanAppTotals_(ym){
 // Collapsed, because it is diagnostic rather than something to read every
 // time — and open-able rather than hidden, because a person who has just been
 // told the app could not do its job is owed the ability to see why.
-function challanShowConvertedText_(text, why){
+function challanShowConvertedText_(text, why, how){
   const host = document.getElementById('chOcrNote');
   if(!host || !host.parentElement) return;
   const t = String(text || '');
   if(!t.replace(/\s/g, '')) return;   // nothing was read; the note already says so
+  // Which pass produced this, because the two fail completely differently and
+  // the answer is different for each. A text-layer read that could not be
+  // parsed is this app not understanding a layout — fixable, and worth
+  // reporting. An OCR read means the document had no text in it to begin with,
+  // so it is a photograph or a scan, and the columns may genuinely have come
+  // back out of order however good the parser is. Saying which saves the next
+  // person working that out from the scrambling alone.
+  const note = how === 'ocr'
+    ? 'This document had no text inside it, so it was read as a picture. That can reorder ' +
+      'the columns, and the figures below may not line up with their headings — trust the ' +
+      'original document over this. A challan downloaded from EPFO rather than scanned or ' +
+      'photographed reads exactly.'
+    : 'This is the text from inside the document. The amounts can be copied straight out of ' +
+      'it into the boxes above. If they are plainly here but the boxes stayed empty, that is ' +
+      'this app failing to read a layout rather than a bad document — worth reporting, with ' +
+      'this text.';
   const box = document.createElement('details');
   box.style.marginTop = '10px';
   box.innerHTML = '<summary style="cursor:pointer;font-size:12.5px;color:var(--muted);">' +
     'Show what was read off the challan (' + escapeHtml(why) + ')</summary>' +
-    '<p style="font-size:11.5px;color:var(--muted);margin:8px 0 6px;">This is the text Google ' +
-    'made of the document. The amounts can be copied straight out of it into the boxes above. ' +
-    'If they are plainly here but the boxes stayed empty, that is this app failing to read a ' +
-    'layout rather than a bad scan — worth reporting, with this text.</p>' +
+    '<p style="font-size:11.5px;color:var(--muted);margin:8px 0 6px;">' + note + '</p>' +
     '<pre style="white-space:pre-wrap;word-break:break-word;font-size:11px;line-height:1.5;' +
     'max-height:320px;overflow:auto;background:var(--code-bg,#f6f6f6);padding:10px;' +
     'border-radius:6px;margin:0;">' + escapeHtml(t.slice(0, 8000)) +
@@ -14395,7 +14408,7 @@ async function challanCheck_(fileId, name){
     note.className = 'pol-warn';
     note.textContent = 'The challan converted, but no figures could be recognised in it. ' +
       'Type them in from the document.';
-    challanShowConvertedText_(res.text, 'no figures were recognised');
+    challanShowConvertedText_(res.text, 'no figures were recognised', res.how);
     return;
   }
   // An ESI or Professional Tax challan carries a TRRN-ish number, a month and
@@ -14409,7 +14422,7 @@ async function challanCheck_(fileId, name){
       'document, so it does not look like a PF challan. ESI and Professional Tax challans ' +
       'cannot be checked here — this screen only compares PF. If it is a PF challan, type the ' +
       'figures in from it.';
-    challanShowConvertedText_(res.text, 'the EPFO accounts were not found');
+    challanShowConvertedText_(res.text, 'the EPFO accounts were not found', res.how);
     return;
   }
   CHALLAN_FIELDS.forEach(f => {

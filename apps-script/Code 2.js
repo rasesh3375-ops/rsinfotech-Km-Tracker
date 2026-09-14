@@ -5100,18 +5100,47 @@ function doOcrChallan_(body) {
   }
   // A temporary Doc, read once and deleted in the finally — a conversion left
   // behind on every press would litter Drive with copies of every challan.
-  var tempId = null, text = '';
-  try {
-    var copy = Drive.Files.copy({ title: 'challan-ocr-' + Date.now(),
+  //
+  // Converted TWICE if it has to be, and the order matters more than it looks.
+  //
+  // This asked for { ocr: true } unconditionally, and that was wrong for the
+  // documents it actually gets. A PF challan downloaded from EPFO is a digital
+  // PDF with real text inside it. Forcing OCR throws that text away and
+  // re-reads the page as a photograph, and the August 2026 challan came back
+  // with its column headings in reverse — "A/C.10 (Rs.) A/C.02 (Rs.) A/C.01
+  // (Rs.)" — two of the five missing entirely and one left as a bare "A/".
+  // Nothing could be parsed out of that, and nothing should have been: a
+  // figure read out of a scrambled table is a wrong figure stated confidently.
+  //
+  // Without the flag, Drive uses the PDF's own text layer, which keeps the
+  // table in the order it was printed. OCR is still there, but as the fallback
+  // for what it is genuinely for: a challan that is a photograph or a scan,
+  // where there is no text layer and the first pass comes back empty.
+  var tempId = null, text = '', how = '';
+  var convert = function (useOcr) {
+    var opts = useOcr ? { ocr: true, ocrLanguage: 'en' } : {};
+    var copy = Drive.Files.copy({ title: 'challan-read-' + Date.now(),
                                   mimeType: 'application/vnd.google-apps.document' },
-                                body.fileId, { ocr: true, ocrLanguage: 'en' });
-    tempId = copy.id || copy.getId();
-    text = DocumentApp.openById(tempId).getBody().getText() || '';
+                                body.fileId, opts);
+    var id = copy.id || copy.getId();
+    try { return { id: id, text: DocumentApp.openById(id).getBody().getText() || '' }; }
+    finally { try { DriveApp.getFileById(id).setTrashed(true); } catch (e) {} }
+  };
+  try {
+    // The text layer first — it is the real thing when it exists.
+    var plain = convert(false);
+    if (plain.text.replace(/\s/g, '')) {
+      text = plain.text;
+      how = 'text-layer';
+    } else {
+      // Empty means no text layer: a scan or a photograph. Now OCR earns its
+      // place, and a scrambled read is better than no read at all.
+      var ocr = convert(true);
+      text = ocr.text;
+      how = 'ocr';
+    }
   } catch (err) {
-    var classified = ocrChallanErrorFor_((err && err.message) ? err.message : String(err));
-    return classified;
-  } finally {
-    if (tempId) { try { DriveApp.getFileById(tempId).setTrashed(true); } catch (e) {} }
+    return ocrChallanErrorFor_((err && err.message) ? err.message : String(err));
   }
   if (!text.replace(/\s/g, '')) {
     return { ok: false, error: 'no-text',
@@ -5119,6 +5148,7 @@ function doOcrChallan_(body) {
         'convert. Enter the figures by hand.' };
   }
   // The text, not an interpretation of it. Capped because a challan is one
-  // page and anything far larger is not one.
-  return { ok: true, fileName: file.getName(), text: text.slice(0, 20000) };
+  // page and anything far larger is not one. `how` says which pass produced
+  // it, so a scrambled read can be told from a clean one without guessing.
+  return { ok: true, fileName: file.getName(), how: how, text: text.slice(0, 20000) };
 }
