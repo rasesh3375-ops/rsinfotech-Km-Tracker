@@ -386,9 +386,24 @@ function diagnoseSessions() {
 // Safe to run as many times as you like. Read the log afterwards: a service
 // that is NOT working says so on its own line rather than stopping the rest.
 function authorizeBackend() {
+  // What failed, so the verdict can be printed at the END rather than left for
+  // somebody to find by scrolling up.
+  //
+  // The first version of this logged each failure in place and then closed
+  // with "Every line above that does not say NOT WORKING is authorised." The
+  // Docs line DID say NOT WORKING — and it had scrolled off the top of the
+  // execution log, so all that was visible was a tidy list of successes and a
+  // reassuring summary. It was reported as "not asking for authorization" when
+  // in fact it was answering, in the one place nobody was looking. A verdict
+  // belongs where the eye lands, which is the bottom.
+  var broken = [];
   var line = function (label, fn) {
     try { Logger.log(label + ': ' + fn()); }
-    catch (err) { Logger.log(label + ': NOT WORKING — ' + ((err && err.message) || err)); }
+    catch (err) {
+      var msg = (err && err.message) ? err.message : String(err);
+      Logger.log(label + ': NOT WORKING — ' + msg);
+      broken.push({ what: label.trim(), why: msg });
+    }
   };
 
   Logger.log('Asking Google for every permission this backend needs.');
@@ -432,8 +447,37 @@ function authorizeBackend() {
   });
 
   Logger.log('');
-  Logger.log('Every line above that does not say NOT WORKING is authorised.');
-  Logger.log('Next: Deploy > Manage deployments > edit the EXISTING deployment > New version.');
+  if (!broken.length) {
+    Logger.log('=================================================================');
+    Logger.log('ALL PERMISSIONS ARE IN PLACE. Nothing else to authorise.');
+    Logger.log('Next: Deploy > Manage deployments > edit the EXISTING deployment');
+    Logger.log('      > New version. Never "New deployment" — the address is');
+    Logger.log('      fixed inside the app.');
+    Logger.log('=================================================================');
+    return;
+  }
+  Logger.log('=================================================================');
+  Logger.log('STILL NOT AUTHORISED — ' + broken.length + ' of them:');
+  broken.forEach(function (b) { Logger.log('  * ' + b.what + ' — ' + b.why); });
+  Logger.log('');
+  // Declaring oauthScopes and running a function is normally enough to make
+  // Apps Script ask. When it is not, the grant is stale in a way only a
+  // revoke clears: the project is remembered as already authorised, so the
+  // consent screen is never shown again however much the manifest changes.
+  Logger.log('If a permission above mentions "do not have permission to call" and');
+  Logger.log('Google never showed a consent screen, the grant is stuck. To clear it:');
+  Logger.log('');
+  Logger.log('  1. Check appsscript.json here lists the scope. If oauthScopes is');
+  Logger.log('     missing entirely, paste the file again and save.');
+  Logger.log('  2. Go to  https://myaccount.google.com/permissions');
+  Logger.log('  3. Find "KM Tracker Backend" and remove its access.');
+  Logger.log('  4. Come back here and Run authorizeBackend again. Google now has');
+  Logger.log('     nothing remembered, so it MUST ask, and it will ask for the');
+  Logger.log('     full list including Google Docs.');
+  Logger.log('');
+  Logger.log('Removing access breaks nothing — the app keeps working, and step 4');
+  Logger.log('grants it straight back. It only clears what Google remembers.');
+  Logger.log('=================================================================');
 }
 
 function deleteSession_(token) {
