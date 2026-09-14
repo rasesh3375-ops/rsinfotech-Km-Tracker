@@ -1599,6 +1599,21 @@
      inc-overdue while living inside a sal-table, not an inc-table — without
      this the flag was applied but never rendered. */
   table.sal-table tr.inc-overdue td:first-child{box-shadow:inset 3px 0 0 var(--red);}
+  /* A challan figure that does not match payroll.
+     A thin red bar down the left of the row was all this had, and it was
+     reported as the mismatch "not showing" — on a table of seven near-
+     identical rows of digits, a 3px line is not an answer to "is my PF Report
+     right". A figure that disagrees with what was actually paid to the EPFO is
+     the entire point of the screen, so it is now unmissable: the row is
+     tinted, its numbers go red and bold, and the verdict is spelled out in
+     words rather than left as a symbol to decode.
+     Tinted with a translucent red rather than a solid one so it holds up in
+     both themes without needing a second colour defined for each. */
+  table.sal-table tr.inc-overdue td{background:rgba(220,38,38,.10);}
+  table.sal-table tr.inc-overdue td.num{color:var(--red);font-weight:700;}
+  .challan-status{white-space:nowrap;font-weight:600;font-size:12.5px;}
+  .challan-status.differs{color:var(--red);}
+  .challan-status.agrees,.challan-status.missing{color:var(--muted);font-weight:500;}
   /* Salary Sheet month-over-month comparison — amber on Rate of Pay when it
      changed since last month, green for a row that is new this month (the
      two never coincide, since a new joiner has no prior month to compare
@@ -14526,13 +14541,17 @@ function challanShow_(cmp, name, ym){
   if(!box) return;
   // Rows carry their own unit — a head count must not come out as "₹1".
   const val = (v, r) => v === null ? '—' : (r.unit === 'count' ? String(v) : '₹' + fmtMoney(v));
-  const mark = { agrees: '✓', differs: '✕', missing: '—' };
+  // In words, not a symbol. "✕" alone was reported as the mismatch not showing
+  // at all: on seven rows of similar-looking digits a tick and a cross are the
+  // same shape at a glance, and the one thing a person needs off this screen is
+  // whether anything is wrong.
+  const verdict = { agrees: '✓ Matches', differs: '✕ MISMATCH', missing: '— Not compared' };
   const rows = cmp.rows.map(r => `<tr class="${r.status === 'differs' ? 'inc-overdue' : ''}">
       <td>${escapeHtml(r.label)}</td>
       <td class="num">${escapeHtml(val(r.challan, r))}</td>
       <td class="num">${escapeHtml(val(r.app, r))}</td>
       <td class="num">${r.difference === null ? '—' : (r.difference === 0 ? '0' : escapeHtml((r.difference > 0 ? '+' : '') + fmtMoney(r.difference)))}</td>
-      <td>${mark[r.status]}</td>
+      <td><span class="challan-status ${r.status}">${verdict[r.status]}</span></td>
     </tr>`).join('');
   const headline = cmp.differCount
     ? `<div class="pp-flag stop"><span class="ic">■</span><span class="bd">
@@ -14556,7 +14575,7 @@ function challanShow_(cmp, name, ym){
       ${hrRow('Establishment', cmp.establishment ? escapeHtml(String(cmp.establishment)) : '—')}
     </div>
     <div class="payroll-docs-table-wrap"><table class="sal-table">
-      <thead><tr><th>Figure</th><th class="num">On the challan</th><th class="num">This app</th><th class="num">Difference</th><th></th></tr></thead>
+      <thead><tr><th>Figure</th><th class="num">On the challan</th><th class="num">This app</th><th class="num">Difference</th><th>Result</th></tr></thead>
       <tbody>${rows}</tbody></table></div>
     <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:14px 0 0;">
       The figures in the middle column are the ones confirmed on the form — read off the document by Drive's own conversion where it could, and by you where it could not. Nothing was asked whether any of them is correct. The right-hand column is this app's own arithmetic for ${escapeHtml(monthLabel(ym))}, from consultantSummaryTotals, the same function the Consultant Summary and the PF Return are built from. The comparison is subtraction, with no tolerance band: a rupee of difference is shown as a rupee of difference, and whether that matters is HR's call and the PF consultant's, not this screen's. Nothing has been saved and nothing left your Google account.
