@@ -14315,6 +14315,44 @@ async function challanAppTotals_(ym){
 // The form goes up first and the conversion runs behind it, so HR can start
 // typing off the challan straight away instead of watching a spinner. Every
 // box stays editable whatever the conversion comes back with.
+// What Google actually read off the challan, shown when nothing useful could
+// be made of it.
+//
+// Without this, "no figures could be recognised" is a dead end for everybody:
+// HR cannot tell whether the scan came out as gibberish or as perfectly good
+// text this app simply did not understand, and neither can whoever is asked to
+// fix it. Those two need completely different answers — rescan the document,
+// versus teach the parser this challan's layout — and there was no way to tell
+// them apart from the message alone.
+//
+// It is also the fastest route to the figures on the day: an EPFO challan
+// converts to text far more readably than it reads as a photograph, so the
+// amounts are usually sitting right there to be copied into the boxes above,
+// even when the parser could not place them.
+//
+// Collapsed, because it is diagnostic rather than something to read every
+// time — and open-able rather than hidden, because a person who has just been
+// told the app could not do its job is owed the ability to see why.
+function challanShowConvertedText_(text, why){
+  const host = document.getElementById('chOcrNote');
+  if(!host || !host.parentElement) return;
+  const t = String(text || '');
+  if(!t.replace(/\s/g, '')) return;   // nothing was read; the note already says so
+  const box = document.createElement('details');
+  box.style.marginTop = '10px';
+  box.innerHTML = '<summary style="cursor:pointer;font-size:12.5px;color:var(--muted);">' +
+    'Show what was read off the challan (' + escapeHtml(why) + ')</summary>' +
+    '<p style="font-size:11.5px;color:var(--muted);margin:8px 0 6px;">This is the text Google ' +
+    'made of the document. The amounts can be copied straight out of it into the boxes above. ' +
+    'If they are plainly here but the boxes stayed empty, that is this app failing to read a ' +
+    'layout rather than a bad scan — worth reporting, with this text.</p>' +
+    '<pre style="white-space:pre-wrap;word-break:break-word;font-size:11px;line-height:1.5;' +
+    'max-height:320px;overflow:auto;background:var(--code-bg,#f6f6f6);padding:10px;' +
+    'border-radius:6px;margin:0;">' + escapeHtml(t.slice(0, 8000)) +
+    (t.length > 8000 ? '\n\n… (' + (t.length - 8000) + ' more characters)' : '') + '</pre>';
+  host.parentElement.insertBefore(box, host.nextSibling);
+}
+
 async function challanCheck_(fileId, name){
   challanForm_(name);
   // A ticking count of how long it has been reading.
@@ -14357,6 +14395,7 @@ async function challanCheck_(fileId, name){
     note.className = 'pol-warn';
     note.textContent = 'The challan converted, but no figures could be recognised in it. ' +
       'Type them in from the document.';
+    challanShowConvertedText_(res.text, 'no figures were recognised');
     return;
   }
   // An ESI or Professional Tax challan carries a TRRN-ish number, a month and
@@ -14370,6 +14409,7 @@ async function challanCheck_(fileId, name){
       'document, so it does not look like a PF challan. ESI and Professional Tax challans ' +
       'cannot be checked here — this screen only compares PF. If it is a PF challan, type the ' +
       'figures in from it.';
+    challanShowConvertedText_(res.text, 'the EPFO accounts were not found');
     return;
   }
   CHALLAN_FIELDS.forEach(f => {
